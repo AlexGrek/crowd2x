@@ -8,7 +8,6 @@ pub mod dog;
 pub mod human;
 
 use bevy::prelude::*;
-use rand::prelude::*;
 
 /// Every character occupies a 48x48 cell of the canvas.
 pub const CELL: u32 = 48;
@@ -61,40 +60,18 @@ pub fn depth_for(y: f32) -> f32 {
     -y * 0.01
 }
 
+/// The art side of a character: how one is built, scaled and depth-sorted.
+///
+/// It spawns nothing of its own. Who exists is [`crate::sim`]'s answer, and
+/// `game::actors` is what turns that answer into sprites — this module used to
+/// scatter a demo crowd on `Startup`, which put twenty-eight characters
+/// off the edge of every map, in every screen, for the life of the process.
 pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_demo_crowd)
-            .add_systems(Update, dog::apply_facing);
+        app.add_systems(Update, dog::apply_facing);
     }
-}
-
-/// A placeholder scene until there is a simulation to drive it: a scattered
-/// crowd of humans and dogs, enough to show the pipeline working.
-fn spawn_demo_crowd(
-    mut commands: Commands,
-    assets: Res<AssetServer>,
-    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-) {
-    let dog_atlas = dog::DogSheets::load(&assets, &mut layouts);
-    let mut rng = rand::rng();
-
-    // Humans on a loose grid, dogs wandering between them.
-    for row in 0..4 {
-        for col in 0..7 {
-            let jitter = Vec2::new(rng.random_range(-6.0..6.0), rng.random_range(-6.0..6.0));
-            let pos = Vec2::new(col as f32 * 52.0 - 156.0, row as f32 * 52.0 - 78.0) + jitter;
-
-            if rng.random_range(0..100) < 40 {
-                dog::spawn(&mut commands, &dog_atlas, pos, dog::Facing::random(&mut rng));
-            } else {
-                human::spawn(&mut commands, &assets, pos, human::Look::random(&mut rng));
-            }
-        }
-    }
-
-    commands.insert_resource(dog_atlas);
 }
 
 #[cfg(test)]

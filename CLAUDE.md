@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19. Art was imported
 wholesale from an earlier prototype; all code is new.
-There is no simulation yet — `characters::spawn_demo_crowd` is a placeholder scene. What
-exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
-editor backed by a saved map format, a game screen that loads a map and lets you look
-around it, and a scripted QA harness that drives all of it.
+What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
+editor backed by a saved map format, a game screen that loads a map and runs a simulation
+on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
+advanced by one function; what it does so far is wander, which is enough to exercise every
+part of a tick and nothing more.
 
 ## Commands
 
@@ -38,6 +39,7 @@ CROWD2X_SHOT=/tmp/frame.png cargo run                          # capture, then e
 CROWD2X_SHOT=/tmp/odd.png CROWD2X_WINDOW=1002x602 cargo run    # capture at a given window size
 CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
 CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
+CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
 
 # check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
@@ -111,6 +113,10 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
 - `depth_for(y)` gives painter's-order depth from world Y (lower on screen = drawn in
   front); per-character layer offsets are small enough that one character's layers can
   never interleave with another's.
+- **This module spawns nothing of its own.** Who exists is `src/sim/`'s answer, and
+  `game/actors.rs` is what turns it into sprites. It used to scatter a demo crowd on
+  `Startup`, which left 28 characters off the edge of every map, in every screen, for the
+  life of the process.
 - **Humans** (`human.rs`): a layered paperdoll — a base body with eyes, clothes, hair as
   child sprites, each a separate PNG in `assets/human/`. Add a look by dropping a 16x16
   PNG in `assets/human/` and adding its path to the matching array (`CLOTHES`, `EYES`,
@@ -209,15 +215,21 @@ Painting is a pointing task, so it goes through a `Cursor` resource either devic
 move: the mouse while it is moving, the left stick when it stops. Everything else has a
 button on both.
 
-### The game (`src/game.rs`)
+### The game (`src/game/`)
 
-Playing a map: it is loaded, drawn and looked at. Nothing simulates yet — this is the
-part that has to exist before anything can, and it is deliberately narrow.
+Playing a map: it is loaded, drawn, simulated and looked at. The simulation itself is not
+here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the bridge.
 
 - **It does not own the map's art.** Terrain and props go through `editor::draw_map`,
   from the palettes the editor paints with, so one catalogue binds a tile's name to its
   PNG instead of two that can drift apart.
-- **It does not edit anything**, so leaving is instant and there is nothing to save.
+- **It does not decide anything.** `actors.rs` builds a `GameState` from the open map,
+  ticks it on `FixedUpdate`, and keeps one sprite alongside each entity — spawning for
+  ids that appeared, despawning for ids that went, moving the rest to
+  `position * TILE`, rounded, at `characters::depth_for` so actors interleave with props.
+  Sprites are not yet culled or pooled; the `dev` skill says why that is the next thing.
+- **It does not edit anything**, so leaving is instant and there is nothing to save. The
+  simulation gets a *clone* of the map, so the editor's copy cannot move under it.
 - **It does not zoom the camera** — zooming is `PixelZoom`, above.
 - **The camera is kept inside the map** (`clamp_to_map`). A map has edges and nothing
   outside them, so flying off into the void is getting lost rather than navigating; an
@@ -272,6 +284,80 @@ never reaches a file. Three things about the shape:
   an object off the map — each is a `MapFormatError`, because padding or dropping produces
   a map that looks right and isn't. `FORMAT_VERSION` is checked first.
 
+### The simulation (`src/sim/`)
+
+The game runs here, and **Bevy is only a renderer**: it draws sprites and UI, reads the
+devices, runs the shaders, and does not decide anything. Same rule as the map, one level
+up and over the state that changes — **plain Rust, no `bevy::` imports**, testable with
+`cargo test` and no `App`.
+
+Four things define the shape, and they are the contract:
+
+- **One super-object.** `GameState` is the whole game: the `map`, the `entities`, and a
+  `log`. Not a set of resources, not a plugin — one value you can construct in a test.
+- **One function.** `process_game_state(&mut GameState, dt, &Input)`. That is the entire
+  entry point. The name says `-> GameState`; taking `&mut` is the honest implementation of
+  it, because returning a fresh state would copy the map, the log and the id allocator
+  sixty times a second to express a change that touches only the entities. The semantics
+  that were actually wanted — a tick is a pure function of the previous state — come from
+  the pass split, not from the signature.
+- **Entities are addressed by `Uid`, never by Bevy's `Entity`.** 64 bits: the top byte is
+  the `EntityType`, the low 56 are random and unique. The type in the id means a log line
+  or a debugger says *what* something is with no lookup; the randomness means an id can be
+  written to a file and still mean the same thing after a reload, which an `Entity` index
+  cannot. "Guaranteed unique" is a retry against the live set, not a hope about 56 bits.
+- **An actor is not an entity.** Entities are for things that draw. `game/actors.rs`
+  spawns sprites *from* the simulation; the simulation has never heard of them.
+
+A tick is **two passes**, and which one may write the entity table is the design:
+
+| | writes the entity table | allocates | parallelisable |
+| --- | --- | --- | --- |
+| `spawn_pass(&mut GameState, &Input)` | **yes** — the only thing that does | yes | no |
+| `process_pass(&mut GameState, dt)` | **no** | no | that is what it is for |
+
+The **spawn pass** drains `Input`'s spawns and despawns. It runs first, so an entity
+spawned this tick thinks this tick, and it is the only pass that may resize the table.
+
+The **processing pass** advances every entity and adds or removes none. It is handed a
+`FrozenEntities` — the table with its membership frozen, offering no `insert` and no
+`remove` — so **that is a guarantee the compiler holds, not a rule to remember.** Inside
+it are two phases: **think**, read-only over the entities and the map, each returning an
+`Intent` into a slot-indexed buffer; then **apply**, single-threaded, slots ascending,
+draining the buffer.
+
+Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
+sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
+invalidates every index into it. And structural mutation is the one thing that genuinely
+cannot be parallelised — two threads moving different entities never conflict, two threads
+pushing to one `Vec` always do — so the pass that wants to run across threads is the pass
+that is not allowed to change the table. An entity that needs to remove itself does not get
+a back door: it returns something the *next* spawn pass acts on.
+
+**The intent buffer is the double buffer.** Think reads entities and writes intents, apply
+reads intents and writes entities; the two never touch the same memory in the same
+direction. That is what makes the read phase safe to parallelise, and it costs no entity
+clone. Determinism follows from it plus a per-entity per-tick seeded RNG: same seed and
+same input, same world after a thousand ticks, and there is a test that says so.
+
+**Lock-free means there is nothing to lock**, not that there are clever atomics. The one
+thing many threads genuinely write is the `log` — a bounded `ArrayQueue<String>` whose
+`push` takes `&self`, evicts the oldest when full rather than growing, and counts what it
+dropped. The renderer (`game/logview.rs`) is the only reader and it drains.
+
+The store is a **dict over a dense arena**: `get(uid)`, `insert`, `remove`, `iter`, backed
+by a `Vec` of slots plus a `HashMap` index. Callers look entities up by id; the tick walks
+the `Vec` in slot order and hashes nothing. Removal leaves a **tombstone** rather than
+`swap_remove`-ing, because a slot index has to stay stable — the intent buffer is indexed
+by it, and reordering the tail on every despawn would make iteration order, and so the
+simulation, non-deterministic.
+
+Positions are in **cell units, not pixels**: `(3.5, 2.5)` is the middle of cell `(3, 2)`,
+and `center_position()` is `position.floor()`, derived so the two cannot disagree. How
+many screen pixels a cell is drawn at is a fact about the art, and `actors.rs` is where it
+is applied. For the same reason nothing here knows what a human looks like — it supplies
+an `appearance_seed`, and `characters/` decides which PNGs that means.
+
 ### Scripted QA (`src/qa/`, `qa/*.json`, `tools/qa.py`)
 
 `cargo test` covers the plain-Rust parts and `debug.rs` can photograph a frame, but
@@ -307,11 +393,22 @@ gamepad is spawned and connected through `RawGamepadEvent`, so `bevy_input` buil
 real `Gamepad` component; the pointer moves by setting the window's cursor position, the
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
+The simulation gets two steps of its own, both intent-level: `{"spawn": {"kind": "human",
+"x": 3, "y": 2}}` puts a command on the same queue the game uses, and `{"tick": 200}` runs
+one spawn pass and then exactly that many processing passes, *immediately* — so pending
+spawns are applied once however many ticks were asked for. Ticking rather than waiting is
+the point — `FixedUpdate` runs at whatever rate the frame allows, so a test that waited a
+second would be asserting on however many ticks the machine managed.
+
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
-`expect_no_map`, `expect_tile`, `expect_zoom` — and `expect_tile` reads the **saved** map,
+`expect_no_map`, `expect_tile`, `expect_zoom`, `expect_entities`, `expect_sprites`,
+`expect_log` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
-cannot be asked how far in it is without counting texels.
+cannot be asked how far in it is without counting texels. `expect_entities` and
+`expect_sprites` are deliberately two assertions: the simulation having three entities and
+the screen showing three actors are different claims, and the second is the one that
+catches a renderer that has quietly stopped keeping up.
 
 **Screenshots are named, not pathed.** `{"shot": "the file list"}` writes
 `qa-screenshots/<test>/01-the-file-list.png`, numbered in the order the shots were taken,
@@ -355,11 +452,14 @@ src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (t
 src/menu.rs             MainMenuPlugin
 src/editor/             EditorPlugin, background.rs + props.rs
 src/browser.rs          BrowserPlugin - the saved-maps screen
-src/game.rs             GamePlugin - playing a map: camera, zoom, clamped to the map
+src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
+                        actors.rs is the sim-to-sprite bridge; logview.rs shows the log
 src/map/                the map + coordinate system - plain Rust, no bevy
+src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
+                        uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
 src/awake.rs            macOS: hold the display awake so a run can be photographed
-src/characters/         CharacterPlugin, CELL/ART/upscale, depth_for
+src/characters/         how a character is drawn: CELL/ART/upscale, depth_for
 src/animation.rs        FrameAnimation, atlas frame stepping
 src/debug.rs            screenshot/smoke-run harness, env-var driven
 tools/check_pixel_grid.py  verifies a frame is an exact integer upscale
@@ -392,5 +492,11 @@ skill documents this in depth; the load-bearing rule when adding simulation logi
 **keep the simulation in plain Rust with no `bevy::` imports** (grid, pathfinding, agent
 state, decisions), with Bevy as a thin adapter that reads sim state and updates
 `Transform`/`Sprite`. An actor doesn't need to be an entity — entities are for things
-that draw. Read the `dev` skill's "Scaling to thousands of actors" section before
-writing anything simulation-shaped.
+that draw.
+
+Concretely, that rule now has an address: **new simulation logic goes in `src/sim/`,
+behind `GameState` and `process_game_state`** — see "The simulation" above. Adding a Bevy
+system that decides something, a `Component` holding agent state, or a second function
+that advances the world is the thing to not do; add an entity kind, an `Intent` variant or
+a `Command` instead. Read the `dev` skill's "Scaling to thousands of actors" section, and
+its "The GameState contract", before writing anything simulation-shaped.

@@ -17,6 +17,7 @@
 
 use crate::map::Point;
 
+use super::kinds::Facing;
 use super::uid::{EntityType, Uid};
 use super::Intent;
 
@@ -96,9 +97,24 @@ pub trait GameEntity: Send + Sync {
         }
     }
 
-    /// A short description for the log and for debugging.
-    fn describe(&self) -> String {
-        self.uid().to_string()
+    /// Which way it is oriented, if that means anything for this kind.
+    ///
+    /// On the trait rather than reached for with a downcast: the renderer asks
+    /// every entity this, and a `dyn GameEntity` that has to be guessed at
+    /// before it can be drawn is not an abstraction, it is a cast with extra
+    /// steps.
+    fn facing(&self) -> Option<Facing> {
+        None
+    }
+
+    /// Stable randomness for the renderer to build an appearance from.
+    ///
+    /// The simulation does not know what a human looks like and should not
+    /// start to — but it does own the one thing choosing an appearance needs,
+    /// which is a number that is the same every time for this entity and
+    /// different for the next one. The id's random half already is that.
+    fn appearance_seed(&self) -> u64 {
+        self.uid().body()
     }
 
     // --- derived, from the body ---

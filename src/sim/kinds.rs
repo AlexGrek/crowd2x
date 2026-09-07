@@ -8,15 +8,18 @@
 //!
 //! # Nothing here knows what a human looks like
 //!
-//! A [`Human`] carries a `look_seed`, not a hairstyle. Which PNGs a seed turns
-//! into is a fact about the art, and the art lives in `src/characters/`; the
-//! simulation only has to promise that the same entity produces the same
-//! appearance every time, which a stored seed does. Same for [`Dog`]: it has a
-//! [`Facing`] of its own rather than `characters::dog::Facing`, because that
-//! one is a Bevy `Component` and this module does not import Bevy.
+//! A [`Human`] has no hairstyle, no outfit and no sprite. Which PNGs it is
+//! drawn from is a fact about the art, and the art lives in `src/characters/`;
+//! all the simulation owes the renderer is a number that is the same every
+//! time for this entity and different for the next one, which
+//! [`GameEntity::appearance_seed`] already gives it.
+//!
+//! Same line for [`Dog`]: its [`Facing`] is this module's own enum rather than
+//! `characters::dog::Facing`, because that one is a Bevy `Component` and
+//! nothing here imports Bevy.
 
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::map::Point;
 
@@ -32,6 +35,27 @@ const WANDER_TRIES: u32 = 8;
 
 /// Close enough to a goal to call it arrived, in cells.
 const ARRIVED: f32 = 0.1;
+
+/// The furthest anything moves in one tick, in cells.
+///
+/// Passability is checked at the *destination*, so a step longer than a cell
+/// would step straight over a wall and land legally on the far side — the
+/// check would pass and the wall would not exist. Capping below one cell means
+/// a step crosses at most one boundary per axis, which is what makes the
+/// destination check sufficient.
+///
+/// At the fixed timestep nothing comes close to this (a dog covers 0.055 cells
+/// a tick). It is here because `process_game_state` is public and takes
+/// whatever `dt` it is handed, and "only correct at one timestep" is not a
+/// property worth relying on.
+///
+/// It does not stop a diagonal step cutting the corner between two walls; that
+/// needs swept collision, and there is no diagonal geometry in the maps yet.
+const MAX_STEP: f32 = 0.5;
+
+/// How often a stuck entity is allowed to mention it. Roughly a second at the
+/// fixed timestep.
+const STUCK_LOG_TICKS: u64 = 64;
 
 const HUMAN_SPEED: f32 = 2.0;
 const DOG_SPEED: f32 = 3.5;
@@ -69,16 +93,25 @@ impl Walker {
     /// Read-only, as [`GameEntity::think`] requires: the goal it picked comes
     /// back inside the [`Intent`] rather than being written here.
     fn think(&self, ctx: &Think<'_>) -> Intent {
-        let mut rng = tick_rng(self.body.uid(), ctx.tick);
-
-        // Somewhere to go, either the standing order or a fresh one.
+        // Somewhere to go, either the standing order or a fresh one. The RNG
+        // is built inside the second arm rather than above the match: an
+        // entity that already has a goal needs no randomness, and that is the
+        // common case by a wide margin — seeding one per entity per tick to
+        // then not use it is the sort of waste that only shows up at ten
+        // thousand of them.
         let goal = match self.goal {
             Some(goal) if ctx.is_passable(goal) => goal,
-            _ => match self.pick_goal(ctx, &mut rng) {
-                Some(goal) => goal,
-                // Walled in, or standing on a map with nothing walkable.
-                None => return Intent::Idle,
-            },
+            _ => {
+                let mut rng = tick_rng(self.body.uid(), ctx.tick);
+                match self.pick_goal(ctx, &mut rng) {
+                    Some(goal) => goal,
+                    // Walled in, or standing on a map with nothing walkable.
+                    None => {
+                        self.report_stuck(ctx);
+                        return Intent::Idle;
+                    }
+                }
+            }
         };
 
         let (x, y) = self.body.position();
@@ -94,7 +127,7 @@ impl Walker {
             };
         }
 
-        let step = (self.speed * ctx.dt).min(distance);
+        let step = (self.speed * ctx.dt).min(distance).min(MAX_STEP);
         let to = (x + dx / distance * step, y + dy / distance * step);
 
         // Refuse to walk into a wall rather than sliding along it: steering is
@@ -133,6 +166,20 @@ impl Walker {
         None
     }
 
+    /// Say so when there is nowhere to go, at most once a second.
+    ///
+    /// This is the only thing written from the think phase, and it is here to
+    /// be exactly that: a `&Log` shared by every thinking entity, appended to
+    /// without a lock. Rate-limited on the tick rather than on a stored
+    /// counter because think may not mutate — and unlimited it would be one
+    /// line per stuck entity per tick, which is how a log becomes noise.
+    fn report_stuck(&self, ctx: &Think<'_>) {
+        if ctx.tick.is_multiple_of(STUCK_LOG_TICKS) {
+            ctx.log
+                .push(format!("{} has nowhere to go", self.body.uid()));
+        }
+    }
+
     fn apply(&mut self, intent: &Intent) {
         if let Intent::Move { to, goal } = intent {
             self.body.set_position(*to);
@@ -169,22 +216,19 @@ fn mix(mut x: u64) -> u64 {
 }
 
 /// A person.
+///
+/// No appearance field: [`GameEntity::appearance_seed`] already gives the
+/// renderer a stable per-entity number, and storing a second one would be two
+/// sources of truth for the same hairstyle.
 pub struct Human {
     walk: Walker,
-    /// Seeds the paperdoll the renderer builds. See the module docs.
-    look_seed: u64,
 }
 
 impl Human {
-    pub fn new(uid: Uid, cell: Point, look_seed: u64) -> Human {
+    pub fn new(uid: Uid, cell: Point) -> Human {
         Human {
             walk: Walker::new(uid, cell, HUMAN_SPEED),
-            look_seed,
         }
-    }
-
-    pub fn look_seed(&self) -> u64 {
-        self.look_seed
     }
 }
 
@@ -220,9 +264,6 @@ impl Dog {
         }
     }
 
-    pub fn facing(&self) -> Facing {
-        self.facing
-    }
 }
 
 impl GameEntity for Dog {
@@ -236,6 +277,10 @@ impl GameEntity for Dog {
 
     fn think(&self, ctx: &Think<'_>) -> Intent {
         self.walk.think(ctx)
+    }
+
+    fn facing(&self) -> Option<Facing> {
+        Some(self.facing)
     }
 
     /// Turns to face the way it is walking.
@@ -262,9 +307,14 @@ impl GameEntity for Dog {
 ///
 /// The one place a `Uid`'s type tag and the concrete type behind it are tied
 /// together, so they cannot drift apart.
-pub(super) fn build(uid: Uid, kind: EntityType, cell: Point, rng: &mut SmallRng) -> Box<dyn GameEntity> {
+pub(super) fn build(
+    uid: Uid,
+    kind: EntityType,
+    cell: Point,
+    rng: &mut SmallRng,
+) -> Box<dyn GameEntity> {
     match kind {
-        EntityType::Human => Box::new(Human::new(uid, cell, rng.random())),
+        EntityType::Human => Box::new(Human::new(uid, cell)),
         EntityType::Dog => Box::new(Dog::new(
             uid,
             cell,
@@ -293,7 +343,7 @@ mod tests {
     }
 
     fn human(cell: Point) -> Human {
-        Human::new(Uid::new(EntityType::Human, 42), cell, 0)
+        Human::new(Uid::new(EntityType::Human, 42), cell)
     }
 
     #[test]
@@ -365,8 +415,8 @@ mod tests {
         // Neighbouring ids sharing a tick must not get correlated streams, or
         // a crowd wanders in formation.
         let (map, log) = (room(), Log::new());
-        let one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4), 0);
-        let two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4), 0);
+        let one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4));
+        let two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4));
 
         let differ = (0..20).any(|tick| {
             one.think(&ctx(&map, &log, tick)) != two.think(&ctx(&map, &log, tick))
@@ -383,13 +433,13 @@ mod tests {
             to: (here.0 - 1.0, here.1),
             goal: None,
         });
-        assert_eq!(dog.facing(), Facing::Left);
+        assert_eq!(dog.facing(), Some(Facing::Left));
 
         dog.apply(&Intent::Move {
             to: (here.0 + 1.0, here.1),
             goal: None,
         });
-        assert_eq!(dog.facing(), Facing::Right);
+        assert_eq!(dog.facing(), Some(Facing::Right));
     }
 
     #[test]
@@ -400,7 +450,7 @@ mod tests {
             to: (x, y + 1.0),
             goal: None,
         });
-        assert_eq!(dog.facing(), Facing::Left);
+        assert_eq!(dog.facing(), Some(Facing::Left));
     }
 
     #[test]

@@ -66,6 +66,9 @@ use crate::map::{Map, MapStore, Size, TerrainId, VOID};
 use crate::render::{PixelZoom, PIXEL_SCALE};
 use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
+use crate::game::actors::{Actor, Sim, SimInput};
+use crate::game::logview::LogView;
+use crate::sim::{process_pass, spawn_pass, EntityType};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
 use script::{gamepad_button, key_char, key_code, GivenMap, Script, Side, Step};
@@ -345,6 +348,14 @@ struct Checks<'w, 's> {
     focusables: Query<'w, 's, (Entity, &'static Focusable)>,
     scope: Res<'w, Scope>,
     zoom: Res<'w, PixelZoom>,
+    /// The sprites themselves, not the map that tracks them: a count taken
+    /// from the bookkeeping would pass while nothing had actually reached the
+    /// world, which is the failure this assertion exists to catch.
+    sprites: Query<'w, 's, &'static Actor>,
+    log: Res<'w, LogView>,
+    /// So a scripted tick is the same size as one the game takes, read rather
+    /// than written down twice.
+    fixed: Res<'w, Time<Fixed>>,
 }
 
 /// What an intent step drives, as opposed to what it inspects.
@@ -356,6 +367,20 @@ struct Intents<'w> {
     tool: ResMut<'w, Tool>,
     cursor: ResMut<'w, EditorCursor>,
     next_state: ResMut<'w, NextState<AppState>>,
+    /// Where a `spawn` step puts its request, so it travels the same route a
+    /// spawn from the game would.
+    sim_input: ResMut<'w, SimInput>,
+    /// The world, for the steps that step it and the ones that ask about it.
+    ///
+    /// Mutable, and here rather than in [`Checks`], because two parameters of
+    /// one system claiming the same resource is a hard conflict — and `tick`
+    /// needs to write. A second writer of `Sim` is something the game itself
+    /// deliberately does not have; a test harness stepping the world on
+    /// purpose is the exception, and it lives in a different schedule from
+    /// `tick_sim` so the two never contend.
+    ///
+    /// `None` anywhere but the game screen.
+    sim: Option<ResMut<'w, Sim>>,
 }
 
 /// What the driver should do once a step has been performed.
@@ -615,6 +640,56 @@ fn perform(
                 .ok_or(format!("expected {label:?} focused, found {focused:?}"))
         }
 
+        Step::Spawn { kind, x, y } => {
+            let kind = EntityType::from_name(kind).ok_or_else(|| {
+                format!(
+                    "no entity kind called {kind:?}; this build has: {}",
+                    EntityType::ALL
+                        .map(|kind| kind.name())
+                        .join(", ")
+                )
+            })?;
+            intents
+                .sim_input
+                .0
+                .spawn(kind, crate::map::Point::new(*x, *y));
+            Ok(Next::Now)
+        }
+
+        Step::Tick(count) => {
+            // Reported wherever it is asked for, count or no count: a script
+            // ticking off the game screen has misunderstood something, and
+            // saying so is the point of the step existing.
+            if intents.sim.is_none() {
+                return Err(
+                    "there is no simulation to tick — `tick` only means anything on the game screen"
+                        .to_string(),
+                );
+            }
+            // `{"tick": 0}` does nothing at all, spawn pass included: the
+            // pending commands stay queued for the game's own `tick_sim`
+            // rather than being taken and dropped on the floor here.
+            if *count == 0 {
+                return Ok(Next::Now);
+            }
+            let commands = std::mem::take(&mut intents.sim_input.0);
+            let sim = intents.sim.as_deref_mut().expect("checked just above");
+            // The step the game itself takes, so a tick in a script and a tick
+            // in play are the same amount of world.
+            let dt = checks.fixed.timestep().as_secs_f32();
+
+            // One spawn pass, then `count` processing passes. Pending spawns
+            // are applied exactly once however many ticks were asked for,
+            // which is what the two passes being separable is *for* — through
+            // `process_game_state` this needed the commands handed to the
+            // first tick and an empty `Input` to every one after it.
+            spawn_pass(&mut sim.0, &commands);
+            for _ in 0..*count {
+                process_pass(&mut sim.0, dt);
+            }
+            Ok(Next::Now)
+        }
+
         Step::ExpectZoom(wanted) => {
             let actual = checks.zoom.get();
             (actual == *wanted)
@@ -658,6 +733,34 @@ fn perform(
                 None => Err(format!("({x}, {y}) is outside {map}")),
             }
         }
+
+        Step::ExpectEntities(wanted) => {
+            let actual = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0
+                .len();
+            (actual == *wanted)
+                .then_some(Next::Now)
+                .ok_or(format!("expected {wanted} entities, found {actual}"))
+        }
+
+        Step::ExpectSprites(wanted) => {
+            let actual = checks.sprites.iter().count();
+            (actual == *wanted)
+                .then_some(Next::Now)
+                .ok_or(format!("expected {wanted} actor sprites, found {actual}"))
+        }
+
+        Step::ExpectLog(needle) => checks
+            .log
+            .contains(needle)
+            .then_some(Next::Now)
+            .ok_or(format!(
+                "nothing in the log contains {needle:?}; it holds: {:?}",
+                checks.log.lines()
+            )),
     }
 }
 

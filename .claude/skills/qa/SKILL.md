@@ -104,11 +104,27 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"tool": "wall brown"}` | Select a palette entry, on whichever layer it lives. |
 | `{"cursor_cell": {"x": 3, "y": 2}}` | Put the editor cursor in the middle of a cell. |
 | `{"cursor": {"x": 168, "y": 120}}` | ...or at a world position, in pixels. |
+| `{"spawn": {"kind": "human", "x": 3, "y": 2}}` | Put an entity in the world: `human` or `dog`. |
+| `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
 `press` **refuses an ambiguous label** rather than guessing — every row of the file list
 has an `edit` button — so walking a list uses arrow keys and then `press` on something
 unique, or `focus` on the row's name first.
+
+`spawn` and `tick` only mean anything on the game screen, and say so rather than passing
+quietly if the test is somewhere else. `spawn` pushes onto the same command queue the game
+uses, so it is applied by the *next* tick and not by being asked for — a test that spawns
+and then asserts without a `tick` in between is asserting on an empty world.
+
+`tick` runs one **spawn pass** and then N **processing passes**, so however many ticks you
+ask for, a pending spawn happens exactly once. `{"tick": 0}` does nothing at all, spawn
+pass included; the commands stay queued for the game's own fixed-step tick.
+
+**`tick` runs the steps by hand rather than waiting for them.** `FixedUpdate` advances at
+whatever rate the frame allows, so `{"wait": 1.0}` would assert on however many ticks this
+machine happened to manage — fine on a fast desktop, a flake on a loaded CI box. `{"tick":
+200}` is always exactly 200.
 
 ### Input — the devices themselves
 
@@ -143,9 +159,22 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_focus": "create"}` | The focused widget's label. |
 | `{"expect_map": "office"}` / `{"expect_no_map": "office"}` | A saved map exists, or does not. |
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
+| `{"expect_entities": 3}` | How many entities the simulation holds. |
+| `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
+| `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 
 A failed assertion stops the test — the steps after it were written for a state the app is
 no longer in — and the run exits non-zero.
+
+`expect_entities` and `expect_sprites` are two assertions on purpose. The simulation
+holding three entities and the screen showing three actors are separate claims, and the
+second is the one that catches a renderer that has quietly stopped keeping up — which is
+the failure a screenshot is worst at showing, because a missing sprite looks like an
+actor that walked off the edge of the view.
+
+`expect_log` reads the log *panel*'s lines, not the queue. The queue is drained as it is
+displayed, so asking it directly would be a race with the system emptying it — and the
+panel only keeps the last handful, so assert on something recent.
 
 `expect_tile` reads the file, not the scene, so "I painted a wall" is only true once it has
 been saved. The editor saves on leaving and on `f5`.

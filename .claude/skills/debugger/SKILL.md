@@ -35,12 +35,20 @@ the binary directly produces a window full of nothing and a wall of `Path not fo
 | `CROWD2X_MAP` | Open this saved map instead of a scratch one. | scratch |
 | `CROWD2X_ZOOM` | Start at this zoom, 1-8 screen pixels per canvas pixel. | `4` |
 | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
+| `CROWD2X_SPAWN` | Scatter N actors on the map when the game screen opens. | none |
 
 The app starts on the main menu, so **a capture of the editor or the game needs
 `CROWD2X_STATE=`** — otherwise you are looking at the menu over the world. Both
 of those screens draw a map, so pair it with `CROWD2X_MAP` (and point
 `CROWD2X_MAPS` at a scratch directory holding one) or you are photographing an
 empty scratch map.
+
+`CROWD2X_SPAWN` exists because **the simulation starts empty**. A capture of the
+game screen without it is a map with nobody on it — correct, and not what you
+were trying to look at. It spawns through the same API a QA script does, onto
+passable cells only, from a fixed seed, so the same command twice gives the same
+crowd. Actors move, so two captures of a running world differ; that is the
+simulation working, not the renderer being unstable.
 
 `CROWD2X_ZOOM` exists because zooming is the one thing the pixel pipeline can
 get wrong that a default-zoom capture will never show. The game screen resets
@@ -101,7 +109,20 @@ done
 ```
 
 Run this after touching anything in `src/render.rs`, the window setup in `src/main.rs`,
-or any sprite `Transform` that could land on a fractional coordinate.
+or any sprite `Transform` that could land on a fractional coordinate. **Actor transforms
+are exactly that**: the simulation moves entities in fractional cell units, and
+`game::actors::world_pos` is the one `.round()` standing between that and an uneven
+texel — so capture with `CROWD2X_SPAWN` set when checking it.
+
+**Is the simulation actually running?** The HUD prints the live entity count and the
+tick, and the log panel prints what spawned:
+```sh
+CROWD2X_SHOT=<scratchpad>/crowd.png CROWD2X_STATE=game CROWD2X_MAP="<a map>" \
+  CROWD2X_SPAWN=25 CROWD2X_SHOT_DELAY=5 cargo run
+```
+A frame showing `actors 25  tick 0` means the world was built but never stepped; `tick`
+climbing with actors piled on their spawn cells means it is stepping but nothing decides
+to move. Both are cheaper to spot here than in a debugger.
 
 ## Reading the result
 

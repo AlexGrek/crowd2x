@@ -29,15 +29,30 @@
 //! — a tick is a pure function of the previous state and the input — are
 //! delivered by the phase split below, which is where they actually matter.
 //!
-//! ## The tick
+//! ## Two passes
 //!
-//! 1. **Commands.** Drain [`Input::commands`]: spawns and despawns, the only
-//!    things that change how many entities there are.
-//! 2. **Think.** Read-only over the entities and the map. Every entity returns
+//! A tick is [`spawn_pass`] then [`process_pass`], and the division is the
+//! whole point:
+//!
+//! | | writes the entity table | allocates | parallelisable |
+//! | --- | --- | --- | --- |
+//! | [`spawn_pass`] | **yes** — the only thing that does | yes | no |
+//! | [`process_pass`] | **no** | no | that is what it is for |
+//!
+//! **The spawn pass** drains [`Input::commands`]. Spawning and despawning are
+//! the only things that change *which* entities exist, and they all happen
+//! here, first, so an entity spawned this tick thinks this tick.
+//!
+//! **The processing pass** advances every entity and adds or removes none. It
+//! is handed a [`FrozenEntities`] — the table with its membership frozen,
+//! offering no `insert` and no `remove` — so that is a guarantee the compiler
+//! holds, not a rule to remember. Inside it, two phases:
+//!
+//! 1. **Think.** Read-only over the entities and the map. Every entity returns
 //!    an [`Intent`] into a slot-indexed buffer. Nothing is mutated, so there
 //!    is nothing to synchronise and this loop can be handed to a thread pool
 //!    without changing its shape.
-//! 3. **Apply.** Single-threaded, slots in ascending order, drains the buffer
+//! 2. **Apply.** Single-threaded, slots in ascending order, drains the buffer
 //!    into the entities.
 //!
 //! **The intent buffer is the double buffer.** The `dev` skill asks for
@@ -45,6 +60,15 @@
 //! reads the entities and writes intents, apply reads intents and writes the
 //! entities. The two phases never touch the same memory in the same direction,
 //! which is the property that makes the read phase safe to parallelise.
+//!
+//! Freezing the table is what makes that property survive contact with the
+//! rest of the tick. The buffer is indexed by slot and sized once, in the
+//! spawn pass; a `Vec` that grows mid-tick moves its contents and invalidates
+//! every index and reference into it. Structural mutation is also the one
+//! thing that genuinely cannot be parallelised — two threads moving different
+//! entities never conflict, two threads pushing to one `Vec` always do. So the
+//! pass that wants to run across threads is the pass that is not allowed to
+//! change the table.
 //!
 //! # Lock-free
 //!
@@ -55,11 +79,17 @@
 //! precisely so it does not become the global lock that killed the earlier
 //! prototype.
 
-// The simulation is being built out ahead of its callers — most of the public
-// surface here is reached from tests and from the Bevy adapter, and trimming
-// it to whatever `src/game/` happens to touch today would mean re-adding it a
-// piece at a time. Same reasoning as `src/map/`.
-#![allow(dead_code)]
+// Same reasoning as `src/map/`: this is the foundation for a game that is
+// mostly not written yet, so a good deal of the surface — `Command::Despawn`,
+// `elapsed`, `get_mut` — is reached only from tests until there is something
+// that wants it. Trimming to today's single caller means re-adding it a piece
+// at a time.
+//
+// The allow is not a licence to leave anything here. It hides *unused*, not
+// *redundant*: `GameEntity::describe` and `Input::cursor` were both removed
+// during review because nothing would ever have wanted them, not because
+// nothing did yet.
+#![allow(dead_code, unused_imports)]
 
 pub mod entities;
 pub mod entity;
@@ -68,11 +98,11 @@ pub mod log;
 pub mod uid;
 
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::map::{Map, Point};
 
-pub use entities::{Entities, Slot};
+pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{Body, GameEntity, Think};
 pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
@@ -113,15 +143,15 @@ pub enum Command {
 
 /// One frame's worth of input to the simulation.
 ///
-/// A struct rather than loose arguments so that giving the simulation
-/// something new to read does not change [`process_game_state`]'s signature
-/// and every call site with it.
+/// A struct rather than a `Vec<Command>` argument so that giving the
+/// simulation something new to read — a pointer position, a paused flag —
+/// does not change [`process_game_state`]'s signature and every call site with
+/// it. It holds only commands today; a field nothing reads is ceremony, and
+/// this one had a cursor in it until nothing turned out to want one.
 #[derive(Clone, Default, Debug)]
 pub struct Input {
     /// Applied in order, before anything thinks.
     pub commands: Vec<Command>,
-    /// Where the pointer is, in cells, if it is over the map at all.
-    pub cursor: Option<Point>,
 }
 
 impl Input {
@@ -165,8 +195,9 @@ pub struct GameState {
     rng: SmallRng,
     tick: u64,
     elapsed: f64,
-    /// The back buffer, reused between ticks so a tick allocates nothing.
-    /// Indexed by [`Slot`]; a hole in the arena keeps an [`Intent::Idle`].
+    /// The back buffer, reused between ticks so the processing pass allocates
+    /// nothing. Indexed by [`Slot`], and sized only by the spawn pass — a hole
+    /// in the arena keeps an [`Intent::Idle`] that apply skips.
     intents: Vec<Intent>,
 }
 
@@ -281,62 +312,29 @@ impl std::fmt::Debug for GameState {
     }
 }
 
-/// Advance the world by `dt` seconds.
+/// Advance the world by `dt` seconds: the spawn pass, then the processing
+/// pass.
 ///
-/// The one function. See the module docs for the three phases and for why this
-/// takes `&mut` rather than returning a new state.
+/// The one function. See the module docs for why it takes `&mut` rather than
+/// returning a new state. The two passes are public in their own right, for a
+/// caller that wants to spawn a world once and then run it — which is what the
+/// QA harness's `tick` step does.
 pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
-    apply_commands(state, input);
-
-    state.tick += 1;
-    state.elapsed += dt as f64;
-
-    // Disjoint field borrows: `intents` is written while `entities`, `map` and
-    // `log` are read. Taking the buffer out and putting it back would work too,
-    // and would allocate nothing either, but this way the borrow checker is
-    // the thing proving the phases do not overlap.
-    let GameState {
-        map,
-        entities,
-        log,
-        tick,
-        intents,
-        ..
-    } = state;
-
-    // Sized to the arena, not the live count: it is indexed by slot, and a
-    // hole keeps an `Idle` that apply skips.
-    intents.resize(entities.capacity(), Intent::Idle);
-
-    // --- think: read-only, and shaped to be run in parallel ---
-    let ctx = Think {
-        map,
-        log,
-        dt,
-        tick: *tick,
-    };
-    for (slot, entity) in entities.iter_slots() {
-        intents[slot as usize] = entity.think(&ctx);
-    }
-
-    // --- apply: single-threaded, in slot order ---
-    for slot in 0..entities.capacity() as Slot {
-        let intent = intents[slot as usize];
-        if intent == Intent::Idle {
-            continue;
-        }
-        if let Some(entity) = entities.slot_mut(slot) {
-            entity.apply(&intent);
-        }
-    }
+    spawn_pass(state, input);
+    process_pass(state, dt);
 }
 
-/// Spawns and despawns, before anything thinks.
+/// **The spawn pass: the only thing that changes which entities exist.**
 ///
-/// Ahead of the tick so that an entity spawned this frame thinks this frame:
-/// spawning something and watching it stand still for a tick reads as a bug in
-/// whatever did the spawning.
-fn apply_commands(state: &mut GameState, input: &Input) {
+/// Spawns and despawns, from [`Input::commands`]. It runs before the
+/// processing pass, so something spawned this tick thinks this tick — watching
+/// a new entity stand still for a frame reads as a bug in whatever spawned it.
+///
+/// This is also the only pass that may resize the entity table, and therefore
+/// the only one that may allocate. [`GameState::spawn`] keeps the intent
+/// buffer sized to the arena as it goes, which is what lets
+/// [`process_pass`] index it without a bounds concern and without touching it.
+pub fn spawn_pass(state: &mut GameState, input: &Input) {
     for command in &input.commands {
         match command {
             Command::Spawn { kind, at } => {
@@ -347,6 +345,69 @@ fn apply_commands(state: &mut GameState, input: &Input) {
                     state.log.push(format!("despawn: no such entity {uid}"));
                 }
             }
+        }
+    }
+}
+
+/// **The processing pass: advances every entity, and adds or removes none.**
+///
+/// Think then apply, over a table whose membership is frozen — it is handed a
+/// [`FrozenEntities`], which has no `insert` and no `remove`, so this is a
+/// guarantee the compiler holds rather than a rule to remember.
+///
+/// Two things follow from the table's shape being fixed here, and both are the
+/// reason for the split:
+///
+/// * **This pass allocates nothing.** The intent buffer was sized by the spawn
+///   pass and is only written through. A tick of a settled world touches no
+///   allocator at all.
+/// * **This pass is the one that becomes parallel.** Moving entities cannot
+///   conflict; inserting into a shared `Vec` always does. Freezing membership
+///   is what removes the only structural mutation from the phase that wants to
+///   run across threads.
+pub fn process_pass(state: &mut GameState, dt: f32) {
+    state.tick += 1;
+    state.elapsed += dt as f64;
+
+    // Disjoint field borrows: `intents` is written while `entities`, `map` and
+    // `log` are read, and the borrow checker is what proves the phases below
+    // do not overlap.
+    let GameState {
+        map,
+        entities,
+        log,
+        tick,
+        intents,
+        ..
+    } = state;
+
+    let mut table = entities.freeze();
+
+    // Sized by the spawn pass, which is the only thing that can change the
+    // arena. If this ever trips, something grew the table outside that pass.
+    debug_assert!(
+        intents.len() >= table.capacity(),
+        "intent buffer ({}) is shorter than the entity table ({})",
+        intents.len(),
+        table.capacity()
+    );
+
+    // --- think: read-only, and shaped to be run in parallel ---
+    let ctx = Think {
+        map,
+        log,
+        dt,
+        tick: *tick,
+    };
+    for (slot, entity) in table.iter_slots() {
+        intents[slot as usize] = entity.think(&ctx);
+    }
+
+    // --- apply: single-threaded, in slot order ---
+    for (slot, entity) in table.iter_slots_mut() {
+        let intent = intents[slot as usize];
+        if intent != Intent::Idle {
+            entity.apply(&intent);
         }
     }
 }
@@ -417,6 +478,63 @@ mod tests {
     }
 
     #[test]
+    fn the_processing_pass_never_changes_who_exists() {
+        // `FrozenEntities` makes this impossible to get wrong at compile time;
+        // the test is here to say it is a property of the design and not an
+        // accident of how the loops happen to be written today.
+        let mut state = world();
+        let mut input = Input::new();
+        input.spawn(EntityType::Human, Point::new(4, 4));
+        input.spawn(EntityType::Dog, Point::new(6, 6));
+        spawn_pass(&mut state, &input);
+
+        let before: Vec<Uid> = state.entities().uids().collect();
+        let arena = state.entities().capacity();
+
+        for _ in 0..500 {
+            process_pass(&mut state, 1.0 / 64.0);
+        }
+
+        assert_eq!(state.entities().uids().collect::<Vec<_>>(), before);
+        assert_eq!(state.entities().capacity(), arena, "the arena was resized");
+    }
+
+    #[test]
+    fn a_spawn_pass_with_nothing_to_do_leaves_the_world_alone() {
+        let mut state = world();
+        state.spawn(EntityType::Human, Point::new(4, 4));
+        let before = state.entities().uids().collect::<Vec<_>>();
+
+        spawn_pass(&mut state, &Input::new());
+
+        assert_eq!(state.entities().uids().collect::<Vec<_>>(), before);
+        // The spawn pass is not a tick: it moves no clock.
+        assert_eq!(state.tick(), 0);
+    }
+
+    #[test]
+    fn the_two_passes_together_are_the_one_function() {
+        let mut input = Input::new();
+        input.spawn(EntityType::Dog, Point::new(5, 5));
+
+        let mut split = world();
+        spawn_pass(&mut split, &input);
+        process_pass(&mut split, 1.0 / 64.0);
+
+        let mut combined = world();
+        process_game_state(&mut combined, 1.0 / 64.0, &input);
+
+        let positions = |s: &GameState| -> Vec<(u64, (f32, f32))> {
+            s.entities()
+                .iter()
+                .map(|e| (e.uid().raw(), e.position()))
+                .collect()
+        };
+        assert_eq!(positions(&split), positions(&combined));
+        assert_eq!(split.tick(), combined.tick());
+    }
+
+    #[test]
     fn commands_are_applied_before_anything_thinks() {
         let mut state = world();
         let mut input = Input::new();
@@ -448,7 +566,10 @@ mod tests {
         let mut state = world();
         run(&mut state, 60);
         assert_eq!(state.tick(), 60);
-        assert!((state.elapsed() - 1.0).abs() < 1e-9);
+        // Loose because dt is an f32: sixty of 1/60 accumulate to within about
+        // 1e-7 of a second, and tightening this would only be asserting that
+        // binary floating point works differently than it does.
+        assert!((state.elapsed() - 1.0).abs() < 1e-6, "{}", state.elapsed());
     }
 
     #[test]
@@ -514,6 +635,39 @@ mod tests {
                     entity.center_position()
                 );
             }
+        }
+    }
+
+    /// A solid wall is solid at every timestep, not only the one the game
+    /// happens to run at.
+    ///
+    /// The sibling test above checks nobody *ends* a tick inside a wall, which
+    /// a long step passes trivially by stepping clean over it — it did, and 14
+    /// of 40 entities reached the far side. This asks the question that
+    /// actually matters: did anyone get across.
+    #[test]
+    fn a_wall_cannot_be_stepped_over_however_long_the_step_is() {
+        for dt in [1.0 / 64.0, 0.25, 1.0, 10.0] {
+            let mut map = Map::new(Size::new(20, 3), FLOOR);
+            for y in 0..3 {
+                map.set_terrain(Point::new(10, y), WALL);
+            }
+            let mut state = GameState::new(map, 1);
+            for i in 0..40 {
+                state.spawn(EntityType::Dog, Point::new(1 + i % 9, 1));
+            }
+
+            let input = Input::new();
+            for _ in 0..300 {
+                process_game_state(&mut state, dt, &input);
+            }
+
+            let escaped = state
+                .entities()
+                .iter()
+                .filter(|e| e.center_position().x > 10)
+                .count();
+            assert_eq!(escaped, 0, "{escaped} entities crossed the wall at dt={dt}");
         }
     }
 
@@ -612,3 +766,4 @@ mod tests {
         );
     }
 }
+

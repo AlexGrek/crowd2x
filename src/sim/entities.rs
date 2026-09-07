@@ -25,6 +25,7 @@
 //! for a crowd is the number that matters anyway.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use super::entity::GameEntity;
 use super::uid::Uid;
@@ -144,15 +145,84 @@ impl Entities {
             .filter_map(|(index, slot)| Some((index as Slot, slot.as_deref()?)))
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut (dyn GameEntity + 'static)> {
+    /// Every live entity with its slot, mutably.
+    ///
+    /// This is what the apply phase walks. The obvious alternative — loop over
+    /// `0..capacity()` and call [`Entities::slot_mut`] — pays a bounds check
+    /// and an `Option` test per slot to rediscover what the iterator already
+    /// knows, and visits every hole to do it.
+    pub fn iter_slots_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (Slot, &mut (dyn GameEntity + 'static))> {
         self.slots
             .iter_mut()
-            .filter_map(|slot| slot.as_mut().map(|entity| &mut **entity))
+            .enumerate()
+            .filter_map(|(index, slot)| Some((index as Slot, &mut **slot.as_mut()?)))
     }
 
     /// Every live id, in slot order.
     pub fn uids(&self) -> impl Iterator<Item = Uid> + '_ {
         self.iter().map(|entity| entity.uid())
+    }
+
+    /// Hand the table to the processing pass with its membership frozen.
+    ///
+    /// See [`FrozenEntities`]. The point is that the processing pass takes
+    /// this and not `&mut Entities`, so "processing does not write to the
+    /// entity table" stops being a convention somebody has to remember.
+    pub fn freeze(&mut self) -> FrozenEntities<'_> {
+        FrozenEntities(self)
+    }
+}
+
+/// The entity table with its **membership frozen**: entities may change, but
+/// which entities exist may not.
+///
+/// This is what the processing pass is given. It cannot spawn and it cannot
+/// despawn, because it has no `&mut Entities` to call [`Entities::insert`] or
+/// [`Entities::remove`] on — only this, which does not offer them.
+///
+/// That is worth a type rather than a comment, because three things quietly
+/// depend on the table's shape holding still for the whole of a tick:
+///
+/// * The intent buffer is indexed by [`Slot`] and sized once, in the spawn
+///   pass. An insert mid-tick would grow the arena past the buffer.
+/// * A `Vec` that grows moves its contents. Anything holding a reference into
+///   the table across a spawn would be holding a dangling one — which the
+///   borrow checker stops today only because the code happens to be written so
+///   it never tries.
+/// * The processing pass is meant to become parallel. Structural mutation is
+///   precisely what cannot be parallelised; moving entities cannot conflict,
+///   inserting into a shared `Vec` always does.
+///
+/// Read-only access comes through `Deref`, so everything that only needs
+/// `&Entities` works unchanged. There is deliberately **no `DerefMut`** — that
+/// would hand back the two methods this type exists to withhold.
+///
+/// An entity that needs to remove itself does not get a back door here: it
+/// returns something the *next* spawn pass acts on, the same way a spawn
+/// arrives as a [`super::Command`].
+pub struct FrozenEntities<'a>(&'a mut Entities);
+
+impl FrozenEntities<'_> {
+    /// The entity in a slot, mutably. See [`Entities::iter_slots_mut`].
+    pub fn iter_slots_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (Slot, &mut (dyn GameEntity + 'static))> {
+        self.0.iter_slots_mut()
+    }
+
+    pub fn get_mut(&mut self, uid: Uid) -> Option<&mut (dyn GameEntity + 'static)> {
+        self.0.get_mut(uid)
+    }
+}
+
+/// Every read-only method of [`Entities`], and none of the structural ones.
+impl Deref for FrozenEntities<'_> {
+    type Target = Entities;
+
+    fn deref(&self) -> &Entities {
+        self.0
     }
 }
 
@@ -276,5 +346,43 @@ mod tests {
         let mut entities = Entities::new();
         entities.insert(stub(1));
         entities.insert(stub(1));
+    }
+
+    #[test]
+    fn a_frozen_table_still_reads_like_the_table_it_came_from() {
+        let mut entities = Entities::new();
+        entities.insert(stub(1));
+        entities.insert(stub(2));
+
+        let mut frozen = entities.freeze();
+        // Everything read-only arrives through `Deref`.
+        assert_eq!(frozen.len(), 2);
+        assert_eq!(frozen.capacity(), 2);
+        assert!(frozen.contains(uid(1)));
+        assert_eq!(frozen.iter().count(), 2);
+        // ...and entities can still be moved, just not added or removed.
+        assert_eq!(frozen.iter_slots_mut().count(), 2);
+        assert!(frozen.get_mut(uid(2)).is_some());
+    }
+
+    /// `insert` and `remove` take `&mut Entities`, and `FrozenEntities` offers
+    /// only `Deref` — so neither is reachable through it. Compiling this file
+    /// with the lines below uncommented is what would break:
+    ///
+    /// ```compile_fail
+    /// let mut entities = crowd2x::sim::Entities::new();
+    /// let frozen = entities.freeze();
+    /// frozen.remove(uid);          // no method `remove`
+    /// ```
+    ///
+    /// A doctest cannot run against a binary crate, so this is a note rather
+    /// than a check. The guarantee is the absence of `DerefMut`, which is
+    /// visible in one place directly above.
+    #[test]
+    fn a_frozen_table_offers_no_way_to_change_who_exists() {
+        let mut entities = Entities::new();
+        entities.insert(stub(1));
+        let frozen = entities.freeze();
+        assert_eq!(frozen.len(), 1);
     }
 }

@@ -23,12 +23,14 @@
 //! | `CROWD2X_MAP` | Open this saved map, instead of a scratch one. | scratch |
 //! | `CROWD2X_ZOOM` | Start at this zoom (screen pixels per canvas pixel). | `4` |
 //! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
+//! | `CROWD2X_SPAWN` | Scatter this many actors on the map when the game screen opens. | none |
 //!
 //! ```sh
 //! CROWD2X_SHOT=/tmp/frame.png cargo run
 //! CROWD2X_SHOT=/tmp/wide.png CROWD2X_WINDOW=1002x602 CROWD2X_SHOT_DELAY=2 cargo run
 //! CROWD2X_SHOT=/tmp/editor.png CROWD2X_STATE=editor CROWD2X_MAP=office cargo run
 //! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
+//! CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
 //! CROWD2X_EXIT=5 cargo run          # smoke run, no capture
 //! ```
 //!
@@ -41,11 +43,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::window::PrimaryWindow;
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 
 use crate::browser::maps_dir;
 use crate::editor::CurrentMap;
-use crate::map::MapStore;
+use crate::game::actors::{SimInput, DEFAULT_SEED};
+use crate::map::{MapStore, Point};
 use crate::render::PixelZoom;
+use crate::sim::EntityType;
 use crate::state::AppState;
 
 const ENV_SHOT: &str = "CROWD2X_SHOT";
@@ -56,6 +62,7 @@ const ENV_STATE: &str = "CROWD2X_STATE";
 const ENV_MAP: &str = "CROWD2X_MAP";
 const ENV_ZOOM: &str = "CROWD2X_ZOOM";
 const ENV_HIDE_UI: &str = "CROWD2X_HIDE_UI";
+const ENV_SPAWN: &str = "CROWD2X_SPAWN";
 
 /// Generous on purpose: with `bevy_ui` in the build, the first frame does not
 /// reach the screen for a couple of seconds on a cold start, and capturing
@@ -78,6 +85,7 @@ impl Plugin for DebugPlugin {
 
         open_map_from_env(app);
         set_zoom_from_env(app);
+        spawn_actors_from_env(app);
 
         if std::env::var(ENV_HIDE_UI).is_ok() {
             info!("debug: {ENV_HIDE_UI} set, hiding all UI");
@@ -97,6 +105,53 @@ fn hide_ui(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
             *visibility = Visibility::Hidden;
         }
     }
+}
+
+/// Put some actors on the map, so a capture of the game screen has a crowd in
+/// it.
+///
+/// The simulation starts empty and [`crate::sim::GameState::spawn`] is the
+/// only way in, by design — so this asks for them the same way a QA script
+/// does, through [`SimInput`], rather than reaching into the world. Cells are
+/// chosen from the passable ones, because an actor spawned inside a wall is
+/// invisible under the tile drawn over it and would photograph as nothing.
+fn spawn_actors_from_env(app: &mut App) {
+    let Ok(raw) = std::env::var(ENV_SPAWN) else {
+        return;
+    };
+    let Ok(count) = raw.parse::<usize>() else {
+        error!("debug: {ENV_SPAWN}={raw:?} is not a number");
+        return;
+    };
+    info!("debug: {ENV_SPAWN}={count}, scattering actors on the map");
+
+    app.add_systems(
+        OnEnter(AppState::Game),
+        // After `actors::build_world`, which is what creates `SimInput`.
+        move |current: Res<CurrentMap>, mut input: ResMut<SimInput>| {
+            let mut rng = SmallRng::seed_from_u64(DEFAULT_SEED);
+            let passable: Vec<Point> = current
+                .map
+                .size()
+                .points()
+                .filter(|cell| current.map.is_passable(*cell))
+                .collect();
+
+            if passable.is_empty() {
+                warn!("debug: {ENV_SPAWN} set, but nothing on this map is walkable");
+                return;
+            }
+            for _ in 0..count {
+                let cell = passable[rng.random_range(0..passable.len())];
+                let kind = if rng.random_range(0..100) < 40 {
+                    EntityType::Dog
+                } else {
+                    EntityType::Human
+                };
+                input.0.spawn(kind, cell);
+            }
+        },
+    );
 }
 
 /// Screen the app boots into, from `CROWD2X_STATE`.

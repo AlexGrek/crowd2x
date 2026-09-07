@@ -5,7 +5,6 @@
 //! Both sheets are strips of 16x16 frames, upscaled to a cell when drawn.
 
 use bevy::prelude::*;
-use rand::prelude::*;
 
 use super::{depth_for, upscale, Character, ART, ART_SCALE};
 use crate::animation::FrameAnimation;
@@ -54,34 +53,27 @@ pub enum Facing {
     Right,
 }
 
-impl Facing {
-    pub fn random<R: Rng + ?Sized>(rng: &mut R) -> Self {
-        if rng.random() {
-            Facing::Left
-        } else {
-            Facing::Right
-        }
-    }
-}
-
-pub fn spawn(commands: &mut Commands, sheets: &DogSheets, pos: Vec2, facing: Facing) {
+/// Returns the entity it made, so a caller can keep track of it.
+pub fn spawn(commands: &mut Commands, sheets: &DogSheets, pos: Vec2, facing: Facing) -> Entity {
     // See `human::spawn`: fractional positions break the upscaled texel grid.
     let pos = pos.round();
-    commands.spawn((
-        Name::new("dog"),
-        Character,
-        facing,
-        Sprite::from_atlas_image(
-            sheets.image_for(facing),
-            TextureAtlas {
-                layout: sheets.layout.clone(),
-                index: 0,
-            },
-        ),
-        FrameAnimation::new(0, IDLE_FRAMES as usize - 1, SECONDS_PER_FRAME),
-        Transform::from_xyz(pos.x, pos.y, depth_for(pos.y)).with_scale(upscale(ART_SCALE)),
-        WORLD_LAYER,
-    ));
+    commands
+        .spawn((
+            Name::new("dog"),
+            Character,
+            facing,
+            Sprite::from_atlas_image(
+                sheets.image_for(facing),
+                TextureAtlas {
+                    layout: sheets.layout.clone(),
+                    index: 0,
+                },
+            ),
+            FrameAnimation::new(0, IDLE_FRAMES as usize - 1, SECONDS_PER_FRAME),
+            Transform::from_xyz(pos.x, pos.y, depth_for(pos.y)).with_scale(upscale(ART_SCALE)),
+            WORLD_LAYER,
+        ))
+        .id()
 }
 
 /// Swap to the matching sheet when a dog turns around.

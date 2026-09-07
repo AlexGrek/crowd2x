@@ -1,0 +1,70 @@
+{
+  "name": "the simulation: an empty world, entities spawned into it, and a tick that moves them",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a world starts empty: nothing exists until something asks for it" },
+    { "expect_entities": 0 },
+    { "expect_sprites": 0 },
+    { "expect_log": "opened yard" },
+    { "shot": "an empty map" },
+
+    { "note": "spawning goes through the same command queue the game would use" },
+    { "spawn": { "kind": "human", "x": 2, "y": 2 } },
+    { "spawn": { "kind": "human", "x": 9, "y": 6 } },
+    { "spawn": { "kind": "dog", "x": 3, "y": 6 } },
+
+    { "note": "commands are applied by a tick, not by being asked for" },
+    { "tick": 1 },
+    { "expect_entities": 3 },
+    { "expect_log": "spawned human" },
+    { "expect_log": "spawned dog" },
+
+    { "note": "and the renderer keeps one sprite alongside each of them" },
+    { "expect_sprites": 3 },
+    { "shot": "three actors on the map" },
+
+    { "note": "ticks are what move the world, and they run without a frame passing" },
+    { "tick": 200 },
+    { "expect_entities": 3 },
+    { "expect_sprites": 3 },
+    { "shot": "the same three, further along" },
+
+    { "note": "the walls in the middle are impassable, and nobody is inside them" },
+    { "tick": 400 },
+    { "expect_entities": 3 },
+
+    { "note": "spawning while the world is running works the same way" },
+    { "spawn": { "kind": "dog", "x": 6, "y": 1 } },
+    { "tick": 30 },
+    { "expect_entities": 4 },
+    { "expect_sprites": 4 },
+    { "shot": "a fourth actor joined" },
+
+    { "note": "the camera still works, and the simulation keeps running under it" },
+    { "hold_key": { "key": "d", "seconds": 0.5 } },
+    { "key": "e" },
+    { "expect_zoom": 5 },
+    { "expect_state": "game" },
+    { "shot": "zoomed in on the crowd" },
+
+    { "note": "leaving drops the world; nothing is saved, so the map is untouched" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_sprites": 0 },
+    { "expect_map": "yard" },
+    { "expect_tile": { "map": "yard", "x": 5, "y": 4, "terrain": "wall brown" } },
+    { "expect_tile": { "map": "yard", "x": 5, "y": 5, "terrain": "floor" } },
+
+    { "note": "re-entering starts the world again from its seed: empty" },
+    { "press": "yard" },
+    { "expect_state": "game" },
+    { "expect_entities": 0 },
+    { "expect_sprites": 0 }
+  ]
+}

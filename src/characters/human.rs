@@ -59,7 +59,9 @@ impl Look {
 #[derive(Component)]
 pub struct LookLayer;
 
-pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Look) {
+/// Returns the root entity: the paperdoll's layers are its children, so this
+/// is the one to move, despawn, or hang a marker on.
+pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Look) -> Entity {
     let layers: Vec<(&'static str, f32)> = [
         Some((look.eyes, LAYER_EYES)),
         look.clothes.map(|c| (c, LAYER_CLOTHES)),
@@ -92,5 +94,6 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Loo
                     WORLD_LAYER,
                 ));
             }
-        });
+        })
+        .id()
 }

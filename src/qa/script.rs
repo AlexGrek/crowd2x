@@ -190,6 +190,25 @@ pub enum Step {
     Name(String),
     /// Select a palette entry by name, on whichever layer it lives.
     Tool(String),
+    /// Put an entity in the world.
+    ///
+    /// The simulation starts empty and spawning is the only way in, so this is
+    /// how a test that needs a crowd gets one. It goes through the same
+    /// command queue the game itself would use rather than reaching into the
+    /// world, so what a test exercises is the real path.
+    Spawn {
+        /// `human` or `dog`.
+        kind: String,
+        x: i32,
+        y: i32,
+    },
+    /// Advance the simulation by this many fixed steps, immediately.
+    ///
+    /// Called directly rather than waited for: `FixedUpdate` runs at whatever
+    /// rate the frame allows, so a test that waited a second would assert on
+    /// however many ticks this machine managed. This one asks for exactly the
+    /// number it names.
+    Tick(u32),
     /// Put the editor cursor in the middle of a cell.
     CursorCell { x: i32, y: i32 },
     /// Put the editor cursor at a world position, in pixels.
@@ -247,6 +266,21 @@ pub enum Step {
         y: i32,
         terrain: String,
     },
+    /// How many entities are alive in the simulation.
+    ExpectEntities(usize),
+    /// That the simulation has said something containing this text.
+    ///
+    /// Reads the log panel's own lines rather than the queue: the queue is
+    /// drained as it is displayed, so asking it would be a race with the
+    /// system that empties it.
+    ExpectLog(String),
+    /// How many actor sprites exist in the world.
+    ///
+    /// The renderer's half of the contract: `expect_entities` can pass while
+    /// nothing is on screen at all, which is exactly the bug this catches.
+    /// Counted from the entities themselves rather than from the map that
+    /// tracks them, so bookkeeping that has drifted from reality fails here.
+    ExpectSprites(usize),
 }
 
 fn default_tap() -> f32 {

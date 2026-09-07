@@ -1,18 +1,21 @@
-//! The game screen: a map, and a camera to look around it with.
+//! The game screen: a map, a simulation running on it, and a camera to look
+//! around with.
 //!
-//! This is where the simulation will live. Nothing simulates yet — what is
-//! here is the part that has to exist before anything can: a saved map is
-//! loaded, drawn, and looked at.
+//! The simulation itself is not here. It is [`crate::sim`], plain Rust with no
+//! `bevy::` imports at all, and [`actors`] is the whole of the bridge: it
+//! builds a `GameState` from the open map, ticks it once per fixed step, and
+//! keeps a sprite alongside each entity. [`logview`] drains what the
+//! simulation had to say onto the screen.
 //!
-//! Three things it deliberately does *not* do, so that when the crowd arrives
-//! it arrives into a screen that already behaves:
+//! Three things this screen deliberately does *not* do:
 //!
 //! * **It does not own the map's art.** Terrain and props are drawn through
 //!   [`editor::draw_map`], from the same palettes the editor paints with, so
 //!   there is one catalogue binding a tile's name to its PNG rather than two
 //!   that can drift apart.
-//! * **It does not edit anything.** The map is read and never written, which
-//!   is why leaving is instant and there is nothing to save.
+//! * **It does not edit anything.** The map is read and never written — the
+//!   simulation gets a clone — which is why leaving is instant and there is
+//!   nothing to save.
 //! * **It does not zoom the camera.** Zooming is [`PixelZoom`], a whole-number
 //!   change to the size of the canvas the world is drawn into, so a sprite is
 //!   on exact pixel blocks at every zoom level rather than only at the default
@@ -32,6 +35,9 @@
 //! where `esc`/`B` means back ([`ui::nav::Cancelled`]). Here `B` is zoom out,
 //! so this screen reads the two leave buttons directly instead of listening
 //! for a cancel it would otherwise fire on every zoom.
+
+pub mod actors;
+pub mod logview;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -62,15 +68,16 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
-        .add_systems(OnExit(AppState::Game), restore_zoom)
-        .add_systems(
-            Update,
-            (move_camera, change_zoom, update_hud, leave)
-                .chain()
-                .after(NavSystems)
-                .run_if(in_state(AppState::Game)),
-        );
+        app.add_plugins((actors::ActorsPlugin, logview::LogViewPlugin))
+            .add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
+            .add_systems(OnExit(AppState::Game), restore_zoom)
+            .add_systems(
+                Update,
+                (move_camera, change_zoom, update_hud, leave)
+                    .chain()
+                    .after(NavSystems)
+                    .run_if(in_state(AppState::Game)),
+            );
     }
 }
 
@@ -254,21 +261,29 @@ fn change_zoom(
 fn update_hud(
     zoom: Res<PixelZoom>,
     current: Res<CurrentMap>,
+    sim: Option<Res<actors::Sim>>,
     mut huds: Query<(&mut Text, Ref<Hud>)>,
 ) {
+    // The tick count changes every fixed step, so unlike the zoom and the map
+    // there is no point asking whether it changed.
+    let running = sim.as_ref().map(|sim| (sim.0.len(), sim.0.tick()));
+
     for (mut text, hud) in &mut huds {
         // `is_added` matters on a second visit: the HUD is respawned empty and
         // neither resource has necessarily changed since the first one.
-        if !hud.is_added() && !zoom.is_changed() && !current.is_changed() {
+        if !hud.is_added() && !zoom.is_changed() && !current.is_changed() && running.is_none() {
             continue;
         }
         let size = current.map.size();
+        let (actors, tick) = running.unwrap_or((0, 0));
         **text = format!(
-            "map    {}  {}x{}\nzoom   x{}",
+            "map    {}  {}x{}\nzoom   x{}\nactors {}  tick {}",
             current.title(),
             size.width,
             size.height,
             zoom.get(),
+            actors,
+            tick,
         );
     }
 }

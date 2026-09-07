@@ -57,6 +57,7 @@ without anyone watching the window:
 CROWD2X_SHOT=/tmp/frame.png cargo run                          # capture, then exit
 CROWD2X_SHOT=/tmp/odd.png CROWD2X_WINDOW=1002x602 cargo run    # capture at a given size
 CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
+CROWD2X_SPAWN=25 CROWD2X_STATE=game CROWD2X_MAP=<a map> cargo run   # with a crowd on it
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
 
 # The pixel grid check needs a frame with no UI in it: bevy_ui draws at window
@@ -105,7 +106,7 @@ window, so `Interaction` would never fire on the world camera, which renders to 
 
 ## What renders today
 
-Characters and whatever has been painted in the editor — no simulation yet.
+Whatever has been painted in the editor, plus the actors the simulation says exist.
 
 - **Humans** (`src/characters/human.rs`) are a layered paperdoll: a 48x48 body
   with eyes, clothes and hair stacked on top as child sprites. New outfits are
@@ -118,7 +119,13 @@ Depth is painter's order by world Y (`characters::depth_for`), so characters
 lower on screen draw in front. Layer offsets within one character are small
 enough that two characters can never interleave.
 
-`spawn_demo_crowd` is placeholder scene-setting until there is a simulation.
+Nothing in `src/characters/` spawns anything. Who exists is the simulation's answer
+(`src/sim/`, plain Rust with no `bevy::` imports), and `src/game/actors.rs` is the bridge
+that keeps one sprite alongside each entity. To see a crowd, ask for one:
+
+```sh
+CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=<a map> CROWD2X_SPAWN=25 cargo run
+```
 
 ## Assets
 

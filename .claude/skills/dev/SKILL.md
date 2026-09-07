@@ -40,6 +40,13 @@ older docs put them:
 | `WindowResized` | `bevy::window::WindowResized`, read with `MessageReader` |
 | `Msaa` | in the prelude, a per-camera **Component** |
 | `Anchor` | `bevy_sprite`, a separate Component, no longer a `Sprite` field |
+| `HashMap`, `HashSet` | `bevy::platform::collections::*` — not in the prelude |
+| Condition combinator | `.and_then(cond)` / `.and_eager(cond)`; plain `.and(..)` is deprecated |
+
+Also: two parameters of one system claiming the same resource — a `Res<T>` in one
+`SystemParam` struct and a `ResMut<T>` in another — is a runtime panic (`B0002`), not a
+compile error. It shows up the first time that system runs, which for a screen-specific
+system can be well into a test run.
 
 Buffered events are `Message` / `MessageReader` / `MessageWriter` since 0.17; `Event` is
 reserved for observers (`On<E>`). `AppExit` is a `Message`.
@@ -65,21 +72,35 @@ systems.
 src/main.rs           app + window setup, plugin registration
 src/state.rs          AppState - MainMenu / Maps / Editor / Game
 src/render.rs         PixelRenderPlugin - the pixel-perfect pipeline, PixelZoom
-src/ui.rs             UiPlugin (UiScale), shared colours and font sizes
+src/ui/               UiPlugin (UiScale), shared widgets
+  nav.rs              Focus/Focusable/Scope - one highlight, three devices
+  keyboard.rs         the on-screen keyboard and TextEntry
 src/menu.rs           MainMenuPlugin
 src/editor/           the map editor
   mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD, draw_map
   background.rs       grid-snapped tile layer
   props.rs            free-placed, Y-sorted object layer
 src/browser.rs        BrowserPlugin - the saved-maps screen
-src/game.rs           GamePlugin - playing a map: camera, zoom, clamp
-src/characters/       humans and dogs
+src/game/             GamePlugin - playing a map
+  mod.rs              camera, zoom, clamp, HUD
+  actors.rs           the sim-to-sprite bridge: Sim, SimInput, tick, sync
+  logview.rs          drains the simulation's log onto the screen
+src/map/              the map + coordinates - PLAIN RUST, no bevy
+src/sim/              GameState + process_game_state - PLAIN RUST, no bevy
+  uid.rs              Uid (type byte + 56 random bits), EntityType
+  entity.rs           GameEntity, Body, Think
+  kinds.rs            Human, Dog, the wander behaviour
+  entities.rs         the dict-over-arena store
+  log.rs              bounded lock-free line queue
+src/characters/       how humans and dogs are drawn
   mod.rs              CharacterPlugin, CELL, depth_for()
   human.rs            layered paperdoll
   dog.rs              animated sprite + facing sheets
 src/animation.rs      FrameAnimation, atlas frame stepping
+src/qa/               scripted QA (see the `qa` skill)
+src/awake.rs          macOS: hold the display awake for a capture
 src/debug.rs          screenshot/smoke harness (see the `debugger` skill)
-tools/                check_pixel_grid.py
+tools/                check_pixel_grid.py, art_scale.py, qa.py
 assets/               imported wholesale from an earlier prototype
 ```
 
@@ -223,6 +244,127 @@ Corollary: an actor is not required to be an entity. Entities are for *things th
 Ten thousand agents can live in dense arrays with a few hundred sprites spawned for the
 visible ones.
 
+### The GameState contract
+
+The rule above has an address. The simulation is `src/sim/`, and its whole surface is:
+
+```rust
+pub struct GameState { pub map: Map, entities: Entities, pub log: Log, /* ... */ }
+
+pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input);  // both passes
+pub fn spawn_pass(state: &mut GameState, input: &Input);                   // writes the table
+pub fn process_pass(state: &mut GameState, dt: f32);                       // must not
+```
+
+One super-object, one entry point. Bevy renders it, reads the devices, runs the shaders and
+draws the UI; it decides nothing. `src/game/actors.rs` is the entire bridge and is worth
+reading before adding to either side.
+
+**Do not** add a Bevy system that decides something, a `Component` holding agent state, or
+a second function that advances the world. Add an entity kind (`sim/kinds.rs`), an
+`Intent` variant, or a `Command`.
+
+#### Which pass does your code belong in
+
+This is the first question to answer, and mostly the compiler answers it for you.
+
+| | writes the entity table | allocates | parallelisable |
+| --- | --- | --- | --- |
+| `spawn_pass` | **yes** — the only thing that does | yes | no |
+| `process_pass` | **no** | no | that is what it is for |
+
+`process_pass` is handed a `FrozenEntities`: the table with its membership frozen. It
+derefs to `&Entities` so every read works unchanged, and it deliberately has **no
+`DerefMut`**, so `insert` and `remove` — which need `&mut Entities` — are simply not
+reachable. Anything that changes *which* entities exist has to go through a `Command` and
+land in the spawn pass. An entity that wants to remove itself returns something the *next*
+spawn pass acts on; there is no back door, and that is the feature.
+
+Three things depend on the table holding still for the whole of a tick, which is why this
+is a type and not a comment:
+
+- The intent buffer is indexed by `Slot` and sized once, in the spawn pass. An insert
+  mid-tick grows the arena past the buffer.
+- A `Vec` that grows moves its contents, invalidating every index and reference into it.
+- Structural mutation is the one thing that genuinely cannot be parallelised. Two threads
+  moving different entities never conflict; two threads pushing to one `Vec` always do.
+
+The payoff is concrete: `process_pass` touches no allocator at all, and it is the pass that
+can be handed to a thread pool without changing shape.
+
+#### Why `&mut` rather than `-> GameState`
+
+Returning a fresh state is the clean semantics and the wrong implementation: it copies the
+map, the log queue and the id allocator sixty times a second to express a change that
+touched only the entities. What the functional signature is actually *for* — a tick being
+a pure function of the previous state — is delivered by the pass split instead:
+
+1. **Spawn pass** — spawns and despawns, before anything thinks, so a new entity thinks
+   on the tick it arrived.
+2. **Processing pass, think** — read-only over entities and map; each returns an `Intent`
+   into a slot-indexed buffer.
+3. **Processing pass, apply** — single-threaded, ascending slot order, drains the buffer.
+
+**The intent buffer is the double buffer.** Think reads entities and writes intents; apply
+reads intents and writes entities. Neither touches the same memory in the same direction,
+which is what makes think safe to `par_iter` later, and it clones no entity to get there.
+The think loop is written in that shape already — keep it that way.
+
+#### Determinism is a test, not an aspiration
+
+`the_same_seed_and_the_same_input_give_the_same_world` runs two worlds for a thousand ticks
+and compares every position. It holds because the per-entity RNG is seeded from
+`mix(uid ^ mix(tick))` rather than shared, ids are minted from a seeded `SmallRng`, and
+iteration is in slot order. Anything that reaches for `rand::rng()` inside the tick breaks
+it, and the breakage is a bug that reproduces once and never again.
+
+#### `Uid`, and why not `Entity`
+
+64 bits: top byte `EntityType`, low 56 random and unique-by-retry. Bevy's `Entity` is an
+index into a `World` — it cannot be written to a save file, quoted in a log, or compared
+across a reload, and most actors will not have one at all once sprites are culled to the
+canvas. `Uid::kind()` reads the type straight off the id, so a log line says what something
+is with no lookup into a state that may already have dropped it. An unknown top byte is
+`None`, not a panic, for the same reason an unknown `TerrainId` is.
+
+#### The store is a dict over an arena
+
+`Entities` presents `get(uid)` / `insert` / `remove` / `iter` over a `Vec<Option<Box<dyn
+GameEntity>>>` plus a `HashMap<Uid, Slot>` index. Look-up by id goes through the map; the
+tick walks the `Vec` and hashes nothing. Removal **tombstones** rather than
+`swap_remove`-ing: the intent buffer is indexed by slot, and reordering the tail on a
+despawn would both misfile intents and make iteration order depend on history.
+
+This is the compromise position between the dict the game wants to talk to and the SoA the
+next section asks for. When entity counts make `Box<dyn GameEntity>` the bottleneck — it
+will be pointer-chasing and vtable dispatch, not the `HashMap` — the move is to columns
+inside `Entities` with the same public API, and callers do not change.
+
+#### Driving the passes separately
+
+`process_game_state` is the two passes in order, and that is what the game calls. A caller
+that wants a world built once and then run — the QA harness's `tick` step — calls
+`spawn_pass` once and `process_pass` N times, which applies pending spawns exactly once
+however many ticks were asked for. Going through `process_game_state` for that needs the
+commands handed to the first tick and an empty `Input` to every one after it, which is the
+sort of thing that is wrong the second time somebody writes it.
+
+#### One `ResMut<Sim>`
+
+`game::actors::tick_sim` is the only system in the game that takes the world mutably. Every
+`ResMut<T>` is an exclusive lock on the schedule, so a second writer serialises the frame
+around it for nothing. Things that want to *ask* take `ResMut<SimInput>` and push a
+`Command`. (The QA harness's `tick` step is the deliberate exception; it lives in a
+different schedule, so the two never contend.)
+
+#### Cell units in, pixels out
+
+`position` is `(f32, f32)` in **cells** — `(3.5, 2.5)` is the middle of cell `(3, 2)` — and
+`center_position()` is `position.floor()`, derived so they cannot disagree. `CELL = 48` is a
+fact about the art and stays in `actors.rs`, which multiplies and rounds. Same line for
+appearance: the simulation hands out an `appearance_seed`, and `characters/` decides which
+PNGs that is.
+
 ### Data layout
 
 - Structure of arrays indexed by a dense `AgentId(u32)`: `Vec<Ps>`, `Vec<Brain>`,
@@ -235,6 +377,8 @@ visible ones.
 
 ### Shape of a tick
 
+`src/sim/` already does this; what follows is why, and what to preserve when changing it.
+
 The pattern that removes locks entirely, rather than making them cheaper:
 
 1. **Think** — read-only over the previous state, fully parallel, writes only into
@@ -242,7 +386,9 @@ The pattern that removes locks entirely, rather than making them cheaper:
 2. **Apply** — single-threaded, drains those buffers in a deterministic order and mutates
    the world. Small and cache-friendly if think did the expensive part.
 3. **Swap** — double-buffered state: read from A, write to B, swap. Also gives you
-   deterministic simulation and trivial rollback.
+   deterministic simulation and trivial rollback. In `src/sim/` the *intent buffer* plays
+   this role: there is no separate copy of the world, because think and apply already
+   touch disjoint memory in opposite directions.
 
 Determinism is worth protecting: iterate in id order, not hash order, and keep RNG
 per-agent and seeded.
@@ -271,7 +417,10 @@ atomics-everywhere is usually slower than a clean double buffer.
    friendly, deterministic. Default choice.
 2. **`crossbeam-channel` / `crossbeam-queue`** (`SegQueue`, `ArrayQueue`) for agent ->
    world intents when producers are genuinely concurrent. Both are already in the
-   dependency tree via Bevy, so they cost no compile time.
+   dependency tree via Bevy, so they cost no compile time. `sim/log.rs` is the working
+   example: `ArrayQueue::force_push` takes `&self`, is bounded, and evicts the oldest
+   rather than growing — pick bounded-and-lossy over unbounded whenever the reader is a
+   frame that might not run.
 3. **Plain atomics** (`AtomicU32`) for counters and stats. Keep them off the hot path;
    a contended atomic is a cache-line ping-pong.
 4. **`arc-swap`** for read-mostly snapshots — config, a published world snapshot readers
@@ -293,6 +442,11 @@ and address them by index.
 Also: pool and reuse sprite entities instead of spawning and despawning as agents enter
 and leave view, and only spawn sprites for agents actually on the canvas — the canvas is
 320x180, so the visible set is small no matter how big the simulation gets.
+
+**Neither is done yet.** `game/actors.rs` spawns one sprite per entity, for every entity,
+and despawns it when the entity goes. That is fine for the hand-built worlds the game
+screen has today and is the first thing to fix before the crowd arrives; the module says
+so in its own docs, so the gap is recorded rather than forgotten.
 
 ### Measure before optimising
 
