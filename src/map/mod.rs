@@ -53,6 +53,7 @@ use serde::{Deserialize, Serialize};
 pub const BASE: usize = 0;
 
 /// One terrain layer: exactly one tile per cell, row-major.
+#[derive(Clone)]
 pub struct TerrainLayer {
     tiles: Vec<TerrainId>,
 }
@@ -142,6 +143,10 @@ impl std::fmt::Debug for Map {
     }
 }
 
+/// `Clone` because the simulation owns its own copy: [`crate::sim::GameState`]
+/// outlives whatever loaded the map, and the editor keeps editing the original
+/// meanwhile.
+#[derive(Clone)]
 pub struct Map {
     size: Size,
     /// At least one; `terrain[BASE]` is the ground.

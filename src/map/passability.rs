@@ -15,6 +15,7 @@
 use super::coords::{Point, Size};
 
 /// One bit per cell, row-major, packed into 64-bit words.
+#[derive(Clone)]
 pub struct PassabilityMap {
     size: Size,
     words: Vec<u64>,

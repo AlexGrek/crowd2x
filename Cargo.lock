@@ -2112,6 +2112,7 @@ name = "crowd2x"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "crossbeam-queue",
  "rand",
  "serde",
  "serde_json",

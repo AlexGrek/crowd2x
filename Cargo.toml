@@ -9,6 +9,9 @@ edition = "2024"
 # matching umbrella for bevy_ui: layout, widgets, input focus and the UI
 # renderer, which the menu and the editor HUD are built out of.
 bevy = { version = "0.19", default-features = false, features = ["2d", "ui", "png", "jpeg"] }
+# The simulation's log queue. Bounded, lock-free, and already in the tree via
+# Bevy, so naming it directly costs no compile time. See `src/sim/log.rs`.
+crossbeam-queue = "0.3"
 rand = "0.10"
 
 # Map files are JSON. serde is already in the tree under Bevy; serde_json is

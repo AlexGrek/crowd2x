@@ -11,6 +11,7 @@ mod map;
 mod menu;
 mod qa;
 mod render;
+mod sim;
 mod state;
 mod ui;
 
