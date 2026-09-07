@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Write and run scripted QA tests for crowd2x - JSON test definitions that drive the real binary through menus, the map browser and the editor with keyboard, gamepad and mouse input, assert on outcomes, and take screenshots. Use when changing anything a person interacts with (screens, navigation, focus, input, the editor, saving and loading maps), when adding a regression test for an interface bug, or when a qa/ test fails and needs diagnosing.
+description: Write and run scripted QA tests for crowd2x - JSON test definitions that drive the real binary through menus, the map browser, the editor and the game with keyboard, gamepad and mouse input, assert on outcomes, and take screenshots. Use when changing anything a person interacts with (screens, navigation, focus, input, the editor, the game camera and zoom, saving and loading maps), when adding a regression test for an interface bug, or when a qa/ test fails and needs diagnosing.
 ---
 
 # Scripted QA for crowd2x
@@ -50,7 +50,7 @@ map will delete a real one.
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `name` | What the test is about. Appears in the log. | required |
-| `state` | Screen to start on: `menu`, `maps`, `editor`. | whatever the app starts on |
+| `state` | Screen to start on: `menu`, `maps`, `editor`, `game`. | whatever the app starts on |
 | `given.maps` | Maps that exist before the test runs. | none |
 | `open` | A map to have open when the app starts, in `state`. | the scratch map |
 | `steps` | The session. | required |
@@ -80,11 +80,11 @@ fixture that has drifted fails at startup with the format's own error.
 
 Remember terrain rows are written **bottom-up**: row 0 of the document is y 0.
 
-`"open": "<name>"` starts with that map loaded, which is how to test the editor without
-clicking through the browser first. Which screen it opens *in* is `state`: `editor` today.
-A script asking for a screen this build does not have — `"state": "game"` — stops the run
-with `this build has no "game" screen; it has: menu, maps, editor`, so a test written
-ahead of a feature says so plainly and starts working when the feature lands.
+`"open": "<name>"` starts with that map loaded, which is how to test the editor or the
+game without clicking through the browser first. Which screen it opens *in* is `state` —
+`editor` or `game`. A script asking for a screen this build does not have stops the run
+with `this build has no "credits" screen; it has: menu, maps, editor, game`, so a test
+written ahead of a feature says so plainly and starts working when the feature lands.
 
 ## Steps
 
@@ -139,6 +139,7 @@ system reads — so a click goes through genuine hover-and-click.
 | Step | Checks |
 | --- | --- |
 | `{"expect_state": "editor"}` | Which screen is up. |
+| `{"expect_zoom": 6}` | The zoom, in screen pixels per canvas pixel. |
 | `{"expect_focus": "create"}` | The focused widget's label. |
 | `{"expect_map": "office"}` / `{"expect_no_map": "office"}` | A saved map exists, or does not. |
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
@@ -148,6 +149,10 @@ no longer in — and the run exits non-zero.
 
 `expect_tile` reads the file, not the scene, so "I painted a wall" is only true once it has
 been saved. The editor saves on leaving and on `f5`.
+
+`expect_zoom` exists because zooming changes the *size of the canvas* rather than the
+scale of a camera, so a screenshot cannot be asked how far in it is without counting
+texels. The game screen is the only one that zooms, and it resets to `4` on the way out.
 
 ## Screenshots
 
@@ -187,7 +192,8 @@ whole log, including the `note` lines, which is usually enough to see how far it
 Common causes, in the order worth checking:
 
 - **`no widget on this screen is labelled "x"`** — the app is not on the screen the test
-  thinks it is. Add `{"expect_state": ...}` earlier to find out where it went.
+  thinks it is. Add `{"expect_state": ...}` earlier to find out where it went. Pressing a
+  map's *name* in the browser plays it; `edit` is the button beside it.
 - **`N widgets are labelled "x"`** — the label repeats on every row; use arrow keys and
   `expect_focus`, or `focus` the row by its unique name first.
 - **A tile check fails but the screenshot looks right** — the map was not saved. The

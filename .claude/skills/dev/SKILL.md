@@ -63,14 +63,16 @@ systems.
 
 ```
 src/main.rs           app + window setup, plugin registration
-src/state.rs          AppState - MainMenu / Editor
-src/render.rs         PixelRenderPlugin - the pixel-perfect pipeline
+src/state.rs          AppState - MainMenu / Maps / Editor / Game
+src/render.rs         PixelRenderPlugin - the pixel-perfect pipeline, PixelZoom
 src/ui.rs             UiPlugin (UiScale), shared colours and font sizes
 src/menu.rs           MainMenuPlugin
 src/editor/           the map editor
-  mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD
+  mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD, draw_map
   background.rs       grid-snapped tile layer
   props.rs            free-placed, Y-sorted object layer
+src/browser.rs        BrowserPlugin - the saved-maps screen
+src/game.rs           GamePlugin - playing a map: camera, zoom, clamp
 src/characters/       humans and dogs
   mod.rs              CharacterPlugin, CELL, depth_for()
   human.rs            layered paperdoll

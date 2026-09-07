@@ -8,7 +8,8 @@ crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19. Art was imported
 wholesale from an earlier prototype; all code is new.
 There is no simulation yet — `characters::spawn_demo_crowd` is a placeholder scene. What
 exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
-editor backed by a saved map format, and a scripted QA harness that drives all of it.
+editor backed by a saved map format, a game screen that loads a map and lets you look
+around it, and a scripted QA harness that drives all of it.
 
 ## Commands
 
@@ -24,7 +25,8 @@ python3 tools/qa.py    # the scripted QA tests in qa/, against the real binary
 resolves `assets/` relative to the manifest under cargo, and relative to the executable
 otherwise, so a direct run produces a blank window and asset-load errors.
 
-Controls: `WASD` / arrows pan the camera, `F12` saves a screenshot to `screenshots/` (gitignored).
+Controls: `WASD` / arrows pan the camera, `q` / `e` zoom in the game, `F12` saves a
+screenshot to `screenshots/` (gitignored).
 
 ### Verifying rendering changes without a human watching
 
@@ -35,10 +37,12 @@ the process exited unattended:
 CROWD2X_SHOT=/tmp/frame.png cargo run                          # capture, then exit
 CROWD2X_SHOT=/tmp/odd.png CROWD2X_WINDOW=1002x602 cargo run    # capture at a given window size
 CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
+CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
 
 # check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
 # window resolution, so on-screen text is legitimately not on the pixel grid.
+# Its second argument is the zoom, and must match CROWD2X_ZOOM.
 CROWD2X_SHOT=/tmp/bare.png CROWD2X_HIDE_UI=1 cargo run
 python3 tools/check_pixel_grid.py /tmp/bare.png 4
 ```
@@ -59,18 +63,33 @@ architecture.
 Everything is drawn twice to get exact-integer pixel scaling:
 
 1. A **world camera** (`RenderLayers` 0, `WORLD_LAYER`) renders the scene into an
-   off-screen `Image` sized `window_physical / PIXEL_SCALE` (4), at 1 world unit = 1 canvas pixel.
+   off-screen `Image` sized `window_physical / zoom`, at 1 world unit = 1 canvas pixel.
 2. An **upscale camera** (`RenderLayers` 1) draws that image to the window as a single
-   sprite scaled by `PIXEL_SCALE`, nearest-neighbor sampled.
+   sprite scaled by `zoom`, nearest-neighbor sampled.
+
+**Zooming is that factor** (`PixelZoom`, 1 to 8, `PIXEL_SCALE` = 4 by default), not a
+camera scale: a fractional zoom would give neighbouring texels different widths, which is
+the one thing this pipeline exists to prevent. Changing it rebuilds the canvas at the new
+resolution exactly as a window resize does, so zooming in shows less world at a larger
+size and every sprite stays on whole pixel blocks at either end. `UiScale` stays at
+`PIXEL_SCALE`, so the interface keeps its size on screen however far the world is zoomed.
 
 What keeps this exact, and easy to break:
 
 - `ImagePlugin::default_nearest()` in `main.rs` — no texture filtering anywhere.
 - `with_scale_factor_override(1.0)` on the window — makes logical/physical pixels
-  identical so the upscale factor is exactly `PIXEL_SCALE` on HiDPI too.
+  identical so the upscale factor is exactly the zoom on HiDPI too.
 - The world camera's `Transform` is snapped to whole pixels every frame; `CameraPan`
-  holds the sub-pixel position for smooth movement.
-- The canvas is rebuilt on window resize so the factor never drifts into a stretch.
+  holds the sub-pixel position for smooth movement. `CameraTarget` is how a screen asks
+  for a position before the camera exists — `OnEnter` for the *initial* state runs before
+  every `Startup` system.
+- The canvas is rebuilt on window resize *and* on a zoom change, so the factor never
+  drifts into a stretch.
+- The canvas quad is nudged half a pixel when the canvas was rounded up by an odd number
+  of screen pixels (`quad_offset`); without it the quad's edge lands between two screen
+  pixels and every texel straddles two of them. A window the display cannot honour
+  (999x601 arrives as 1000x602) fails the grid check for a reason that is not this —
+  ask for even sizes.
 
 **Anything new that should render must carry `WORLD_LAYER`**, or it won't appear.
 Verify with `tools/check_pixel_grid.py` after touching this file, window setup in
@@ -104,8 +123,10 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
 
 ### Screens and interface
 
-`AppState` (`src/state.rs`) is `MainMenu`, `Maps` (the map browser) or `Editor`. Screen
-entities carry `DespawnOnExit(..)` instead of hand-written teardown.
+`AppState` (`src/state.rs`) is `MainMenu`, `Maps` (the map browser), `Editor` or `Game`.
+Screen entities carry `DespawnOnExit(..)` instead of hand-written teardown, which is also
+why drawing a map takes the state it is being drawn for: the editor and the game draw the
+same map from the same palettes and each takes its own sprites away on the way out.
 
 **Two ordering traps live here.** `bevy_state` inserts `StateTransition` *before*
 `PreStartup`, so the initial `OnEnter` runs before **every** `Startup` system — an
@@ -151,11 +172,13 @@ writes to.
 
 ### The map browser (`src/browser.rs`)
 
-The screen that owns saved maps: create with a name, open, duplicate, delete (with a
-confirmation, since it is the only button here that destroys work), and a scroll view for
-the list. Scrolling follows the focus (`ui::scroll_to_show`) so a controller can reach the
-end of a long list, and the wheel moves it directly for a mouse. `CROWD2X_MAPS` points the
-store somewhere else, which is what keeps a QA run from deleting real maps.
+The screen that owns saved maps: create with a name, play, edit, duplicate, delete (with
+a confirmation, since it is the only button here that destroys work), and a scroll view
+for the list. A map's **name** is the button that plays it and `edit` is the one beside
+it — playing is what a map is for, so it gets the biggest target in the row. Scrolling
+follows the focus (`ui::scroll_to_show`) so a controller can reach the end of a long
+list, and the wheel moves it directly for a mouse. `CROWD2X_MAPS` points the store
+somewhere else, which is what keeps a QA run from deleting real maps.
 
 ### The map editor
 
@@ -185,6 +208,27 @@ have been `PaletteItem::upscaled`.
 Painting is a pointing task, so it goes through a `Cursor` resource either device can
 move: the mouse while it is moving, the left stick when it stops. Everything else has a
 button on both.
+
+### The game (`src/game.rs`)
+
+Playing a map: it is loaded, drawn and looked at. Nothing simulates yet — this is the
+part that has to exist before anything can, and it is deliberately narrow.
+
+- **It does not own the map's art.** Terrain and props go through `editor::draw_map`,
+  from the palettes the editor paints with, so one catalogue binds a tile's name to its
+  PNG instead of two that can drift apart.
+- **It does not edit anything**, so leaving is instant and there is nothing to save.
+- **It does not zoom the camera** — zooming is `PixelZoom`, above.
+- **The camera is kept inside the map** (`clamp_to_map`). A map has edges and nothing
+  outside them, so flying off into the void is getting lost rather than navigating; an
+  axis with less map than view is centred, since there is nothing there to scroll to.
+  Pan speed scales with the zoom so crossing the window always takes the same time.
+
+Move with `WASD`, the arrows, the d-pad or the left stick; zoom with `q`/`e` or `A`/`B`;
+`esc` or `start` goes back to the browser. `B` is the one departure from the `esc`/`B`
+means back convention the rest of the game follows — it is zoom out here, so this screen
+reads the leave buttons directly instead of listening for the `Cancelled` it would
+otherwise fire on every zoom.
 
 ### The map (`src/map/`)
 
@@ -264,8 +308,10 @@ real `Gamepad` component; the pointer moves by setting the window's cursor posit
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
-`expect_no_map`, `expect_tile` — and `expect_tile` reads the **saved** map, so "I painted
-a wall" is only true once the file says so.
+`expect_no_map`, `expect_tile`, `expect_zoom` — and `expect_tile` reads the **saved** map,
+so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
+zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
+cannot be asked how far in it is without counting texels.
 
 **Screenshots are named, not pathed.** `{"shot": "the file list"}` writes
 `qa-screenshots/<test>/01-the-file-list.png`, numbered in the order the shots were taken,
@@ -285,9 +331,9 @@ A test can start from a world rather than an empty one: `given.maps` takes a bar
 empty map), `{"name": ..., "file": ...}` (a map kept in `qa/fixtures/`), or
 `{"name": ..., "map": {...}}` (the map document written inline, for tests that depend on
 exactly which cells are painted). `"open": "<name>"` has that map already loaded when the
-app starts, in whichever screen `state` names — `editor` today, `game` when there is one;
-a script asking for a screen this build does not have stops with a message saying so
-rather than running against the wrong screen.
+app starts, in whichever screen `state` names — `editor` or `game`; a script asking for a
+screen this build does not have stops with a message saying so rather than running
+against the wrong screen.
 
 Two things to keep true, both learned the hard way here:
 
@@ -309,6 +355,7 @@ src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (t
 src/menu.rs             MainMenuPlugin
 src/editor/             EditorPlugin, background.rs + props.rs
 src/browser.rs          BrowserPlugin - the saved-maps screen
+src/game.rs             GamePlugin - playing a map: camera, zoom, clamped to the map
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
 src/awake.rs            macOS: hold the display awake so a run can be photographed

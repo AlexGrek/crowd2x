@@ -21,13 +21,14 @@
 //! | `CROWD2X_EXIT` | Quit after this many seconds even without a capture. | off |
 //! | `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
 //! | `CROWD2X_MAP` | Open this saved map, instead of a scratch one. | scratch |
+//! | `CROWD2X_ZOOM` | Start at this zoom (screen pixels per canvas pixel). | `4` |
 //! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 //!
 //! ```sh
 //! CROWD2X_SHOT=/tmp/frame.png cargo run
 //! CROWD2X_SHOT=/tmp/wide.png CROWD2X_WINDOW=1002x602 CROWD2X_SHOT_DELAY=2 cargo run
 //! CROWD2X_SHOT=/tmp/editor.png CROWD2X_STATE=editor CROWD2X_MAP=office cargo run
-//! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office cargo run
+//! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 //! CROWD2X_EXIT=5 cargo run          # smoke run, no capture
 //! ```
 //!
@@ -44,6 +45,7 @@ use bevy::window::PrimaryWindow;
 use crate::browser::maps_dir;
 use crate::editor::CurrentMap;
 use crate::map::MapStore;
+use crate::render::PixelZoom;
 use crate::state::AppState;
 
 const ENV_SHOT: &str = "CROWD2X_SHOT";
@@ -52,6 +54,7 @@ const ENV_WINDOW: &str = "CROWD2X_WINDOW";
 const ENV_EXIT: &str = "CROWD2X_EXIT";
 const ENV_STATE: &str = "CROWD2X_STATE";
 const ENV_MAP: &str = "CROWD2X_MAP";
+const ENV_ZOOM: &str = "CROWD2X_ZOOM";
 const ENV_HIDE_UI: &str = "CROWD2X_HIDE_UI";
 
 /// Generous on purpose: with `bevy_ui` in the build, the first frame does not
@@ -74,6 +77,7 @@ impl Plugin for DebugPlugin {
             .add_systems(Update, (manual_screenshot, run_capture_script));
 
         open_map_from_env(app);
+        set_zoom_from_env(app);
 
         if std::env::var(ENV_HIDE_UI).is_ok() {
             info!("debug: {ENV_HIDE_UI} set, hiding all UI");
@@ -126,6 +130,26 @@ fn open_map_from_env(app: &mut App) {
             app.insert_resource(CurrentMap::new(name, map));
         }
         Err(error) => error!("debug: cannot open {ENV_MAP}={name:?}: {error}"),
+    }
+}
+
+/// Start zoomed in or out, for checking that the pixel grid survives it.
+///
+/// In `build` for the same reason the map is: the canvas is sized from the
+/// zoom in `Startup`, which is too late to change it from a system that runs
+/// afterwards. The game screen resets the zoom when it is *left*, not when it
+/// is entered, so a capture booted straight into it keeps this.
+fn set_zoom_from_env(app: &mut App) {
+    let Ok(raw) = std::env::var(ENV_ZOOM) else {
+        return;
+    };
+    match raw.trim().parse::<u32>() {
+        Ok(zoom) => {
+            let zoom = PixelZoom::new(zoom);
+            info!("debug: {ENV_ZOOM}={raw:?}, starting at x{}", zoom.get());
+            app.insert_resource(zoom);
+        }
+        Err(error) => error!("debug: bad {ENV_ZOOM}={raw:?}: {error}"),
     }
 }
 

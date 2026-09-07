@@ -62,10 +62,7 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            OnEnter(AppState::Game),
-            (start_at_the_default_zoom, build_scene, aim_camera_at_map),
-        )
+        app.add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
         .add_systems(OnExit(AppState::Game), restore_zoom)
         .add_systems(
             Update,
@@ -77,15 +74,12 @@ impl Plugin for GamePlugin {
     }
 }
 
-/// Every visit starts at the zoom the rest of the game is drawn at, so a map
-/// opened after one that was left zoomed all the way in is not a wall of four
-/// pixels.
-fn start_at_the_default_zoom(mut zoom: ResMut<PixelZoom>) {
-    zoom.reset();
-}
-
-/// The editor and the menus have no zoom control, so leaving one behind would
-/// strand them at it.
+/// Put the zoom back on the way out.
+///
+/// This screen is the only one with a zoom control, so a zoom left behind
+/// would strand the editor and the menus at it with no way to undo. Resetting
+/// on the way *out* rather than on the way in is what lets the debug harness
+/// boot straight into a chosen zoom (`CROWD2X_ZOOM`) and still photograph it.
 fn restore_zoom(mut zoom: ResMut<PixelZoom>) {
     zoom.reset();
 }

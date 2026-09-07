@@ -31,11 +31,21 @@ the binary directly produces a window full of nothing and a wall of `Path not fo
 | `CROWD2X_SHOT_DELAY` | Seconds to run before capturing. Raise it if new assets are slow. | `3.0` |
 | `CROWD2X_WINDOW` | Force the window to `WxH` before capturing. | window default |
 | `CROWD2X_EXIT` | Quit after N seconds even with no capture. | off |
-| `CROWD2X_STATE` | Boot straight into `menu` or `editor`. | `menu` |
+| `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
+| `CROWD2X_MAP` | Open this saved map instead of a scratch one. | scratch |
+| `CROWD2X_ZOOM` | Start at this zoom, 1-8 screen pixels per canvas pixel. | `4` |
 | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 
-The app starts on the main menu, so **a capture of the editor needs
-`CROWD2X_STATE=editor`** — otherwise you are looking at the menu over the world.
+The app starts on the main menu, so **a capture of the editor or the game needs
+`CROWD2X_STATE=`** — otherwise you are looking at the menu over the world. Both
+of those screens draw a map, so pair it with `CROWD2X_MAP` (and point
+`CROWD2X_MAPS` at a scratch directory holding one) or you are photographing an
+empty scratch map.
+
+`CROWD2X_ZOOM` exists because zooming is the one thing the pixel pipeline can
+get wrong that a default-zoom capture will never show. The game screen resets
+the zoom when it is *left*, not when it is entered, so a capture booted straight
+into it keeps whatever this asked for.
 
 `F12` in a normal `cargo run` saves to `screenshots/shot-<epoch-millis>.png`
 (gitignored). That is for the human, not for you.
@@ -48,11 +58,16 @@ CROWD2X_SHOT=<scratchpad>/after.png cargo run
 ```
 Read the PNG. Capture a `before.png` first if the change is subtle.
 
-**Does it survive an awkward window size?** Sizes that are not multiples of
-`PIXEL_SCALE` exercise the canvas-rounding and resize path:
+**Does it survive an awkward window size?** Sizes that are not multiples of the
+zoom exercise the canvas-rounding and resize path:
 ```sh
 CROWD2X_SHOT=<scratchpad>/odd.png CROWD2X_WINDOW=1002x602 CROWD2X_SHOT_DELAY=2 cargo run
 ```
+Ask only for **even** sizes. A window this display cannot honour comes back
+rounded (999x601 arrives as 1000x602), and then the projection and the
+framebuffer disagree by a pixel — which reads as "not pixel-perfect" everywhere
+and has nothing to do with the code you changed. The capture's own dimensions,
+which `check_pixel_grid.py` prints, are the ones to trust.
 
 **Does it still run at all?** No capture, no window fiddling, just start and stop:
 ```sh
@@ -73,6 +88,17 @@ Checks that every source texel is a solid 4x4 block of identical pixels. Exits n
 if not, so it can gate a change. A reported phase offset like `x=3 y=3` is fine and
 expected when the window is not a multiple of 4 — the canvas is centred, so the grid
 starts a few pixels in. What matters is `PIXEL-PERFECT`, not the phase.
+
+**The zoom is the second argument**, and it has to match `CROWD2X_ZOOM`. Sweep
+it when you touch the pipeline — the rounding is different at every level, and
+an odd zoom is where a half-pixel offset in the canvas quad shows up first:
+```sh
+for z in 1 2 3 4 5 6 7 8; do
+  CROWD2X_SHOT=<scratchpad>/z$z.png CROWD2X_HIDE_UI=1 CROWD2X_ZOOM=$z \
+    CROWD2X_STATE=game CROWD2X_MAP="<a map>" cargo run
+  python3 tools/check_pixel_grid.py <scratchpad>/z$z.png $z
+done
+```
 
 Run this after touching anything in `src/render.rs`, the window setup in `src/main.rs`,
 or any sprite `Transform` that could land on a fractional coordinate.

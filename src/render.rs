@@ -77,6 +77,13 @@ impl PixelZoom {
     /// Twice the default. Past this a 48px cell fills a third of the window.
     pub const MAX: u32 = 8;
 
+    /// A zoom chosen from outside — the debug harness's `CROWD2X_ZOOM`.
+    /// Clamped rather than refused: an out-of-range number is a typo, and the
+    /// nearest zoom that exists is a more useful answer than a panic.
+    pub fn new(zoom: u32) -> Self {
+        Self(zoom.clamp(Self::MIN, Self::MAX))
+    }
+
     pub fn get(self) -> u32 {
         self.0
     }
@@ -163,8 +170,29 @@ fn create_canvas_image(size: UVec2) -> Image {
 /// always covers the whole window even when the size is not a multiple of the
 /// zoom.
 fn canvas_size_for(window: &Window, zoom: u32) -> UVec2 {
-    let physical = UVec2::new(window.physical_width(), window.physical_height());
-    (physical + zoom - 1) / zoom
+    (window_size(window) + zoom - 1) / zoom
+}
+
+fn window_size(window: &Window) -> UVec2 {
+    UVec2::new(window.physical_width(), window.physical_height())
+}
+
+/// Half a pixel of nudge for the canvas quad, per axis, or nothing.
+///
+/// The quad is centred on the window, so its edge sits `(window - quad) / 2`
+/// from the window's own edge. When the canvas was rounded up by an odd number
+/// of screen pixels that lands the edge on *half* a pixel, and from there every
+/// source texel straddles two screen pixels: not a blur — nothing is filtered —
+/// but rows of blocks a pixel wider than their neighbours, which is the exact
+/// unevenness this pipeline exists to prevent.
+///
+/// It shows up at any zoom whose rounding is odd (a window 602 tall at zoom 3
+/// is a 201-pixel canvas drawn 603 tall), so it cannot be fixed by choosing a
+/// better canvas size — only by putting the quad back on the grid.
+fn quad_offset(window: UVec2, canvas: UVec2, zoom: u32) -> Vec2 {
+    let quad = canvas * zoom;
+    let odd = |quad: u32, window: u32| if (quad.abs_diff(window)) % 2 == 1 { 0.5 } else { 0.0 };
+    Vec2::new(odd(quad.x, window.x), odd(quad.y, window.y))
 }
 
 fn setup_pipeline(
@@ -173,10 +201,13 @@ fn setup_pipeline(
     zoom: Res<PixelZoom>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
-    let size = windows
-        .single()
+    let window = windows.single().ok();
+    let size = window
         .map(|window| canvas_size_for(window, zoom.get()))
         .unwrap_or(UVec2::new(320, 180));
+    let offset = window
+        .map(|window| quad_offset(window_size(window), size, zoom.get()))
+        .unwrap_or(Vec2::ZERO);
     let image = images.add(create_canvas_image(size));
 
     // Renders the world at 1 world unit == 1 canvas pixel.
@@ -203,7 +234,7 @@ fn setup_pipeline(
             custom_size: Some(size.as_vec2()),
             ..default()
         },
-        Transform::from_scale(Vec3::splat(zoom.factor())),
+        Transform::from_translation(offset.extend(0.0)).with_scale(Vec3::splat(zoom.factor())),
         UPSCALE_LAYER,
         CanvasQuad,
     ));
@@ -254,10 +285,12 @@ fn resize_canvas(
         return;
     }
 
+    let offset = quad_offset(window_size(window), size, zoom.get());
     let image = images.add(create_canvas_image(size));
     for (mut sprite, mut transform) in &mut quads {
         sprite.image = image.clone();
         sprite.custom_size = Some(size.as_vec2());
+        transform.translation = offset.extend(0.0);
         transform.scale = Vec3::splat(zoom.factor());
     }
     for mut target in &mut targets {
@@ -399,6 +432,23 @@ mod tests {
             window_to_world(cursor, WINDOW, Vec2::ZERO, 1),
             Vec2::new(80.0, 0.0)
         );
+    }
+
+    /// A canvas rounded up by an odd number of screen pixels puts the quad's
+    /// edge on half a pixel; half a pixel of nudge puts it back.
+    #[test]
+    fn the_canvas_quad_lands_on_whole_pixels_at_every_zoom() {
+        for zoom in PixelZoom::MIN..=PixelZoom::MAX {
+            for window in [UVec2::new(1280, 720), UVec2::new(1002, 602), UVec2::new(999, 601)] {
+                let canvas = (window + zoom - 1) / zoom;
+                let offset = quad_offset(window, canvas, zoom);
+                // Where the quad's left and bottom edges land, in window
+                // pixels from the window's own edge.
+                let edge = (window.as_vec2() - (canvas * zoom).as_vec2()) / 2.0 + offset;
+                assert_eq!(edge.x.fract(), 0.0, "{zoom}x in {window}");
+                assert_eq!(edge.y.fract(), 0.0, "{zoom}x in {window}");
+            }
+        }
     }
 
     #[test]
