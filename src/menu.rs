@@ -14,8 +14,11 @@ use crate::state::AppState;
 use crate::ui::nav::{Activated, Cancelled, Focusable, NavSystems};
 use crate::ui::{button, label, FONT_BODY, FONT_TITLE, PANEL, TEXT_ACCENT, TEXT_DIM};
 
+/// One way in, because there is only one thing to choose first: a map. The
+/// browser is where that choice is made, and it is also where a map is edited,
+/// copied or thrown away.
 const ENTRIES: [(&str, MenuAction); 2] = [
-    ("Map Editor", MenuAction::Maps),
+    ("Play", MenuAction::Maps),
     ("Quit", MenuAction::Quit),
 ];
 

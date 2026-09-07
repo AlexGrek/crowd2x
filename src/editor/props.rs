@@ -77,7 +77,7 @@ pub fn place(commands: &mut Commands, assets: &AssetServer, map: &mut Map, pos: 
             kind: ObjectKind::new(PALETTE[item].name),
         },
     );
-    spawn_prop(commands, assets, at, item);
+    spawn_prop(commands, assets, at, item, AppState::Editor);
 }
 
 /// Delete the prop nearest the cursor, if one is close enough.
@@ -110,19 +110,28 @@ pub fn erase_nearest(
     }
 }
 
-/// Draw a map's props, for entering the editor with a map already loaded.
-pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, map: &Map) {
+/// Draw a map's props, for entering a screen with a map already loaded.
+///
+/// `state` is the screen they belong to — the editor and the game draw the
+/// same props and each despawns its own on the way out.
+pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, map: &Map, state: AppState) {
     for object in map.objects(ObjectLayer::Props) {
         match item_of(&object.kind) {
-            Some(item) => spawn_prop(commands, assets, object.at, item),
+            Some(item) => spawn_prop(commands, assets, object.at, item, state),
             // Left in the map, so saving does not delete a prop this build
             // merely has no picture for.
-            None => warn!("editor: no art for prop {:?}, not drawn", object.kind.as_str()),
+            None => warn!("no art for prop {:?}, not drawn", object.kind.as_str()),
         }
     }
 }
 
-fn spawn_prop(commands: &mut Commands, assets: &AssetServer, at: Point, item: usize) {
+fn spawn_prop(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    at: Point,
+    item: usize,
+    state: AppState,
+) {
     let y = at.y as f32;
     commands.spawn((
         Name::new("prop"),
@@ -133,7 +142,7 @@ fn spawn_prop(commands: &mut Commands, assets: &AssetServer, at: Point, item: us
         Sprite::from_image(assets.load(PALETTE[item].path)),
         Transform::from_xyz(at.x as f32, y, depth_for(y)).with_scale(upscale(PALETTE[item].scale)),
         WORLD_LAYER,
-        DespawnOnExit(AppState::Editor),
+        DespawnOnExit(state),
     ));
 }
 

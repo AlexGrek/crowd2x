@@ -6,6 +6,7 @@ mod browser;
 mod characters;
 mod debug;
 mod editor;
+mod game;
 mod map;
 mod menu;
 mod qa;
@@ -54,6 +55,7 @@ fn main() -> AppExit {
             menu::MainMenuPlugin,
             browser::BrowserPlugin,
             editor::EditorPlugin,
+            game::GamePlugin,
             awake::AwakePlugin,
             debug::DebugPlugin,
             qa::QaPlugin::new(script),

@@ -3,7 +3,7 @@
   "state": "maps",
   "given": { "maps": ["studio"] },
   "steps": [
-    { "press": "studio" },
+    { "press": "edit" },
     { "expect_state": "editor" },
 
     { "note": "aim by cell and pick the tile by name, so this does not depend on the camera or the palette order" },

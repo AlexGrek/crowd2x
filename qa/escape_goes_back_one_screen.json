@@ -4,7 +4,7 @@
   "given": { "maps": ["studio"] },
   "steps": [
     { "note": "a press belongs to the screen it was made on: this used to fall through the browser and quit" },
-    { "press": "studio" },
+    { "press": "edit" },
     { "expect_state": "editor" },
     { "key": "esc" },
     { "expect_state": "maps" },

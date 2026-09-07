@@ -19,14 +19,15 @@
 //! | `CROWD2X_SHOT_DELAY` | Seconds to run before capturing, so assets finish loading. | `3.0` |
 //! | `CROWD2X_WINDOW` | Resize the window to `WxH` on startup, before capturing. | window default |
 //! | `CROWD2X_EXIT` | Quit after this many seconds even without a capture. | off |
-//! | `CROWD2X_STATE` | Boot straight into `menu`, `maps` or `editor`. | `menu` |
-//! | `CROWD2X_MAP` | Open this saved map in the editor, instead of a scratch one. | scratch |
+//! | `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
+//! | `CROWD2X_MAP` | Open this saved map, instead of a scratch one. | scratch |
 //! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 //!
 //! ```sh
 //! CROWD2X_SHOT=/tmp/frame.png cargo run
 //! CROWD2X_SHOT=/tmp/wide.png CROWD2X_WINDOW=1002x602 CROWD2X_SHOT_DELAY=2 cargo run
 //! CROWD2X_SHOT=/tmp/editor.png CROWD2X_STATE=editor CROWD2X_MAP=office cargo run
+//! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office cargo run
 //! CROWD2X_EXIT=5 cargo run          # smoke run, no capture
 //! ```
 //!
@@ -111,16 +112,17 @@ pub fn initial_state() -> AppState {
 /// Open a saved map without going through the browser.
 ///
 /// Done here in `build` rather than in a `Startup` system, and it has to be:
-/// booting straight into the editor runs `OnEnter(Editor)` — which draws the
-/// map — *before* every `Startup` system. `DebugPlugin` is registered after
-/// `EditorPlugin`, so this replaces the scratch map that plugin inserts.
+/// booting straight into the editor or the game runs their `OnEnter` — which
+/// draws the map — *before* every `Startup` system. `DebugPlugin` is
+/// registered after `EditorPlugin`, so this replaces the scratch map that
+/// plugin inserts.
 fn open_map_from_env(app: &mut App) {
     let Ok(name) = std::env::var(ENV_MAP) else {
         return;
     };
     match MapStore::new(maps_dir()).load(&name) {
         Ok(map) => {
-            info!("debug: {ENV_MAP}={name:?}, opening it in the editor");
+            info!("debug: {ENV_MAP}={name:?}, opening it");
             app.insert_resource(CurrentMap::new(name, map));
         }
         Err(error) => error!("debug: cannot open {ENV_MAP}={name:?}: {error}"),

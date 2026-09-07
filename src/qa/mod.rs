@@ -63,7 +63,7 @@ use bevy::window::PrimaryWindow;
 
 use crate::browser::Maps;
 use crate::map::{Map, MapStore, Size, TerrainId, VOID};
-use crate::render::PIXEL_SCALE;
+use crate::render::{PixelZoom, PIXEL_SCALE};
 use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
 use crate::ui::keyboard::TextEntry;
@@ -344,6 +344,7 @@ struct Checks<'w, 's> {
     children: Query<'w, 's, &'static Children>,
     focusables: Query<'w, 's, (Entity, &'static Focusable)>,
     scope: Res<'w, Scope>,
+    zoom: Res<'w, PixelZoom>,
 }
 
 /// What an intent step drives, as opposed to what it inspects.
@@ -612,6 +613,13 @@ fn perform(
             (focused == *label)
                 .then_some(Next::Now)
                 .ok_or(format!("expected {label:?} focused, found {focused:?}"))
+        }
+
+        Step::ExpectZoom(wanted) => {
+            let actual = checks.zoom.get();
+            (actual == *wanted)
+                .then_some(Next::Now)
+                .ok_or(format!("expected zoom x{wanted}, found x{actual}"))
         }
 
         Step::ExpectMap(name) => checks

@@ -1,0 +1,64 @@
+{
+  "name": "play a map: load it, look around it, zoom it",
+  "state": "maps",
+  "given": {
+    "maps": [
+      { "name": "big room", "file": "qa/fixtures/big_room.json" }
+    ]
+  },
+  "steps": [
+    { "note": "a map's name is the button that plays it; edit is the one beside it" },
+    { "press": "big room" },
+    { "expect_state": "game" },
+    { "expect_zoom": 4 },
+    { "shot": "the middle of the map" },
+
+    { "note": "the camera starts in the middle of the map and can be walked to an edge" },
+    { "hold_key": { "key": "d", "seconds": 1.2 } },
+    { "hold_key": { "key": "w", "seconds": 1.2 } },
+    { "shot": "panned to the top right corner" },
+
+    { "note": "arrows, the left stick and the dpad move the same camera" },
+    { "hold_key": { "key": "left", "seconds": 0.6 } },
+    { "stick": { "side": "left", "x": -1.0, "y": -1.0, "seconds": 0.8 } },
+    { "hold_pad": { "button": "dpad_down", "seconds": 0.6 } },
+    { "shot": "panned back down and left" },
+
+    { "note": "q and e zoom by whole steps, and stop at the ends" },
+    { "key": "e" },
+    { "key": "e" },
+    { "expect_zoom": 6 },
+    { "shot": "zoomed in" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "shot": "zoomed out past the edges of the map" },
+
+    { "note": "and so do A and B on a gamepad" },
+    { "pad": "a" },
+    { "expect_zoom": 3 },
+    { "pad": "b" },
+    { "pad": "b" },
+    { "expect_zoom": 1 },
+    { "note": "already at the far end, so this one changes nothing" },
+    { "pad": "b" },
+    { "expect_zoom": 1 },
+
+    { "note": "B is zoom out here, so it must not also leave the screen" },
+    { "expect_state": "game" },
+
+    { "note": "escape goes back to the browser, and the map is untouched" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "big room" },
+    { "expect_tile": { "map": "big room", "x": 0, "y": 0, "terrain": "wall brown" } },
+    { "expect_tile": { "map": "big room", "x": 10, "y": 6, "terrain": "wood" } },
+
+    { "note": "the same map opens in the editor from the button next to its name" },
+    { "press": "edit" },
+    { "expect_state": "editor" },
+    { "expect_zoom": 4 }
+  ]
+}

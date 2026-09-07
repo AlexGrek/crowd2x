@@ -86,6 +86,14 @@ pub fn cell_centre(cell: IVec2) -> Vec2 {
     cell.as_vec2() * TILE + Vec2::splat(TILE / 2.0)
 }
 
+/// How much world a map covers, in pixels. Cell (0, 0) starts at the origin,
+/// so this is also the map's far corner — which is what a camera has to be
+/// kept inside of.
+pub fn map_extent(map: &Map) -> Vec2 {
+    let size = map.size();
+    Vec2::new(size.width as f32, size.height as f32) * TILE
+}
+
 /// A cell as the map addresses it. The two grids are the same grid; only the
 /// types differ, because one side of the fence has no `bevy` in it.
 pub fn point_of(cell: IVec2) -> Point {
@@ -130,7 +138,7 @@ pub fn paint(
     if let Some(painted) = tiles.0.remove(&cell) {
         commands.entity(painted.entity).despawn();
     }
-    let entity = spawn_tile(commands, assets, cell, item);
+    let entity = spawn_tile(commands, assets, cell, item, AppState::Editor);
     tiles.0.insert(cell, Painted { entity, item });
 }
 
@@ -143,11 +151,24 @@ pub fn erase(commands: &mut Commands, tiles: &mut Tiles, map: &mut Map, cell: IV
     }
 }
 
-/// Draw a whole map's terrain, for entering the editor with a map already
+/// Draw a whole map's terrain, for entering a screen with a map already
 /// loaded. Void cells get no sprite at all — that is what makes them read as
 /// nothing rather than as a black tile.
-pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, tiles: &mut Tiles, map: &Map) {
-    tiles.clear();
+///
+/// `state` is the screen the sprites belong to, because both the editor and
+/// the game draw the same map and each has to take its own copy away with it.
+/// The index is only wanted by the editor: a screen that cannot paint has no
+/// use for knowing which entity is in which cell.
+pub fn spawn_map(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    map: &Map,
+    state: AppState,
+    mut tiles: Option<&mut Tiles>,
+) {
+    if let Some(tiles) = tiles.as_deref_mut() {
+        tiles.clear();
+    }
     let mut unknown = Vec::new();
 
     for point in map.size().points() {
@@ -162,18 +183,26 @@ pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, tiles: &mut Tile
             continue;
         };
         let cell = IVec2::new(point.x, point.y);
-        let entity = spawn_tile(commands, assets, cell, item);
-        tiles.0.insert(cell, Painted { entity, item });
+        let entity = spawn_tile(commands, assets, cell, item, state);
+        if let Some(tiles) = tiles.as_deref_mut() {
+            tiles.0.insert(cell, Painted { entity, item });
+        }
     }
 
     for terrain in unknown {
         // Kept in the map rather than dropped, so saving does not quietly
         // delete terrain this build merely cannot draw.
-        warn!("editor: no art for terrain {:?}, not drawn", terrain.name());
+        warn!("no art for terrain {:?}, not drawn", terrain.name());
     }
 }
 
-fn spawn_tile(commands: &mut Commands, assets: &AssetServer, cell: IVec2, item: usize) -> Entity {
+fn spawn_tile(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    cell: IVec2,
+    item: usize,
+    state: AppState,
+) -> Entity {
     let centre = cell_centre(cell);
     commands
         .spawn((
@@ -183,7 +212,7 @@ fn spawn_tile(commands: &mut Commands, assets: &AssetServer, cell: IVec2, item: 
             Transform::from_xyz(centre.x, centre.y, BACKGROUND_Z)
                 .with_scale(upscale(PALETTE[item].scale)),
             WORLD_LAYER,
-            DespawnOnExit(AppState::Editor),
+            DespawnOnExit(state),
         ))
         .id()
 }

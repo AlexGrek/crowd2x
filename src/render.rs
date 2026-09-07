@@ -9,6 +9,12 @@
 //! that every source texel becomes an exact NxN block of screen pixels: sprites
 //! can never land on a half-texel, so there is no shimmering when the camera
 //! moves and no uneven pixel sizes.
+//!
+//! **Zooming is changing N.** [`PixelZoom`] is that factor, and it is a whole
+//! number for the same reason: a zoom of 2.5 would give neighbouring texels
+//! different widths and break the grid the pipeline exists to protect. Zooming
+//! in therefore makes the canvas *smaller* — fewer, bigger pixels — so the
+//! canvas is rebuilt at the new resolution exactly as it is on a resize.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -17,7 +23,12 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::window::{PrimaryWindow, WindowResized};
 
-/// Every world pixel becomes a PIXEL_SCALE x PIXEL_SCALE block on screen.
+/// Every world pixel becomes a PIXEL_SCALE x PIXEL_SCALE block on screen,
+/// unless something has zoomed — see [`PixelZoom`], which starts here.
+///
+/// It is also what the interface is measured in (`UiScale`), and that does
+/// *not* zoom: the HUD stays the same size on screen however far in the world
+/// is zoomed, so the two uses are separate on purpose.
 pub const PIXEL_SCALE: u32 = 4;
 
 /// Layer for everything that is drawn *inside* the low-res canvas.
@@ -32,10 +43,74 @@ pub struct PixelRenderPlugin;
 
 impl Plugin for PixelRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_pipeline)
-            .add_systems(Update, (resize_canvas, snap_camera_to_pixels));
+        app.init_resource::<PixelZoom>()
+            .init_resource::<CameraTarget>()
+            .add_systems(Startup, setup_pipeline)
+            // Chained: a camera moved this frame should be snapped this frame,
+            // not photographed one frame off the pixel grid first.
+            .add_systems(
+                Update,
+                (resize_canvas, apply_camera_target, snap_camera_to_pixels).chain(),
+            );
     }
 }
+
+/// Screen pixels per canvas pixel: the zoom.
+///
+/// Whole numbers only, which is the whole reason zooming lives here rather
+/// than on the camera's scale. Changing it rebuilds the canvas at
+/// `window / zoom`, so zooming in shows less of the world at a larger size and
+/// every sprite stays on exact pixel blocks at either end.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelZoom(u32);
+
+impl Default for PixelZoom {
+    fn default() -> Self {
+        Self(PIXEL_SCALE)
+    }
+}
+
+impl PixelZoom {
+    /// One screen pixel per canvas pixel: the whole map at its smallest, and
+    /// the point where the art stops being legible.
+    pub const MIN: u32 = 1;
+    /// Twice the default. Past this a 48px cell fills a third of the window.
+    pub const MAX: u32 = 8;
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+
+    pub fn factor(self) -> f32 {
+        self.0 as f32
+    }
+
+    /// Zoom by whole steps, clamped. Answers whether it actually moved, so a
+    /// caller can leave the HUD alone when it did not.
+    pub fn step(&mut self, steps: i32) -> bool {
+        let wanted =
+            (self.0 as i32 + steps).clamp(Self::MIN as i32, Self::MAX as i32) as u32;
+        if wanted == self.0 {
+            return false;
+        }
+        self.0 = wanted;
+        true
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = PIXEL_SCALE;
+    }
+}
+
+/// Where the camera should be put, once there is a camera to put it there.
+///
+/// Asking and applying are two steps rather than one because `OnEnter` for the
+/// *initial* state runs before every `Startup` system: a screen booted into
+/// directly reaches its own setup before [`setup_pipeline`] has spawned the
+/// camera. Writing the wish here means that boot still lands where the screen
+/// wanted instead of silently looking at the corner of the map.
+#[derive(Resource, Default)]
+pub struct CameraTarget(pub Option<Vec2>);
 
 /// Handle of the off-screen canvas plus the resolution it was created at.
 #[derive(Resource)]
@@ -85,21 +160,22 @@ fn create_canvas_image(size: UVec2) -> Image {
 }
 
 /// Canvas resolution for a given window size, rounded up so the upscaled quad
-/// always covers the whole window even when the size is not a multiple of
-/// `PIXEL_SCALE`.
-fn canvas_size_for(window: &Window) -> UVec2 {
+/// always covers the whole window even when the size is not a multiple of the
+/// zoom.
+fn canvas_size_for(window: &Window, zoom: u32) -> UVec2 {
     let physical = UVec2::new(window.physical_width(), window.physical_height());
-    (physical + PIXEL_SCALE - 1) / PIXEL_SCALE
+    (physical + zoom - 1) / zoom
 }
 
 fn setup_pipeline(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    zoom: Res<PixelZoom>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let size = windows
         .single()
-        .map(canvas_size_for)
+        .map(|window| canvas_size_for(window, zoom.get()))
         .unwrap_or(UVec2::new(320, 180));
     let image = images.add(create_canvas_image(size));
 
@@ -119,7 +195,7 @@ fn setup_pipeline(
         CameraPan::default(),
     ));
 
-    // Draws the canvas to the window, PIXEL_SCALE times bigger.
+    // Draws the canvas to the window, `zoom` times bigger.
     commands.spawn((
         Name::new("canvas quad"),
         Sprite {
@@ -127,7 +203,7 @@ fn setup_pipeline(
             custom_size: Some(size.as_vec2()),
             ..default()
         },
-        Transform::from_scale(Vec3::splat(PIXEL_SCALE as f32)),
+        Transform::from_scale(Vec3::splat(zoom.factor())),
         UPSCALE_LAYER,
         CanvasQuad,
     ));
@@ -151,31 +227,38 @@ fn setup_pipeline(
     commands.insert_resource(PixelCanvas { image, size });
 }
 
-/// Rebuild the canvas at the new resolution whenever the window changes size,
-/// so the upscale factor stays exactly `PIXEL_SCALE` instead of stretching.
+/// Rebuild the canvas at the new resolution whenever the window changes size
+/// or the zoom changes, so the upscale factor stays exactly the zoom instead
+/// of stretching.
+///
+/// One system for both because they are the same event as far as the canvas is
+/// concerned: the resolution it needs is `window / zoom`, and either half of
+/// that can move.
 fn resize_canvas(
     mut resized: MessageReader<WindowResized>,
+    zoom: Res<PixelZoom>,
     mut images: ResMut<Assets<Image>>,
     mut canvas: ResMut<PixelCanvas>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut quads: Query<&mut Sprite, With<CanvasQuad>>,
+    mut quads: Query<(&mut Sprite, &mut Transform), With<CanvasQuad>>,
     mut targets: Query<&mut RenderTarget, With<WorldCamera>>,
 ) {
-    if resized.read().count() == 0 {
+    if resized.read().count() == 0 && !zoom.is_changed() {
         return;
     }
     let Ok(window) = windows.single() else {
         return;
     };
-    let size = canvas_size_for(window);
+    let size = canvas_size_for(window, zoom.get());
     if size == canvas.size || size.x == 0 || size.y == 0 {
         return;
     }
 
     let image = images.add(create_canvas_image(size));
-    for mut sprite in &mut quads {
+    for (mut sprite, mut transform) in &mut quads {
         sprite.image = image.clone();
         sprite.custom_size = Some(size.as_vec2());
+        transform.scale = Vec3::splat(zoom.factor());
     }
     for mut target in &mut targets {
         *target = RenderTarget::Image(image.clone().into());
@@ -183,6 +266,24 @@ fn resize_canvas(
     images.remove(&canvas.image);
     canvas.image = image;
     canvas.size = size;
+}
+
+/// Put the camera where a screen asked for it, once there is one to put.
+fn apply_camera_target(
+    mut target: ResMut<CameraTarget>,
+    mut cameras: Query<&mut CameraPan, With<WorldCamera>>,
+) {
+    let Some(wanted) = target.0 else {
+        return;
+    };
+    let mut moved = false;
+    for mut pan in &mut cameras {
+        pan.0 = wanted;
+        moved = true;
+    }
+    if moved {
+        target.0 = None;
+    }
 }
 
 /// Keep the rendered camera position on whole canvas pixels, whatever is
@@ -198,10 +299,25 @@ fn snap_camera_to_pixels(mut cameras: Query<(&mut Transform, &CameraPan), With<W
 /// World position under the mouse cursor, or `None` when the cursor is outside
 /// the window.
 ///
-/// `camera` is the world camera's (already snapped) translation.
-pub fn cursor_world_pos(window: &Window, camera: Vec2) -> Option<Vec2> {
+/// `camera` is the world camera's (already snapped) translation, and `zoom`
+/// the factor the canvas is currently drawn at.
+pub fn cursor_world_pos(window: &Window, camera: Vec2, zoom: u32) -> Option<Vec2> {
     let window_size = Vec2::new(window.width(), window.height());
-    Some(window_to_world(window.cursor_position()?, window_size, camera))
+    Some(window_to_world(
+        window.cursor_position()?,
+        window_size,
+        camera,
+        zoom,
+    ))
+}
+
+/// How much world the window shows, in world units, at this zoom.
+///
+/// Half of it, because every caller wants the distance from the middle: what
+/// the camera can see either side of itself is what decides how far it may be
+/// panned before the map runs out.
+pub fn half_view(window: &Window, zoom: u32) -> Vec2 {
+    Vec2::new(window.width(), window.height()) / (2.0 * zoom as f32)
 }
 
 /// The mapping itself, split out from the `Window` so it can be tested.
@@ -213,9 +329,9 @@ pub fn cursor_world_pos(window: &Window, camera: Vec2) -> Option<Vec2> {
 ///
 /// Window coordinates are in logical pixels running *down* the screen. The
 /// window's scale factor is overridden to 1.0 in `main`, so logical pixels are
-/// physical pixels and the divisor really is `PIXEL_SCALE`.
-fn window_to_world(cursor: Vec2, window: Vec2, camera: Vec2) -> Vec2 {
-    let offset = (cursor - window * 0.5) / PIXEL_SCALE as f32;
+/// physical pixels and the divisor really is the zoom.
+fn window_to_world(cursor: Vec2, window: Vec2, camera: Vec2, zoom: u32) -> Vec2 {
+    let offset = (cursor - window * 0.5) / zoom as f32;
     camera + Vec2::new(offset.x, -offset.y)
 }
 
@@ -228,14 +344,20 @@ mod tests {
     #[test]
     fn centre_of_the_window_is_the_camera() {
         let camera = Vec2::new(37.0, -12.0);
-        assert_eq!(window_to_world(WINDOW * 0.5, WINDOW, camera), camera);
+        assert_eq!(
+            window_to_world(WINDOW * 0.5, WINDOW, camera, PIXEL_SCALE),
+            camera
+        );
     }
 
     #[test]
     fn one_canvas_pixel_is_pixel_scale_window_pixels() {
         let scale = PIXEL_SCALE as f32;
         let cursor = WINDOW * 0.5 + Vec2::new(scale, 0.0);
-        assert_eq!(window_to_world(cursor, WINDOW, Vec2::ZERO), Vec2::new(1.0, 0.0));
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE),
+            Vec2::new(1.0, 0.0)
+        );
     }
 
     #[test]
@@ -243,16 +365,69 @@ mod tests {
         // Cursor below the centre of the window is below the camera in world
         // space, which is *negative* y.
         let cursor = WINDOW * 0.5 + Vec2::new(0.0, PIXEL_SCALE as f32);
-        assert_eq!(window_to_world(cursor, WINDOW, Vec2::ZERO), Vec2::new(0.0, -1.0));
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE),
+            Vec2::new(0.0, -1.0)
+        );
     }
 
     #[test]
     fn the_corners_span_the_canvas() {
         // A 1280x720 window is a 320x180 canvas, so the top-left corner is
         // half of that up and to the left of a camera at the origin.
-        let top_left = window_to_world(Vec2::ZERO, WINDOW, Vec2::ZERO);
+        let top_left = window_to_world(Vec2::ZERO, WINDOW, Vec2::ZERO, PIXEL_SCALE);
         assert_eq!(top_left, Vec2::new(-160.0, 90.0));
-        let bottom_right = window_to_world(WINDOW, WINDOW, Vec2::ZERO);
+        let bottom_right = window_to_world(WINDOW, WINDOW, Vec2::ZERO, PIXEL_SCALE);
         assert_eq!(bottom_right, Vec2::new(160.0, -90.0));
+    }
+
+    /// The same screen position is a different world position once zoomed:
+    /// a cursor mapped at the wrong factor paints somewhere other than where
+    /// it is pointing, which is the bug this argument exists to prevent.
+    #[test]
+    fn zooming_in_puts_the_same_pixel_closer_to_the_camera() {
+        let cursor = WINDOW * 0.5 + Vec2::new(80.0, 0.0);
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 4),
+            Vec2::new(20.0, 0.0)
+        );
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 8),
+            Vec2::new(10.0, 0.0)
+        );
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 1),
+            Vec2::new(80.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_canvas_covers_the_window_at_every_zoom() {
+        // Rounded up, never down: a canvas a pixel short of the window leaves
+        // an unpainted strip down the edge of the screen.
+        for zoom in PixelZoom::MIN..=PixelZoom::MAX {
+            let size = (UVec2::new(1002, 602) + zoom - 1) / zoom;
+            assert!(size.x * zoom >= 1002 && size.y * zoom >= 602, "zoom {zoom}");
+        }
+    }
+
+    #[test]
+    fn the_zoom_stops_at_both_ends_and_says_when_it_did_not_move() {
+        let mut zoom = PixelZoom::default();
+        assert_eq!(zoom.get(), PIXEL_SCALE);
+        assert!(zoom.step(1));
+        assert_eq!(zoom.get(), PIXEL_SCALE + 1);
+
+        assert!(zoom.step(100));
+        assert_eq!(zoom.get(), PixelZoom::MAX);
+        // Already at the end: nothing moved, so nothing needs redrawing.
+        assert!(!zoom.step(1));
+
+        assert!(zoom.step(-100));
+        assert_eq!(zoom.get(), PixelZoom::MIN);
+        assert!(!zoom.step(-1));
+
+        zoom.reset();
+        assert_eq!(zoom.get(), PIXEL_SCALE);
     }
 }

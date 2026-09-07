@@ -33,7 +33,7 @@ use bevy::window::{CursorMoved, PrimaryWindow};
 use crate::browser::Maps;
 use crate::characters::{upscale, ART_SCALE};
 use crate::map::{Map, Size, VOID};
-use crate::render::{cursor_world_pos, CameraPan, WorldCamera, WORLD_LAYER};
+use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
 use crate::ui::nav::{Cancelled, NavSystems};
 use crate::ui::{FONT_BODY, PANEL, TEXT, TEXT_DIM};
@@ -224,7 +224,7 @@ impl CurrentMap {
         }
     }
 
-    fn title(&self) -> &str {
+    pub fn title(&self) -> &str {
         self.name.as_deref().unwrap_or("scratch  (not saved)")
     }
 }
@@ -262,7 +262,6 @@ impl Plugin for EditorPlugin {
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
-            .init_resource::<PendingView>()
             .add_systems(
                 OnEnter(AppState::Editor),
                 (spawn_overlay, build_scene, aim_camera_at_map),
@@ -274,7 +273,6 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
-                    centre_camera,
                     track_cursor,
                     pan_camera,
                     switch_layer,
@@ -292,6 +290,19 @@ impl Plugin for EditorPlugin {
     }
 }
 
+/// Draw a map's terrain and props into the world, for any screen that shows
+/// one.
+///
+/// The art catalogue is the two palettes in this module: a tile's name is
+/// bound to its PNG next to the code that paints it. The game screen draws the
+/// same map from the same catalogue, so it comes through here rather than
+/// growing a second one that could drift out of step. `state` is whose sprites
+/// these are, so each screen takes its own away on the way out.
+pub fn draw_map(commands: &mut Commands, assets: &AssetServer, map: &Map, state: AppState) {
+    background::spawn_map(commands, assets, map, state, None);
+    props::spawn_map(commands, assets, map, state);
+}
+
 /// Draw the open map. The scene is rebuilt on every entry and thrown away on
 /// every exit, so the map — not the entities — is the thing that persists.
 fn build_scene(
@@ -300,42 +311,30 @@ fn build_scene(
     mut tiles: ResMut<background::Tiles>,
     current: Res<CurrentMap>,
 ) {
-    background::spawn_map(&mut commands, &assets, &mut tiles, &current.map);
-    props::spawn_map(&mut commands, &assets, &current.map);
+    // The editor keeps the tile index the game has no use for: painting has to
+    // find the sprite already in a cell to replace it.
+    background::spawn_map(
+        &mut commands,
+        &assets,
+        &current.map,
+        AppState::Editor,
+        Some(&mut tiles),
+    );
+    props::spawn_map(&mut commands, &assets, &current.map, AppState::Editor);
 }
-
-/// Where the camera should be put once there is a camera to put there.
-///
-/// Two steps rather than one because `OnEnter` for the *initial* state runs
-/// before every `Startup` system, so booting straight into the editor reaches
-/// this before `render::setup_pipeline` has spawned the camera. Asking for the
-/// move and applying it separately means that boot lands on the map too,
-/// instead of silently looking at the corner of it.
-#[derive(Resource, Default)]
-struct PendingView(Option<Vec2>);
 
 /// Aim at the middle of the map rather than at its bottom-left corner, which
 /// on a fresh map is a screen of nothing.
-fn aim_camera_at_map(current: Res<CurrentMap>, mut pending: ResMut<PendingView>) {
-    let size = current.map.size();
-    pending.0 = Some(Vec2::new(size.width as f32, size.height as f32) * background::TILE / 2.0);
+///
+/// Asked for rather than done, because `OnEnter` for the *initial* state runs
+/// before the camera exists — see [`CameraTarget`].
+fn aim_camera_at_map(current: Res<CurrentMap>, mut target: ResMut<CameraTarget>) {
+    target.0 = Some(map_centre(&current.map));
 }
 
-fn centre_camera(
-    mut pending: ResMut<PendingView>,
-    mut cameras: Query<&mut CameraPan, With<WorldCamera>>,
-) {
-    let Some(centre) = pending.0 else {
-        return;
-    };
-    let mut moved = false;
-    for mut pan in &mut cameras {
-        pan.0 = centre;
-        moved = true;
-    }
-    if moved {
-        pending.0 = None;
-    }
+/// The middle of a map, in world pixels.
+pub fn map_centre(map: &Map) -> Vec2 {
+    background::map_extent(map) / 2.0
 }
 
 /// Leaving the editor saves. There is no unsaved-changes dialog because there
@@ -460,6 +459,7 @@ fn track_cursor(
     time: Res<Time>,
     mut moved: MessageReader<CursorMoved>,
     gamepads: Query<&Gamepad>,
+    zoom: Res<PixelZoom>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<&Transform, With<WorldCamera>>,
     mut cursor: ResMut<Cursor>,
@@ -471,7 +471,7 @@ fn track_cursor(
 
     let mouse_moved = moved.read().count() > 0;
     if (mouse_moved || cursor.world.is_none())
-        && let Some(world) = cursor_world_pos(window, camera)
+        && let Some(world) = cursor_world_pos(window, camera, zoom.get())
     {
         cursor.world = Some(world);
     }
@@ -485,9 +485,8 @@ fn track_cursor(
         let moved_to = from + stick * CURSOR_SPEED * time.delta_secs();
         // Kept on screen: a cursor pushed off the canvas would be painting
         // where nobody can see it.
-        let half = Vec2::new(window.width(), window.height())
-            / (2.0 * crate::render::PIXEL_SCALE as f32)
-            - Vec2::splat(background::TILE / 2.0);
+        let half =
+            crate::render::half_view(window, zoom.get()) - Vec2::splat(background::TILE / 2.0);
         cursor.world = Some(moved_to.clamp(camera - half, camera + half));
     }
 

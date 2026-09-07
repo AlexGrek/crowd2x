@@ -1,8 +1,13 @@
 //! The map browser: the screen that owns saved maps.
 //!
 //! Everything the editor cannot do to a map from inside it happens here —
-//! naming a new one, opening, duplicating and deleting an existing one — so
-//! the editor never has to grow a file dialog of its own.
+//! naming a new one, playing, editing, duplicating and deleting an existing
+//! one — so neither the editor nor the game has to grow a file dialog of its
+//! own.
+//!
+//! A map's **name** is the button that plays it, and `edit` beside it is the
+//! button that opens it in the editor. Playing is what a map is for, and it is
+//! the biggest target in the row; editing it is a deliberate second choice.
 //!
 //! It is built entirely out of [`ui::nav`] focusables, which is what makes the
 //! whole screen work on a gamepad without a second code path: the mouse and
@@ -76,7 +81,7 @@ const ACTION_WIDTH: f32 = 30.0;
 /// Canvas pixels scrolled per line of wheel movement.
 const WHEEL_LINE: f32 = ROW_STRIDE;
 
-const HINTS: &str = "arrows/dpad move   enter/A choose   esc/B back   wheel scrolls";
+const HINTS: &str = "press a name to play it   arrows/dpad move   esc/B back";
 
 /// The maps directory, as a resource so the store is opened once.
 #[derive(Resource)]
@@ -115,7 +120,10 @@ enum Action {
     /// Start typing in the name field.
     TypeName,
     Create,
-    Open(String),
+    /// Open a map in the game.
+    Play(String),
+    /// Open a map in the editor.
+    Edit(String),
     Duplicate(String),
     AskDelete(String),
     ConfirmDelete(String),
@@ -339,7 +347,7 @@ fn rebuild_list(
                     BackgroundColor(ROW),
                     children![
                         (
-                            Action::Open(name.clone()),
+                            Action::Play(name.clone()),
                             Focusable::new(row, 0),
                             Button,
                             Node {
@@ -358,7 +366,7 @@ fn rebuild_list(
                             )],
                         ),
                         (
-                            Action::Open(name.clone()),
+                            Action::Edit(name.clone()),
                             button("edit", Focusable::new(row, 1), px(ACTION_WIDTH)),
                         ),
                         (
@@ -426,16 +434,12 @@ fn run_actions(
                 }
             }
 
-            Action::Open(name) => match maps.0.load(name) {
-                Ok(map) => {
-                    commands.insert_resource(CurrentMap::new(name.clone(), map));
-                    next.set(AppState::Editor);
-                }
-                Err(error) => {
-                    error!("maps: {error}");
-                    status.0 = format!("could not open {name}: {error}");
-                }
-            },
+            // Playing and editing differ only in where they go: both load the
+            // map and hand it over, so a map cannot be opened in one screen
+            // from a file and in the other from something else.
+            Action::Play(name) => open(name, &maps, &mut commands, &mut status, &mut next, AppState::Game),
+
+            Action::Edit(name) => open(name, &maps, &mut commands, &mut status, &mut next, AppState::Editor),
 
             Action::Duplicate(name) => match maps.0.duplicate(name) {
                 Ok(copy) => {
@@ -468,6 +472,27 @@ fn run_actions(
             Action::CloseModal => close_modal(&mut commands, &mut modal, &mut scope, &mut entry),
 
             Action::Back => next.set(AppState::MainMenu),
+        }
+    }
+}
+
+/// Load a saved map and go to the screen that shows it.
+fn open(
+    name: &str,
+    maps: &Maps,
+    commands: &mut Commands,
+    status: &mut Status,
+    next: &mut NextState<AppState>,
+    screen: AppState,
+) {
+    match maps.0.load(name) {
+        Ok(map) => {
+            commands.insert_resource(CurrentMap::new(name.to_string(), map));
+            next.set(screen);
+        }
+        Err(error) => {
+            error!("maps: {error}");
+            status.0 = format!("could not open {name}: {error}");
         }
     }
 }

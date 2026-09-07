@@ -61,7 +61,7 @@ const DEFAULT_SHOT_DELAY: f32 = 0.5;
 #[serde(deny_unknown_fields)]
 pub struct Script {
     pub name: String,
-    /// Screen to start on: `menu`, `maps` or `editor`.
+    /// Screen to start on: `menu`, `maps`, `editor` or `game`.
     #[serde(default)]
     pub state: Option<String>,
     /// Maps that must exist before the test starts.
@@ -69,9 +69,8 @@ pub struct Script {
     pub given: Given,
     /// A map to have open when the app starts, instead of the scratch one.
     ///
-    /// Which screen it opens *in* is [`Script::state`]: `editor` today, and
-    /// `game` once there is a game to load a map into. It must be one of the
-    /// maps in `given`, or already saved.
+    /// Which screen it opens *in* is [`Script::state`] — `editor` or `game`.
+    /// It must be one of the maps in `given`, or already saved.
     #[serde(default)]
     pub open: Option<String>,
     #[serde(default = "default_settle")]
@@ -229,6 +228,12 @@ pub enum Step {
     Shot(String),
 
     ExpectState(String),
+    /// The current zoom, in screen pixels per canvas pixel.
+    ///
+    /// Zooming changes the size of the canvas rather than the scale of a
+    /// camera, so it cannot be read off a screenshot without counting texels —
+    /// which is exactly the kind of thing a test should not have to do.
+    ExpectZoom(u32),
     /// The focused widget's label, which is how a test says "the highlight is
     /// where I think it is" without knowing about entities.
     ExpectFocus(String),
@@ -292,7 +297,8 @@ impl Script {
             Some(name) => match AppState::from_name(name) {
                 Some(state) => Ok(Some(state)),
                 None => Err(format!(
-                    "this build has no {name:?} screen; it has: menu, maps, editor"
+                    "this build has no {name:?} screen; it has: {}",
+                    AppState::NAMES
                 )),
             },
         }
@@ -489,14 +495,23 @@ mod tests {
     }
 
     /// The screen a test asks for is not negotiable: a script written for a
-    /// game mode this build has not grown yet must say so, not quietly run
+    /// screen this build has not grown yet must say so, not quietly run
     /// against the menu and fail somewhere else.
     #[test]
     fn a_screen_this_build_does_not_have_is_an_error_naming_the_ones_it_does() {
-        let script = Script::parse(r#"{"name": "x", "state": "game", "steps": []}"#).unwrap();
+        let script = Script::parse(r#"{"name": "x", "state": "credits", "steps": []}"#).unwrap();
         let error = script.initial_state().unwrap_err();
-        assert!(error.contains("game"), "{error}");
+        assert!(error.contains("credits"), "{error}");
         assert!(error.contains("editor"), "{error}");
+        assert!(error.contains("game"), "{error}");
+    }
+
+    /// ...and the game screen, written about long before it existed, is one of
+    /// the ones it does have now.
+    #[test]
+    fn a_test_can_start_in_the_game() {
+        let script = Script::parse(r#"{"name": "x", "state": "game", "steps": []}"#).unwrap();
+        assert_eq!(script.initial_state(), Ok(Some(AppState::Game)));
     }
 
     #[test]
