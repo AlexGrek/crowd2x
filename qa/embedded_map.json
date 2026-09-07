@@ -1,0 +1,34 @@
+{
+  "name": "a map written into the test itself",
+  "state": "editor",
+  "given": {
+    "maps": [
+      {
+        "name": "inline",
+        "map": {
+          "version": 1,
+          "size": { "width": 3, "height": 2 },
+          "terrain": {
+            "palette": ["void", "floor", "block"],
+            "layers": [ { "rows": ["1,1,2", "1,0,1"] } ]
+          },
+          "objects": { "props": [], "spawners": [] }
+        }
+      }
+    ]
+  },
+  "open": "inline",
+  "steps": [
+    { "note": "exactly the cells the test says, with no fixture file to keep in step" },
+    { "note": "rows are written bottom-up, so row 0 of the document is y 0" },
+    { "expect_tile": { "map": "inline", "x": 0, "y": 0, "terrain": "floor" } },
+    { "expect_tile": { "map": "inline", "x": 2, "y": 0, "terrain": "block" } },
+    { "expect_tile": { "map": "inline", "x": 1, "y": 1, "terrain": "void" } },
+    { "shot": "an embedded map" },
+
+    { "note": "the impassable cells are impassable, which is the point of painting them" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "inline" }
+  ]
+}

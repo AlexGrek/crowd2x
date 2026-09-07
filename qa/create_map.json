@@ -1,0 +1,20 @@
+{
+  "name": "create a map from the browser",
+  "state": "maps",
+  "steps": [
+    { "note": "the intent level: say what is happening, not which key does it" },
+    { "expect_no_map": "office" },
+    { "shot": "empty list" },
+    { "name": "office" },
+    { "shot": "named" },
+    { "press": "create" },
+    { "expect_map": "office" },
+    { "expect_state": "editor" },
+    { "shot": "new map in the editor" },
+
+    { "note": "leaving the editor saves and goes back to the list" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "office" }
+  ]
+}

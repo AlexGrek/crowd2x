@@ -1,0 +1,26 @@
+{
+  "name": "start in the editor with a map from a fixture file already open",
+  "state": "editor",
+  "given": {
+    "maps": [
+      { "name": "walled room", "file": "qa/fixtures/walled_room.json" }
+    ]
+  },
+  "open": "walled room",
+  "steps": [
+    { "note": "the map is open before the first frame, so the editor drew it" },
+    { "expect_state": "editor" },
+    { "expect_tile": { "map": "walled room", "x": 0, "y": 0, "terrain": "wall brown" } },
+    { "expect_tile": { "map": "walled room", "x": 2, "y": 2, "terrain": "floor" } },
+    { "shot": "fixture map in the editor" },
+
+    { "note": "editing it and leaving writes it back to the same map" },
+    { "tool": "wall red" },
+    { "cursor_cell": { "x": 2, "y": 2 } },
+    { "click": { "seconds": 0.2 } },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_tile": { "map": "walled room", "x": 2, "y": 2, "terrain": "wall red" } },
+    { "shot": "back in the browser" }
+  ]
+}

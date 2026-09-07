@@ -1,0 +1,39 @@
+{
+  "name": "copy a map, then delete one and mean it",
+  "state": "maps",
+  "given": { "maps": ["alpha", "beta"] },
+  "steps": [
+    { "note": "the row buttons repeat on every row, so they are reached by walking" },
+    { "key": "down" },
+    { "expect_focus": "alpha" },
+    { "key": "right" },
+    { "expect_focus": "edit" },
+    { "key": "right" },
+    { "expect_focus": "copy" },
+    { "key": "enter" },
+    { "expect_map": "alpha copy" },
+    { "shot": "list after copying" },
+
+    { "note": "delete asks first, and cancelling means cancelled" },
+    { "focus": "beta" },
+    { "key": "right" },
+    { "key": "right" },
+    { "key": "right" },
+    { "expect_focus": "delete" },
+    { "key": "enter" },
+    { "expect_focus": "cancel" },
+    { "shot": "delete confirmation" },
+    { "key": "esc" },
+    { "expect_map": "beta" },
+
+    { "focus": "beta" },
+    { "key": "right" },
+    { "key": "right" },
+    { "key": "right" },
+    { "key": "enter" },
+    { "press": "delete" },
+    { "expect_no_map": "beta" },
+    { "expect_map": "alpha" },
+    { "expect_map": "alpha copy" }
+  ]
+}

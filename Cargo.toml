@@ -1,0 +1,30 @@
+[package]
+name = "crowd2x"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# `2d` is Bevy's curated 2D umbrella feature: app, platform, winit, sprite
+# rendering and picking, without pbr/gltf/audio/anti-alias/solari. `ui` is the
+# matching umbrella for bevy_ui: layout, widgets, input focus and the UI
+# renderer, which the menu and the editor HUD are built out of.
+bevy = { version = "0.19", default-features = false, features = ["2d", "ui", "png", "jpeg"] }
+rand = "0.10"
+
+# Map files are JSON. serde is already in the tree under Bevy; serde_json is
+# not — Bevy serialises scenes as ron — so this is a real addition, taken
+# because a map wants a format other tools and a human in a diff can read.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Bevy is unusably slow in a fully unoptimized debug build; optimize the
+# dependencies hard and our own crate lightly so iteration stays fast.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

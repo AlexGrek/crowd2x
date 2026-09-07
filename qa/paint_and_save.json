@@ -1,0 +1,26 @@
+{
+  "name": "paint a wall in the editor and check it reached the file",
+  "state": "maps",
+  "given": { "maps": ["studio"] },
+  "steps": [
+    { "press": "studio" },
+    { "expect_state": "editor" },
+
+    { "note": "aim by cell and pick the tile by name, so this does not depend on the camera or the palette order" },
+    { "tool": "wall brown" },
+    { "cursor_cell": { "x": 3, "y": 2 } },
+    { "click": { "seconds": 0.2 } },
+    { "key": "f5" },
+    { "shot": "painted wall" },
+    { "expect_tile": { "map": "studio", "x": 3, "y": 2, "terrain": "wall brown" } },
+
+    { "note": "and the cell next to it was not touched" },
+    { "expect_tile": { "map": "studio", "x": 4, "y": 2, "terrain": "void" } },
+
+    { "note": "erasing puts it back to nothing, and leaving saves that" },
+    { "click": { "button": "right", "seconds": 0.2 } },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_tile": { "map": "studio", "x": 3, "y": 2, "terrain": "void" } }
+  ]
+}

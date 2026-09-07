@@ -1,0 +1,20 @@
+{
+  "name": "type a name on a real keyboard, with the letters that are also directions",
+  "state": "maps",
+  "steps": [
+    { "note": "opening the field must not also close it in the same press" },
+    { "expect_focus": "new map..." },
+    { "key": "enter" },
+    { "expect_focus": "a" },
+
+    { "note": "wasd are letters here, not navigation" },
+    { "type": "wasd map" },
+    { "key": "backspace" },
+    { "key": "enter" },
+
+    { "expect_focus": "create" },
+    { "press": "create" },
+    { "expect_map": "wasd ma" },
+    { "expect_state": "editor" }
+  ]
+}

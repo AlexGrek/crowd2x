@@ -1,0 +1,32 @@
+{
+  "name": "reach every part of the browser with nothing but a gamepad",
+  "state": "maps",
+  "given": { "maps": ["alpha"] },
+  "steps": [
+    { "note": "name a map on the on-screen keyboard, one letter at a time" },
+    { "pad": "south" },
+    { "expect_focus": "a" },
+    { "pad": "south" },
+    { "pad": "dpad_right" },
+    { "pad": "south" },
+    { "expect_focus": "b" },
+    { "shot": "on-screen keyboard" },
+
+    { "note": "down four rows lands on the done key, whatever column we were in" },
+    { "pad": "dpad_down" },
+    { "pad": "dpad_down" },
+    { "pad": "dpad_down" },
+    { "pad": "dpad_down" },
+    { "expect_focus": "done" },
+    { "pad": "south" },
+
+    { "expect_focus": "create" },
+    { "pad": "south" },
+    { "expect_map": "ab" },
+    { "expect_state": "editor" },
+
+    { "note": "and back out again" },
+    { "pad": "east" },
+    { "expect_state": "maps" }
+  ]
+}

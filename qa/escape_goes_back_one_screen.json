@@ -1,0 +1,18 @@
+{
+  "name": "escape goes back one screen at a time, not all the way out",
+  "state": "maps",
+  "given": { "maps": ["studio"] },
+  "steps": [
+    { "note": "a press belongs to the screen it was made on: this used to fall through the browser and quit" },
+    { "press": "studio" },
+    { "expect_state": "editor" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "wait": 0.3 },
+    { "expect_state": "maps" },
+    { "key": "esc" },
+    { "expect_state": "menu" },
+    { "wait": 0.3 },
+    { "expect_state": "menu" }
+  ]
+}

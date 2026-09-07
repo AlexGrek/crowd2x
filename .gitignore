@@ -1,0 +1,13 @@
+/target
+
+# macOS
+.DS_Store
+
+# debug captures
+/screenshots
+
+# saved maps: local content, written by the editor
+/maps
+
+# screenshots taken by the scripted QA tests: evidence, not source
+/qa-screenshots
