@@ -1,0 +1,111 @@
+{
+  "name": "game speed: the ladder, the pause, and the corners that drive them",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a map opens running at 1x, with a crowd to watch" },
+    { "expect_speed": "x1" },
+    { "spawn": { "kind": "human", "x": 2, "y": 2 } },
+    { "spawn": { "kind": "human", "x": 9, "y": 6 } },
+    { "spawn": { "kind": "dog", "x": 3, "y": 6 } },
+    { "tick": 1 },
+    { "expect_entities": 3 },
+    { "shot": "running at 1x" },
+
+    { "note": "+ and - walk the ladder, and say so in the log" },
+    { "key": "+" },
+    { "expect_speed": "x2" },
+    { "key": "+" },
+    { "key": "+" },
+    { "expect_speed": "x8" },
+    { "expect_log": "speed x8" },
+    { "shot": "at the top of the ladder" },
+
+    { "note": "and it stops at the top rather than wrapping round to the bottom" },
+    { "key": "+" },
+    { "expect_speed": "x8" },
+
+    { "key": "-" },
+    { "key": "-" },
+    { "key": "-" },
+    { "key": "-" },
+    { "key": "-" },
+    { "expect_speed": "x0.25" },
+    { "key": "-" },
+    { "expect_speed": "x0.25" },
+
+    { "note": "p pauses, and the button beside the readout offers to resume" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "expect_log": "speed paused" },
+    { "shot": "paused" },
+
+    { "note": "a paused world does not advance, however long the game runs" },
+    { "wait": 0.5 },
+    { "expect_speed": "paused" },
+
+    { "note": "...and something spawned while it is paused still appears" },
+    { "spawn": { "kind": "dog", "x": 6, "y": 1 } },
+    { "wait": 0.3 },
+    { "expect_entities": 4 },
+    { "expect_sprites": 4 },
+
+    { "note": "letting go of the pause goes back to the speed being watched" },
+    { "press": "resume" },
+    { "expect_speed": "x0.25" },
+
+    { "note": "the corner buttons do what the keys do, addressed by name" },
+    { "press": "faster" },
+    { "press": "faster" },
+    { "expect_speed": "x1" },
+    { "press": "slower" },
+    { "expect_speed": "x0.5" },
+    { "press": "pause" },
+    { "expect_speed": "paused" },
+    { "press": "faster" },
+    { "note": "asking for a speed lets go of the pause rather than doing nothing" },
+    { "expect_speed": "x1" },
+
+    { "note": "a gamepad reaches all of it too: bumpers for speed, Y for pause" },
+    { "pad": "r1" },
+    { "expect_speed": "x2" },
+    { "pad": "l1" },
+    { "pad": "l1" },
+    { "expect_speed": "x0.5" },
+    { "pad": "north" },
+    { "expect_speed": "paused" },
+    { "pad": "north" },
+    { "expect_speed": "x0.5" },
+
+    { "note": "+ and - are the speed's now, so they must not also zoom" },
+    { "expect_zoom": 4 },
+
+    { "note": "the zoom is the other corner, on its own buttons" },
+    { "press": "+" },
+    { "press": "+" },
+    { "expect_zoom": 6 },
+    { "expect_speed": "x0.5" },
+    { "press": "-" },
+    { "expect_zoom": 5 },
+    { "shot": "zoomed in from the corner, at half speed" },
+
+    { "note": "and q/e still zoom without touching the speed" },
+    { "key": "q" },
+    { "expect_zoom": 4 },
+    { "expect_speed": "x0.5" },
+
+    { "note": "menu leaves the game, exactly as escape does" },
+    { "press": "menu" },
+    { "expect_state": "maps" },
+
+    { "note": "a game left at half speed opens the next one at 1x, running" },
+    { "press": "yard" },
+    { "expect_state": "game" },
+    { "expect_speed": "x1" }
+  ]
+}

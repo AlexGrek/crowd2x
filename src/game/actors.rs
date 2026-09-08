@@ -5,7 +5,8 @@
 //!
 //! 1. Builds a [`GameState`] when the game screen opens, and drops it on the
 //!    way out.
-//! 2. Calls [`process_game_state`] once per fixed step.
+//! 2. Runs a spawn pass every fixed step, and as many processing passes as
+//!    [`GameSpeed`] asks for — which is none while the game is paused.
 //! 3. Spawns a sprite for an entity that appeared, despawns one for an entity
 //!    that went, and moves the rest.
 //! 4. Turns simulation facts into art — an appearance seed into a paperdoll, a
@@ -45,8 +46,10 @@ use rand::SeedableRng;
 
 use crate::characters::{depth_for, dog, human, snap_to_texel};
 use crate::editor::{background, CurrentMap};
-use crate::sim::{self, process_game_state, EntityType, GameEntity, GameState, Input, Uid};
+use crate::sim::{self, process_pass, spawn_pass, EntityType, GameEntity, GameState, Input, Uid};
 use crate::state::AppState;
+
+use super::speed::GameSpeed;
 
 /// How the world is seeded when the game screen opens.
 ///
@@ -167,11 +170,36 @@ fn tear_down_world(
 }
 
 /// One step of the game. The only `ResMut<Sim>` in the app.
-fn tick_sim(time: Res<Time<Fixed>>, mut sim: ResMut<Sim>, mut input: ResMut<SimInput>) {
-    process_game_state(&mut sim.0, time.delta_secs(), &input.0);
+///
+/// The two passes are taken separately rather than through
+/// [`process_game_state`] because the speed is a count of *processing* passes
+/// and never of spawn passes:
+///
+/// * The spawn pass runs every fixed step whatever the speed is, pause
+///   included. Something asked for while the game is paused should appear,
+///   standing still — waiting for the world to be let go again would look like
+///   the request had been lost — and a command held over would be applied to
+///   however many ticks arrive at once when it is.
+/// * The processing passes are the speed. A tick is always the same slice of
+///   world, so 4x is four of them; stretching `dt` instead would change what
+///   the simulation does rather than only when.
+///
+/// [`process_game_state`]: crate::sim::process_game_state
+fn tick_sim(
+    time: Res<Time<Fixed>>,
+    mut speed: ResMut<GameSpeed>,
+    mut sim: ResMut<Sim>,
+    mut input: ResMut<SimInput>,
+) {
+    spawn_pass(&mut sim.0, &input.0);
     // Consumed: a command left in place would be replayed every step, which
     // for a spawn means an unbounded crowd.
     input.0.clear();
+
+    let dt = time.delta_secs();
+    for _ in 0..speed.steps() {
+        process_pass(&mut sim.0, dt);
+    }
 }
 
 /// Make the sprites match the entities.

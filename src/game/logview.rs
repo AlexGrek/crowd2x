@@ -16,6 +16,7 @@ use crate::state::AppState;
 use crate::ui::{FONT_BODY, PANEL, TEXT_DIM};
 
 use super::actors::Sim;
+use super::hud;
 
 /// How many lines are kept and shown.
 ///
@@ -60,7 +61,6 @@ pub struct LogViewPlugin;
 impl Plugin for LogViewPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LogView>()
-            .add_systems(OnEnter(AppState::Game), spawn_panel)
             .add_systems(OnExit(AppState::Game), clear)
             .add_systems(
                 Update,
@@ -69,26 +69,32 @@ impl Plugin for LogViewPlugin {
     }
 }
 
-fn spawn_panel(mut commands: Commands) {
-    commands.spawn((
+/// The panel, for whoever is laying the screen out.
+///
+/// Handed over as a bundle rather than spawned by a system of its own: it
+/// hangs under the speed and pause controls in [`hud`]'s top right corner, and
+/// where a panel sits is a fact about the screen rather than about the log. It
+/// takes the same backing as the panel in the other corner, from there, so the
+/// two cannot drift apart.
+///
+/// The width is capped because this is the one panel whose contents are not
+/// written by us — an entity id is long, and a log line at its natural width
+/// would reach across the map and into the numbers in the far corner.
+pub fn panel() -> impl Bundle {
+    (
         Name::new("game log"),
         Node {
-            position_type: PositionType::Absolute,
-            bottom: px(4),
-            left: px(4),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::axes(px(4), px(3)),
-            ..default()
+            max_width: px(150),
+            ..hud::panel_node()
         },
         BackgroundColor(PANEL),
-        DespawnOnExit(AppState::Game),
         children![(
             LogPanel,
             Text::new(String::new()),
             TextFont::from_font_size(FONT_BODY),
             TextColor(TEXT_DIM),
         )],
-    ));
+    )
 }
 
 /// Cleared on the way out, not on the way in: the world is rebuilt from its

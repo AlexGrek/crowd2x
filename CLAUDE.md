@@ -27,8 +27,8 @@ python3 tools/qa.py --release   # ...optimised, which is the only profile to quo
 resolves `assets/` relative to the manifest under cargo, and relative to the executable
 otherwise, so a direct run produces a blank window and asset-load errors.
 
-Controls: `WASD` / arrows pan the camera, `q` / `e` zoom in the game, `F12` saves a
-screenshot to `screenshots/` (gitignored).
+Controls: `WASD` / arrows pan the camera, `q` / `e` zoom in the game, `+` / `-` change
+the game speed and `p` pauses it, `F12` saves a screenshot to `screenshots/` (gitignored).
 
 ### Verifying rendering changes without a human watching
 
@@ -238,16 +238,39 @@ here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the br
 - **It does not edit anything**, so leaving is instant and there is nothing to save. The
   simulation gets a *clone* of the map, so the editor's copy cannot move under it.
 - **It does not zoom the camera** — zooming is `PixelZoom`, above.
+- **Speed is how many ticks happen, never how big one is** (`game/speed.rs`). A tick is
+  always the fixed timestep, so 4x is four processing passes in one fixed step and a
+  pause is none; `GameSpeed` carries the fraction between steps, so 0.5x is every other
+  step, and the ladder (0.25 to 8) is powers of two so that stays exact. Scaling `dt`
+  instead would change what the simulation *does* rather than only when. The **spawn**
+  pass runs every fixed step regardless, pause included, so something spawned into a
+  paused world appears standing still instead of looking lost. Pause is a flag beside the
+  speed rather than a rung at the bottom of the ladder, so resuming goes back to the
+  speed being watched; both reset on the way out, as the zoom does.
 - **The camera is kept inside the map** (`clamp_to_map`). A map has edges and nothing
   outside them, so flying off into the void is getting lost rather than navigating; an
   axis with less map than view is centred, since there is nothing there to scroll to.
   Pan speed scales with the zoom so crossing the window always takes the same time.
 
 Move with `WASD`, the arrows, the d-pad or the left stick; zoom with `q`/`e` or `A`/`B`;
-`esc` or `start` goes back to the browser. `B` is the one departure from the `esc`/`B`
-means back convention the rest of the game follows — it is zoom out here, so this screen
-reads the leave buttons directly instead of listening for the `Cancelled` it would
-otherwise fire on every zoom.
+change speed with `+`/`-` or the bumpers and pause with `p` or `Y`; `esc` or `start` goes
+back to the browser. `B` is the one departure from the `esc`/`B` means back convention the
+rest of the game follows — it is zoom out here, so this screen reads the leave buttons
+directly instead of listening for the `Cancelled` it would otherwise fire on every zoom.
+
+#### The two corners (`game/hud.rs`)
+
+The screen is laid out as **the view on the left and the world on the right**: `- x4 +`
+over the map's name, size, crowd and tick count top left; `slower x1 faster pause menu`
+over the log top right, because the log is the readout for exactly those controls.
+
+**Nothing here is `Focusable`,** and that is forced: the arrows pan the camera on this
+screen and `A` zooms, so `nav`'s one highlight would be walked around by the camera
+controls and pressed by the zoom. Every control has a direct binding on both devices
+instead, and the buttons are for the mouse — the one device this screen otherwise has no
+use for. They still answer to `Activated`, so a QA script presses them by name like
+anything else; the speed pair says `slower`/`faster` rather than `-`/`+` because two
+buttons with one label are two buttons a test cannot tell apart.
 
 ### The map (`src/map/`)
 
@@ -461,11 +484,13 @@ setting are recorded in the report. `qa/perf_simulation.json` and `qa/perf_rende
 are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
-`expect_no_map`, `expect_tile`, `expect_zoom`, `expect_entities`, `expect_sprites`,
-`expect_log` — and `expect_tile` reads the **saved** map,
+`expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
+`expect_sprites`, `expect_log` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
-cannot be asked how far in it is without counting texels. `expect_entities` and
+cannot be asked how far in it is without counting texels. `expect_speed` takes the string
+the readout shows (`x1`, `x0.25`, `paused`) rather than a number and a flag, since
+`paused` and `x1` are the same multiplier and a different game. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
 catches a renderer that has quietly stopped keeping up.
@@ -514,6 +539,7 @@ src/editor/             EditorPlugin, background.rs + props.rs
 src/browser.rs          BrowserPlugin - the saved-maps screen
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
+                        speed.rs is how fast the world runs; hud.rs the two corners
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs

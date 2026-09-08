@@ -3,9 +3,10 @@
 //!
 //! The simulation itself is not here. It is [`crate::sim`], plain Rust with no
 //! `bevy::` imports at all, and [`actors`] is the whole of the bridge: it
-//! builds a `GameState` from the open map, ticks it once per fixed step, and
-//! keeps a sprite alongside each entity. [`logview`] drains what the
-//! simulation had to say onto the screen.
+//! builds a `GameState` from the open map, steps it as fast as [`speed`] says
+//! to, and keeps a sprite alongside each entity. [`hud`] is the two corners of
+//! controls over the map, and [`logview`] drains what the simulation had to
+//! say into the panel under them.
 //!
 //! Three things this screen deliberately does *not* do:
 //!
@@ -29,7 +30,9 @@
 //! # Controls
 //!
 //! Move with `WASD`, the arrow keys, the left stick or the d-pad; zoom with
-//! `q` / `e` or `A` / `B`; `esc` or `start` goes back to the browser.
+//! `q` / `e` or `A` / `B`; change speed with `+` / `-` or the bumpers and
+//! pause with `p` or `Y`; `esc` or `start` goes back to the browser. Every one
+//! of those also has a button in a corner ([`hud`]).
 //!
 //! `B` is the one departure from the convention the rest of the game follows,
 //! where `esc`/`B` means back ([`ui::nav::Cancelled`]). Here `B` is zoom out,
@@ -37,7 +40,9 @@
 //! for a cancel it would otherwise fire on every zoom.
 
 pub mod actors;
+pub mod hud;
 pub mod logview;
+pub mod speed;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -46,7 +51,6 @@ use crate::editor::{background, draw_map, map_centre, CurrentMap};
 use crate::render::{half_view, CameraPan, CameraTarget, PixelZoom, PIXEL_SCALE, WorldCamera};
 use crate::state::AppState;
 use crate::ui::nav::NavSystems;
-use crate::ui::{FONT_BODY, PANEL, TEXT, TEXT_DIM};
 
 /// Camera speed at the default zoom, in canvas pixels per second.
 ///
@@ -58,22 +62,21 @@ const PAN_SPEED: f32 = 140.0;
 /// How far a stick must be pushed before it counts as pushed at all.
 const STICK_DEADZONE: f32 = 0.2;
 
-const KEY_HINTS: &str =
-    "wasd/arrows/dpad or left stick  move\n                         q/e or A/B  zoom      esc/start  maps";
-
-#[derive(Component)]
-struct Hud;
-
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((actors::ActorsPlugin, logview::LogViewPlugin))
+        app.add_plugins((
+            actors::ActorsPlugin,
+            speed::SpeedPlugin,
+            hud::HudPlugin,
+            logview::LogViewPlugin,
+        ))
             .add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
             .add_systems(OnExit(AppState::Game), restore_zoom)
             .add_systems(
                 Update,
-                (move_camera, change_zoom, update_hud, leave)
+                (move_camera, change_zoom, leave)
                     .chain()
                     .after(NavSystems)
                     .run_if(in_state(AppState::Game)),
@@ -91,40 +94,12 @@ fn restore_zoom(mut zoom: ResMut<PixelZoom>) {
     zoom.reset();
 }
 
-/// Draw the open map, and the HUD over it.
+/// Draw the open map. What goes over it is [`hud`]'s.
 ///
 /// The scene is built on entry and despawned by `DespawnOnExit` on the way
 /// out, exactly as the editor's is: the map persists, its entities do not.
 fn build_scene(mut commands: Commands, assets: Res<AssetServer>, current: Res<CurrentMap>) {
     draw_map(&mut commands, &assets, &current.map, AppState::Game);
-
-    commands.spawn((
-        Name::new("game hud"),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(4),
-            left: px(4),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::axes(px(4), px(3)),
-            row_gap: px(3),
-            ..default()
-        },
-        BackgroundColor(PANEL),
-        DespawnOnExit(AppState::Game),
-        children![
-            (
-                Hud,
-                Text::new(String::new()),
-                TextFont::from_font_size(FONT_BODY),
-                TextColor(TEXT),
-            ),
-            (
-                Text::new(KEY_HINTS),
-                TextFont::from_font_size(FONT_BODY),
-                TextColor(TEXT_DIM),
-            ),
-        ],
-    ));
 }
 
 /// Start looking at the middle of the map rather than at its bottom-left
@@ -233,16 +208,20 @@ fn move_camera(
 }
 
 /// `q` / `e` and the two face buttons zoom, one whole step at a time.
+///
+/// `+` and `-` used to zoom too and are the speed's now (see [`speed`]): the
+/// zoom already had two bindings on each device and a button in the corner,
+/// and a keyboard with no way to pause was the gap worth filling.
 fn change_zoom(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     mut zoom: ResMut<PixelZoom>,
 ) {
     let mut step = 0;
-    if keys.any_just_pressed([KeyCode::KeyE, KeyCode::Equal, KeyCode::NumpadAdd]) {
+    if keys.just_pressed(KeyCode::KeyE) {
         step += 1;
     }
-    if keys.any_just_pressed([KeyCode::KeyQ, KeyCode::Minus, KeyCode::NumpadSubtract]) {
+    if keys.just_pressed(KeyCode::KeyQ) {
         step -= 1;
     }
     for pad in &gamepads {
@@ -255,36 +234,6 @@ fn change_zoom(
     // makes `render` rebuild the canvas.
     if step != 0 {
         zoom.step(step);
-    }
-}
-
-fn update_hud(
-    zoom: Res<PixelZoom>,
-    current: Res<CurrentMap>,
-    sim: Option<Res<actors::Sim>>,
-    mut huds: Query<(&mut Text, Ref<Hud>)>,
-) {
-    // The tick count changes every fixed step, so unlike the zoom and the map
-    // there is no point asking whether it changed.
-    let running = sim.as_ref().map(|sim| (sim.0.len(), sim.0.tick()));
-
-    for (mut text, hud) in &mut huds {
-        // `is_added` matters on a second visit: the HUD is respawned empty and
-        // neither resource has necessarily changed since the first one.
-        if !hud.is_added() && !zoom.is_changed() && !current.is_changed() && running.is_none() {
-            continue;
-        }
-        let size = current.map.size();
-        let (actors, tick) = running.unwrap_or((0, 0));
-        **text = format!(
-            "map    {}  {}x{}\nzoom   x{}\nactors {}  tick {}",
-            current.title(),
-            size.width,
-            size.height,
-            zoom.get(),
-            actors,
-            tick,
-        );
     }
 }
 

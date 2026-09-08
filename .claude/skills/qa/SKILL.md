@@ -114,13 +114,20 @@ list growing a row. **Reach for these unless the input itself is what is under t
 has an `edit` button — so walking a list uses arrow keys and then `press` on something
 unique, or `focus` on the row's name first.
 
+It addresses the focusable widgets of the layer that currently owns input, **and** the
+buttons a screen drives itself: the game's two corners (`slower`, `faster`, `pause`,
+`menu`, and the zoom's `-` and `+`) are deliberately outside the focus system, because
+the arrows pan the camera there and `A` zooms, and they are still pressable by name.
+
 `spawn` and `tick` only mean anything on the game screen, and say so rather than passing
 quietly if the test is somewhere else. `spawn` pushes onto the same command queue the game
 uses, so it is applied by the *next* tick and not by being asked for — a test that spawns
 and then asserts without a `tick` in between is asserting on an empty world.
 
 `tick` runs one **spawn pass** and then N **processing passes**, so however many ticks you
-ask for, a pending spawn happens exactly once. `{"tick": 0}` does nothing at all, spawn
+ask for, a pending spawn happens exactly once. It ignores the game speed — `tick` means
+exactly this many steps of world, and a test that wants to check the speed asserts on
+`expect_speed` and on what the game does with its own fixed steps. `{"tick": 0}` does nothing at all, spawn
 pass included; the commands stay queued for the game's own fixed-step tick.
 
 **`tick` runs the steps by hand rather than waiting for them.** `FixedUpdate` advances at
@@ -135,7 +142,7 @@ typing lands in the field and not in the palette.
 
 | Step | Does |
 | --- | --- |
-| `{"key": "enter"}` | Tap a key: `enter`, `esc`, `tab`, `backspace`, `up`, `f5`, `a`, `7`. |
+| `{"key": "enter"}` | Tap a key: `enter`, `esc`, `tab`, `backspace`, `up`, `f5`, `a`, `7`, `+`, `-`. |
 | `{"hold_key": {"key": "d", "seconds": 0.5}}` | Hold one — panning, dragging. |
 | `{"type": "office"}` | Type text, one character at a time. |
 | `{"pad": "south"}` | Tap a gamepad button: `south`/`a`, `east`/`b`, `north`, `west`, `dpad_down`, `start`, `l1`, `r1`. |
@@ -158,6 +165,7 @@ system reads — so a click goes through genuine hover-and-click.
 | --- | --- |
 | `{"expect_state": "editor"}` | Which screen is up. |
 | `{"expect_zoom": 6}` | The zoom, in screen pixels per canvas pixel. |
+| `{"expect_speed": "x2"}` | How fast the game is running: `x1`, `x0.25`, or `paused`. |
 | `{"expect_focus": "create"}` | The focused widget's label. |
 | `{"expect_map": "office"}` / `{"expect_no_map": "office"}` | A saved map exists, or does not. |
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
@@ -186,6 +194,10 @@ been saved. The editor saves on leaving and on `f5`.
 `expect_zoom` exists because zooming changes the *size of the canvas* rather than the
 scale of a camera, so a screenshot cannot be asked how far in it is without counting
 texels. The game screen is the only one that zooms, and it resets to `4` on the way out.
+
+`expect_speed` takes the string the readout shows rather than a number and a flag, because
+`paused` and `x1` are the same multiplier and a different game. It resets to `x1` on the
+way out, like the zoom, so a test that leaves a map paused does not poison the next one.
 
 ## Performance tests
 

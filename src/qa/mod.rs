@@ -69,6 +69,7 @@ use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
 use crate::game::actors::{Actor, Sim, SimInput};
 use crate::game::logview::LogView;
+use crate::game::speed::GameSpeed;
 use crate::sim::{process_pass, spawn_pass, EntityType};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
@@ -440,8 +441,17 @@ struct Checks<'w, 's> {
     labels: Query<'w, 's, &'static Text>,
     children: Query<'w, 's, &'static Children>,
     focusables: Query<'w, 's, (Entity, &'static Focusable)>,
+    /// Buttons the focus system knows nothing about.
+    ///
+    /// The game screen's corners are built this way on purpose — the arrows
+    /// pan the camera there and `A` zooms, so a highlight would be walked and
+    /// pressed by the camera controls — and a `press` step still has to be
+    /// able to reach them by name, or the only way to test a button would be
+    /// to click at a hardcoded position and hope the layout never moves.
+    plain_buttons: Query<'w, 's, Entity, (With<Button>, Without<Focusable>)>,
     scope: Res<'w, Scope>,
     zoom: Res<'w, PixelZoom>,
+    speed: Res<'w, GameSpeed>,
     /// The sprites themselves, not the map that tracks them: a count taken
     /// from the bookkeeping would pass while nothing had actually reached the
     /// world, which is the failure this assertion exists to catch.
@@ -899,6 +909,13 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::ExpectSpeed(wanted) => {
+            let actual = checks.speed.label();
+            (actual == *wanted)
+                .then_some(Next::Now)
+                .ok_or(format!("expected the game {wanted:?}, found {actual:?}"))
+        }
+
         Step::ExpectZoom(wanted) => {
             let actual = checks.zoom.get();
             (actual == *wanted)
@@ -1256,12 +1273,8 @@ fn release(held: Held, devices: &mut Devices, pad: Entity) {
 /// Scoped on purpose: while a dialog is open, "delete" means the dialog's
 /// button and not the row behind it — exactly as it does for the player.
 fn widget(label: &str, checks: &Checks) -> Result<Entity, String> {
-    let mut found: Vec<Entity> = checks
-        .focusables
-        .iter()
-        .filter(|(_, slot)| slot.scope == checks.scope.0)
-        .filter(|(entity, _)| label_of(*entity, checks).as_deref() == Some(label))
-        .map(|(entity, _)| entity)
+    let mut found: Vec<Entity> = addressable(checks)
+        .filter(|entity| label_of(*entity, checks).as_deref() == Some(label))
         .collect();
     found.sort();
 
@@ -1281,13 +1294,29 @@ fn widget(label: &str, checks: &Checks) -> Result<Entity, String> {
     }
 }
 
-/// Every label currently reachable, for an error message to name.
-fn labels_in_scope(checks: &Checks) -> String {
-    let mut labels: Vec<String> = checks
+/// Everything a step can name: the focusables of the layer that owns input,
+/// and the buttons a screen drives itself.
+///
+/// The plain buttons drop out while a dialog is open, exactly as the
+/// focusables behind it do — a modal is modal for the mouse too.
+fn addressable<'a>(checks: &'a Checks) -> impl Iterator<Item = Entity> + 'a {
+    let scope = checks.scope.0;
+    let focusables = checks
         .focusables
         .iter()
-        .filter(|(_, slot)| slot.scope == checks.scope.0)
-        .filter_map(|(entity, _)| label_of(entity, checks))
+        .filter(move |(_, slot)| slot.scope == scope)
+        .map(|(entity, _)| entity);
+    let plain = checks
+        .plain_buttons
+        .iter()
+        .filter(move |_| scope == 0);
+    focusables.chain(plain)
+}
+
+/// Every label currently reachable, for an error message to name.
+fn labels_in_scope(checks: &Checks) -> String {
+    let mut labels: Vec<String> = addressable(checks)
+        .filter_map(|entity| label_of(entity, checks))
         .collect();
     labels.sort();
     labels.dedup();

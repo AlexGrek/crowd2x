@@ -376,12 +376,18 @@ inside `Entities` with the same public API, and callers do not change.
 
 #### Driving the passes separately
 
-`process_game_state` is the two passes in order, and that is what the game calls. A caller
-that wants a world built once and then run — the QA harness's `tick` step — calls
-`spawn_pass` once and `process_pass` N times, which applies pending spawns exactly once
-however many ticks were asked for. Going through `process_game_state` for that needs the
-commands handed to the first tick and an empty `Input` to every one after it, which is the
-sort of thing that is wrong the second time somebody writes it.
+`process_game_state` is the two passes in order. A caller that wants a world built once and
+then run calls `spawn_pass` once and `process_pass` N times, which applies pending spawns
+exactly once however many ticks were asked for. Going through `process_game_state` for that
+needs the commands handed to the first tick and an empty `Input` to every one after it,
+which is the sort of thing that is wrong the second time somebody writes it.
+
+Two callers do exactly that, and for the same reason. The QA harness's `tick` step runs
+exactly the number of processing passes it was asked for, whatever the game speed is.
+And `game::actors::tick_sim` runs **one spawn pass every fixed step and `GameSpeed::steps()`
+processing passes** — so speed is how many ticks happen and never how big one is, a pause
+is zero of them, and something spawned into a paused world still appears. Scaling `dt`
+instead would change what the simulation does rather than only when it does it.
 
 #### One `ResMut<Sim>`
 

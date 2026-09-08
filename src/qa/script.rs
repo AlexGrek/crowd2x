@@ -321,6 +321,12 @@ pub enum Step {
     Shot(String),
 
     ExpectState(String),
+    /// How fast the game is being run: `x1`, `x0.25`, or `paused`.
+    ///
+    /// The string the readout shows rather than a number and a flag, because
+    /// what a test is asking about is what the player can see — and because
+    /// `paused` and `x1` are the same multiplier and a different game.
+    ExpectSpeed(String),
     /// The current zoom, in screen pixels per canvas pixel.
     ///
     /// Zooming changes the size of the canvas rather than the scale of a
@@ -452,6 +458,9 @@ pub fn key_code(name: &str) -> Option<KeyCode> {
         "down" | "arrow_down" => KeyCode::ArrowDown,
         "left" | "arrow_left" => KeyCode::ArrowLeft,
         "right" | "arrow_right" => KeyCode::ArrowRight,
+        // `+` is shift and `=` on most layouts, so a test may say either.
+        "plus" | "+" | "equal" | "=" => KeyCode::Equal,
+        "minus" | "-" => KeyCode::Minus,
         "f5" => KeyCode::F5,
         "f12" => KeyCode::F12,
         _ => return None,

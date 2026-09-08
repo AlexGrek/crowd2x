@@ -90,6 +90,35 @@ pub fn button(label: &str, focus: Focusable, width: Val) -> impl Bundle {
     )
 }
 
+/// A labelled button the focus system knows nothing about.
+///
+/// For a screen that drives its own input rather than `nav`'s one highlight —
+/// the game, where the arrows pan the camera and `A` zooms, so a highlight
+/// would be walked by the camera controls and pressed by the zoom. It is
+/// filled rather than transparent, because nothing is ever going to highlight
+/// it to say that it is there.
+pub fn plain_button(text: &str, width: Val) -> impl Bundle {
+    labelled_button(label(text, FONT_BODY, TEXT), width)
+}
+
+/// A [`plain_button`] whose label carries something of its own — a marker for
+/// whichever system rewrites it.
+pub fn labelled_button(label: impl Bundle, width: Val) -> impl Bundle {
+    (
+        Button,
+        Node {
+            width,
+            height: px(11),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(px(3), px(1)),
+            ..default()
+        },
+        BackgroundColor(FIELD),
+        children![label],
+    )
+}
+
 /// A button that reads as dangerous whether or not it is focused.
 pub fn danger_button(label: &str, focus: Focusable, width: Val) -> impl Bundle {
     (
