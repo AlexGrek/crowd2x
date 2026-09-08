@@ -329,9 +329,34 @@ spawned this tick thinks this tick, and it is the only pass that may resize the 
 The **processing pass** advances every entity and adds or removes none. It is handed a
 `FrozenEntities` — the table with its membership frozen, offering no `insert` and no
 `remove` — so **that is a guarantee the compiler holds, not a rule to remember.** Inside
-it are two phases: **think**, read-only over the entities and the map, each returning an
-`Intent` into a slot-indexed buffer; then **apply**, single-threaded, slots ascending,
-draining the buffer.
+it are three steps:
+
+1. **think** — read-only over the entities and the map, each returning an `Intent` into a
+   slot-indexed buffer.
+2. **move** — single-threaded, slots ascending, draining that buffer. **An entity does not
+   decide where it ends up; the world does.** A step is granted only if the destination
+   cell is passable terrain *and* unoccupied, and otherwise the move is **cancelled
+   outright** — not trimmed, not slid along the obstacle — and what stopped it goes into a
+   second slot-indexed buffer as a `MoveOutcome`, carrying the blocking entity's `Uid` when
+   the obstacle was one. This is the one step that cannot be parallelised, and that is
+   what it is for: two entities stepping into the same empty cell on the same tick is the
+   race it exists to settle, and slot order settles it the same way on every run.
+3. **react** — the second thinking round, once the whole crowd has moved. Each entity is
+   handed its own outcome and revises its plan, writing only to itself. Answering a
+   collision inside the move loop would mean reacting to a world that is halfway through
+   the tick, with the later slots not moved yet.
+
+**Passability is at the tile level, on the centre cell**, and it is two layers asked in
+order: `map`'s `PassabilityMap` for the terrain, then `sim/occupancy.rs` for the crowd —
+`Occupancy` is the dynamic layer the passability map's docs always said belonged
+elsewhere. One entity to a cell, `claim` naming the occupant when it refuses. **Movement
+therefore never creates an overlap; spawning can** — an entity is placed exactly where it
+was asked for, so two can share a cell, and `release` only ever clears a cell whose
+occupant is the entity leaving it, which is what keeps that contained.
+
+What the wanderers do with all this is: nothing clever. A blocked walker drops its goal
+and picks another next tick — no steering, no waiting, no queueing, no path. Each of those
+is a change to `Walker::react` and nothing else.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -341,7 +366,7 @@ pushing to one `Vec` always do — so the pass that wants to run across threads 
 that is not allowed to change the table. An entity that needs to remove itself does not get
 a back door: it returns something the *next* spawn pass acts on.
 
-**The intent buffer is the double buffer.** Think reads entities and writes intents, apply
+**The intent buffer is the double buffer.** Think reads entities and writes intents, move
 reads intents and writes entities; the two never touch the same memory in the same
 direction. That is what makes the read phase safe to parallelise, and it costs no entity
 clone. Determinism follows from it plus a per-entity per-tick seeded RNG: same seed and
@@ -492,6 +517,7 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
+                        occupancy.rs is who stands where: passability's dynamic half
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed

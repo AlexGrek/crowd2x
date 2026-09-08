@@ -1,10 +1,17 @@
 //! The entities that exist: humans and dogs.
 //!
 //! Both are wanderers for now — pick a nearby cell that can be stood on, walk
-//! to it, pick another. That is not the simulation, it is the smallest thing
-//! that exercises every part of the tick: thinking against the map, an intent
-//! crossing from the read phase to the write phase, and a position the
-//! renderer has to keep up with.
+//! to it, pick another; and when a wall or somebody else turns out to be in
+//! the way, give up on that cell and pick a different one. That is not the
+//! simulation, it is the smallest thing that exercises every part of the tick:
+//! thinking against the map, an intent crossing from the read phase to the
+//! write phase, a move the world is allowed to refuse, and a reaction to the
+//! refusal.
+//!
+//! **The reaction really is only that.** No steering round the obstacle, no
+//! waiting for it to pass, no queueing and no path — a wanderer that stops and
+//! re-picks is honest about not having any of those yet, and each of them is a
+//! change to [`Walker::react`] and nothing else.
 //!
 //! # Nothing here knows what a human looks like
 //!
@@ -25,7 +32,7 @@ use crate::map::Point;
 
 use super::entity::{Body, GameEntity, Think};
 use super::uid::{EntityType, Uid};
-use super::Intent;
+use super::{Intent, MoveOutcome};
 
 /// How far a wanderer will look for somewhere to go, in cells.
 const WANDER_RADIUS: i32 = 6;
@@ -38,7 +45,7 @@ const ARRIVED: f32 = 0.1;
 
 /// The furthest anything moves in one tick, in cells.
 ///
-/// Passability is checked at the *destination*, so a step longer than a cell
+/// The move step checks the *destination* cell, so a step longer than a cell
 /// would step straight over a wall and land legally on the far side — the
 /// check would pass and the wall would not exist. Capping below one cell means
 /// a step crosses at most one boundary per axis, which is what makes the
@@ -130,16 +137,6 @@ impl Walker {
         let step = (self.speed * ctx.dt).min(distance).min(MAX_STEP);
         let to = (x + dx / distance * step, y + dy / distance * step);
 
-        // Refuse to walk into a wall rather than sliding along it: steering is
-        // a later problem, and a wanderer that stops and re-picks is honest
-        // about not having any yet.
-        if !ctx.is_passable(cell_of(to)) {
-            return Intent::Move {
-                to: (x, y),
-                goal: None,
-            };
-        }
-
         Intent::Move {
             to,
             goal: Some(goal),
@@ -186,14 +183,25 @@ impl Walker {
             self.goal = *goal;
         }
     }
-}
 
-/// The cell a world position in cell units falls in.
-///
-/// The same rule as [`Body::center_position`], for a position that is not on a
-/// body yet.
-fn cell_of((x, y): (f32, f32)) -> Point {
-    Point::new(x.floor() as i32, y.floor() as i32)
+    /// Answer a refused move by giving the goal up.
+    ///
+    /// Whatever was in the way — a wall, or another walker — this walker has
+    /// no way round it, so the cell it was heading for is no longer worth
+    /// heading for. Dropping the goal is what makes the next think pick a
+    /// fresh one; deciding here instead would be picking a target in the same
+    /// tick the last one failed, which is the same thing one tick earlier and
+    /// costs a second RNG stream to say it.
+    ///
+    /// [`MoveOutcome::Blocked`] carries the obstacle's id and this ignores it.
+    /// That is the honest shape of "no steering yet": knowing *who* is in the
+    /// way only pays off once there is something to do about them, and the id
+    /// is in the outcome so that step is a change here and nowhere else.
+    fn react(&mut self, outcome: MoveOutcome) {
+        if outcome.is_blocked() {
+            self.goal = None;
+        }
+    }
 }
 
 /// A deterministic RNG for one entity on one tick.
@@ -248,6 +256,10 @@ impl GameEntity for Human {
     fn apply(&mut self, intent: &Intent) {
         self.walk.apply(intent);
     }
+
+    fn react(&mut self, _ctx: &Think<'_>, outcome: MoveOutcome) {
+        self.walk.react(outcome);
+    }
 }
 
 /// A dog.
@@ -288,6 +300,10 @@ impl GameEntity for Dog {
     /// Derived here rather than sent in the intent because it is a consequence
     /// of moving, not a decision: an intent describes what an entity wants,
     /// and no dog wants to face left.
+    fn react(&mut self, _ctx: &Think<'_>, outcome: MoveOutcome) {
+        self.walk.react(outcome);
+    }
+
     fn apply(&mut self, intent: &Intent) {
         let was = self.walk.body.position().0;
         self.walk.apply(intent);
@@ -327,6 +343,7 @@ pub(super) fn build(
 mod tests {
     use super::*;
     use crate::map::{Map, Size, FLOOR, WALL};
+    use crate::sim::entity::cell_of;
     use crate::sim::log::Log;
 
     fn room() -> Map {
@@ -375,26 +392,63 @@ mod tests {
         assert_eq!(walker.center_position(), Point::new(1, 1));
     }
 
+    /// A wanderer aims at a wall quite happily — it is the move step that says
+    /// no, which is why this asserts on the aim and not on the position.
+    ///
+    /// Nobody ending a tick inside a wall is a property of the whole tick, and
+    /// it is tested where it is enforced:
+    /// `sim::tests::nothing_ever_ends_a_tick_in_an_impassable_cell`. Applying
+    /// an intent by hand, as this file's tests do, is deliberately taking the
+    /// world's arbitration out of the loop.
     #[test]
-    fn a_wanderer_never_ends_a_tick_inside_a_wall() {
+    fn a_wanderer_walks_into_a_wall_and_leaves_the_refusing_to_the_move_step() {
         let mut map = room();
-        // A wall down the middle column, so a goal on the far side is only
-        // reachable by walking through it — which is what must not happen.
         for y in 0..9 {
             map.set_terrain(Point::new(4, y), WALL);
         }
         let log = Log::new();
 
-        let mut walker = human(Point::new(1, 4));
+        // Standing next to the wall with the only goal it can pick beyond it:
+        // a 3x3 world would do, but the wall has to be reachable in one step.
+        let mut walker = human(Point::new(3, 4));
+        let mut aimed_at_the_wall = false;
         for tick in 0..600 {
             let intent = walker.think(&ctx(&map, &log, tick));
+            if matches!(intent, Intent::Move { to, .. } if !map.is_passable(cell_of(to))) {
+                aimed_at_the_wall = true;
+                break;
+            }
             walker.apply(&intent);
-            assert!(
-                map.is_passable(walker.center_position()),
-                "walked into {:?} on tick {tick}",
-                walker.center_position()
-            );
         }
+        assert!(aimed_at_the_wall, "never even tried the wall");
+    }
+
+    #[test]
+    fn a_blocked_walker_gives_up_the_goal_it_could_not_reach() {
+        // The reaction round, on its own: whatever was in the way, the plan
+        // that ran into it is dropped, and the next think picks another.
+        let (map, log) = (room(), Log::new());
+        let mut walker = human(Point::new(4, 4));
+
+        let intent = walker.think(&ctx(&map, &log, 1));
+        walker.apply(&intent);
+        assert!(walker.walk.goal.is_some(), "it should be heading somewhere");
+
+        walker.react(&ctx(&map, &log, 1), MoveOutcome::Blocked { by: None });
+        assert_eq!(walker.walk.goal, None);
+    }
+
+    #[test]
+    fn a_walker_that_got_where_it_was_going_keeps_its_plan() {
+        let (map, log) = (room(), Log::new());
+        let mut walker = human(Point::new(4, 4));
+
+        let intent = walker.think(&ctx(&map, &log, 1));
+        walker.apply(&intent);
+        let goal = walker.walk.goal;
+
+        walker.react(&ctx(&map, &log, 1), MoveOutcome::Moved);
+        assert_eq!(walker.walk.goal, goal);
     }
 
     #[test]

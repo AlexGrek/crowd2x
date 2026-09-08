@@ -70,6 +70,16 @@ impl Body {
     }
 }
 
+/// The cell a world position in cell units falls in.
+///
+/// [`Body::center_position`]'s rule, for a position that is not on a body yet
+/// — a step that has been decided but not taken. One definition, so a move
+/// cannot disagree with the entity it is moving about which cell it is
+/// entering.
+pub fn cell_of((x, y): (f32, f32)) -> Point {
+    Point::new(x.floor() as i32, y.floor() as i32)
+}
+
 /// Anything the simulation ticks.
 ///
 /// `Send + Sync` because the think phase is meant to run across threads; it is
@@ -78,14 +88,20 @@ pub trait GameEntity: Send + Sync {
     fn body(&self) -> &Body;
     fn body_mut(&mut self) -> &mut Body;
 
-    /// Decide what to do, reading only. The returned [`Intent`] is applied
-    /// later, in a single-threaded pass — see [`super::process_game_state`].
+    /// **Step 1, think.** Decide what to do, reading only. The returned
+    /// [`Intent`] is what the move step will *try* to carry out — see
+    /// [`super::process_pass`].
     ///
     /// Nothing about the world may be mutated here, which is what makes the
-    /// whole phase parallelisable without a lock.
+    /// whole phase parallelisable without a lock. Nor is what this asks for
+    /// granted: the world is arbitrated in the move step, and an entity finds
+    /// out what became of its intent in [`GameEntity::react`].
     fn think(&self, ctx: &Think<'_>) -> Intent;
 
-    /// Carry out what [`GameEntity::think`] decided.
+    /// **Step 2, move.** Carry out what [`GameEntity::think`] decided.
+    ///
+    /// Called only for a move the world allowed — a cancelled one leaves the
+    /// entity untouched, so this never has to undo anything.
     ///
     /// The default writes the position and nothing else. A kind overrides this
     /// to keep its own state in step — a dog turning to face the way it walks
@@ -95,6 +111,25 @@ pub trait GameEntity: Send + Sync {
         if let Intent::Move { to, .. } = intent {
             self.body_mut().set_position(*to);
         }
+    }
+
+    /// **Step 3, react.** Take in what became of this tick's move, once every
+    /// entity has taken theirs.
+    ///
+    /// This is the second thinking round, and the only place a collision is
+    /// answered: [`super::MoveOutcome::Blocked`] carries the id of whatever
+    /// was in the way, and an entity decides here what that means for its
+    /// plan. It runs after the whole crowd has moved, so what it sees is the
+    /// world as it ended the tick rather than as it was partway through.
+    ///
+    /// **It may write only to itself.** No position (the move already
+    /// happened, and the occupancy layer has been settled around it), and
+    /// nothing outside this entity — which is what leaves the phase
+    /// parallelisable in the same way think is, entity by entity.
+    ///
+    /// The default does nothing: a kind with no plan has nothing to revise.
+    fn react(&mut self, ctx: &Think<'_>, outcome: super::MoveOutcome) {
+        let _ = (ctx, outcome);
     }
 
     /// Which way it is oriented, if that means anything for this kind.

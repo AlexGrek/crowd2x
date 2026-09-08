@@ -249,7 +249,9 @@ visible ones.
 The rule above has an address. The simulation is `src/sim/`, and its whole surface is:
 
 ```rust
-pub struct GameState { pub map: Map, entities: Entities, pub log: Log, /* ... */ }
+pub struct GameState {
+    pub map: Map, entities: Entities, occupancy: Occupancy, pub log: Log, /* ... */
+}
 
 pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input);  // both passes
 pub fn spawn_pass(state: &mut GameState, input: &Input);                   // writes the table
@@ -303,12 +305,44 @@ a pure function of the previous state — is delivered by the pass split instead
    on the tick it arrived.
 2. **Processing pass, think** — read-only over entities and map; each returns an `Intent`
    into a slot-indexed buffer.
-3. **Processing pass, apply** — single-threaded, ascending slot order, drains the buffer.
+3. **Processing pass, move** — single-threaded, ascending slot order, drains the buffer.
+4. **Processing pass, react** — each entity is handed what became of its own move.
 
-**The intent buffer is the double buffer.** Think reads entities and writes intents; apply
+**The intent buffer is the double buffer.** Think reads entities and writes intents; move
 reads intents and writes entities. Neither touches the same memory in the same direction,
 which is what makes think safe to `par_iter` later, and it clones no entity to get there.
 The think loop is written in that shape already — keep it that way.
+
+#### Think proposes, move disposes, react answers
+
+An `Intent` is a **request**, not an outcome. The move step is the single place it is
+granted or refused, and it checks two layers in order: the terrain (`Map::is_passable`)
+and then the crowd (`sim::Occupancy`, one entity to a cell, keyed on the centre cell). A
+refused move is **cancelled outright** — the entity is exactly where it started, not
+partway and not slid along the obstacle — and the reason lands in a second slot-indexed
+buffer as a `MoveOutcome::Blocked { by: Option<Uid> }`, naming the entity in the way or
+`None` for the map itself.
+
+Two rules to keep, because both are load-bearing:
+
+- **The move step stays sequential.** It writes `Occupancy`, so two entities heading for
+  one empty cell on the same tick is the race it exists to settle; ascending slot order
+  settles it identically on every run, which is where the determinism test would break
+  first. Do not `par_iter` this one.
+- **Nothing decides a position anywhere else.** A kind that wants to refuse a step should
+  not return an `Intent` it has pre-vetted against the world — think may run in parallel
+  and cannot see the crowd mid-tick. Aim, and let the move step say no.
+
+React is the second thinking round, after the *whole* crowd has moved: an entity revises
+its plan, writing only to itself (`GameEntity::react`). Reacting inside the move loop
+would mean answering a world that is halfway through the tick. Today a blocked `Walker`
+just drops its goal — steering, waiting, queueing and pathfinding are each a change to
+`Walker::react` and nowhere else.
+
+`Occupancy` is exactly the dynamic layer `map::PassabilityMap`'s docs reserve a space for,
+and it lives in `sim/` because who is standing where is simulation state. Movement never
+creates an overlap; **spawning can**, because an entity is placed where it was asked for —
+so `release` only clears a cell whose occupant is the entity leaving it.
 
 #### Determinism is a test, not an aspiration
 
@@ -387,8 +421,9 @@ The pattern that removes locks entirely, rather than making them cheaper:
    the world. Small and cache-friendly if think did the expensive part.
 3. **Swap** — double-buffered state: read from A, write to B, swap. Also gives you
    deterministic simulation and trivial rollback. In `src/sim/` the *intent buffer* plays
-   this role: there is no separate copy of the world, because think and apply already
-   touch disjoint memory in opposite directions.
+   this role: there is no separate copy of the world, because think and the move step
+   (which is what "apply" is called there) already touch disjoint memory in opposite
+   directions.
 
 Determinism is worth protecting: iterate in id order, not hash order, and keep RNG
 per-agent and seeded.

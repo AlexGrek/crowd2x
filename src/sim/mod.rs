@@ -9,7 +9,7 @@
 //! # The shape
 //!
 //! ```text
-//! GameState { map, entities, log }
+//! GameState { map, entities, occupancy, log }
 //!      |
 //!      +-- process_game_state(&mut state, dt, &input)
 //! ```
@@ -46,20 +46,24 @@
 //! **The processing pass** advances every entity and adds or removes none. It
 //! is handed a [`FrozenEntities`] — the table with its membership frozen,
 //! offering no `insert` and no `remove` — so that is a guarantee the compiler
-//! holds, not a rule to remember. Inside it, two phases:
+//! holds, not a rule to remember. Inside it, three steps:
 //!
 //! 1. **Think.** Read-only over the entities and the map. Every entity returns
 //!    an [`Intent`] into a slot-indexed buffer. Nothing is mutated, so there
 //!    is nothing to synchronise and this loop can be handed to a thread pool
 //!    without changing its shape.
-//! 2. **Apply.** Single-threaded, slots in ascending order, drains the buffer
-//!    into the entities.
+//! 2. **Move.** Single-threaded, slots in ascending order. Every intent is
+//!    put to the world, which is allowed to refuse it, and what became of it
+//!    lands in a second slot-indexed buffer as a [`MoveOutcome`].
+//! 3. **React.** Every entity is handed its own outcome, once the whole crowd
+//!    has moved. This is the second thinking round: an entity whose move was
+//!    cancelled decides here what that means for its plan.
 //!
 //! **The intent buffer is the double buffer.** The `dev` skill asks for
 //! read-from-A-write-to-B, and this is that, without cloning an entity: think
-//! reads the entities and writes intents, apply reads intents and writes the
-//! entities. The two phases never touch the same memory in the same direction,
-//! which is the property that makes the read phase safe to parallelise.
+//! reads the entities and writes intents, move reads intents and writes the
+//! entities. The two never touch the same memory in the same direction, which
+//! is the property that makes the read phase safe to parallelise.
 //!
 //! Freezing the table is what makes that property survive contact with the
 //! rest of the tick. The buffer is indexed by slot and sized once, in the
@@ -69,6 +73,32 @@
 //! entities never conflict, two threads pushing to one `Vec` always do. So the
 //! pass that wants to run across threads is the pass that is not allowed to
 //! change the table.
+//!
+//! ## Why moving is its own step, and why it is sequential
+//!
+//! Because **an entity does not get to decide where it ends up** — the world
+//! does. [`Intent`] is a request; the move step is the one place it is
+//! granted or refused, against the terrain ([`Map::is_passable`]) and then
+//! against the crowd ([`Occupancy`]). Nobody walks through a wall and nobody
+//! walks through anybody, and both facts are enforced in one loop rather than
+//! trusted to every kind of entity that will ever exist.
+//!
+//! That loop is **strictly sequential, in slot order**, and it has to be: it
+//! writes the occupancy layer, so two entities stepping into the same empty
+//! cell in the same tick is precisely the race it exists to settle. The
+//! earlier slot gets the cell, the later one is told who took it, and running
+//! the same world twice settles it the same way. This is the one step of the
+//! tick that is not parallelisable, and it is small — a cell test, a claim and
+//! a position write.
+//!
+//! ## ...and why reacting is a separate round
+//!
+//! A collision is information, and it only exists once the move has been
+//! tried. Answering it inside the move loop would mean an entity reacting to a
+//! world that is halfway through the tick — the entities in later slots have
+//! not moved yet, so the cell it is looking at may be about to empty. So the
+//! crowd moves, and *then* the crowd reacts, entity by entity, each writing
+//! only to itself. See [`GameEntity::react`].
 //!
 //! # Lock-free
 //!
@@ -95,6 +125,7 @@ pub mod entities;
 pub mod entity;
 pub mod kinds;
 pub mod log;
+pub mod occupancy;
 pub mod uid;
 
 use rand::rngs::SmallRng;
@@ -103,9 +134,10 @@ use rand::{RngExt, SeedableRng};
 use crate::map::{Map, Point};
 
 pub use entities::{Entities, FrozenEntities, Slot};
-pub use entity::{Body, GameEntity, Think};
+pub use entity::{cell_of, Body, GameEntity, Think};
 pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
+pub use occupancy::Occupancy;
 pub use uid::{EntityType, Uid};
 
 /// What an entity decided to do this tick.
@@ -128,6 +160,45 @@ pub enum Intent {
         to: (f32, f32),
         goal: Option<Point>,
     },
+}
+
+/// What became of an [`Intent`] once the world had its say.
+///
+/// The move step's answer to one entity, and the only thing
+/// [`GameEntity::react`] is told about the tick it has just had. `Copy` and
+/// slot-indexed for the same reasons [`Intent`] is: one per entity per tick,
+/// in a buffer that is reused rather than reallocated.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MoveOutcome {
+    /// Nothing was asked for, so nothing happened.
+    #[default]
+    Idle,
+    /// It is where it wanted to be.
+    Moved,
+    /// **The move was cancelled** and the entity did not move at all — not
+    /// part of the way, not along the obstacle. It is exactly where it started
+    /// the tick.
+    ///
+    /// `by` names the entity in the way, and is `None` when the obstacle was
+    /// the map itself: a wall, or the edge of it. Both are a refusal; which
+    /// one it was is the difference between something that will never move and
+    /// something that might, which is why the id is carried rather than
+    /// flattened into a bool.
+    Blocked { by: Option<Uid> },
+}
+
+impl MoveOutcome {
+    pub fn is_blocked(self) -> bool {
+        matches!(self, MoveOutcome::Blocked { .. })
+    }
+
+    /// The entity that got in the way, if one did.
+    pub fn obstacle(self) -> Option<Uid> {
+        match self {
+            MoveOutcome::Blocked { by } => by,
+            _ => None,
+        }
+    }
 }
 
 /// Something done *to* the world, from outside it.
@@ -189,6 +260,10 @@ pub struct GameState {
     /// whatever loaded the map, and a lifetime here would infect every caller.
     pub map: Map,
     entities: Entities,
+    /// The dynamic half of passability: who is standing where. Kept in step by
+    /// the spawn pass and by the move step, and by nothing else — see
+    /// [`Occupancy`].
+    occupancy: Occupancy,
     /// Written from any thread, drained by the renderer. See [`Log`].
     pub log: Log,
     /// Mints ids and seeds new entities. Seeded, so a run replays.
@@ -197,8 +272,11 @@ pub struct GameState {
     elapsed: f64,
     /// The back buffer, reused between ticks so the processing pass allocates
     /// nothing. Indexed by [`Slot`], and sized only by the spawn pass — a hole
-    /// in the arena keeps an [`Intent::Idle`] that apply skips.
+    /// in the arena keeps an [`Intent::Idle`] that the move step skips.
     intents: Vec<Intent>,
+    /// What the move step made of each intent, read by the reaction round.
+    /// Indexed by [`Slot`] and sized alongside [`GameState::intents`].
+    moves: Vec<MoveOutcome>,
 }
 
 impl GameState {
@@ -209,6 +287,7 @@ impl GameState {
     /// default.
     pub fn new(map: Map, seed: u64) -> GameState {
         GameState {
+            occupancy: Occupancy::new(map.size()),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -216,11 +295,29 @@ impl GameState {
             tick: 0,
             elapsed: 0.0,
             intents: Vec::new(),
+            moves: Vec::new(),
         }
     }
 
     pub fn entities(&self) -> &Entities {
         &self.entities
+    }
+
+    /// Who is standing where. Read-only from outside the tick: the two places
+    /// allowed to write it are the spawn pass and the move step, which is what
+    /// keeps it in step with the entity positions it describes.
+    pub fn occupancy(&self) -> &Occupancy {
+        &self.occupancy
+    }
+
+    /// What became of an entity's move on the last tick.
+    ///
+    /// `None` for an id nobody holds. The renderer has no use for this yet —
+    /// it is how a test, a log or a future bump animation asks whether
+    /// somebody actually got where they were going.
+    pub fn last_move(&self, uid: Uid) -> Option<MoveOutcome> {
+        let slot = self.entities.slot_of(uid)?;
+        self.moves.get(slot as usize).copied()
     }
 
     /// How many entities are alive.
@@ -274,11 +371,19 @@ impl GameState {
         };
         let slot = self.entities.insert(entity);
 
-        // The buffer is indexed by slot, so it has to cover the new one.
+        // The buffers are indexed by slot, so they have to cover the new one.
         if self.intents.len() <= slot as usize {
             self.intents.resize(slot as usize + 1, Intent::Idle);
+            self.moves.resize(slot as usize + 1, MoveOutcome::Idle);
         }
         self.intents[slot as usize] = Intent::Idle;
+        self.moves[slot as usize] = MoveOutcome::Idle;
+
+        // Takes the cell if it is free, and leaves whoever is already there in
+        // possession if it is not — an entity is placed where it was asked
+        // for, so spawning is the one thing that can put two of them in one
+        // cell. See the [`occupancy`] module docs; moving cannot.
+        let _ = self.occupancy.claim(at, uid);
 
         self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
         uid
@@ -287,7 +392,11 @@ impl GameState {
     /// Remove an entity. Returns whether there was one.
     pub fn despawn(&mut self, uid: Uid) -> bool {
         match self.entities.remove(uid) {
-            Some(_) => {
+            Some(gone) => {
+                // Only if it was the registered occupant: an entity that
+                // spawned on top of somebody else must not free their cell on
+                // its way out.
+                self.occupancy.release(gone.center_position(), uid);
                 self.log.push(format!("despawned {uid}"));
                 true
             }
@@ -307,6 +416,7 @@ impl std::fmt::Debug for GameState {
             .field("tick", &self.tick)
             .field("entities", &self.entities.len())
             .field("map", &self.map)
+            .field("occupancy", &self.occupancy)
             .field("log", &self.log)
             .finish()
     }
@@ -351,33 +461,39 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
 
 /// **The processing pass: advances every entity, and adds or removes none.**
 ///
-/// Think then apply, over a table whose membership is frozen — it is handed a
-/// [`FrozenEntities`], which has no `insert` and no `remove`, so this is a
-/// guarantee the compiler holds rather than a rule to remember.
+/// Three steps — [`think_step`], [`move_step`], [`react_step`] — over a table
+/// whose membership is frozen: it is handed a [`FrozenEntities`], which has no
+/// `insert` and no `remove`, so this is a guarantee the compiler holds rather
+/// than a rule to remember.
 ///
 /// Two things follow from the table's shape being fixed here, and both are the
 /// reason for the split:
 ///
-/// * **This pass allocates nothing.** The intent buffer was sized by the spawn
-///   pass and is only written through. A tick of a settled world touches no
-///   allocator at all.
+/// * **This pass allocates nothing.** Both slot buffers were sized by the
+///   spawn pass and are only written through. A tick of a settled world
+///   touches no allocator at all.
 /// * **This pass is the one that becomes parallel.** Moving entities cannot
 ///   conflict; inserting into a shared `Vec` always does. Freezing membership
 ///   is what removes the only structural mutation from the phase that wants to
-///   run across threads.
+///   run across threads. Of the three steps, think and react are the ones that
+///   parallelise; the move step is sequential on purpose, and the module docs
+///   say why.
 pub fn process_pass(state: &mut GameState, dt: f32) {
     state.tick += 1;
     state.elapsed += dt as f64;
 
-    // Disjoint field borrows: `intents` is written while `entities`, `map` and
-    // `log` are read, and the borrow checker is what proves the phases below
-    // do not overlap.
+    // Disjoint field borrows, so the borrow checker is what proves the steps
+    // below do not overlap: think reads the world and writes `intents`, move
+    // reads `intents` and writes the entities and `occupancy`, react reads
+    // `moves` and writes the entities.
     let GameState {
         map,
         entities,
+        occupancy,
         log,
         tick,
         intents,
+        moves,
         ..
     } = state;
 
@@ -386,29 +502,127 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // Sized by the spawn pass, which is the only thing that can change the
     // arena. If this ever trips, something grew the table outside that pass.
     debug_assert!(
-        intents.len() >= table.capacity(),
-        "intent buffer ({}) is shorter than the entity table ({})",
+        intents.len() >= table.capacity() && moves.len() >= table.capacity(),
+        "the slot buffers ({}, {}) are shorter than the entity table ({})",
         intents.len(),
+        moves.len(),
         table.capacity()
     );
 
-    // --- think: read-only, and shaped to be run in parallel ---
-    let ctx = Think {
-        map,
-        log,
-        dt,
-        tick: *tick,
-    };
-    for (slot, entity) in table.iter_slots() {
-        intents[slot as usize] = entity.think(&ctx);
-    }
+    think_step(
+        &table,
+        &Think {
+            map,
+            log,
+            dt,
+            tick: *tick,
+        },
+        intents,
+    );
 
-    // --- apply: single-threaded, in slot order ---
+    move_step(&mut table, map, occupancy, intents, moves);
+
+    react_step(
+        &mut table,
+        &Think {
+            map,
+            log,
+            dt,
+            tick: *tick,
+        },
+        moves,
+    );
+}
+
+/// **Step 1: everybody decides.** Read-only, and shaped to be run in parallel.
+///
+/// Nothing is written but the intent buffer, and each entity writes only its
+/// own slot — so this loop becomes a `par_iter` over `(slot, entity)` pairs
+/// without changing shape. Keep it that way.
+fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent]) {
+    for (slot, entity) in table.iter_slots() {
+        intents[slot as usize] = entity.think(ctx);
+    }
+}
+
+/// **Step 2: everybody moves, one at a time, and the world may say no.**
+///
+/// Sequential and in ascending slot order, because it writes the occupancy
+/// layer: two entities heading for the same empty cell on the same tick is the
+/// race this exists to settle, and it settles it the same way on every run.
+///
+/// An [`Intent::Move`] is granted only if the destination cell is passable
+/// terrain *and* nobody else is standing in it. Otherwise the move is
+/// **cancelled outright** — no partial step, no sliding along the wall — and
+/// the entity is told what stopped it. Cancelling rather than trimming is what
+/// makes the outcome meaningful: "you did not get there, and this is who was
+/// in the way" is something an entity can act on, where "you got 40% of the
+/// way" is not.
+///
+/// A step that stays inside the entity's own cell is the common case by a wide
+/// margin — at a walking pace of two cells a second, a boundary is crossed
+/// about once every thirty ticks — and it costs neither of the two checks: no
+/// cell changes hands, so there is nothing to claim and nobody new to bump
+/// into.
+fn move_step(
+    table: &mut FrozenEntities<'_>,
+    map: &Map,
+    occupancy: &mut Occupancy,
+    intents: &[Intent],
+    moves: &mut [MoveOutcome],
+) {
     for (slot, entity) in table.iter_slots_mut() {
-        let intent = intents[slot as usize];
-        if intent != Intent::Idle {
+        let slot = slot as usize;
+        let intent = intents[slot];
+        let Intent::Move { to, .. } = intent else {
+            moves[slot] = MoveOutcome::Idle;
+            continue;
+        };
+
+        let uid = entity.uid();
+        let from = entity.center_position();
+        let into = cell_of(to);
+
+        moves[slot] = if into == from {
+            // Still in its own cell: it already holds this one.
             entity.apply(&intent);
-        }
+            MoveOutcome::Moved
+        } else if !map.is_passable(into) {
+            // The terrain first — a wall is cheaper to hit than a crowd, and
+            // off the map is impassable, so this is the bounds check too.
+            MoveOutcome::Blocked { by: None }
+        } else if let Err(other) = occupancy.claim(into, uid) {
+            // A refused claim writes nothing, so there is nothing to undo.
+            MoveOutcome::Blocked { by: Some(other) }
+        } else {
+            // Claim first and release second: the other order would leave the
+            // old cell open for a moment, which matters the day this runs
+            // anywhere but here.
+            occupancy.release(from, uid);
+            entity.apply(&intent);
+            MoveOutcome::Moved
+        };
+    }
+}
+
+/// **Step 3: everybody reacts, now that the whole crowd has moved.**
+///
+/// The second thinking round. Each entity is handed its own
+/// [`MoveOutcome`] and revises its plan — for a wanderer, a cancelled move
+/// means the cell it was heading for is not worth heading for.
+///
+/// Every entity is asked, not only the ones that were blocked: "did I get
+/// there" is as much an answer as "who stopped me", and a kind that wants to
+/// count its successful steps should not have to be told about them by a
+/// separate channel. The default [`GameEntity::react`] does nothing, so a kind
+/// with no plan pays a call and no more.
+///
+/// Each entity writes only to itself, so this parallelises the same way think
+/// does — it is written as a `&mut` walk of the table for exactly that reason,
+/// rather than as a second intent buffer nobody would read.
+fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome]) {
+    for (slot, entity) in table.iter_slots_mut() {
+        entity.react(ctx, moves[slot as usize]);
     }
 }
 
@@ -686,15 +900,36 @@ mod tests {
 
     #[test]
     fn despawning_mid_run_does_not_disturb_the_entities_that_remain() {
-        // The tombstone rule, end to end: the slot buffer must stay lined up
-        // with the arena across a removal.
-        let mut a = GameState::new(Map::new(Size::new(16, 16), FLOOR), 11);
-        let mut b = GameState::new(Map::new(Size::new(16, 16), FLOOR), 11);
+        // The tombstone rule, end to end: the slot buffers must stay lined up
+        // with the arena across a removal, so nobody is moved on the strength
+        // of a decision filed under somebody else's slot.
+        //
+        // The entity that goes is walled off from the four that stay, and it
+        // has to be: entities collide now, so an entity leaving a room really
+        // does change what the entities in it do next. What must not change is
+        // anything about an entity it could never have touched.
+        let world = || {
+            let mut map = Map::new(Size::new(16, 16), FLOOR);
+            for y in 0..16 {
+                map.set_terrain(Point::new(8, y), WALL);
+            }
+            GameState::new(map, 11)
+        };
+        let (mut a, mut b) = (world(), world());
         let mut keep = Vec::new();
+        // Slots 0, 1, 3 and 4 share the left room; slot 2 — the hole this
+        // makes, in the middle of the arena — is alone on the far side.
+        let places = [
+            Point::new(2, 8),
+            Point::new(3, 8),
+            Point::new(12, 8),
+            Point::new(5, 8),
+            Point::new(6, 8),
+        ];
         for state in [&mut a, &mut b] {
             let mut ids = Vec::new();
-            for i in 0..5 {
-                ids.push(state.spawn(EntityType::Human, Point::new(2 + i, 8)));
+            for place in places {
+                ids.push(state.spawn(EntityType::Human, place));
             }
             keep.push(ids);
         }
@@ -730,6 +965,150 @@ mod tests {
     }
 
     #[test]
+    fn a_move_into_an_occupied_cell_is_cancelled_and_names_the_occupant() {
+        // A world two cells wide: the only place either of them can go is
+        // where the other one is standing, so every step is a collision.
+        let mut state = GameState::new(Map::new(Size::new(2, 1), FLOOR), 4);
+        let a = state.spawn(EntityType::Human, Point::new(0, 0));
+        let b = state.spawn(EntityType::Human, Point::new(1, 0));
+        let (start_a, start_b) = (Point::new(0, 0), Point::new(1, 0));
+
+        let mut named_the_obstacle = false;
+        for tick in 0..300 {
+            run(&mut state, 1);
+
+            let cell = |uid| state.entities().get(uid).unwrap().center_position();
+            assert_eq!(cell(a), start_a, "tick {tick}");
+            assert_eq!(cell(b), start_b, "tick {tick}");
+
+            // Blocked *by the other entity*, not by the wall the map does not
+            // have: a collision has to say who, or a reaction cannot tell the
+            // difference between somebody in the way and nowhere to go.
+            if state.last_move(a) == Some(MoveOutcome::Blocked { by: Some(b) }) {
+                named_the_obstacle = true;
+            }
+        }
+        assert!(named_the_obstacle, "they never bumped into each other");
+    }
+
+    #[test]
+    fn two_entities_stepping_into_one_empty_cell_are_settled_by_slot_order() {
+        // Wandering produces a genuine tie only by luck, and the arbitration
+        // has to be exact whether or not it is lucky — so the intents are put
+        // in by hand and the move step is run on its own.
+        let mut state = world();
+        let contested = Point::new(5, 4);
+        let left = state.spawn(EntityType::Human, Point::new(4, 4));
+        let right = state.spawn(EntityType::Human, Point::new(6, 4));
+
+        for (uid, to) in [(left, (5.0, 4.5)), (right, (5.99, 4.5))] {
+            let slot = state.entities.slot_of(uid).expect("just spawned") as usize;
+            state.intents[slot] = Intent::Move {
+                to,
+                goal: Some(contested),
+            };
+        }
+
+        let GameState {
+            map,
+            entities,
+            occupancy,
+            intents,
+            moves,
+            ..
+        } = &mut state;
+        move_step(&mut entities.freeze(), map, occupancy, intents, moves);
+
+        // The earlier slot gets the cell; the later one is told who took it
+        // and has not moved at all.
+        assert_eq!(state.last_move(left), Some(MoveOutcome::Moved));
+        assert_eq!(
+            state.last_move(right),
+            Some(MoveOutcome::Blocked { by: Some(left) })
+        );
+        assert_eq!(state.occupancy().occupant(contested), Some(left));
+        assert_eq!(state.position_of(right), Some((6.5, 4.5)));
+    }
+
+    #[test]
+    fn moving_never_puts_two_entities_in_one_cell() {
+        // The headline property, over a crowd dense enough to keep bumping
+        // into itself: twelve of them in a room of thirty-six cells.
+        let mut state = GameState::new(Map::new(Size::new(6, 6), FLOOR), 13);
+        for i in 0..12 {
+            state.spawn(EntityType::Human, Point::new(i % 6, i / 6));
+        }
+
+        for tick in 0..1000 {
+            run(&mut state, 1);
+            let mut taken = std::collections::HashSet::new();
+            for entity in state.entities().iter() {
+                assert!(
+                    taken.insert(entity.center_position()),
+                    "{} shares {:?} on tick {tick}",
+                    entity.uid(),
+                    entity.center_position()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_occupancy_layer_follows_an_entity_as_it_walks() {
+        // A cell claimed and not given back is a hole in the map that nothing
+        // can ever walk through again, and nothing would say so.
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+
+        for tick in 0..500 {
+            run(&mut state, 1);
+            let cell = state.entities().get(uid).expect("alive").center_position();
+            assert_eq!(state.occupancy().occupant(cell), Some(uid), "tick {tick}");
+            assert_eq!(
+                state.occupancy().count_occupied(),
+                1,
+                "a cell was left claimed behind it on tick {tick}"
+            );
+        }
+    }
+
+    #[test]
+    fn despawning_gives_back_the_cell_the_entity_was_standing_in() {
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+        run(&mut state, 200);
+        let cell = state.entities().get(uid).expect("alive").center_position();
+        assert_eq!(state.occupancy().occupant(cell), Some(uid));
+
+        state.despawn(uid);
+
+        assert_eq!(state.occupancy().occupant(cell), None);
+        assert_eq!(state.occupancy().count_occupied(), 0);
+    }
+
+    #[test]
+    fn spawning_on_top_of_somebody_leaves_them_in_possession() {
+        // Spawning puts an entity where it was asked for, occupied or not, so
+        // it is the one thing that can put two of them in one cell — and the
+        // newcomer must not take the cell off the entity already holding it,
+        // in either direction. See the `occupancy` module docs.
+        let mut state = world();
+        let cell = Point::new(4, 4);
+        let first = state.spawn(EntityType::Human, cell);
+        let second = state.spawn(EntityType::Human, cell);
+
+        assert_eq!(state.len(), 2);
+        assert_eq!(state.occupancy().occupant(cell), Some(first));
+        assert_eq!(
+            state.entities().get(second).expect("spawned").center_position(),
+            cell
+        );
+
+        state.despawn(second);
+        assert_eq!(state.occupancy().occupant(cell), Some(first));
+    }
+
+    #[test]
     fn the_log_records_what_came_and_went() {
         let mut state = world();
         let uid = state.spawn(EntityType::Dog, Point::new(1, 2));
@@ -741,15 +1120,16 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_allocates_no_intent_buffer_after_the_first() {
+    fn a_tick_allocates_no_slot_buffer_after_the_first() {
         let mut state = world();
         for i in 0..10 {
             state.spawn(EntityType::Human, Point::new(1, 1 + i));
         }
         run(&mut state, 1);
-        let capacity = state.intents.capacity();
+        let (intents, moves) = (state.intents.capacity(), state.moves.capacity());
         run(&mut state, 500);
-        assert_eq!(state.intents.capacity(), capacity);
+        assert_eq!(state.intents.capacity(), intents);
+        assert_eq!(state.moves.capacity(), moves);
     }
 
     #[test]
