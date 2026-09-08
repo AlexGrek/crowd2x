@@ -20,6 +20,7 @@ cargo run --release
 cargo build
 cargo test             # the plain-Rust parts: map, coordinates, navigation, scripts
 python3 tools/qa.py    # the scripted QA tests in qa/, against the real binary
+python3 tools/qa.py --release   # ...optimised, which is the only profile to quote a timing from
 ```
 
 **Always run through `cargo`, never the raw binary** (`./target/debug/crowd2x`) — Bevy
@@ -406,6 +407,34 @@ spawns are applied once however many ticks were asked for. Ticking rather than w
 the point — `FixedUpdate` runs at whatever rate the frame allows, so a test that waited a
 second would be asserting on however many ticks the machine managed.
 
+**A test can also time itself** (`src/qa/perf.rs`). `{"populate": {"kind": "human",
+"count": 1000}}` queues a crowd spread over the cells that can be stood on, `{"measure":
+{"name": "1000 humans", "ticks": 200}}` times that many processing passes — the simulation
+alone, no renderer — and `{"measure_frames": {"name": "1000 actors", "seconds": 2.0}}`
+times whole frames, sprite sync and render included. Every measurement keeps its
+distribution (best, median, p95, worst, microseconds per entity), is written to
+`qa-perf/<test>.json` pass or fail, and is printed by `tools/qa.py`: **the number is the
+deliverable, and the assertions are a floor under it.**
+
+Two assertions, and which one to reach for matters. `{"expect_scaling": {"from": "100
+humans", "to": "1000 humans", "slack": 1.5}}` checks that the cost *per entity* did not
+grow with the crowd, which is what an accidental per-agent scan over every other agent
+looks like and is what killed the earlier prototype; it barely depends on the machine.
+It divides the *fastest* sample of each measurement, not the median: interference only ever
+adds time, and a ratio of two medians inherits the noise of both — with medians, three
+consecutive runs of an unchanged build gave 0.52x, 0.68x and 1.60x. A budget judges the
+median instead, because that is what the game typically does. How much slack a comparison
+needs still depends on the cache — a hundred entities fit in L1 and a thousand do not, so
+that pair moves by 1.3-1.8x between runs.
+`{"expect_under": {"measure": "...", "ms": 1.0}}` is a wall rather than a target, set well
+above what the machine does today, and the observed number belongs in a `note` beside it.
+Two things stop the numbers being lies: a test that measures frames must set `"vsync":
+false`, or every frame is capped at the refresh rate and a regression only shows once the
+game is already below 60Hz; and a debug timing (this crate is `opt-level = 1` there) is
+good for a *ratio* and worthless as a speed, which is why the profile and the vsync
+setting are recorded in the report. `qa/perf_simulation.json` and `qa/perf_rendering.json`
+are the two that exist.
+
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_entities`, `expect_sprites`,
 `expect_log` — and `expect_tile` reads the **saved** map,
@@ -464,6 +493,7 @@ src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
+                        perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed
 src/characters/         how a character is drawn: CELL/ART/upscale, depth_for
 src/animation.rs        FrameAnimation, atlas frame stepping
@@ -473,6 +503,7 @@ tools/art_scale.py         finds/reduces art that is stored pre-upscaled
 tools/qa.py                runs every qa/*.json against the real binary
 qa/                     scripted QA tests, one JSON file each; fixtures/ holds map JSON
 qa-screenshots/         what those tests photographed (gitignored)
+qa-perf/                what the perf tests measured (gitignored: one machine's evidence)
 maps/                   saved maps (gitignored; CROWD2X_MAPS points elsewhere)
 assets/                 imported wholesale from an earlier prototype (layout preserved; .tmx maps not imported)
 ```

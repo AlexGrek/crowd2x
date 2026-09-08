@@ -11,9 +11,16 @@ so what is in there is always from the last one. A capture that beat the
 renderer to the frame comes out as a single flat colour rather than as an
 error, so those are counted and reported instead of being left to be noticed.
 
+A test that measures something (see src/qa/perf.rs) also writes its numbers to
+qa-perf/<test>.json, and they are printed here whether it passed or failed -
+the measurement is the point of a perf test, and a run that failed a budget is
+exactly the one whose numbers are worth reading.
+
     python3 tools/qa.py                    # every test in qa/
     python3 tools/qa.py qa/create_map.json # just this one
     python3 tools/qa.py -v                 # stream the game's log as it runs
+    python3 tools/qa.py --release          # optimised build; the only honest
+                                           # profile to quote a timing from
 
 Exits non-zero if any test failed, so it can gate a commit.
 """
@@ -35,6 +42,9 @@ SCRATCH = ROOT / "target" / "qa"
 # ...and its own screenshot directory here, which is gitignored and meant to be
 # looked at, so it is not buried in target/.
 SHOTS = ROOT / "qa-screenshots"
+# ...and its measurements here, next to them and gitignored for the same
+# reason: a timing is evidence from one machine, not source.
+PERF = ROOT / "qa-perf"
 # The window size the coordinates in a `mouse` step assume: 320x180 canvas at
 # PIXEL_SCALE 4. Forced so a test does not depend on the last window size.
 WINDOW = "1280x720"
@@ -74,7 +84,34 @@ def report_shots(shots: Path) -> None:
         print(f"     WARNING {png.name} is blank: the window was never presented")
 
 
-def run_one(path: Path, verbose: bool) -> bool:
+def report_perf(perf: Path) -> None:
+    """Print what a test measured, if it measured anything.
+
+    Printed on a pass as well as a failure: a perf test's deliverable is the
+    number, and a run nobody looks at is a run that only tells you whether the
+    budget - which is deliberately loose - was breached.
+    """
+    if not perf.exists():
+        return
+    try:
+        report = json.loads(perf.read_text())
+    except json.JSONDecodeError as error:
+        print(f"     cannot read {perf.name}: {error}")
+        return
+
+    vsync = "vsync on" if report.get("vsync", True) else "vsync off"
+    print(f"     measurements ({report.get('profile', '?')} build, {vsync}):")
+    for m in report.get("measurements", []):
+        per_entity = m.get("per_entity_us")
+        each = f"  {per_entity:8.2f}us each" if per_entity is not None else ""
+        print(
+            f"       {m['name']:<32} {m['entities']:>6} entities"
+            f"  best {m['best_ms']:7.3f}ms  median {m['median_ms']:7.3f}ms"
+            f"  p95 {m['p95_ms']:7.3f}ms  worst {m['worst_ms']:7.3f}ms{each}"
+        )
+
+
+def run_one(path: Path, verbose: bool, release: bool) -> bool:
     name = path.stem
     maps = SCRATCH / name / "maps"
     shutil.rmtree(maps.parent, ignore_errors=True)
@@ -82,6 +119,9 @@ def run_one(path: Path, verbose: bool) -> bool:
 
     shots = SHOTS / name
     shutil.rmtree(shots, ignore_errors=True)
+
+    perf = PERF / f"{name}.json"
+    perf.unlink(missing_ok=True)
 
     try:
         timeout = json.loads(path.read_text()).get("timeout", 60)
@@ -94,6 +134,7 @@ def run_one(path: Path, verbose: bool) -> bool:
         "CROWD2X_QA": str(path),
         "CROWD2X_MAPS": str(maps),
         "CROWD2X_QA_SHOTS": str(shots),
+        "CROWD2X_QA_PERF": str(perf),
         "CROWD2X_WINDOW": WINDOW,
     }
 
@@ -102,7 +143,7 @@ def run_one(path: Path, verbose: bool) -> bool:
         # Through cargo, always: bevy resolves assets/ relative to the manifest
         # under cargo and relative to the executable otherwise.
         result = subprocess.run(
-            ["cargo", "run", "--quiet"],
+            ["cargo", "run", "--quiet"] + (["--release"] if release else []),
             cwd=ROOT,
             env=env,
             timeout=timeout + GRACE_SECONDS,
@@ -116,10 +157,12 @@ def run_one(path: Path, verbose: bool) -> bool:
     if result.returncode == 0:
         print(f"PASS {name}")
         report_shots(shots)
+        report_perf(perf)
         return True
 
     print(f"FAIL {name} (exit {result.returncode})")
     report_shots(shots)
+    report_perf(perf)
     if not verbose:
         # Only the qa lines: the rest is bevy's startup chatter.
         for line in (result.stderr or "").splitlines():
@@ -131,13 +174,17 @@ def run_one(path: Path, verbose: bool) -> bool:
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     verbose = "-v" in sys.argv or "--verbose" in sys.argv
+    # A timing from a debug build says whether something is scaling badly, and
+    # nothing at all about how fast the game is: this crate builds at
+    # opt-level 1 there. Quote numbers from --release.
+    release = "--release" in sys.argv
 
     tests = [Path(a) for a in args] if args else sorted(QA_DIR.glob("*.json"))
     if not tests:
         print(f"no tests found in {QA_DIR}")
         return 1
 
-    passed = sum(run_one(path, verbose) for path in tests)
+    passed = sum(run_one(path, verbose, release) for path in tests)
     failed = len(tests) - passed
     print(f"\n{passed}/{len(tests)} passed")
     return 1 if failed else 0

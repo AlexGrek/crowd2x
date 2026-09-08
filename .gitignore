@@ -8,3 +8,7 @@
 
 # screenshots taken by the scripted QA tests: evidence, not source
 /qa-screenshots
+
+# timings taken by the scripted perf tests: evidence from one machine, and the
+# numbers worth keeping are quoted in the test that asserts on them
+/qa-perf

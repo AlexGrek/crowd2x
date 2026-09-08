@@ -1,0 +1,57 @@
+{
+  "name": "how a tick scales with the size of the crowd",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "plaza", "file": "qa/fixtures/plaza.json" }
+    ]
+  },
+  "open": "plaza",
+  "timeout": 300,
+  "steps": [
+    { "note": "the simulation alone: no frames, no sprites, just process_pass" },
+    { "expect_entities": 0 },
+    { "measure": { "name": "an empty world", "ticks": 200 } },
+
+    { "note": "a hundred, which is where the earlier prototype fell over" },
+    { "populate": { "kind": "human", "count": 100 } },
+    { "measure": { "name": "100 humans", "ticks": 200 } },
+    { "expect_entities": 100 },
+
+    { "note": "ten times the crowd should be about ten times the work" },
+    { "populate": { "kind": "human", "count": 900 } },
+    { "measure": { "name": "1000 humans", "ticks": 200 } },
+    { "expect_entities": 1000 },
+
+    { "note": "...and so should ten times that, which is where an n^2 becomes obvious" },
+    { "populate": { "kind": "human", "count": 3000 } },
+    { "measure": { "name": "4000 humans", "ticks": 200 } },
+    { "expect_entities": 4000 },
+
+    { "note": "dogs animate and turn, so they are worth measuring separately" },
+    { "populate": { "kind": "dog", "count": 1000 } },
+    { "measure": { "name": "4000 humans and 1000 dogs", "ticks": 200 } },
+    { "expect_entities": 5000 },
+
+    { "note": "the assertion that matters: cost per entity must not grow with the crowd" },
+    { "note": "a hundred entities fit in cache and a thousand do not, so this pair has a" },
+    { "note": "real 1.3-1.8x spread between runs that is not a regression - a quadratic" },
+    { "note": "would be 10x here, so the wide slack still catches the thing being watched" },
+    { "expect_scaling": { "from": "100 humans", "to": "1000 humans", "slack": 3.0 } },
+
+    { "note": "past that the crowd is already out of cache, so this pair is the tight one" },
+    { "expect_scaling": { "from": "1000 humans", "to": "4000 humans", "slack": 1.5 } },
+
+    { "note": "a wall well above what this machine does, to catch an order of magnitude" },
+    { "note": "4000 wandering humans is a 0.04ms tick on an M3 in a debug build" },
+    { "expect_under": { "measure": "4000 humans", "ms": 1.0 } },
+    { "expect_under": { "measure": "4000 humans and 1000 dogs", "ms": 1.0 } },
+
+    { "note": "the crowd is still all there, and the world it ran in is untouched" },
+    { "expect_state": "game" },
+    { "expect_entities": 5000 },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "plaza" }
+  ]
+}

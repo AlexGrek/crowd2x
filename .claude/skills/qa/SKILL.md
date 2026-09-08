@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Write and run scripted QA tests for crowd2x - JSON test definitions that drive the real binary through menus, the map browser, the editor and the game with keyboard, gamepad and mouse input, assert on outcomes, and take screenshots. Use when changing anything a person interacts with (screens, navigation, focus, input, the editor, the game camera and zoom, saving and loading maps), when adding a regression test for an interface bug, or when a qa/ test fails and needs diagnosing.
+description: Write and run scripted QA tests for crowd2x - JSON test definitions that drive the real binary through menus, the map browser, the editor and the game with keyboard, gamepad and mouse input, assert on outcomes, measure how long a crowd takes to simulate and draw, and take screenshots. Use when changing anything a person interacts with (screens, navigation, focus, input, the editor, the game camera and zoom, saving and loading maps), when adding a regression test for an interface bug, when writing or reading a performance test, or when a qa/ test fails and needs diagnosing.
 ---
 
 # Scripted QA for crowd2x
@@ -18,12 +18,13 @@ cd /Users/vedmedik/dev/crowd2x
 python3 tools/qa.py                      # every test in qa/, one process each
 python3 tools/qa.py qa/create_map.json   # one test
 python3 tools/qa.py -v                   # stream the game's log while it runs
+python3 tools/qa.py --release            # optimised build, for a timing worth quoting
 CROWD2X_QA=qa/create_map.json cargo run  # by hand; set CROWD2X_MAPS too (see below)
 ```
 
-Each test takes about 8 seconds. The runner gives every test its own maps directory
-(`target/qa/<test>/maps`) and its own screenshot directory, and forces a 1280x720 window
-so coordinates are stable.
+Each test takes about 8 seconds — a performance test half a minute. The runner gives every
+test its own maps directory (`target/qa/<test>/maps`), its own screenshot directory and its
+own `qa-perf/<test>.json`, and forces a 1280x720 window so coordinates are stable.
 
 **Run `tools/qa.py`, not the binary, unless you are debugging one test.** Running the
 binary by hand without `CROWD2X_MAPS` points the test at `maps/` — a test that deletes a
@@ -58,6 +59,7 @@ map will delete a real one.
 | `gap` | Seconds between steps — several frames, so a press lands and its consequences settle. | `0.1` |
 | `shot_delay` | Seconds either side of a screenshot. | `0.5` |
 | `timeout` | Whole-run limit; a stuck test fails instead of hanging. | `60` |
+| `vsync` | Whether the window waits for the display. Turn it **off** to measure frames. | `true` |
 
 Unknown fields and unknown step names are **errors**, not ignored: a typo that silently
 skipped a step would make a test pass by not testing anything.
@@ -162,6 +164,8 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
+| `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
+| `{"expect_scaling": {"from": "100 humans", "to": "1000 humans", "slack": 1.5}}` | Cost per entity did not grow with the crowd. |
 
 A failed assertion stops the test — the steps after it were written for a state the app is
 no longer in — and the run exits non-zero.
@@ -182,6 +186,86 @@ been saved. The editor saves on leaving and on `f5`.
 `expect_zoom` exists because zooming changes the *size of the canvas* rather than the
 scale of a camera, so a screenshot cannot be asked how far in it is without counting
 texels. The game screen is the only one that zooms, and it resets to `4` on the way out.
+
+## Performance tests
+
+The same harness, timing itself. Three steps measure, two assert, and the numbers are
+written to `qa-perf/<test>.json` and printed by `tools/qa.py` whether the test passed or
+failed — **the measurement is the deliverable**, and the assertions are a floor under it.
+
+| Step | Does |
+| --- | --- |
+| `{"populate": {"kind": "human", "count": 1000}}` | Queue a whole crowd, spread over the cells that can be stood on. |
+| `{"measure": {"name": "1000 humans", "ticks": 200}}` | Time that many processing passes: the simulation alone, no renderer. |
+| `{"measure_frames": {"name": "1000 actors", "seconds": 2.0}}` | Time whole frames for that long: sim, sprite sync, UI and render. |
+
+`populate` is the bulk form of `spawn` and takes the same route — the commands go on the
+queue the game uses, so they are applied by the next `measure` or `tick`, and the cost of
+spawning a crowd is paid by the pass that really does it. `measure` runs one spawn pass
+(untimed, since it runs once however many ticks were asked for) and then times each
+processing pass separately.
+
+Every measurement keeps the whole distribution — best, median, mean, p95, worst, and
+microseconds per entity — because the mean is the one number that hides a stutter.
+
+**The two assertions read different statistics, on purpose.** `expect_under` judges the
+**median**: a budget asks what the game typically does. `expect_scaling` divides the
+**fastest** samples: interference only ever adds time, so the quickest tick observed is the
+one that ran closest to undisturbed, and a ratio of two medians inherits the noise of both.
+With medians, three consecutive runs of an unchanged build gave 0.52x, 0.68x and 1.60x, and
+the third failed a check the code had not earned.
+
+### Assert on scaling, not on milliseconds
+
+**`expect_scaling` is the assertion to reach for.** How many microseconds a tick takes
+depends on the machine, the build profile and what else is running; how that time *grows
+with the crowd* barely does. Doubling the entities should about double the work, so a
+ratio near or below `1.0` is healthy, and a ratio above it means each entity is getting
+more expensive as the crowd grows — which is the shape of the failure this project is
+built around, a per-agent scan over every other agent.
+
+**How much slack depends on the cache.** A hundred entities fit in L1 and a thousand do
+not, so that pair moves by 1.3-1.8x between runs of an unchanged build and wants a slack
+near `3.0`; two crowds that are both past the cache — a thousand against four thousand —
+hold much tighter and can be held to `1.5`. Either still catches what matters, because a
+quadratic is 10x over the same range. Compare crowds an order of magnitude apart.
+
+`expect_under` is the blunt one: a **wall, not a target**. Set it several times above what
+the machine does today so it catches an order of magnitude rather than a loaded laptop,
+and put the observed number in a `note` next to it so the next reader knows what it was
+set against.
+
+### Two things that would otherwise make the numbers lies
+
+- **Vsync caps every frame at the refresh rate.** A game that takes 2ms a frame and one
+  that takes 15ms both present every 16.7ms, so `measure_frames` under vsync measures the
+  monitor and only notices a regression after the game has already dropped below 60Hz. Set
+  `"vsync": false` in any test that measures frames.
+- **A debug timing is not a speed.** This crate builds at `opt-level = 1` in debug (its
+  dependencies at 3). Debug numbers are fine for *scaling* — the ratio is what matters —
+  and useless as an answer to "how fast is it". Run `python3 tools/qa.py --release` before
+  quoting one. The profile and the vsync setting are recorded in the report for exactly
+  this reason.
+
+### What the two that exist measure
+
+`qa/perf_simulation.json` times ticks from an empty world up to 5000 actors on
+`qa/fixtures/plaza.json` (48x32, walls and pillars). `qa/perf_rendering.json` times frames
+with up to 1500 actors on screen, and photographs the crowd.
+
+Where they stood on an M3 when they were written:
+
+| | debug | release |
+| --- | --- | --- |
+| a tick, 4000 wandering humans | 0.04ms | 0.04ms |
+| a frame, 1500 drawn actors | 1.1ms | 0.9ms |
+
+Two things worth knowing from that. The tick barely moves between profiles — the wander is
+trivial enough that `opt-level = 1` already handles it, which will stop being true as soon
+as there is pathfinding, so re-measure rather than assuming. And a frame costs about 0.6ms
+before any actor exists at all: at 1500 actors the crowd is a fifth of the frame, and every
+one of them has a sprite whether or not it is on the canvas, which is the culling and
+pooling gap `game/actors.rs` documents in its own header.
 
 ## Screenshots
 

@@ -44,6 +44,7 @@
 //! Point `CROWD2X_MAPS` at a scratch directory when running these, or a test
 //! will delete maps somebody meant to keep; `tools/qa.py` does that for you.
 
+pub mod perf;
 pub mod script;
 
 use std::num::NonZero;
@@ -71,12 +72,17 @@ use crate::game::logview::LogView;
 use crate::sim::{process_pass, spawn_pass, EntityType};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
+use perf::{Measured, Measurement};
 use script::{gamepad_button, key_char, key_code, GivenMap, Script, Side, Step};
 
 const ENV_SCRIPT: &str = "CROWD2X_QA";
 /// Where screenshots go. Overridden per test by `tools/qa.py`.
 const ENV_SHOTS: &str = "CROWD2X_QA_SHOTS";
 const SHOTS_DIR: &str = "qa-screenshots";
+/// Where a performance run writes its numbers. Overridden per test by
+/// `tools/qa.py`, the same way screenshots are.
+const ENV_PERF: &str = "CROWD2X_QA_PERF";
+const PERF_DIR: &str = "qa-perf";
 
 /// Size of the maps a `given` fixture creates.
 const FIXTURE_SIZE: (i32, i32) = (8, 6);
@@ -151,7 +157,7 @@ impl Plugin for QaPlugin {
         }
 
         app.insert_resource(Run::new(script))
-            .add_systems(Startup, connect_virtual_gamepad)
+            .add_systems(Startup, (connect_virtual_gamepad, apply_present_mode))
             // After the input plugins have cleared last frame's state, so a
             // press made here is still `just_pressed` when the game reads it
             // in `Update`.
@@ -186,6 +192,64 @@ struct Run {
     /// Set once a shot has run out of retries: this window is not being
     /// presented, and every later shot in the run would fail the same way.
     shots_are_hopeless: bool,
+    /// What this run has measured, and whatever it is measuring right now.
+    perf: Perf,
+    /// Where the numbers are written when the run ends.
+    perf_path: std::path::PathBuf,
+}
+
+/// The performance half of a run.
+///
+/// A separate struct rather than three more fields on [`Run`], because it is
+/// borrowed as a unit: a step that measures something needs the report and the
+/// open window and nothing else the run holds.
+struct Perf {
+    report: perf::Report,
+    /// The frames being counted right now, if a `measure_frames` step is in
+    /// progress. Frames cannot be measured by a step that returns immediately
+    /// — the whole point is the time the app takes between them — so this is
+    /// the one step that leaves the driver in a state rather than a wait.
+    window: Option<FrameWindow>,
+}
+
+impl Perf {
+    /// Take a name for a measurement about to be made.
+    ///
+    /// Refused if the run has already used it: `expect_under` and
+    /// `expect_scaling` address measurements by name, so two of them sharing
+    /// one would silently make every assertion about the pair refer to the
+    /// first.
+    fn claim(&mut self, name: &str) -> Result<(), String> {
+        match self.report.find(name) {
+            Ok(_) => Err(format!(
+                "this run has already measured {name:?}; measurements are addressed by name, so give this one its own"
+            )),
+            Err(_) => Ok(()),
+        }
+    }
+
+    fn record(&mut self, measurement: Measurement) {
+        // Logged as it is taken as well as written out at the end: a run that
+        // fails an assertion later still leaves its numbers in the output, and
+        // `tools/qa.py` keeps every `qa:` line of a failing run.
+        info!("qa: perf {}", measurement.line());
+        self.report.push(measurement);
+    }
+}
+
+/// A `measure_frames` step in progress.
+struct FrameWindow {
+    name: String,
+    /// When the window closes, in app seconds.
+    until: f32,
+    /// How big the world was when it opened. Frames are not sampled while the
+    /// crowd changes, so one count describes the whole window.
+    entities: usize,
+    samples: Vec<f64>,
+    /// The first frame after the window opens carries the cost of the step
+    /// that opened it — and of whatever the step before it did — so it is
+    /// dropped rather than recorded as a stutter that nothing caused.
+    skip_first: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -202,6 +266,12 @@ impl Run {
         let shot_dir = std::env::var(ENV_SHOTS)
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::Path::new(SHOTS_DIR).join(script.stem()));
+        let perf_path = std::env::var(ENV_PERF)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::Path::new(PERF_DIR).join(format!("{}.json", script.stem()))
+            });
+        let report = perf::Report::new(&script.stem(), script.vsync);
         Self {
             ready_at: script.settle,
             script,
@@ -214,6 +284,11 @@ impl Run {
             shots: 0,
             retake: None,
             shots_are_hopeless: false,
+            perf: Perf {
+                report,
+                window: None,
+            },
+            perf_path,
         }
     }
 
@@ -325,6 +400,25 @@ fn connect_virtual_gamepad(
     run.pad = pad;
 }
 
+/// Turn vsync off for a script that asked for it.
+///
+/// In `Startup` rather than in the window handed to `WindowPlugin`, for the
+/// same reason `CROWD2X_WINDOW` is: the window is built before any of this
+/// crate's plugins get a say, and changing the component afterwards
+/// reconfigures the surface.
+///
+/// This only matters for a test that measures frames — see [`Script::vsync`].
+fn apply_present_mode(run: Res<Run>, mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    if run.script.vsync {
+        return;
+    }
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    window.present_mode = bevy::window::PresentMode::AutoNoVsync;
+    info!("qa: vsync off - frames are timed as the game produces them");
+}
+
 /// Everything a step might press.
 #[derive(SystemParam)]
 struct Devices<'w> {
@@ -391,6 +485,16 @@ enum Next {
     After(f32),
     /// Let go of this after that long, then carry on.
     Holding(Held, f32),
+    /// Start counting frames, under this name, for this long.
+    ///
+    /// Frames are the one thing a step cannot do and then return from: what is
+    /// being measured is the time the app takes between them, so the driver
+    /// samples every frame until the window closes.
+    Frames {
+        name: String,
+        seconds: f32,
+        entities: usize,
+    },
 }
 
 // A system takes its dependencies as parameters; the lint counts a Bevy
@@ -412,6 +516,15 @@ fn drive(
         let timeout = run.script.timeout;
         run.fail(format!("timed out after {timeout}s"));
         finish(&mut run, &mut exit);
+        return;
+    }
+
+    // A frame window is sampled before anything else: every frame while it is
+    // open belongs to the measurement, and no step may run inside one — a
+    // screenshot or a tick landing in the middle would be timed as if the game
+    // had done it.
+    if run.perf.window.is_some() {
+        sample_frame(&mut run, &time, now);
         return;
     }
 
@@ -463,17 +576,35 @@ fn drive(
         return;
     }
 
-    match perform(
+    // Read out first: `run` is a `ResMut`, so a field read and a field borrow
+    // in the same call would both go through the deref and conflict.
+    let pad = run.pad;
+    let outcome = perform(
         &step,
-        run.pad,
+        pad,
+        &mut run.perf,
         &mut devices,
         &mut intents,
         &checks,
         &mut windows,
-    ) {
+    );
+    match outcome {
         Ok(Next::Now) => run.ready_at = now + run.script.gap,
         Ok(Next::After(seconds)) => run.ready_at = now + seconds + run.script.gap,
         Ok(Next::Holding(held, seconds)) => run.holding = Some((held, now + seconds)),
+        Ok(Next::Frames {
+            name,
+            seconds,
+            entities,
+        }) => {
+            run.perf.window = Some(FrameWindow {
+                name,
+                until: now + seconds,
+                entities,
+                samples: Vec::new(),
+                skip_first: true,
+            })
+        }
         Err(message) => {
             run.fail(message);
             finish(&mut run, &mut exit);
@@ -481,9 +612,13 @@ fn drive(
     }
 }
 
+// Same reason as `drive`: these are a system's dependencies, not a call
+// site's arguments.
+#[allow(clippy::too_many_arguments)]
 fn perform(
     step: &Step,
     pad: Entity,
+    perf: &mut Perf,
     devices: &mut Devices,
     intents: &mut Intents,
     checks: &Checks,
@@ -641,18 +776,92 @@ fn perform(
         }
 
         Step::Spawn { kind, x, y } => {
-            let kind = EntityType::from_name(kind).ok_or_else(|| {
-                format!(
-                    "no entity kind called {kind:?}; this build has: {}",
-                    EntityType::ALL
-                        .map(|kind| kind.name())
-                        .join(", ")
-                )
-            })?;
+            let kind = entity_kind(kind)?;
             intents
                 .sim_input
                 .0
                 .spawn(kind, crate::map::Point::new(*x, *y));
+            Ok(Next::Now)
+        }
+
+        Step::Populate { kind, count } => {
+            let kind = entity_kind(kind)?;
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no world to populate - `populate` only means anything on the game screen".to_string())?;
+            let places = perf::spread(&standing_room(&sim.0.map), *count);
+            if places.len() < *count {
+                return Err(format!(
+                    "asked for {count} {}s, but the map has nowhere to stand",
+                    kind.name()
+                ));
+            }
+            // Queued, not applied: the same route a single `spawn` takes, so
+            // the cost of spawning a crowd is measured by the pass that really
+            // does it rather than by a shortcut into the entity table.
+            for place in places {
+                intents.sim_input.0.spawn(kind, place);
+            }
+            info!("qa: queued {count} {}s", kind.name());
+            Ok(Next::Now)
+        }
+
+        Step::Measure { name, ticks } => {
+            perf.claim(name)?;
+            if intents.sim.is_none() {
+                return Err(
+                    "there is no simulation to measure - `measure` only means anything on the game screen"
+                        .to_string(),
+                );
+            }
+            if *ticks == 0 {
+                return Err("a measurement of zero ticks measures nothing".to_string());
+            }
+            let commands = std::mem::take(&mut intents.sim_input.0);
+            let sim = intents.sim.as_deref_mut().expect("checked just above");
+            let dt = checks.fixed.timestep().as_secs_f32();
+
+            // The spawn pass first and untimed, exactly as `tick` does it: it
+            // is the pass that allocates and it runs once however many ticks
+            // were asked for, so folding it into the samples would put one
+            // enormous outlier at the front of every measurement.
+            spawn_pass(&mut sim.0, &commands);
+
+            let mut samples = Vec::with_capacity(*ticks as usize);
+            for _ in 0..*ticks {
+                let started = std::time::Instant::now();
+                process_pass(&mut sim.0, dt);
+                samples.push(started.elapsed().as_secs_f64() * 1000.0);
+            }
+            perf.record(Measurement::of(name, Measured::Tick, sim.0.len(), &samples));
+            Ok(Next::Now)
+        }
+
+        Step::MeasureFrames { name, seconds } => {
+            perf.claim(name)?;
+            if *seconds <= 0.0 {
+                return Err("a frame window has to last some time".to_string());
+            }
+            // Off the game screen this is a world of nobody, which is a
+            // legitimate thing to measure — what the interface costs on its
+            // own — and reads as such in the report.
+            let entities = intents.sim.as_deref().map_or(0, |sim| sim.0.len());
+            Ok(Next::Frames {
+                name: name.clone(),
+                seconds: *seconds,
+                entities,
+            })
+        }
+
+        Step::ExpectUnder { measure, ms } => {
+            perf::Budget { ms: *ms }.check(perf.report.find(measure)?)?;
+            Ok(Next::Now)
+        }
+
+        Step::ExpectScaling { from, to, slack } => {
+            let ratio = perf::check_scaling(perf.report.find(from)?, perf.report.find(to)?, *slack)?;
+            info!("qa: perf cost per entity grew {ratio:.2}x from {from:?} to {to:?}");
             Ok(Next::Now)
         }
 
@@ -764,6 +973,36 @@ fn perform(
     }
 }
 
+/// One frame's worth of a `measure_frames` window.
+///
+/// Timed from `Time`'s own delta rather than from a stopwatch here: that is
+/// the interval the app actually presented at, including everything Bevy did
+/// before and after this system ran, which is what a player experiences and
+/// what a stopwatch inside one system would miss half of.
+fn sample_frame(run: &mut Run, time: &Time, now: f32) {
+    let Some(window) = run.perf.window.as_mut() else {
+        return;
+    };
+    if window.skip_first {
+        window.skip_first = false;
+    } else {
+        window.samples.push(time.delta_secs_f64() * 1000.0);
+    }
+    if now < window.until {
+        return;
+    }
+
+    let window = run.perf.window.take().expect("checked just above");
+    let measurement = Measurement::of(
+        &window.name,
+        Measured::Frame,
+        window.entities,
+        &window.samples,
+    );
+    run.perf.record(measurement);
+    run.ready_at = now + run.script.gap;
+}
+
 /// Ask for a screenshot of this frame.
 ///
 /// The wait around it is the script's `shot_delay`: a capture taken before the
@@ -851,6 +1090,7 @@ fn slug(label: &str) -> String {
 /// something that only reads that.
 fn finish(run: &mut Run, exit: &mut MessageWriter<AppExit>) {
     run.finished = true;
+    write_perf_report(run);
     if run.failures.is_empty() {
         info!("qa: PASS {:?} ({} steps)", run.script.name, run.step);
         exit.write(AppExit::Success);
@@ -862,6 +1102,53 @@ fn finish(run: &mut Run, exit: &mut MessageWriter<AppExit>) {
             run.step
         );
         exit.write(AppExit::Error(NonZero::new(1).expect("1 is not zero")));
+    }
+}
+
+/// An entity kind by name, saying what this build has when it does not have
+/// the one asked for.
+fn entity_kind(name: &str) -> Result<EntityType, String> {
+    EntityType::from_name(name).ok_or_else(|| {
+        format!(
+            "no entity kind called {name:?}; this build has: {}",
+            EntityType::ALL.map(|kind| kind.name()).join(", ")
+        )
+    })
+}
+
+/// Every cell of a map an entity could stand in.
+///
+/// Read from the passability map rather than from the terrain, so a crowd goes
+/// where the simulation would let one walk and a perf test is not quietly
+/// measuring a thousand entities stuck inside a wall.
+fn standing_room(map: &Map) -> Vec<crate::map::Point> {
+    let size = map.size();
+    (0..size.height)
+        .flat_map(|y| (0..size.width).map(move |x| crate::map::Point::new(x, y)))
+        .filter(|point| map.is_passable(*point))
+        .collect()
+}
+
+/// Write out what the run measured, if it measured anything.
+///
+/// Always, pass or fail: a failing perf run's numbers are the first thing
+/// anybody looking at it wants, and a run that failed a budget is exactly the
+/// run whose distribution is worth reading. A test with no `measure` step in
+/// it writes nothing, so the directory holds perf runs and not one empty file
+/// per interface test.
+fn write_perf_report(run: &Run) {
+    if run.perf.report.is_empty() {
+        return;
+    }
+    if let Some(parent) = run.perf_path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        warn!("qa: cannot create {}: {error}", parent.display());
+        return;
+    }
+    match std::fs::write(&run.perf_path, run.perf.report.to_json()) {
+        Ok(()) => info!("qa: perf written to {}", run.perf_path.display()),
+        Err(error) => warn!("qa: cannot write {}: {error}", run.perf_path.display()),
     }
 }
 

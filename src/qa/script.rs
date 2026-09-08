@@ -19,6 +19,10 @@
 //!   field and not into the palette. They depend on layout and focus order,
 //!   which is the point.
 //!
+//! A third kind of step measures rather than checks — `populate`, `measure`,
+//! `measure_frames` — and is documented in [`crate::qa::perf`], including why
+//! the assertion to reach for is `expect_scaling` and not a duration.
+//!
 //! ```json
 //! {
 //!   "name": "create a map from the browser",
@@ -86,6 +90,16 @@ pub struct Script {
     /// pure black, which is a photograph of nothing rather than an error.
     #[serde(default = "default_shot_delay")]
     pub shot_delay: f32,
+    /// Whether the window waits for the display before presenting a frame.
+    ///
+    /// On by default, as it is in play. Turn it **off** in a test that
+    /// measures frames: with it on, an app that finishes its frame in 2ms and
+    /// one that takes 15ms both present every 16.7ms, so `measure_frames`
+    /// would be timing the monitor and would only notice a regression once the
+    /// game had already dropped below the refresh rate. Off, the number is
+    /// what the frame actually costs.
+    #[serde(default = "default_vsync")]
+    pub vsync: bool,
     pub steps: Vec<Step>,
 
     /// Where the script was read from, for naming its screenshots. Not part of
@@ -167,6 +181,10 @@ fn default_shot_delay() -> f32 {
     DEFAULT_SHOT_DELAY
 }
 
+fn default_vsync() -> bool {
+    true
+}
+
 /// One line of a test.
 ///
 /// Externally tagged, so every step is a one-key object naming what it does.
@@ -209,6 +227,62 @@ pub enum Step {
     /// however many ticks this machine managed. This one asks for exactly the
     /// number it names.
     Tick(u32),
+
+    /// Put a whole crowd in the world at once, spread over the cells that can
+    /// be stood on.
+    ///
+    /// The bulk form of [`Step::Spawn`], and it takes the same route: the
+    /// commands go on the queue the game uses and are applied by the next
+    /// `tick` or `measure`, not by being asked for. Writing out a thousand
+    /// `spawn` steps would measure the same thing; this makes the size of the
+    /// crowd a number a perf test can vary.
+    Populate {
+        /// `human` or `dog`.
+        kind: String,
+        count: usize,
+    },
+
+    /// Time this many processing passes of the simulation, and record the
+    /// result under `name`.
+    ///
+    /// The simulation on its own: no renderer, no frame, no window — one
+    /// spawn pass to apply anything pending (exactly as `tick` does) and then
+    /// `ticks` calls to `process_pass`, each timed separately.
+    ///
+    /// The recorded measurement is the deliverable, asserted on or not. See
+    /// [`Step::ExpectScaling`] for the assertion worth making about it.
+    Measure { name: String, ticks: u32 },
+
+    /// Time whole frames for this long, and record the result under `name`.
+    ///
+    /// The other half of the picture: the simulation on its fixed step, the
+    /// sprite sync, the UI and the render, measured as the player would feel
+    /// it. Wall-clock rather than a count, because a frame is the thing being
+    /// measured and asking for exactly 200 of them would take however long
+    /// they take.
+    MeasureFrames { name: String, seconds: f32 },
+
+    /// A wall under a measurement: its median sample must come in under `ms`.
+    ///
+    /// Set it several times above what the machine does today. An absolute
+    /// duration depends on the machine, the build profile and what else is
+    /// running, so a tight one fails on a loaded laptop and gets muted; this
+    /// is for catching something becoming an order of magnitude slower.
+    ExpectUnder { measure: String, ms: f64 },
+
+    /// The assertion a perf test should reach for first: growing the crowd
+    /// must not make each entity more expensive.
+    ///
+    /// `slack` is how much per-entity cost may grow between the two
+    /// measurements — `1.0` is perfectly linear, and a little above it allows
+    /// for cache pressure. Unlike a duration this barely depends on the
+    /// machine, and it is what catches the failure this project is shaped
+    /// around: a per-agent scan over every other agent.
+    ExpectScaling {
+        from: String,
+        to: String,
+        slack: f64,
+    },
     /// Put the editor cursor in the middle of a cell.
     CursorCell { x: i32, y: i32 },
     /// Put the editor cursor at a world position, in pixels.
@@ -446,6 +520,8 @@ mod tests {
         assert_eq!(script.gap, DEFAULT_GAP);
         assert_eq!(script.timeout, DEFAULT_TIMEOUT);
         assert_eq!(script.shot_delay, DEFAULT_SHOT_DELAY);
+        // The window behaves as it does in play unless a test says otherwise.
+        assert!(script.vsync);
     }
 
     #[test]
@@ -468,6 +544,33 @@ mod tests {
         .expect("valid script");
         assert_eq!(script.steps.len(), 8);
         assert!(matches!(script.steps[3], Step::Press(ref label) if label == "create"));
+    }
+
+    #[test]
+    fn a_performance_test_says_how_big_the_crowd_is_and_what_to_time() {
+        let script = Script::parse(
+            r#"{
+                "name": "perf",
+                "state": "game",
+                "steps": [
+                    { "populate": { "kind": "human", "count": 1000 } },
+                    { "measure": { "name": "1000 humans", "ticks": 200 } },
+                    { "measure_frames": { "name": "drawing 1000", "seconds": 2.0 } },
+                    { "expect_under": { "measure": "1000 humans", "ms": 8.0 } },
+                    { "expect_scaling": { "from": "100 humans", "to": "1000 humans", "slack": 1.5 } }
+                ]
+            }"#,
+        )
+        .expect("valid script");
+
+        assert!(matches!(
+            script.steps[0],
+            Step::Populate { ref kind, count: 1000 } if kind == "human"
+        ));
+        assert!(matches!(script.steps[1], Step::Measure { ticks: 200, .. }));
+        assert!(matches!(script.steps[2], Step::MeasureFrames { seconds, .. } if seconds == 2.0));
+        assert!(matches!(script.steps[3], Step::ExpectUnder { ms, .. } if ms == 8.0));
+        assert!(matches!(script.steps[4], Step::ExpectScaling { slack, .. } if slack == 1.5));
     }
 
     /// A misspelled step name has to be an error. Silently skipping one would

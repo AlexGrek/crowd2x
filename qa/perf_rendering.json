@@ -1,0 +1,60 @@
+{
+  "name": "what a crowd costs to draw",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "plaza", "file": "qa/fixtures/plaza.json" }
+    ]
+  },
+  "open": "plaza",
+  "vsync": false,
+  "settle": 2.0,
+  "timeout": 300,
+  "steps": [
+    { "note": "frames, not ticks: the sim on its fixed step, the sprite sync, the UI and the render" },
+    { "note": "an empty map first - the map's own tiles, the HUD and the pipeline" },
+    { "expect_sprites": 0 },
+    { "measure_frames": { "name": "an empty map", "seconds": 2.0 } },
+
+    { "note": "200 actors, one sprite each, spawned by the renderer as they appear" },
+    { "populate": { "kind": "human", "count": 200 } },
+    { "tick": 1 },
+    { "expect_entities": 200 },
+    { "expect_sprites": 200 },
+    { "measure_frames": { "name": "200 actors", "seconds": 2.0 } },
+    { "shot": "200 actors on the plaza" },
+
+    { "note": "a thousand: far more than fit on a 320x180 canvas, and all of them still drawn" },
+    { "populate": { "kind": "human", "count": 800 } },
+    { "tick": 1 },
+    { "expect_entities": 1000 },
+    { "expect_sprites": 1000 },
+    { "measure_frames": { "name": "1000 actors", "seconds": 2.0 } },
+    { "shot": "a thousand actors" },
+
+    { "note": "dogs draw from an atlas and step their animation every frame" },
+    { "populate": { "kind": "dog", "count": 500 } },
+    { "tick": 1 },
+    { "expect_sprites": 1500 },
+    { "measure_frames": { "name": "1000 actors and 500 dogs", "seconds": 2.0 } },
+    { "shot": "a thousand actors and five hundred dogs" },
+
+    { "note": "the frame cost per actor must not grow as the crowd does" },
+    { "expect_scaling": { "from": "200 actors", "to": "1000 actors", "slack": 1.2 } },
+
+    { "note": "and a wall: 1500 actors is a 1.1ms frame on an M3 in a debug build," },
+    { "note": "so this one also says there is still room inside a 60Hz frame" },
+    { "expect_under": { "measure": "1000 actors and 500 dogs", "ms": 8.0 } },
+
+    { "note": "zooming rebuilds the canvas; the crowd is still there afterwards" },
+    { "key": "e" },
+    { "expect_zoom": 5 },
+    { "expect_sprites": 1500 },
+    { "shot": "zoomed in on the crowd" },
+
+    { "note": "and leaving takes every one of those sprites away" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_sprites": 0 }
+  ]
+}

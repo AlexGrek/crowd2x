@@ -450,6 +450,16 @@ so in its own docs, so the gap is recorded rather than forgotten.
 
 ### Measure before optimising
 
-Add `FrameTimeDiagnosticsPlugin` and look, or build with Bevy's `trace_tracy` feature.
-Guessing which of a dozen systems is the problem is exactly how the O(n^2) query in
+**There is a harness for this**: `qa/perf_simulation.json` times processing passes from an
+empty world up to 5000 actors, and `qa/perf_rendering.json` times whole frames with up to
+1500 of them on screen. Both write their distributions to `qa-perf/<test>.json`, and both
+assert on *scaling* — cost per entity must not grow with the crowd — rather than on
+milliseconds, because that is the check the earlier prototype's O(parts x workers) loop
+would have failed and a wall-clock budget would not. Add a `measure` step to them before
+optimising anything here, and read the `qa` skill's "Performance tests" section first:
+frame numbers need `"vsync": false`, and a debug timing (`opt-level = 1`) is a ratio, not a
+speed — `python3 tools/qa.py --release` for a number worth quoting.
+
+Beyond that: add `FrameTimeDiagnosticsPlugin` and look, or build with Bevy's `trace_tracy`
+feature. Guessing which of a dozen systems is the problem is exactly how the O(n^2) query in
 the earlier prototype survived to the last commit.
