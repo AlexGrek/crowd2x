@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use rand::prelude::*;
 
-use super::{depth_for, upscale, Character, ART_SCALE};
+use super::{depth_for, snap_to_texel, upscale, Character, ART_SCALE};
 use crate::render::WORLD_LAYER;
 
 pub(super) const BASE: &str = "human/human_base.png";
@@ -71,9 +71,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Loo
     .flatten()
     .collect();
 
-    // Whole pixels only: on a fractional coordinate the upscaled texels come
-    // out uneven, some three canvas pixels wide and some four.
-    let pos = pos.round();
+    // On the art's own grid: see `characters::snap_to_texel`.
+    let pos = snap_to_texel(pos);
 
     commands
         .spawn((

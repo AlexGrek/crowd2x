@@ -43,8 +43,8 @@ use bevy::prelude::*;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
-use crate::characters::{depth_for, dog, human, ART, ART_SCALE};
-use crate::editor::CurrentMap;
+use crate::characters::{depth_for, dog, human, snap_to_texel};
+use crate::editor::{background, CurrentMap};
 use crate::sim::{self, process_game_state, EntityType, GameEntity, GameState, Input, Uid};
 use crate::state::AppState;
 
@@ -267,25 +267,18 @@ fn sync_sprites(
     }
 }
 
-/// Cell units to world pixels, on the *art* grid.
+/// Cell units to world pixels, on the art's own grid.
 ///
-/// The unit of position on screen is one texel of the source art, not one
-/// canvas pixel. Character art is [`ART`] (16) texels to a cell and is drawn
-/// at [`ART_SCALE`] (3), so a cell is 48 canvas pixels and a texel is three of
-/// them: this rounds the cell position to a multiple of 1/16 and then scales,
-/// which is the same thing as landing the sprite on a whole texel.
+/// The step on screen is one texel of the source art — a sixteenth of a cell,
+/// three canvas pixels — not one canvas pixel. Rounding to the canvas pixel
+/// instead, which is what this used to do, keeps the renderer happy but lets a
+/// character's own pixels sit a third of a texel off the grid its art is drawn
+/// on, so crossing a cell reads as being nudged between sub-positions rather
+/// than walking. [`characters::snap_to_texel`] is where that grid is defined.
 ///
-/// Rounding to the *canvas* pixel instead — which is what this used to do —
-/// puts the sprite on the pixel grid the renderer cares about, so it never
-/// stretches a texel, but it lets the character's own pixels sit one or two
-/// canvas pixels off the grid the rest of its art is drawn on. Crossing a cell
-/// then looks like the figure is being nudged between three sub-positions
-/// rather than walking, because every part of it shifts by a third of a pixel
-/// of its own art at a time. Snapping to the texel is what makes movement read
-/// as pixel art.
+/// [`characters::snap_to_texel`]: crate::characters::snap_to_texel
 fn world_pos((x, y): (f32, f32)) -> Vec2 {
-    // Cell units to texels, snapped, then texels to canvas pixels.
-    (Vec2::new(x, y) * ART as f32).round() * ART_SCALE
+    snap_to_texel(Vec2::new(x, y) * background::TILE)
 }
 
 /// A paperdoll from a simulation seed.
@@ -311,7 +304,7 @@ fn facing_of(entity: &dyn GameEntity) -> dog::Facing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::background;
+    use crate::characters::{ART, ART_SCALE};
 
     #[test]
     fn a_cell_position_becomes_whole_world_pixels() {

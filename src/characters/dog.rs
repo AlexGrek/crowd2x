@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use super::{depth_for, upscale, Character, ART, ART_SCALE};
+use super::{depth_for, snap_to_texel, upscale, Character, ART, ART_SCALE};
 use crate::animation::FrameAnimation;
 use crate::render::WORLD_LAYER;
 
@@ -55,8 +55,8 @@ pub enum Facing {
 
 /// Returns the entity it made, so a caller can keep track of it.
 pub fn spawn(commands: &mut Commands, sheets: &DogSheets, pos: Vec2, facing: Facing) -> Entity {
-    // See `human::spawn`: fractional positions break the upscaled texel grid.
-    let pos = pos.round();
+    // See `human::spawn`: positions live on the art's own pixel grid.
+    let pos = snap_to_texel(pos);
     commands
         .spawn((
             Name::new("dog"),

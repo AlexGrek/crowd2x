@@ -37,6 +37,21 @@ pub fn upscale(factor: f32) -> Vec3 {
     Vec3::new(factor, factor, 1.0)
 }
 
+/// Snap a world position onto the grid the art itself is drawn on.
+///
+/// A character's own pixel is [`ART_SCALE`] canvas pixels wide, so a sprite
+/// placed on a canvas pixel that is not a multiple of that has every one of
+/// its pixels straddling the grid its neighbours sit on. The picture is still
+/// exact — the pipeline never stretches a texel — but a figure crossing a cell
+/// looks nudged between sub-positions instead of walking. Snapping here is
+/// what makes movement read as pixel art.
+///
+/// This is the one definition of that grid: everything that turns a simulated
+/// position into a `Transform` goes through it.
+pub fn snap_to_texel(pos: Vec2) -> Vec2 {
+    (pos / ART_SCALE).round() * ART_SCALE
+}
+
 /// Pixel size of a PNG, read straight out of its IHDR.
 ///
 /// Only the tests need this, and only to check that a file on disk is the
@@ -106,6 +121,19 @@ mod tests {
                 dog::IDLE_FRAMES
             );
         }
+    }
+
+    #[test]
+    fn snapping_lands_on_a_whole_texel() {
+        // Sixteen positions to a cell, three canvas pixels apart.
+        for i in -50..50 {
+            let snapped = snap_to_texel(Vec2::splat(i as f32 * 0.7));
+            assert_eq!(snapped.x % ART_SCALE, 0.0, "{snapped:?} is off the grid");
+        }
+        // A position already on the grid is left exactly where it is, so
+        // snapping twice is the same as snapping once.
+        let on_grid = Vec2::new(ART_SCALE * 4.0, -ART_SCALE * 7.0);
+        assert_eq!(snap_to_texel(on_grid), on_grid);
     }
 
     #[test]

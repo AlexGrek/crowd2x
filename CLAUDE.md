@@ -226,7 +226,13 @@ here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the br
 - **It does not decide anything.** `actors.rs` builds a `GameState` from the open map,
   ticks it on `FixedUpdate`, and keeps one sprite alongside each entity — spawning for
   ids that appeared, despawning for ids that went, moving the rest to
-  `position * TILE`, rounded, at `characters::depth_for` so actors interleave with props.
+  `position * TILE`, snapped to the art grid, at `characters::depth_for` so actors
+  interleave with props. **A sprite is positioned in whole texels of its own art**
+  (`characters::snap_to_texel`) — a sixteenth of a cell, three canvas pixels — not in
+  whole canvas pixels. Either is exact for the pipeline, which never stretches a texel;
+  the difference is that on the canvas grid a character's pixels sit a third of a texel
+  off the grid they are drawn on, and crossing a cell reads as being nudged between
+  sub-positions rather than walking.
   Sprites are not yet culled or pooled; the `dev` skill says why that is the next thing.
 - **It does not edit anything**, so leaving is instant and there is nothing to save. The
   simulation gets a *clone* of the map, so the editor's copy cannot move under it.
