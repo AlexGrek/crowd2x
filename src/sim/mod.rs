@@ -605,7 +605,7 @@ fn move_step(
     for (slot, entity) in table.iter_slots_mut() {
         let slot = slot as usize;
         let intent = intents[slot];
-        let Intent::Move { to, .. } = intent else {
+        let Intent::Move { to } = intent else {
             moves[slot] = MoveOutcome::Idle;
             continue;
         };
@@ -804,10 +804,21 @@ mod tests {
 
         process_game_state(&mut state, 1.0 / 60.0, &input);
 
-        // Spawned *and* moved, in the one tick.
+        // Spawned this tick, and thought this tick — a wanderer's first think
+        // finds no plan yet (there has been no reaction round to make one) and
+        // asks for nothing, so it stands exactly where it landed rather than
+        // somewhere `spawn` never put it.
         assert_eq!(state.len(), 1);
-        let entity = state.entities().iter().next().expect("spawned");
-        assert_ne!(entity.position(), (5.5, 5.5));
+        let uid = state.entities().uids().next().expect("spawned");
+        assert_eq!(state.position_of(uid), Some((5.5, 5.5)));
+
+        // The reaction round that same tick planned a route (or is about to,
+        // if the first random candidate missed the map), so a following tick
+        // is the one that actually walks it.
+        for _ in 0..20 {
+            process_game_state(&mut state, 1.0 / 60.0, &Input::new());
+        }
+        assert_ne!(state.position_of(uid), Some((5.5, 5.5)));
     }
 
     #[test]
@@ -850,6 +861,34 @@ mod tests {
         let (mut a, mut b) = (build(), build());
         run(&mut a, 1000);
         run(&mut b, 1000);
+
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state
+                .entities()
+                .iter()
+                .map(|e| (e.uid().raw(), e.position()))
+                .collect()
+        };
+        assert_eq!(positions(&a), positions(&b));
+    }
+
+    #[test]
+    fn determinism_survives_crossing_into_the_parallel_rounds() {
+        // The test above stays under `PARALLEL_AT`, so it never proves think
+        // and react running on rayon instead of a plain loop still agree with
+        // themselves. This one spawns past the threshold on purpose.
+        let build = || {
+            let mut state = GameState::new(Map::new(Size::new(24, 24), FLOOR), 11);
+            for i in 0..(PARALLEL_AT as i32 + 20) {
+                state.spawn(EntityType::Human, Point::new(i % 24, (i / 24) % 24));
+            }
+            state
+        };
+        assert!(build().len() > PARALLEL_AT, "should actually cross the line");
+
+        let (mut a, mut b) = (build(), build());
+        run(&mut a, 300);
+        run(&mut b, 300);
 
         let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
             state
@@ -1051,10 +1090,7 @@ mod tests {
 
         for (uid, to) in [(left, (5.0, 4.5)), (right, (5.99, 4.5))] {
             let slot = state.entities.slot_of(uid).expect("just spawned") as usize;
-            state.intents[slot] = Intent::Move {
-                to,
-                goal: Some(contested),
-            };
+            state.intents[slot] = Intent::Move { to };
         }
 
         let GameState {

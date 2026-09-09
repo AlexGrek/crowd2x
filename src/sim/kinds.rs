@@ -68,12 +68,7 @@ use super::{Intent, MoveOutcome};
 use super::path::{self, Path};
 
 /// How far a wanderer will look for somewhere to go, in cells.
-///
-/// Wider than it was when a wanderer walked in a straight line at its goal,
-/// because it no longer has to: a route round a wall is a route, so a cell
-/// across the room is as reachable as the one next door and picking only from
-/// next door would waste the search.
-const WANDER_RADIUS: i32 = 16;
+const WANDER_RADIUS: i32 = 6;
 
 /// How many cells to try before giving up and standing still this tick.
 const WANDER_TRIES: u32 = 8;
@@ -298,6 +293,14 @@ impl Walker {
     ///
     /// That is also what makes this the parallel half: nothing it reads
     /// changes while the round runs.
+    ///
+    /// **Only a failed search pays [`REPLAN_DELAY`].** [`Walker::pick_goal`]
+    /// missing is cheap — a few random points that landed on a wall or off the
+    /// map — and it is retried the very next tick for exactly that reason. What
+    /// the delay is for is a candidate that *is* on the map and still costs a
+    /// full flood of the reachable region to rule out; charging that same
+    /// delay for an unlucky dice roll would make a wanderer stand still for
+    /// half a second on a map with plenty to walk to.
     fn plan(&mut self, ctx: &Think<'_>) {
         if let Some(left) = self.delay.checked_sub(1) {
             self.delay = left;
@@ -307,8 +310,6 @@ impl Walker {
         let here = self.body.center_position();
         let mut rng = tick_rng(self.body.uid(), ctx.tick);
         let Some(goal) = self.pick_goal(ctx, &mut rng) else {
-            // Walled in, or standing on a map with nothing walkable.
-            self.give_up();
             self.report_stuck(ctx);
             return;
         };
@@ -319,9 +320,9 @@ impl Walker {
                 self.path = Path::new(steps);
             }
             // Passable but not reachable — a room on the far side of a wall.
-            // Same answer as nowhere to go: wait a moment and pick again.
+            // This is the expensive miss, and the only one that backs off.
             _ => {
-                self.give_up();
+                self.delay = REPLAN_DELAY;
                 self.report_stuck(ctx);
             }
         }
@@ -514,14 +515,16 @@ mod tests {
     use crate::map::{Map, Size, FLOOR, WALL};
     use crate::sim::entity::cell_of;
     use crate::sim::log::Log;
+    use crate::sim::occupancy::Occupancy;
 
     fn room() -> Map {
         Map::new(Size::new(9, 9), FLOOR)
     }
 
-    fn ctx<'a>(map: &'a Map, log: &'a Log, tick: u64) -> Think<'a> {
+    fn ctx<'a>(map: &'a Map, occupancy: &'a Occupancy, log: &'a Log, tick: u64) -> Think<'a> {
         Think {
             map,
+            occupancy,
             log,
             dt: 1.0 / 60.0,
             tick,
@@ -532,13 +535,44 @@ mod tests {
         Human::new(Uid::new(EntityType::Human, 42), cell)
     }
 
+    /// Run one full tick by hand: think, apply what it asked for, react as
+    /// though the move always succeeded. Good enough for these tests, which
+    /// are about the plan and not about the crowd — `sim::mod`'s tests are
+    /// where a refused move comes from the real move step.
+    fn tick(walker: &mut Human, ctx: &Think<'_>) {
+        let intent = walker.think(ctx);
+        walker.apply(&intent);
+        walker.react(ctx, MoveOutcome::Moved);
+    }
+
     #[test]
-    fn a_wanderer_with_somewhere_to_go_moves_towards_it() {
-        let (map, log) = (room(), Log::new());
+    fn a_fresh_wanderer_has_no_plan_and_thinks_idle() {
+        let (map, occ, log) = (room(), Occupancy::new(Size::new(9, 9)), Log::new());
+        let walker = human(Point::new(4, 4));
+        assert_eq!(walker.think(&ctx(&map, &occ, &log, 0)), Intent::Idle);
+    }
+
+    #[test]
+    fn a_wanderer_plans_on_its_first_reaction_and_then_walks_the_plan() {
+        let (map, occ, log) = (room(), Occupancy::new(Size::new(9, 9)), Log::new());
         let mut walker = human(Point::new(4, 4));
         let start = walker.position();
 
-        let intent = walker.think(&ctx(&map, &log, 1));
+        // The far stage runs in react, once think has seen there is no plan
+        // yet — an idle outcome is exactly what a fresh spawn gets. Missing an
+        // in-bounds candidate is cheap and retried every tick (`plan`'s
+        // docs), so a few reactions are enough to be sure of one.
+        let mut planned = false;
+        for t in 0..20 {
+            walker.react(&ctx(&map, &occ, &log, t), MoveOutcome::Idle);
+            if walker.walk.path.current().is_some() {
+                planned = true;
+                break;
+            }
+        }
+        assert!(planned, "should have a route by now");
+
+        let intent = walker.think(&ctx(&map, &occ, &log, 1));
         walker.apply(&intent);
 
         assert_ne!(walker.position(), start);
@@ -550,40 +584,37 @@ mod tests {
         let mut map = Map::new(Size::new(3, 3), WALL);
         // One passable cell, in the middle: nowhere to go.
         map.set_terrain(Point::new(1, 1), FLOOR);
-        let log = Log::new();
+        let (occ, log) = (Occupancy::new(Size::new(3, 3)), Log::new());
 
         let mut walker = human(Point::new(1, 1));
-        for tick in 0..50 {
-            let intent = walker.think(&ctx(&map, &log, tick));
-            walker.apply(&intent);
+        for t in 0..200 {
+            tick(&mut walker, &ctx(&map, &occ, &log, t));
         }
 
         assert_eq!(walker.center_position(), Point::new(1, 1));
     }
 
-    /// A wanderer aims at a wall quite happily — it is the move step that says
-    /// no, which is why this asserts on the aim and not on the position.
-    ///
-    /// Nobody ending a tick inside a wall is a property of the whole tick, and
-    /// it is tested where it is enforced:
-    /// `sim::tests::nothing_ever_ends_a_tick_in_an_impassable_cell`. Applying
-    /// an intent by hand, as this file's tests do, is deliberately taking the
-    /// world's arbitration out of the loop.
     #[test]
-    fn a_wanderer_walks_into_a_wall_and_leaves_the_refusing_to_the_move_step() {
+    fn a_walker_that_reaches_a_wall_by_hand_gets_stopped_by_the_move_step() {
+        // This module trusts the far stage to route round a wall on its own,
+        // so the only way to see a move step refuse one here is to hand a
+        // walker a path that walks into it directly — which is what
+        // `sim::mod::nothing_ever_ends_a_tick_in_an_impassable_cell` checks
+        // for real, through the move step and not by hand.
         let mut map = room();
-        for y in 0..9 {
-            map.set_terrain(Point::new(4, y), WALL);
-        }
-        let log = Log::new();
+        map.set_terrain(Point::new(4, 4), WALL);
+        let (occ, log) = (Occupancy::new(map.size()), Log::new());
 
-        // Standing next to the wall with the only goal it can pick beyond it:
-        // a 3x3 world would do, but the wall has to be reachable in one step.
         let mut walker = human(Point::new(3, 4));
+        walker.walk.path = Path::new(vec![Point::new(4, 4)]);
+
+        // `think` only ever asks for a step this small (`MAX_STEP`), so
+        // reaching the wall takes several of them — apply each one by hand
+        // and stop as soon as an aim lands outside passable terrain.
         let mut aimed_at_the_wall = false;
-        for tick in 0..600 {
-            let intent = walker.think(&ctx(&map, &log, tick));
-            if matches!(intent, Intent::Move { to, .. } if !map.is_passable(cell_of(to))) {
+        for t in 0..600 {
+            let intent = walker.think(&ctx(&map, &occ, &log, t));
+            if matches!(intent, Intent::Move { to } if !map.is_passable(cell_of(to))) {
                 aimed_at_the_wall = true;
                 break;
             }
@@ -593,56 +624,98 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_walker_gives_up_the_goal_it_could_not_reach() {
-        // The reaction round, on its own: whatever was in the way, the plan
-        // that ran into it is dropped, and the next think picks another.
-        let (map, log) = (room(), Log::new());
+    fn a_blocked_walker_detours_round_whoever_is_in_the_way() {
+        // A straight corridor with a body parked one cell ahead: the near
+        // stage should find the way round it and keep heading for the same
+        // place, rather than dropping the plan the far stage already paid for.
+        let map = room();
+        let mut occ = Occupancy::new(map.size());
+        let blocker = Uid::new(EntityType::Human, 99);
+        occ.claim(Point::new(5, 4), blocker).unwrap();
+        let log = Log::new();
+
         let mut walker = human(Point::new(4, 4));
+        let destination = Point::new(7, 4);
+        walker.walk.path = Path::new(vec![Point::new(5, 4), Point::new(6, 4), destination]);
 
-        let intent = walker.think(&ctx(&map, &log, 1));
-        walker.apply(&intent);
-        assert!(walker.walk.goal.is_some(), "it should be heading somewhere");
+        walker.react(
+            &ctx(&map, &occ, &log, 0),
+            MoveOutcome::Blocked {
+                by: Some(blocker),
+            },
+        );
 
-        walker.react(&ctx(&map, &log, 1), MoveOutcome::Blocked { by: None });
+        assert_eq!(walker.walk.path.destination(), Some(destination));
+        assert!(
+            !walker.walk.path.remaining().contains(&Point::new(5, 4)),
+            "should not still be heading straight at the blocker"
+        );
+    }
+
+    #[test]
+    fn a_walker_alone_on_its_cell_keeps_trying_for_free() {
+        // Nothing else on the map is passable, so `pick_goal` can never find
+        // a candidate — every offset it tries is either off the map or a
+        // wall. That miss is cheap (no search ran), and `plan`'s docs say it
+        // is retried every tick rather than backed off.
+        let mut map = Map::new(Size::new(3, 3), WALL);
+        map.set_terrain(Point::new(1, 1), FLOOR);
+        let (occ, log) = (Occupancy::new(Size::new(3, 3)), Log::new());
+
+        let mut walker = human(Point::new(1, 1));
+        for t in 0..200 {
+            walker.react(&ctx(&map, &occ, &log, t), MoveOutcome::Idle);
+            assert_eq!(walker.walk.delay, 0, "tick {t}: a bare dice-roll miss should not back off");
+        }
+        assert!(walker.walk.path.is_done());
         assert_eq!(walker.walk.goal, None);
     }
 
     #[test]
-    fn a_walker_that_got_where_it_was_going_keeps_its_plan() {
-        let (map, log) = (room(), Log::new());
-        let mut walker = human(Point::new(4, 4));
+    fn a_goal_that_turns_out_walled_off_pays_the_replan_delay() {
+        // Two cells the wander radius can see, but only one is reachable:
+        // `(2, 0)` sits behind a wall with no way round on this map, so
+        // picking it is the *expensive* miss — a full flood of the reachable
+        // region before `find_path` can say no — and that is the one `plan`
+        // backs off after.
+        let mut map = Map::new(Size::new(3, 1), FLOOR);
+        map.set_terrain(Point::new(1, 0), WALL);
+        let (occ, log) = (Occupancy::new(map.size()), Log::new());
 
-        let intent = walker.think(&ctx(&map, &log, 1));
-        walker.apply(&intent);
-        let goal = walker.walk.goal;
-
-        walker.react(&ctx(&map, &log, 1), MoveOutcome::Moved);
-        assert_eq!(walker.walk.goal, goal);
+        let mut walker = human(Point::new(0, 0));
+        let paid = (0..2000).any(|t| {
+            walker.react(&ctx(&map, &occ, &log, t), MoveOutcome::Idle);
+            walker.walk.delay > 0
+        });
+        assert!(paid, "should eventually roll the unreachable candidate and back off");
     }
 
     #[test]
-    fn the_same_entity_on_the_same_tick_decides_the_same_thing() {
-        let (map, log) = (room(), Log::new());
-        let a = human(Point::new(4, 4));
-        let b = human(Point::new(4, 4));
+    fn the_same_entity_on_the_same_tick_plans_the_same_route() {
+        let (map, occ, log) = (room(), Occupancy::new(Size::new(9, 9)), Log::new());
+        let mut a = human(Point::new(4, 4));
+        let mut b = human(Point::new(4, 4));
 
-        for tick in 0..20 {
-            let one = a.think(&ctx(&map, &log, tick));
-            let two = b.think(&ctx(&map, &log, tick));
-            assert_eq!(one, two, "tick {tick}");
-        }
+        a.react(&ctx(&map, &occ, &log, 5), MoveOutcome::Idle);
+        b.react(&ctx(&map, &occ, &log, 5), MoveOutcome::Idle);
+
+        assert_eq!(a.walk.path, b.walk.path);
     }
 
     #[test]
-    fn two_entities_on_the_same_tick_do_not_decide_in_lockstep() {
+    fn two_entities_on_the_same_tick_do_not_plan_in_lockstep() {
         // Neighbouring ids sharing a tick must not get correlated streams, or
         // a crowd wanders in formation.
-        let (map, log) = (room(), Log::new());
-        let one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4));
-        let two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4));
+        let (map, occ, log) = (room(), Occupancy::new(Size::new(9, 9)), Log::new());
+        let mut one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4));
+        let mut two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4));
 
-        let differ = (0..20).any(|tick| {
-            one.think(&ctx(&map, &log, tick)) != two.think(&ctx(&map, &log, tick))
+        let differ = (0..20).any(|t| {
+            one.walk = Walker::new(one.walk.body.uid(), Point::new(4, 4), HUMAN_SPEED);
+            two.walk = Walker::new(two.walk.body.uid(), Point::new(4, 4), HUMAN_SPEED);
+            one.react(&ctx(&map, &occ, &log, t), MoveOutcome::Idle);
+            two.react(&ctx(&map, &occ, &log, t), MoveOutcome::Idle);
+            one.walk.path != two.walk.path
         });
         assert!(differ);
     }
@@ -654,13 +727,11 @@ mod tests {
 
         dog.apply(&Intent::Move {
             to: (here.0 - 1.0, here.1),
-            goal: None,
         });
         assert_eq!(dog.facing(), Some(Facing::Left));
 
         dog.apply(&Intent::Move {
             to: (here.0 + 1.0, here.1),
-            goal: None,
         });
         assert_eq!(dog.facing(), Some(Facing::Right));
     }
@@ -669,10 +740,7 @@ mod tests {
     fn a_dog_walking_straight_up_keeps_the_side_it_was_facing() {
         let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Left);
         let (x, y) = dog.position();
-        dog.apply(&Intent::Move {
-            to: (x, y + 1.0),
-            goal: None,
-        });
+        dog.apply(&Intent::Move { to: (x, y + 1.0) });
         assert_eq!(dog.facing(), Some(Facing::Left));
     }
 

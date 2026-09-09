@@ -108,7 +108,7 @@ pub trait GameEntity: Send + Sync {
     /// — rather than that consequence being encoded in the intent, which
     /// describes what an entity *wants*.
     fn apply(&mut self, intent: &Intent) {
-        if let Intent::Move { to, .. } = intent {
+        if let Intent::Move { to } = intent {
             self.body_mut().set_position(*to);
         }
     }
