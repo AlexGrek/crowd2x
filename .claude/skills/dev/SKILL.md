@@ -132,8 +132,8 @@ Layout is preserved from the earlier prototype so porting is mechanical:
 
 | Path | Contents |
 | --- | --- |
-| `assets/*.png` | sprites and strips, each at its true resolution (16px or 48px) |
-| `assets/32/` | 32px tile variants |
+| `assets/*.png` | sprites and strips, each at its true resolution — 16px, bar the exceptions below |
+| `assets/32/` | 32px tile variants: 2x upscales, kept as the source the 16px tiles were reduced from |
 | `assets/human/` | paperdoll layers: `human_base`, `clothes_*`, `eyes_*`, `hair_*` |
 | `assets/concept/` | 512px AI concept art + Pixelorama source — reference only, never loaded |
 
@@ -141,15 +141,21 @@ Rules:
 
 - **Everything is nearest-filtered.** `ImagePlugin::default_nearest()` in `main.rs` is
   load-bearing. Never set a per-image linear sampler.
-- **48x48 is the character cell** (`characters::CELL`), but most art is *drawn* at 16x16
-  (`characters::ART`) and upscaled by the game. Animation strips are horizontal:
+- **48x48 is the character cell** (`characters::CELL`), but art is *drawn* at 16x16
+  (`characters::ART`) and upscaled 3x by the game. Animation strips are horizontal:
   `dog_idle.png` is 64x16 = 4 frames.
 - **Never commit a pre-upscaled PNG.** Store the true resolution and let the game scale
   it by a whole number (`characters::upscale`, X and Y only — Z is depth). A baked-in
   upscale takes the choice away from the game and disguises 16px art as 48px art.
   `python3 tools/art_scale.py report assets` lists any file that is secretly an upscale;
   `shrink <src> <dst>` reduces one and refuses if the reduction would lose a pixel.
-  Mixed resolutions are real here: beds and walls genuinely are 48x48.
+- **16x16 is the intended resolution for everything**, and the palette is nearly there:
+  every tile but `floor` and `floor_diag` is 16x16, and of the props only the beds, the
+  toilet, `trash_can48` and `fire_static` are not. Those are the imported art that is
+  *genuinely* drawn at 48x48 — reducing them is lossy and mangles them, so they are art
+  debt waiting to be redrawn at 16x16, not a resolution the project wants to keep. Until
+  then `PaletteItem::new` exists for them and `PaletteItem::upscaled` for everything else;
+  new art should always be the latter.
 - **Paths are relative to `assets/`**: `assets.load("human/hair_blue.png")`.
 - Tiled maps (`.tmx`) were deliberately not imported — level data, not art, and the map
   format is undecided.

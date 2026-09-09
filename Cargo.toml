@@ -13,6 +13,11 @@ bevy = { version = "0.19", default-features = false, features = ["2d", "ui", "pn
 # Bevy, so naming it directly costs no compile time. See `src/sim/log.rs`.
 crossbeam-queue = "0.3"
 rand = "0.10"
+# The think and react rounds run across threads: rayon over the entity arena,
+# each thread holding one entity and writing one slot. It is the simulation's
+# executor and not Bevy's on purpose — `src/sim/` imports no bevy, and the
+# whole tick is called from a single Bevy system, so the two pools never nest.
+rayon = "1.11"
 
 # Map files are JSON. serde is already in the tree under Bevy; serde_json is
 # not — Bevy serialises scenes as ron — so this is a real addition, taken

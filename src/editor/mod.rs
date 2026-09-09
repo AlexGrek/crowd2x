@@ -63,10 +63,14 @@ const GHOST_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.55);
 
 /// One placeable entry in a layer's palette.
 ///
-/// The imported art is a mix of two resolutions — some of it is drawn at the
-/// 16x16 character size and some genuinely at 48x48 — so an entry has to say
-/// which it is. Getting it wrong is loud rather than subtle: the sprite comes
-/// out at a third of its size, or three times it.
+/// Art is drawn at [`characters::ART`] and upscaled by the game, so all but a
+/// handful of entries are [`upscaled`](Self::upscaled). The exceptions are
+/// imported props and two floors that are *genuinely* drawn at 48x48 and
+/// cannot be reduced without mangling them (`tools/art_scale.py` refuses); they
+/// are art debt to redraw at 16x16, not a second supported resolution. Until
+/// they are, an entry has to say which it is, and getting it wrong is loud
+/// rather than subtle: the sprite comes out at a third of its size, or three
+/// times it.
 pub struct PaletteItem {
     /// Shown in the HUD.
     pub name: &'static str,

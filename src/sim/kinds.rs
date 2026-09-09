@@ -1,17 +1,48 @@
 //! The entities that exist: humans and dogs.
 //!
-//! Both are wanderers for now — pick a nearby cell that can be stood on, walk
-//! to it, pick another; and when a wall or somebody else turns out to be in
-//! the way, give up on that cell and pick a different one. That is not the
+//! Both are wanderers for now — pick a cell somewhere in the neighbourhood,
+//! **find a route to it**, walk the route, pick another. That is not the
 //! simulation, it is the smallest thing that exercises every part of the tick:
 //! thinking against the map, an intent crossing from the read phase to the
 //! write phase, a move the world is allowed to refuse, and a reaction to the
 //! refusal.
 //!
-//! **The reaction really is only that.** No steering round the obstacle, no
-//! waiting for it to pass, no queueing and no path — a wanderer that stops and
-//! re-picks is honest about not having any of those yet, and each of them is a
-//! change to [`Walker::react`] and nothing else.
+//! # Two stages, and the difference between them is what they can see
+//!
+//! A wanderer no longer walks at its goal in a straight line and give up when
+//! a wall turns out to be in the way. It plans, and it plans twice:
+//!
+//! * **Far** — [`Walker::plan`], point to point over the *static* passability
+//!   map. It does not know the crowd exists. The terrain does not move, so a
+//!   route over the terrain stays true for as long as the walker takes to walk
+//!   it, and nothing this stage reads changes while the round runs — which is
+//!   what lets every walker in the world plan at the same time, on every
+//!   thread there is.
+//! * **Near** — [`Walker::detour`], on a move the world refused. The next
+//!   [`DETOUR_CELLS`] cells of the plan are thrown away and re-planned against
+//!   passability **as it is at this moment**, crowd included, ending at the
+//!   same cell they ended at. The far route past that point is untouched,
+//!   because it is still right: whatever was in the way is a body, and bodies
+//!   move.
+//!
+//! The split is the point. Planning the whole route against the crowd would
+//! make every walker's plan depend on every other walker's position — the
+//! per-agent scan over every other agent that killed the earlier prototype —
+//! and it would be wrong by the time it was walked. Planning nothing against
+//! the crowd is what a wanderer used to do, and it meant a doorway with one
+//! person in it was a wall.
+//!
+//! Neither stage searches diagonals ([`super::path`] says why), but **movement
+//! is not orthogonal**: a walker picks up the next heading as it crosses into
+//! a cell rather than at the middle of it, so it cuts corners.
+//!
+//! # Where the decisions live
+//!
+//! [`Walker::think`] does arithmetic and nothing else — it walks the plan it
+//! was given. Both stages of planning are in [`Walker::react`], for two
+//! reasons that happen to agree: a route is state, and think may not write;
+//! and the crowd is only worth planning against once the whole crowd has
+//! moved.
 //!
 //! # Nothing here knows what a human looks like
 //!
@@ -34,14 +65,51 @@ use super::entity::{Body, GameEntity, Think};
 use super::uid::{EntityType, Uid};
 use super::{Intent, MoveOutcome};
 
+use super::path::{self, Path};
+
 /// How far a wanderer will look for somewhere to go, in cells.
-const WANDER_RADIUS: i32 = 6;
+///
+/// Wider than it was when a wanderer walked in a straight line at its goal,
+/// because it no longer has to: a route round a wall is a route, so a cell
+/// across the room is as reachable as the one next door and picking only from
+/// next door would waste the search.
+const WANDER_RADIUS: i32 = 16;
 
 /// How many cells to try before giving up and standing still this tick.
 const WANDER_TRIES: u32 = 8;
 
-/// Close enough to a goal to call it arrived, in cells.
-const ARRIVED: f32 = 0.1;
+/// The far stage's budget, in cells expanded. Deliberately large: a wanderer
+/// crossing a real map should be limited by the map and not by this, and the
+/// number is here to bound the *unreachable* case rather than the long one.
+/// See [`path::PathFinder::find`].
+const FAR_LIMIT: usize = 65_536;
+
+/// How many cells of the plan the near stage throws away and replaces.
+///
+/// Five is far enough ahead to walk round somebody standing in a doorway and
+/// short enough that the detour is a local repair rather than a second full
+/// path — the far route past those five cells is still good, because whatever
+/// is in the way is a body and bodies move.
+const DETOUR_CELLS: usize = 5;
+
+/// The near stage's budget, in cells expanded. Small on purpose: this runs on
+/// a collision, collisions come in crowds, and a detour that has to search
+/// half the map is not a detour. Failing here drops the whole path and the
+/// far stage plans again next tick, which is the right answer anyway.
+const DETOUR_LIMIT: usize = 512;
+
+/// Ticks to wait before planning again, after a plan that found nothing.
+///
+/// A walker with nowhere reachable to go would otherwise pay for a search
+/// every tick forever, and the search it pays for is the expensive one: a goal
+/// it cannot reach makes A* flood everything it can. Roughly half a second, so
+/// a door opening is noticed promptly and a sealed room costs almost nothing.
+const REPLAN_DELAY: u16 = 32;
+
+/// Close enough to a cell's centre to be treated as standing on it, in cells.
+/// Only a guard against dividing by a zero distance — arriving is a matter of
+/// which cell the walker is in, not how near the middle of it it got.
+const ARRIVED: f32 = 1e-4;
 
 /// The furthest anything moves in one tick, in cells.
 ///
@@ -55,9 +123,6 @@ const ARRIVED: f32 = 0.1;
 /// a tick). It is here because `process_game_state` is public and takes
 /// whatever `dt` it is handed, and "only correct at one timestep" is not a
 /// property worth relying on.
-///
-/// It does not stop a diagonal step cutting the corner between two walls; that
-/// needs swept collision, and there is no diagonal geometry in the maps yet.
 const MAX_STEP: f32 = 0.5;
 
 /// How often a stuck entity is allowed to mention it. Roughly a second at the
@@ -76,14 +141,27 @@ pub enum Facing {
 }
 
 /// The part of an entity that walks: shared by every kind, because "has a
-/// position and somewhere it is going" is not specific to any of them.
-#[derive(Clone, Copy, Debug)]
+/// position, a route, and somewhere that route ends" is not specific to any of
+/// them.
+///
+/// Not `Copy` any more, and that is the [`Path`]: a route is a `Vec`, and one
+/// per walker is the cost of the whole feature. It is paid once per plan and
+/// not per tick — walking a path allocates nothing, and neither does being
+/// blocked on one that a detour happens to fit inside.
+#[derive(Clone, Debug)]
 pub struct Walker {
     body: Body,
-    /// Where it is heading, in cells. `None` means "decide next tick".
+    /// Where it is heading, in cells. `None` means "no plan": the far stage
+    /// picks one in the reaction round.
     goal: Option<Point>,
+    /// How to get there, cell by cell, orthogonally. Empty means the same
+    /// thing `goal: None` does, and the two are cleared together.
+    path: Path,
     /// Cells per second.
     speed: f32,
+    /// Ticks left before the far stage may try again. Non-zero only after a
+    /// plan that found nothing — see [`REPLAN_DELAY`].
+    delay: u16,
 }
 
 impl Walker {
@@ -91,55 +169,161 @@ impl Walker {
         Walker {
             body: Body::at_cell(uid, cell),
             goal: None,
+            path: Path::none(),
             speed,
+            delay: 0,
         }
     }
 
-    /// Decide where to be at the end of this tick.
+    /// **Walk the plan.** Aim at the centre of the next cell in the path, and
+    /// nothing else.
     ///
-    /// Read-only, as [`GameEntity::think`] requires: the goal it picked comes
-    /// back inside the [`Intent`] rather than being written here.
+    /// There is no decision left in here: the route was chosen in the reaction
+    /// round, by [`Walker::plan`] and [`Walker::detour`], which is where the
+    /// `&mut self` a route has to be stored through lives. What remains is
+    /// arithmetic, which is exactly the shape the read phase wants — no RNG,
+    /// no search, no branch on the crowd.
+    ///
+    /// A walker with no path stands still for this tick and gets one at the
+    /// end of it. That is a single tick at spawn and never again.
     fn think(&self, ctx: &Think<'_>) -> Intent {
-        // Somewhere to go, either the standing order or a fresh one. The RNG
-        // is built inside the second arm rather than above the match: an
-        // entity that already has a goal needs no randomness, and that is the
-        // common case by a wide margin — seeding one per entity per tick to
-        // then not use it is the sort of waste that only shows up at ten
-        // thousand of them.
-        let goal = match self.goal {
-            Some(goal) if ctx.is_passable(goal) => goal,
-            _ => {
-                let mut rng = tick_rng(self.body.uid(), ctx.tick);
-                match self.pick_goal(ctx, &mut rng) {
-                    Some(goal) => goal,
-                    // Walled in, or standing on a map with nothing walkable.
-                    None => {
-                        self.report_stuck(ctx);
-                        return Intent::Idle;
-                    }
-                }
-            }
+        let Some(step) = self.path.current() else {
+            return Intent::Idle;
         };
 
         let (x, y) = self.body.position();
-        let (gx, gy) = (goal.x as f32 + 0.5, goal.y as f32 + 0.5);
-        let (dx, dy) = (gx - x, gy - y);
+        let (tx, ty) = (step.x as f32 + 0.5, step.y as f32 + 0.5);
+        let (dx, dy) = (tx - x, ty - y);
         let distance = (dx * dx + dy * dy).sqrt();
-
         if distance <= ARRIVED {
-            // Arrived: stop on the spot and choose again next tick.
-            return Intent::Move {
-                to: (gx, gy),
-                goal: None,
-            };
+            return Intent::Idle;
         }
 
         let step = (self.speed * ctx.dt).min(distance).min(MAX_STEP);
-        let to = (x + dx / distance * step, y + dy / distance * step);
-
         Intent::Move {
-            to,
-            goal: Some(goal),
+            to: (x + dx / distance * step, y + dy / distance * step),
+        }
+    }
+
+    /// Take the step the world granted, and tick the path along if it landed
+    /// in the cell it was heading for.
+    ///
+    /// Advancing on **entering** the cell rather than on reaching its centre
+    /// is what makes a corner read as a turn instead of a stop: the next
+    /// heading is picked up at the boundary, so the walked line cuts the
+    /// corner diagonally. `path.rs` says why that can never skip a cell.
+    fn apply(&mut self, intent: &Intent) {
+        let Intent::Move { to } = intent else {
+            return;
+        };
+        self.body.set_position(*to);
+        if self.path.current() == Some(self.body.center_position()) {
+            self.path.advance();
+        }
+    }
+
+    /// **The reaction round: repair the plan, or make one.**
+    ///
+    /// Both stages of pathfinding are here, and they are here rather than in
+    /// [`Walker::think`] for two separate reasons that happen to agree:
+    ///
+    /// * A route is state, and think may not write. React is the round that
+    ///   may write to `self` and only to `self`.
+    /// * The near stage plans against the crowd, and the only moment the crowd
+    ///   is worth planning against is *after* everyone has moved. Deciding a
+    ///   detour inside the move loop would route round entities that have not
+    ///   taken their step yet.
+    ///
+    /// The two run in that order on purpose: a detour that fails clears the
+    /// path, and a cleared path is what the far stage plans for, so a walker
+    /// that is thoroughly stuck recovers in one tick rather than two.
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
+        if outcome.is_blocked() {
+            self.detour(ctx);
+        }
+        if self.path.is_done() {
+            self.plan(ctx);
+        }
+    }
+
+    /// **The near stage.** Something was in the way: throw away the next few
+    /// cells of the plan and find another way to where they ended.
+    ///
+    /// [`DETOUR_CELLS`] of the route go, or all of what is left if it is
+    /// shorter, and the last of them is the target — so the rest of the far
+    /// route past that point survives untouched. It is the crowd this is
+    /// planned against as well as the terrain, which is the whole difference
+    /// from the far stage and the reason it can find a way round a body the
+    /// far stage cannot see.
+    ///
+    /// The target cell itself is allowed to be occupied. Refusing it would
+    /// make a walker whose next-but-four cell happens to have somebody in it
+    /// throw away a good route; letting it stand means the walker gets there,
+    /// is blocked, and detours again — by which time whoever it was has
+    /// probably moved.
+    ///
+    /// No detour means no local way round, so the plan goes and the far stage
+    /// takes over. That is the honest answer: waiting for a gap needs a reason
+    /// to believe one is coming, and a wanderer has nowhere it needs to be.
+    fn detour(&mut self, ctx: &Think<'_>) {
+        let remaining = self.path.remaining();
+        if remaining.is_empty() {
+            return;
+        }
+        let cells = remaining.len().min(DETOUR_CELLS);
+        let target = remaining[cells - 1];
+
+        let uid = self.body.uid();
+        let here = self.body.center_position();
+        let detour = path::find_path(here, target, DETOUR_LIMIT, |cell| {
+            ctx.is_passable(cell) && (cell == target || ctx.occupancy.is_free_for(cell, uid))
+        });
+
+        match detour {
+            Some(detour) => self.path.splice(cells, detour),
+            None => self.give_up(),
+        }
+    }
+
+    /// **The far stage.** Pick somewhere to go and find the way there, over
+    /// the static passability map and nothing else.
+    ///
+    /// The crowd is deliberately not consulted. A route planned round every
+    /// body standing in the way at this instant is a route that is wrong by
+    /// the time it is walked, and it would make every walker's plan depend on
+    /// every other walker's position — which is the per-agent scan over every
+    /// other agent that killed the earlier prototype. The terrain does not
+    /// move, so a route over the terrain stays true, and bodies are the near
+    /// stage's problem.
+    ///
+    /// That is also what makes this the parallel half: nothing it reads
+    /// changes while the round runs.
+    fn plan(&mut self, ctx: &Think<'_>) {
+        if let Some(left) = self.delay.checked_sub(1) {
+            self.delay = left;
+            return;
+        }
+
+        let here = self.body.center_position();
+        let mut rng = tick_rng(self.body.uid(), ctx.tick);
+        let Some(goal) = self.pick_goal(ctx, &mut rng) else {
+            // Walled in, or standing on a map with nothing walkable.
+            self.give_up();
+            self.report_stuck(ctx);
+            return;
+        };
+
+        match path::find_path(here, goal, FAR_LIMIT, |cell| ctx.is_passable(cell)) {
+            Some(steps) if !steps.is_empty() => {
+                self.goal = Some(goal);
+                self.path = Path::new(steps);
+            }
+            // Passable but not reachable — a room on the far side of a wall.
+            // Same answer as nowhere to go: wait a moment and pick again.
+            _ => {
+                self.give_up();
+                self.report_stuck(ctx);
+            }
         }
     }
 
@@ -148,7 +332,8 @@ impl Walker {
     ///
     /// Bounded tries rather than a scan: this runs per idle entity per tick,
     /// and a bounded miss costs one wasted tick while a scan of the
-    /// neighbourhood would cost the frame.
+    /// neighbourhood would cost the frame. Reachability is not checked here
+    /// and cannot cheaply be — that is what the search that follows is for.
     fn pick_goal(&self, ctx: &Think<'_>, rng: &mut SmallRng) -> Option<Point> {
         let here = self.body.center_position();
         for _ in 0..WANDER_TRIES {
@@ -163,43 +348,27 @@ impl Walker {
         None
     }
 
+    /// Drop the plan and wait [`REPLAN_DELAY`] ticks before making another.
+    ///
+    /// The delay is the whole point: without it a walker with nowhere to go
+    /// pays for a full flood of everything it can reach, every tick, forever,
+    /// and a crowd of them is a frame-rate cliff that only appears on maps
+    /// with a sealed room in them.
+    fn give_up(&mut self) {
+        self.goal = None;
+        self.path.clear();
+        self.delay = REPLAN_DELAY;
+    }
+
     /// Say so when there is nowhere to go, at most once a second.
     ///
-    /// This is the only thing written from the think phase, and it is here to
-    /// be exactly that: a `&Log` shared by every thinking entity, appended to
-    /// without a lock. Rate-limited on the tick rather than on a stored
-    /// counter because think may not mutate — and unlimited it would be one
-    /// line per stuck entity per tick, which is how a log becomes noise.
+    /// Rate-limited on the tick rather than on a stored counter so that a
+    /// crowd of stuck walkers does not turn the log into one line each per
+    /// tick, which is how a log becomes noise.
     fn report_stuck(&self, ctx: &Think<'_>) {
         if ctx.tick.is_multiple_of(STUCK_LOG_TICKS) {
             ctx.log
                 .push(format!("{} has nowhere to go", self.body.uid()));
-        }
-    }
-
-    fn apply(&mut self, intent: &Intent) {
-        if let Intent::Move { to, goal } = intent {
-            self.body.set_position(*to);
-            self.goal = *goal;
-        }
-    }
-
-    /// Answer a refused move by giving the goal up.
-    ///
-    /// Whatever was in the way — a wall, or another walker — this walker has
-    /// no way round it, so the cell it was heading for is no longer worth
-    /// heading for. Dropping the goal is what makes the next think pick a
-    /// fresh one; deciding here instead would be picking a target in the same
-    /// tick the last one failed, which is the same thing one tick earlier and
-    /// costs a second RNG stream to say it.
-    ///
-    /// [`MoveOutcome::Blocked`] carries the obstacle's id and this ignores it.
-    /// That is the honest shape of "no steering yet": knowing *who* is in the
-    /// way only pays off once there is something to do about them, and the id
-    /// is in the outcome so that step is a change here and nowhere else.
-    fn react(&mut self, outcome: MoveOutcome) {
-        if outcome.is_blocked() {
-            self.goal = None;
         }
     }
 }
@@ -257,8 +426,8 @@ impl GameEntity for Human {
         self.walk.apply(intent);
     }
 
-    fn react(&mut self, _ctx: &Think<'_>, outcome: MoveOutcome) {
-        self.walk.react(outcome);
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
+        self.walk.react(ctx, outcome);
     }
 }
 
@@ -300,8 +469,8 @@ impl GameEntity for Dog {
     /// Derived here rather than sent in the intent because it is a consequence
     /// of moving, not a decision: an intent describes what an entity wants,
     /// and no dog wants to face left.
-    fn react(&mut self, _ctx: &Think<'_>, outcome: MoveOutcome) {
-        self.walk.react(outcome);
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
+        self.walk.react(ctx, outcome);
     }
 
     fn apply(&mut self, intent: &Intent) {

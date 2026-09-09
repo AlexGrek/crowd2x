@@ -183,6 +183,13 @@ pub trait GameEntity: Send + Sync {
 /// — does not change every `think` signature in the game.
 pub struct Think<'a> {
     pub map: &'a crate::map::Map,
+    /// Who is standing where. **What this says depends on when it is read**,
+    /// and the two rounds read it at different moments on purpose: think sees
+    /// the crowd as it ended the previous tick, react sees it as it ended
+    /// this one. The near stage of pathfinding wants the second, which is why
+    /// it is a reaction and not a decision — see
+    /// [`crate::sim::kinds::Walker`].
+    pub occupancy: &'a super::occupancy::Occupancy,
     pub log: &'a super::log::Log,
     /// Seconds since the previous tick.
     pub dt: f32,
@@ -192,9 +199,20 @@ pub struct Think<'a> {
 }
 
 impl Think<'_> {
-    /// Whether an entity could stand in `cell`.
+    /// Whether the *terrain* would let an entity stand in `cell`. The static
+    /// half, and the only half the far stage of a path is planned against.
     pub fn is_passable(&self, cell: Point) -> bool {
         self.map.is_passable(cell)
+    }
+
+    /// Whether `uid` could stand in `cell` **right now**: passable terrain,
+    /// and nobody else already there.
+    ///
+    /// Both layers, in the order the move step asks them in. This is what the
+    /// near stage plans against, and it is only meaningful for the moment it
+    /// is asked — the crowd moves.
+    pub fn is_clear_for(&self, cell: Point, uid: Uid) -> bool {
+        self.is_passable(cell) && self.occupancy.is_free_for(cell, uid)
     }
 }
 

@@ -108,9 +108,14 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
   (`characters::upscale`) — Z carries painter's depth. `tools/art_scale.py report assets`
   finds files that are secretly an upscale, `shrink` reduces one (refusing if lossy), and
   three tests fail if character art or a palette entry stops matching its declared size.
-- The imported art is a genuine mix: character art, some floors and the crate are 16x16,
-  while beds, walls and most floors really are drawn at 48x48. That is why a palette entry
-  has to declare which it is.
+- **16x16 is the resolution everything is meant to be at**, and the engine does the
+  upscaling. The palette is nearly there: of the tiles only `floor` and `floor diagonal`
+  are not, and of the props only the beds, the toilet, the trash can and the fire. Those
+  are the imported art that is *genuinely* drawn at 48x48 — `tools/art_scale.py` refuses
+  to reduce them because it would be lossy, and it visibly is: the beds lose their frames
+  and the toilet stops being recognisable. They are art debt to redraw at 16x16, not a
+  second supported resolution, and until then a palette entry has to declare which it is.
+  New art is always 16x16 and always `PaletteItem::upscaled`.
 - `depth_for(y)` gives painter's-order depth from world Y (lower on screen = drawn in
   front); per-character layer offsets are small enough that one character's layers can
   never interleave with another's.

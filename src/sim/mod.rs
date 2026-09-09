@@ -126,10 +126,12 @@ pub mod entity;
 pub mod kinds;
 pub mod log;
 pub mod occupancy;
+pub mod path;
 pub mod uid;
 
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
+use rayon::prelude::*;
 
 use crate::map::{Map, Point};
 
@@ -138,6 +140,7 @@ pub use entity::{cell_of, Body, GameEntity, Think};
 pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
+pub use path::{find_path, Path, PathFinder};
 pub use uid::{EntityType, Uid};
 
 /// What an entity decided to do this tick.
@@ -151,15 +154,13 @@ pub enum Intent {
     /// Do nothing. Also what an entity with nowhere to go returns.
     #[default]
     Idle,
-    /// Be here at the end of the tick, and hold this goal afterwards.
+    /// Be here at the end of the tick.
     ///
-    /// The goal rides along because [`GameEntity::think`] cannot write it: an
-    /// entity that picks somewhere new to walk has to say so through the one
-    /// channel the read phase is allowed to use.
-    Move {
-        to: (f32, f32),
-        goal: Option<Point>,
-    },
+    /// A position and nothing else. Where the entity is *heading* used to ride
+    /// along here, because think picks a goal and think may not write — but a
+    /// route is chosen in the reaction round now, which may, so an intent is
+    /// back to being one request about one tick.
+    Move { to: (f32, f32) },
 }
 
 /// What became of an [`Intent`] once the world had its say.
@@ -509,10 +510,12 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         table.capacity()
     );
 
+    // The crowd as it ended the previous tick.
     think_step(
         &table,
         &Think {
             map,
+            occupancy,
             log,
             dt,
             tick: *tick,
@@ -522,10 +525,13 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
 
     move_step(&mut table, map, occupancy, intents, moves);
 
+    // ...and as it ends this one, which is the layer a detour is worth
+    // planning against. Same struct, deliberately different moment.
     react_step(
         &mut table,
         &Think {
             map,
+            occupancy,
             log,
             dt,
             tick: *tick,
@@ -534,15 +540,40 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     );
 }
 
-/// **Step 1: everybody decides.** Read-only, and shaped to be run in parallel.
+/// Live entities below which the rounds that could run in parallel do not
+/// bother.
+///
+/// Handing eight entities to a thread pool costs more than thinking for them,
+/// and every test in this crate and most of the QA suite runs worlds that
+/// size. The answer is identical either side of the line — the parallel rounds
+/// write one slot each and read nothing that changes — so this is a choice
+/// about overhead and never about behaviour.
+const PARALLEL_AT: usize = 64;
+
+/// **Step 1: everybody decides.** Read-only, and run across threads.
 ///
 /// Nothing is written but the intent buffer, and each entity writes only its
-/// own slot — so this loop becomes a `par_iter` over `(slot, entity)` pairs
-/// without changing shape. Keep it that way.
+/// own slot, so the arena and the buffer are zipped index for index and handed
+/// to rayon: two threads never touch the same `Intent` and nothing they read
+/// changes while they read it. Keep it that way — an entity that wants to see
+/// what another entity decided this tick is asking for the one thing this
+/// shape cannot give.
 fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent]) {
-    for (slot, entity) in table.iter_slots() {
-        intents[slot as usize] = entity.think(ctx);
+    let intents = &mut intents[..table.capacity()];
+    if table.len() < PARALLEL_AT {
+        for (slot, entity) in table.iter_slots() {
+            intents[slot as usize] = entity.think(ctx);
+        }
+        return;
     }
+    intents
+        .par_iter_mut()
+        .zip(table.par_iter_slots())
+        .for_each(|(intent, entity)| {
+            if let Some(entity) = entity {
+                *intent = entity.think(ctx);
+            }
+        });
 }
 
 /// **Step 2: everybody moves, one at a time, and the world may say no.**
@@ -617,13 +648,30 @@ fn move_step(
 /// separate channel. The default [`GameEntity::react`] does nothing, so a kind
 /// with no plan pays a call and no more.
 ///
-/// Each entity writes only to itself, so this parallelises the same way think
-/// does — it is written as a `&mut` walk of the table for exactly that reason,
-/// rather than as a second intent buffer nobody would read.
+/// Each entity writes only to itself, so this runs across threads the same way
+/// think does — a `&mut` walk of the table rather than a second intent buffer
+/// nobody would read, and rayon over disjoint slots above [`PARALLEL_AT`].
+///
+/// **This is where pathfinding happens**, and it is the round that most wants
+/// the threads: a far route is a search over the map, one walker's search
+/// shares nothing with another's, and a crowd that has all arrived at once
+/// wants all of them planned at once. See [`kinds::Walker`].
 fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome]) {
-    for (slot, entity) in table.iter_slots_mut() {
-        entity.react(ctx, moves[slot as usize]);
+    let moves = &moves[..table.capacity()];
+    if table.len() < PARALLEL_AT {
+        for (slot, entity) in table.iter_slots_mut() {
+            entity.react(ctx, moves[slot as usize]);
+        }
+        return;
     }
+    table
+        .par_iter_slots_mut()
+        .zip(moves.par_iter())
+        .for_each(|(entity, outcome)| {
+            if let Some(entity) = entity {
+                entity.react(ctx, *outcome);
+            }
+        });
 }
 
 #[cfg(test)]

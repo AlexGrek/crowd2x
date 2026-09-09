@@ -27,7 +27,7 @@ different rules:
 
 | | Background | Props |
 | --- | --- | --- |
-| Placement | snapped to a 48px grid, one tile per cell | free, at the cursor |
+| Placement | snapped to the 48px cell grid, one tile per cell | free, at the cursor |
 | Depth | a single depth behind everything | `depth_for(y)`, same as characters |
 | Painting | drag to fill | one click, one prop |
 | Erasing | right-click the cell | right-click the nearest prop |
@@ -108,12 +108,18 @@ window, so `Interaction` would never fire on the world camera, which renders to 
 
 Whatever has been painted in the editor, plus the actors the simulation says exist.
 
-- **Humans** (`src/characters/human.rs`) are a layered paperdoll: a 48x48 body
+- **Humans** (`src/characters/human.rs`) are a layered paperdoll: a 16x16 body
   with eyes, clothes and hair stacked on top as child sprites. New outfits are
   a PNG in `assets/human/` plus one line in the relevant array.
-- **Dogs** (`src/characters/dog.rs`) use a 4-frame idle atlas, with a separate
-  mirrored sheet for facing left rather than `flip_x`, so left-facing art can be
-  hand-tuned later.
+- **Dogs** (`src/characters/dog.rs`) use a 4-frame idle atlas of 16x16 frames, with a
+  separate mirrored sheet for facing left rather than `flip_x`, so left-facing art can
+  be hand-tuned later.
+
+Art is drawn at 16x16 and the game upscales it by a whole number — `characters::ART` is
+16, `characters::CELL` is the 48-canvas-pixel cell it fills, and `ART_SCALE` is the 3
+between them. A PNG is never stored pre-upscaled, so the scale stays the game's to choose.
+A handful of imported props and two floors are still genuinely drawn at 48x48; they are
+art debt to redraw, not a second supported resolution.
 
 Depth is painter's order by world Y (`characters::depth_for`), so characters
 lower on screen draw in front. Layer offsets within one character are small
@@ -133,8 +139,8 @@ Imported wholesale from an earlier prototype, with the original layout preserved
 
 | Path | Contents |
 | --- | --- |
-| `assets/*.png` | 48px sprites and sheets (characters, props, tiles) |
-| `assets/32/` | 32px tile variants |
+| `assets/*.png` | 16px sprites and sheets (characters, props, tiles); a few unreduced 48px props |
+| `assets/32/` | 32px tile variants — the 2x source the 16px tiles were reduced from |
 | `assets/human/` | paperdoll layers (`human_base`, `clothes_*`, `eyes_*`, `hair_*`) |
 | `assets/concept/` | 512px AI concept art and the Pixelorama source file — reference only, not loaded |
 

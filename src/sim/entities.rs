@@ -27,6 +27,8 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
+use rayon::prelude::*;
+
 use super::entity::GameEntity;
 use super::uid::Uid;
 
@@ -160,6 +162,32 @@ impl Entities {
             .filter_map(|(index, slot)| Some((index as Slot, &mut **slot.as_mut()?)))
     }
 
+    /// The arena as a parallel iterator, **holes included**: item `i` is the
+    /// entity in slot `i`, or `None`.
+    ///
+    /// Indexed, and that is what it is for — the caller zips it with a
+    /// slot-indexed buffer and gets a guarantee from the type system that the
+    /// two are lined up. The alternative, filtering the holes out first, is
+    /// not indexed, so a slot number would have to be carried alongside and
+    /// the buffer indexed by hand from several threads at once.
+    pub fn par_iter_slots(
+        &self,
+    ) -> impl IndexedParallelIterator<Item = Option<&(dyn GameEntity + 'static)>> {
+        self.slots.par_iter().map(|slot| slot.as_deref())
+    }
+
+    /// [`Entities::par_iter_slots`], mutably.
+    ///
+    /// Each item is a distinct entity, so a thread that has one cannot reach
+    /// another — which is the whole of what makes the think and react rounds
+    /// safe to run in parallel. `Box<dyn GameEntity>` is `Send + Sync` because
+    /// [`GameEntity`] says so.
+    pub fn par_iter_slots_mut(
+        &mut self,
+    ) -> impl IndexedParallelIterator<Item = Option<&mut (dyn GameEntity + 'static)>> {
+        self.slots.par_iter_mut().map(|slot| slot.as_deref_mut())
+    }
+
     /// Every live id, in slot order.
     pub fn uids(&self) -> impl Iterator<Item = Uid> + '_ {
         self.iter().map(|entity| entity.uid())
@@ -210,6 +238,15 @@ impl FrozenEntities<'_> {
         &mut self,
     ) -> impl Iterator<Item = (Slot, &mut (dyn GameEntity + 'static))> {
         self.0.iter_slots_mut()
+    }
+
+    /// [`Entities::par_iter_slots_mut`]. See [`react_step`] for what walks it.
+    ///
+    /// [`react_step`]: super::react_step
+    pub fn par_iter_slots_mut(
+        &mut self,
+    ) -> impl IndexedParallelIterator<Item = Option<&mut (dyn GameEntity + 'static)>> {
+        self.0.par_iter_slots_mut()
     }
 
     pub fn get_mut(&mut self, uid: Uid) -> Option<&mut (dyn GameEntity + 'static)> {

@@ -26,8 +26,9 @@ use crate::map::{Map, Point, TerrainId, VOID};
 use crate::render::WORLD_LAYER;
 use crate::state::AppState;
 
-/// Tiles are laid out on the character cell grid. The art is not all drawn at
-/// that size — each palette entry carries the scale that gets it there.
+/// Tiles are laid out on the character cell grid. The art is drawn at 16x16 and
+/// upscaled to fill it — each palette entry carries the scale that gets it
+/// there, since a few imported tiles are still stored at the full cell size.
 pub const TILE: f32 = CELL as f32;
 
 /// Depth of every background tile. `characters::depth_for` is `-y * 0.01`, so
@@ -41,18 +42,18 @@ const BACKGROUND_Z: f32 = -100.0;
 pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::new("floor", "floor.png"),
     PaletteItem::upscaled("floor white", "floor_white.png"),
-    PaletteItem::new("floor red", "floor_red.png"),
-    PaletteItem::new("floor colorful", "floor_colorful.png"),
+    PaletteItem::upscaled("floor red", "floor_red.png"),
+    PaletteItem::upscaled("floor colorful", "floor_colorful.png"),
     PaletteItem::new("floor diagonal", "floor_diag.png"),
     PaletteItem::upscaled("tiles blue", "floor_tiles_blue.png"),
     PaletteItem::upscaled("tiles yellow", "floor_tiles_yellow.png"),
     PaletteItem::upscaled("wood", "wood.png"),
-    PaletteItem::new("wood cracked", "wood_crack.png"),
-    PaletteItem::new("wall brown", "wall_brown.png"),
-    PaletteItem::new("wall brown big", "wall_brown_big.png"),
-    PaletteItem::new("wall purple", "wall_purple.png"),
-    PaletteItem::new("wall red", "wall_red.png"),
-    PaletteItem::new("block", "block.png"),
+    PaletteItem::upscaled("wood cracked", "wood_crack.png"),
+    PaletteItem::upscaled("wall brown", "wall_brown.png"),
+    PaletteItem::upscaled("wall brown big", "wall_brown_big.png"),
+    PaletteItem::upscaled("wall purple", "wall_purple.png"),
+    PaletteItem::upscaled("wall red", "wall_red.png"),
+    PaletteItem::upscaled("block", "block.png"),
 ];
 
 #[derive(Component)]

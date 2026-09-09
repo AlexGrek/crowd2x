@@ -1,6 +1,7 @@
 //! Character rendering: the only thing drawn into the world canvas for now.
 //!
-//! Two kinds exist, both on a 48x48 sprite grid:
+//! Both kinds are drawn at 16x16 and upscaled 3x into a 48x48 cell of the
+//! canvas, which is the rule for all art here:
 //!   * humans - a layered paperdoll (body, clothes, eyes, hair)
 //!   * dogs   - a single 4-frame idle animation with a mirrored left-facing sheet
 

@@ -130,8 +130,8 @@ Sanity checks worth making on a captured frame:
 
 - Characters visible at all? If the canvas is the flat clear colour, assets failed to
   load (check `ERROR` lines) or nothing is on `WORLD_LAYER`.
-- Paperdoll layers aligned? Hair, eyes and clothes are separate 48x48 sprites that must
-  sit exactly on the body.
+- Paperdoll layers aligned? Hair, eyes and clothes are separate 16x16 sprites, upscaled
+  3x with the body on the shared root, that must sit exactly on it.
 - Edges crisp? Blurred edges mean something reintroduced filtering — most likely a lost
   `ImagePlugin::default_nearest()` or a sprite scaled by a non-integer.
 - Layering right? Characters lower on screen draw in front; a character's own layers
