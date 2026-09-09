@@ -1,0 +1,52 @@
+{
+  "name": "the spawn menu: opened from the corner, and what it can put in the world",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "expect_entities": 0 },
+
+    { "note": "the corner's spawn button opens a menu of what can be spawned" },
+    { "press": "spawn" },
+    { "expect_focus": "human" },
+    { "shot": "the spawn menu open" },
+
+    { "note": "escape closes the menu rather than leaving the game" },
+    { "key": "esc" },
+    { "expect_state": "game" },
+    { "expect_entities": 0 },
+
+    { "note": "picking a kind queues it, applied on the next tick exactly as `spawn` does" },
+    { "press": "spawn" },
+    { "press": "human" },
+    { "expect_state": "game" },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "expect_log": "spawned human" },
+    { "shot": "a human appeared" },
+
+    { "note": "the menu closes itself once something is chosen, so it can be opened again" },
+    { "press": "spawn" },
+    { "press": "dog" },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+    { "expect_sprites": 2 },
+    { "expect_log": "spawned dog" },
+
+    { "note": "close backs out without adding anything" },
+    { "press": "spawn" },
+    { "press": "close" },
+    { "expect_state": "game" },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+
+    { "note": "with the menu closed, escape leaves the game again" },
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

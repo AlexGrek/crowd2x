@@ -50,7 +50,7 @@ use bevy::window::PrimaryWindow;
 use crate::editor::{background, draw_map, map_centre, CurrentMap};
 use crate::render::{half_view, CameraPan, CameraTarget, PixelZoom, PIXEL_SCALE, WorldCamera};
 use crate::state::AppState;
-use crate::ui::nav::NavSystems;
+use crate::ui::nav::{NavSystems, Scope};
 
 /// Camera speed at the default zoom, in canvas pixels per second.
 ///
@@ -237,20 +237,32 @@ fn change_zoom(
     }
 }
 
-/// Back to the browser, which is where another map is chosen.
+/// Back to the browser, which is where another map is chosen — or, if the
+/// spawn menu is open, back to the game: escape closes a dialog before it
+/// closes the screen it is over, exactly as it does in the browser.
 ///
 /// Read from the devices rather than from `Cancelled`, because `B` is the
-/// zoom-out button on this screen and nav writes a cancel for it.
+/// zoom-out button on this screen and nav writes a cancel for it, and because
+/// this is the one system that gets to decide which of the two escape does —
+/// splitting that across two systems reading the same press is a race.
 fn leave(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    mut menu: ResMut<hud::SpawnMenu>,
+    mut scope: ResMut<Scope>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let asked = keys.just_pressed(KeyCode::Escape)
         || gamepads.iter().any(|pad| {
             pad.just_pressed(GamepadButton::Start) || pad.just_pressed(GamepadButton::Select)
         });
-    if asked {
+    if !asked {
+        return;
+    }
+    if menu.0.is_some() {
+        hud::close_spawn_menu(&mut commands, &mut menu, &mut scope);
+    } else {
         next.set(AppState::Maps);
     }
 }

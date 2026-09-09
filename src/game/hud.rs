@@ -38,18 +38,26 @@
 
 use bevy::prelude::*;
 
-use crate::editor::CurrentMap;
-use crate::render::PixelZoom;
+use crate::editor::{background, CurrentMap};
+use crate::map::{Map, Point};
+use crate::render::{CameraPan, PixelZoom, WorldCamera};
+use crate::sim::EntityType;
 use crate::state::AppState;
-use crate::ui::nav::{Activated, NavSystems};
+use crate::ui::keyboard::MODAL_Z;
+use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
 use crate::ui::{
-    label, labelled_button, plain_button, FIELD, FONT_BODY, HIGHLIGHT_SOLID, PANEL, TEXT,
-    TEXT_ACCENT, TEXT_DIM,
+    button, label, labelled_button, plain_button, FIELD, FONT_BODY, FONT_TITLE, HIGHLIGHT_SOLID,
+    MODAL, PANEL, TEXT, TEXT_ACCENT, TEXT_DIM,
 };
 
-use super::actors::Sim;
+use super::actors::{Sim, SimInput};
 use super::logview;
 use super::speed::{self, Change, GameSpeed};
+
+/// The focus layer the spawn menu occupies while it is open, so the corner
+/// buttons and the map behind it stop being reachable by keyboard or gamepad —
+/// exactly what [`Scope`] is for everywhere else it is used.
+const SPAWN_MENU: u8 = 1;
 
 /// Every control has a key and a gamepad button of its own, since the
 /// highlight the rest of the game navigates with cannot live on this screen.
@@ -71,7 +79,23 @@ enum Control {
     Slower,
     Faster,
     Pause,
+    Spawn,
     Menu,
+}
+
+/// The open spawn menu, if there is one.
+///
+/// A resource rather than a marker on the overlay, because [`super::leave`]
+/// needs to know whether escape should close the menu or leave the game
+/// before it can decide which — the same shape as the browser's `Modal`.
+#[derive(Resource, Default)]
+pub struct SpawnMenu(pub Option<Entity>);
+
+/// A button inside the spawn menu.
+#[derive(Component, Clone, Copy)]
+enum SpawnChoice {
+    Kind(EntityType),
+    Close,
 }
 
 /// A piece of text that has to be kept true.
@@ -91,15 +115,26 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Game), spawn_hud)
+        app.init_resource::<SpawnMenu>()
+            .add_systems(OnEnter(AppState::Game), spawn_hud)
+            .add_systems(OnExit(AppState::Game), reset_spawn_menu)
             .add_systems(
                 Update,
-                (press_controls, hover, update_readouts)
+                (press_controls, spawn_menu_actions, hover, update_readouts)
                     .chain()
                     .after(NavSystems)
                     .run_if(in_state(AppState::Game)),
             );
     }
+}
+
+/// Forget the spawn menu on the way out, exactly as the zoom and the speed
+/// reset — the overlay itself goes with every other `DespawnOnExit`, but the
+/// resource pointing at it and the scope it raised would otherwise strand the
+/// next screen's own focus layer at 1.
+fn reset_spawn_menu(mut menu: ResMut<SpawnMenu>, mut scope: ResMut<Scope>) {
+    menu.0 = None;
+    *scope = Scope(0);
 }
 
 /// Both corners, in one system.
@@ -156,6 +191,7 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                         px(30),
                     ),
                 ),
+                (Control::Spawn, plain_button("spawn", px(26))),
                 (Control::Menu, plain_button("menu", px(26))),
             ]),
             logview::panel(),
@@ -234,17 +270,31 @@ fn readout(kind: Readout, text: impl Into<String>, width: Val) -> impl Bundle {
 /// A click on a control, or a script pressing one by name.
 #[allow(clippy::too_many_arguments)]
 fn press_controls(
+    mut commands: Commands,
     mut activated: MessageReader<Activated>,
     clicked: Query<(&Control, &Interaction), Changed<Interaction>>,
     controls: Query<&Control>,
     mut zoom: ResMut<PixelZoom>,
     mut speed: ResMut<GameSpeed>,
     mut next: ResMut<NextState<AppState>>,
+    mut scope: ResMut<Scope>,
+    mut focus: ResMut<Focus>,
+    mut menu: ResMut<SpawnMenu>,
     sim: Option<Res<Sim>>,
 ) {
     for (control, interaction) in &clicked {
         if *interaction == Interaction::Pressed {
-            press(*control, &mut zoom, &mut speed, &mut next, sim.as_deref());
+            press(
+                *control,
+                &mut commands,
+                &mut zoom,
+                &mut speed,
+                &mut next,
+                &mut scope,
+                &mut focus,
+                &mut menu,
+                sim.as_deref(),
+            );
         }
     }
 
@@ -252,7 +302,17 @@ fn press_controls(
     // these buttons and for nothing else.
     for message in activated.read() {
         if let Ok(control) = controls.get(message.0) {
-            press(*control, &mut zoom, &mut speed, &mut next, sim.as_deref());
+            press(
+                *control,
+                &mut commands,
+                &mut zoom,
+                &mut speed,
+                &mut next,
+                &mut scope,
+                &mut focus,
+                &mut menu,
+                sim.as_deref(),
+            );
         }
     }
 }
@@ -262,11 +322,16 @@ fn press_controls(
 /// The resources arrive as their `ResMut` wrappers rather than as `&mut`, so
 /// that pressing `menu` does not mark the zoom changed — a changed zoom is
 /// what makes `render` rebuild the canvas.
+#[allow(clippy::too_many_arguments)]
 fn press(
     control: Control,
+    commands: &mut Commands,
     zoom: &mut ResMut<PixelZoom>,
     speed: &mut ResMut<GameSpeed>,
     next: &mut ResMut<NextState<AppState>>,
+    scope: &mut Scope,
+    focus: &mut Focus,
+    menu: &mut SpawnMenu,
     sim: Option<&Sim>,
 ) {
     match control {
@@ -279,8 +344,166 @@ fn press(
         Control::Slower => speed::apply(Change::Slower, speed, sim),
         Control::Faster => speed::apply(Change::Faster, speed, sim),
         Control::Pause => speed::apply(Change::TogglePause, speed, sim),
+        Control::Spawn => open_spawn_menu(commands, scope, focus, menu),
         Control::Menu => next.set(AppState::Maps),
     }
+}
+
+/// Build the spawn menu overlay: one button per [`EntityType`], and a close
+/// button beside them.
+///
+/// Full screen and opaque, like the browser's delete confirmation, so the
+/// corner buttons behind it stop receiving the pointer the moment it opens —
+/// the topmost node under the cursor is the only one `bevy_ui` reports a hover
+/// to, which is what keeps a click from reaching through a modal anywhere else
+/// in the game.
+fn open_spawn_menu(commands: &mut Commands, scope: &mut Scope, focus: &mut Focus, menu: &mut SpawnMenu) {
+    if menu.0.is_some() {
+        return;
+    }
+
+    let mut choices: Vec<Entity> = EntityType::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(col, kind)| {
+            commands
+                .spawn((
+                    SpawnChoice::Kind(kind),
+                    button(
+                        kind.name(),
+                        Focusable::new(0, col as i32).in_scope(SPAWN_MENU),
+                        px(40),
+                    ),
+                ))
+                .id()
+        })
+        .collect();
+    choices.push(
+        commands
+            .spawn((
+                SpawnChoice::Close,
+                button(
+                    "close",
+                    Focusable::new(0, EntityType::ALL.len() as i32).in_scope(SPAWN_MENU),
+                    px(40),
+                ),
+            ))
+            .id(),
+    );
+
+    let overlay = commands
+        .spawn((
+            Name::new("spawn menu"),
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(4),
+                ..default()
+            },
+            BackgroundColor(MODAL),
+            GlobalZIndex(MODAL_Z),
+            DespawnOnExit(AppState::Game),
+            children![
+                label("spawn", FONT_TITLE, TEXT),
+                label("appears near the camera", FONT_BODY, TEXT_DIM),
+            ],
+        ))
+        .id();
+
+    commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(6),
+                margin: UiRect::top(px(4)),
+                ..default()
+            },
+            ChildOf(overlay),
+        ))
+        .add_children(&choices);
+
+    focus.0 = Some(choices[0]);
+    *scope = Scope(SPAWN_MENU);
+    menu.0 = Some(overlay);
+}
+
+/// What the spawn menu's own buttons do, once something in it is chosen.
+///
+/// Kept apart from [`press`]: that dispatches the corner controls, which have
+/// to work in `Scope(0)`, and these have to work in [`SPAWN_MENU`] instead —
+/// `nav` only ever activates a widget in the scope that currently owns input.
+#[allow(clippy::too_many_arguments)]
+fn spawn_menu_actions(
+    mut commands: Commands,
+    mut activated: MessageReader<Activated>,
+    choices: Query<&SpawnChoice>,
+    mut menu: ResMut<SpawnMenu>,
+    mut scope: ResMut<Scope>,
+    mut sim_input: ResMut<SimInput>,
+    sim: Option<Res<Sim>>,
+    cameras: Query<&CameraPan, With<WorldCamera>>,
+) {
+    if menu.0.is_none() {
+        return;
+    }
+
+    let mut chosen = None;
+    let mut should_close = false;
+    for Activated(entity) in activated.read() {
+        match choices.get(*entity) {
+            Ok(SpawnChoice::Kind(kind)) => chosen = Some(*kind),
+            Ok(SpawnChoice::Close) => should_close = true,
+            Err(_) => {}
+        }
+    }
+
+    if let (Some(kind), Some(sim)) = (chosen, sim.as_deref()) {
+        let near = cameras
+            .single()
+            .map(|pan| background::point_of(background::cell_of(pan.0)))
+            .unwrap_or(Point::ORIGIN);
+        match spawn_point(&sim.0.map, near) {
+            Some(at) => {
+                sim_input.0.spawn(kind, at);
+            }
+            None => sim.0.log.push(format!("nowhere to stand for a {}", kind.name())),
+        }
+    }
+
+    if should_close || chosen.is_some() {
+        close_spawn_menu(&mut commands, &mut menu, &mut scope);
+    }
+}
+
+/// The nearest cell to `near` that a character can stand on, or `None` for a
+/// map with nowhere to stand at all.
+///
+/// A full scan rather than a search that spirals outward from `near`: this
+/// runs once per click rather than once per tick, and even a large map is
+/// cheap to walk once.
+fn spawn_point(map: &Map, near: Point) -> Option<Point> {
+    if map.is_passable(near) {
+        return Some(near);
+    }
+    map.size()
+        .points()
+        .filter(|point| map.is_passable(*point))
+        .min_by_key(|point| (point.x - near.x).abs() + (point.y - near.y).abs())
+}
+
+/// Close the spawn menu, wherever it was closed from: its own `close` button,
+/// picking a kind, or `esc`/`start` while it is open ([`super::leave`] calls
+/// this directly rather than listening for [`crate::ui::nav::Cancelled`],
+/// since it has to decide whether escape closes the menu or leaves the game).
+pub(super) fn close_spawn_menu(commands: &mut Commands, menu: &mut SpawnMenu, scope: &mut Scope) {
+    if let Some(overlay) = menu.0.take() {
+        commands.entity(overlay).despawn();
+    }
+    *scope = Scope(0);
 }
 
 /// The pointer's own highlight.
