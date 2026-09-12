@@ -39,6 +39,19 @@ impl DogSheets {
         }
     }
 
+    /// The first idle frame, for drawing a dog outside the world — the unit
+    /// panel's portrait. The atlas comes with it, because one frame of a strip
+    /// is a region of a sheet and not an image of its own.
+    pub fn portrait(&self, facing: Facing) -> (Handle<Image>, TextureAtlas) {
+        (
+            self.image_for(facing),
+            TextureAtlas {
+                layout: self.layout.clone(),
+                index: 0,
+            },
+        )
+    }
+
     fn image_for(&self, facing: Facing) -> Handle<Image> {
         match facing {
             Facing::Right => self.right.clone(),

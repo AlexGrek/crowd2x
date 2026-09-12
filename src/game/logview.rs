@@ -88,6 +88,7 @@ pub fn panel() -> impl Bundle {
             ..hud::panel_node()
         },
         BackgroundColor(PANEL),
+        hud::absorbs_clicks(),
         children![(
             LogPanel,
             Text::new(String::new()),

@@ -145,6 +145,33 @@ pub fn danger_button(label: &str, focus: Focusable, width: Val) -> impl Bundle {
     )
 }
 
+/// Light a button under the pointer, for buttons the focus system does not
+/// know about.
+///
+/// [`nav::highlight`] does this for focusable widgets. The game screen's are
+/// deliberately not focusable — the arrows pan the camera there and `A` zooms,
+/// so one highlight would be walked around by the camera controls — and
+/// without this the only clickable things on that screen would give no sign
+/// that they can be clicked.
+///
+/// Generic over the marker so each panel registers it for its own buttons:
+/// `app.add_systems(Update, ui::hover_highlight::<Control>)`. One
+/// implementation, so two panels of plain buttons cannot come to disagree
+/// about what hovering looks like.
+pub fn hover_highlight<M: Component>(
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), (With<M>, Changed<Interaction>)>,
+) {
+    for (interaction, mut background) in &mut buttons {
+        let wanted = match interaction {
+            Interaction::None => FIELD,
+            _ => HIGHLIGHT_SOLID,
+        };
+        if background.0 != wanted {
+            background.0 = wanted;
+        }
+    }
+}
+
 pub fn label(text: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     (
         Text::new(text.into()),

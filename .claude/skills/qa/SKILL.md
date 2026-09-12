@@ -107,6 +107,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"cursor_cell": {"x": 3, "y": 2}}` | Put the editor cursor in the middle of a cell. |
 | `{"cursor": {"x": 168, "y": 120}}` | ...or at a world position, in pixels. |
 | `{"spawn": {"kind": "human", "x": 3, "y": 2}}` | Put an entity in the world: `human` or `dog`. |
+| `{"select": 0}` | Select the unit that arrived first; `1` is the next, and so on. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -119,7 +120,14 @@ buttons a screen drives itself: the game's two corners (`slower`, `faster`, `pau
 `menu`, and the zoom's `-` and `+`) are deliberately outside the focus system, because
 the arrows pan the camera there and `A` zooms, and they are still pressable by name.
 
-`spawn` and `tick` only mean anything on the game screen, and say so rather than passing
+`select` is **arrival order, not slot order**: a despawn leaves a hole that the next spawn
+fills, so `{"select": 0}` after despawning the first of three means the oldest survivor and
+not whoever landed in slot 0. It exists because a `Uid` is random and a test cannot know
+one in advance. Selecting for real is a mouse act — a test *of* selecting should move the
+pointer and click — and this is for the tests that are about what the unit panel does
+once somebody is selected, or whose target has wandered since it was spawned.
+
+`spawn`, `select` and `tick` only mean anything on the game screen, and say so rather than passing
 quietly if the test is somewhere else. `spawn` pushes onto the same command queue the game
 uses, so it is applied by the *next* tick and not by being asked for — a test that spawns
 and then asserts without a `tick` in between is asserting on an empty world.
@@ -171,6 +179,7 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
+| `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
 | `{"expect_scaling": {"from": "100 humans", "to": "1000 humans", "slack": 1.5}}` | Cost per entity did not grow with the crowd. |
@@ -187,6 +196,16 @@ actor that walked off the edge of the view.
 `expect_log` reads the log *panel*'s lines, not the queue. The queue is drained as it is
 displayed, so asking it directly would be a race with the system emptying it — and the
 panel only keeps the last handful, so assert on something recent.
+
+`expect_selected` names the *kind* and not the id, for the reason `select` takes an index:
+ids are random. It is the assertion for the click that picks somebody out of the crowd —
+and for the click that puts them back, since `null` is a claim of its own.
+
+**A click on a panel is not a click on the map.** Every panel on the game screen carries an
+`Interaction` so `bevy_ui` absorbs the press, which means a `mouse`/`click` pair aimed at a
+cell under the HUD selects nothing. The canvas is 320x180: the top-left corner runs to
+about (130, 95), the top-right from about (150, 4) to (316, 75), and the unit panel across
+the bottom from about y 130. Aim at the band in between, or move the camera first.
 
 `expect_tile` reads the file, not the scene, so "I painted a wall" is only true once it has
 been saved. The editor saves on leaving and on `f5`.

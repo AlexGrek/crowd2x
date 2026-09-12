@@ -339,6 +339,13 @@ Two rules to keep, because both are load-bearing:
   not return an `Intent` it has pre-vetted against the world — think may run in parallel
   and cannot see the crowd mid-tick. Aim, and let the move step say no.
 
+One entity skips all of this: a **frozen** one. `Command::Freeze` arrives on the same queue
+as a spawn and is applied in the spawn pass, and the think step then hands that entity an
+`Intent::Idle` rather than asking it what it wants — a decision nothing would carry out is
+work with nowhere to go. It is a debugging handle (the unit panel's `life` menu), it keeps
+the entity's cell and goal, and it lives on `Body` because "stop moving" means the same
+thing for everything that has a position.
+
 React is the second thinking round, after the *whole* crowd has moved: an entity revises
 its plan, writing only to itself (`GameEntity::react`). Reacting inside the move loop
 would mean answering a world that is halfway through the tick. Today a blocked `Walker`

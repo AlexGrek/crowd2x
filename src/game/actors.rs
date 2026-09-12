@@ -305,7 +305,7 @@ fn sync_sprites(
 /// than walking. [`characters::snap_to_texel`] is where that grid is defined.
 ///
 /// [`characters::snap_to_texel`]: crate::characters::snap_to_texel
-fn world_pos((x, y): (f32, f32)) -> Vec2 {
+pub fn world_pos((x, y): (f32, f32)) -> Vec2 {
     snap_to_texel(Vec2::new(x, y) * background::TILE)
 }
 
@@ -314,7 +314,7 @@ fn world_pos((x, y): (f32, f32)) -> Vec2 {
 /// The simulation supplies a stable number and nothing else about how a human
 /// looks; which PNGs it turns into is decided here, next to the art, so adding
 /// a hairstyle never touches `src/sim/`.
-fn look_from(entity: &dyn GameEntity) -> human::Look {
+pub fn look_from(entity: &dyn GameEntity) -> human::Look {
     human::Look::random(&mut SmallRng::seed_from_u64(entity.appearance_seed()))
 }
 
@@ -322,7 +322,7 @@ fn look_from(entity: &dyn GameEntity) -> human::Look {
 ///
 /// An entity with no facing of its own is drawn right-facing; only dogs have
 /// two sheets, so there is nothing else the answer could be.
-fn facing_of(entity: &dyn GameEntity) -> dog::Facing {
+pub fn facing_of(entity: &dyn GameEntity) -> dog::Facing {
     match entity.facing() {
         Some(sim::Facing::Left) => dog::Facing::Left,
         _ => dog::Facing::Right,

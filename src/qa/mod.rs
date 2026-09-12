@@ -69,6 +69,7 @@ use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
 use crate::game::actors::{Actor, Sim, SimInput};
 use crate::game::logview::LogView;
+use crate::game::selection::Selected;
 use crate::game::speed::GameSpeed;
 use crate::sim::{process_pass, spawn_pass, EntityType};
 use crate::ui::keyboard::TextEntry;
@@ -485,6 +486,10 @@ struct Intents<'w> {
     ///
     /// `None` anywhere but the game screen.
     sim: Option<ResMut<'w, Sim>>,
+    /// Who is selected. In here rather than in [`Checks`] for the same reason
+    /// `sim` is: `select` writes it, and one system cannot take the same
+    /// resource twice.
+    selected: ResMut<'w, Selected>,
 }
 
 /// What the driver should do once a step has been performed.
@@ -785,6 +790,20 @@ fn perform(
                 .ok_or(format!("expected {label:?} focused, found {focused:?}"))
         }
 
+        Step::Select(index) => {
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?;
+            let crowd = sim.0.entities().in_spawn_order();
+            let uid = *crowd.get(*index).ok_or(format!(
+                "the world holds {} entities; there is no number {index}",
+                crowd.len()
+            ))?;
+            intents.selected.select(uid);
+            Ok(Next::Now)
+        }
+
         Step::Spawn { kind, x, y } => {
             let kind = entity_kind(kind)?;
             intents
@@ -977,6 +996,25 @@ fn perform(
             (actual == *wanted)
                 .then_some(Next::Now)
                 .ok_or(format!("expected {wanted} actor sprites, found {actual}"))
+        }
+
+        Step::ExpectSelected(wanted) => {
+            let actual = intents.selected.get().map(|uid| match uid.kind() {
+                Some(kind) => kind.name().to_string(),
+                None => "unknown".to_string(),
+            });
+            // Lazily, because the arms below cover only the failing cases:
+            // `ok_or` would evaluate them on the way past a passing one.
+            (actual.as_deref() == wanted.as_deref())
+                .then_some(Next::Now)
+                .ok_or_else(|| match (wanted, &actual) {
+                    (Some(wanted), Some(actual)) => {
+                        format!("expected a {wanted} to be selected, found a {actual}")
+                    }
+                    (Some(wanted), None) => format!("expected a {wanted} to be selected, found nobody"),
+                    (None, Some(actual)) => format!("expected nobody to be selected, found a {actual}"),
+                    (None, None) => unreachable!("equal, so it did not fail"),
+                })
         }
 
         Step::ExpectLog(needle) => checks

@@ -39,6 +39,16 @@ pub type Slot = u32;
 pub struct Entities {
     /// Dense and stable: a `None` is a hole waiting on the free list.
     slots: Vec<Option<Box<dyn GameEntity>>>,
+    /// When the entity in each slot arrived, as a count of the inserts before
+    /// it. Parallel to [`Entities::slots`], and meaningless for a hole.
+    ///
+    /// Slot order is *not* arrival order, and cannot be made into it: a
+    /// despawn leaves a hole that the next spawn fills, so the newest entity
+    /// in the world can sit in the lowest slot. Keeping the count is one
+    /// `u64` write per spawn; recovering it afterwards is impossible.
+    serials: Vec<u64>,
+    /// Inserts so far. Never reused, unlike a slot.
+    next_serial: u64,
     index: HashMap<Uid, Slot>,
     free: Vec<Slot>,
     live: usize,
@@ -114,9 +124,12 @@ impl Entities {
             }
             None => {
                 self.slots.push(Some(entity));
+                self.serials.push(0);
                 (self.slots.len() - 1) as Slot
             }
         };
+        self.serials[slot as usize] = self.next_serial;
+        self.next_serial += 1;
         self.index.insert(uid, slot);
         self.live += 1;
         slot
@@ -192,6 +205,23 @@ impl Entities {
     pub fn uids(&self) -> impl Iterator<Item = Uid> + '_ {
         self.iter().map(|entity| entity.uid())
     }
+
+    /// Every live id, **oldest first** — the order the entities arrived in.
+    ///
+    /// Sorted on demand from [`Entities::serials`] rather than kept as a
+    /// second index: this is asked by a person picking somebody out of the
+    /// crowd, or by a QA script naming one, and never by a tick. A second
+    /// ordered `Vec` would cost an O(n) removal on every despawn to answer a
+    /// question nothing in the hot path asks.
+    pub fn in_spawn_order(&self) -> Vec<Uid> {
+        let mut live: Vec<(u64, Uid)> = self
+            .iter_slots()
+            .map(|(slot, entity)| (self.serials[slot as usize], entity.uid()))
+            .collect();
+        live.sort_unstable_by_key(|(serial, _)| *serial);
+        live.into_iter().map(|(_, uid)| uid).collect()
+    }
+
 
     /// Hand the table to the processing pass with its membership frozen.
     ///
@@ -301,6 +331,33 @@ mod tests {
 
     fn uid(body: u64) -> Uid {
         Uid::new(EntityType::Human, body)
+    }
+
+    #[test]
+    fn entities_come_back_in_the_order_they_arrived() {
+        let mut store = Entities::new();
+        for body in 1..=4 {
+            store.insert(stub(body));
+        }
+        assert_eq!(
+            store.in_spawn_order(),
+            vec![uid(1), uid(2), uid(3), uid(4)]
+        );
+    }
+
+    #[test]
+    fn a_spawn_that_fills_a_hole_is_still_the_newest_thing_there() {
+        // The trap this exists for: slot order says the newcomer is second,
+        // because it took the hole the second entity left behind.
+        let mut store = Entities::new();
+        for body in 1..=3 {
+            store.insert(stub(body));
+        }
+        store.remove(uid(2));
+        store.insert(stub(9));
+
+        assert_eq!(store.uids().collect::<Vec<_>>(), vec![uid(1), uid(9), uid(3)]);
+        assert_eq!(store.in_spawn_order(), vec![uid(1), uid(3), uid(9)]);
     }
 
     #[test]

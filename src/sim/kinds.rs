@@ -372,6 +372,28 @@ impl Walker {
                 .push(format!("{} has nowhere to go", self.body.uid()));
         }
     }
+
+    /// What a walker would tell a debugger: where it is going, how far it has
+    /// left to walk to get there, and how fast.
+    ///
+    /// The goal and the path are the two halves of the same answer — a walker
+    /// with a goal and no path is one whose route was thrown away this tick,
+    /// and a walker that keeps dropping both is one that keeps being blocked.
+    /// That is visible in these two lines long before it is visible on the
+    /// map.
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        vec![
+            (
+                "goal",
+                match self.goal {
+                    Some(goal) => format!("{}, {}", goal.x, goal.y),
+                    None => "none".to_string(),
+                },
+            ),
+            ("path", format!("{} cells", self.path.remaining().len())),
+            ("speed", format!("{:.2} cells/s", self.speed)),
+        ]
+    }
 }
 
 /// A deterministic RNG for one entity on one tick.
@@ -430,6 +452,10 @@ impl GameEntity for Human {
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
         self.walk.react(ctx, outcome);
     }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        self.walk.debug_fields()
+    }
 }
 
 /// A dog.
@@ -486,6 +512,10 @@ impl GameEntity for Dog {
         } else if now > was {
             self.facing = Facing::Right;
         }
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        self.walk.debug_fields()
     }
 }
 

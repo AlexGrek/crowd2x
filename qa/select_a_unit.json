@@ -1,0 +1,90 @@
+{
+  "name": "selecting a unit: click it, read it, freeze it, despawn it",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a human at cell (7, 4), paused so it stays there to be clicked" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": 7, "y": 4 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "expect_selected": null },
+
+    { "note": "the map is 12x9 so the camera sits at its middle, putting cell (7, 4) at canvas (232, 110) - clear of every panel, since a panel absorbs a click rather than passing it to the map" },
+    { "mouse": { "x": 232, "y": 110 } },
+    { "click": {} },
+    { "expect_selected": "human" },
+    { "shot": "a selected human, framed, with the panel under it" },
+
+    { "note": "clicking empty ground selects nobody, and the panel goes with it" },
+    { "mouse": { "x": 100, "y": 110 } },
+    { "click": {} },
+    { "expect_selected": null },
+
+    { "note": "a script can also name a unit by arrival order, which is what the rest of this uses" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+
+    { "note": "the four menus open one at a time, and the button that opened one closes it" },
+    { "press": "debug" },
+    { "shot": "the debug menu" },
+    { "press": "stats" },
+    { "press": "brains" },
+    { "press": "brains" },
+
+    { "note": "freezing goes through the simulation's own command queue" },
+    { "press": "life" },
+    { "shot": "the life menu" },
+    { "press": "freeze" },
+    { "tick": 1 },
+    { "expect_log": "froze human" },
+
+    { "note": "a frozen unit stays put however long the world runs (asserted in sim's own tests)" },
+    { "press": "faster" },
+    { "expect_speed": "x2" },
+    { "tick": 600 },
+    { "expect_selected": "human" },
+    { "shot": "still standing where it was frozen" },
+
+    { "note": "the button now offers the way back, and letting go starts it moving" },
+    { "press": "unfreeze" },
+    { "tick": 1 },
+    { "expect_log": "unfroze human" },
+
+    { "note": "a second unit, to be sure select takes the one it says it does" },
+    { "spawn": { "kind": "dog", "x": 8, "y": 2 } },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+    { "select": 1 },
+    { "expect_selected": "dog" },
+    { "shot": "the dog selected instead" },
+
+    { "note": "despawning takes it out of the world, and the selection goes with it" },
+    { "press": "life" },
+    { "press": "despawn" },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "expect_selected": null },
+    { "expect_log": "despawned dog" },
+
+    { "note": "the survivor is now number 0 again: arrival order closes the gap" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "press": "close" },
+    { "expect_selected": null },
+
+    { "note": "leaving forgets who was selected; the next visit is a new world" },
+    { "select": 0 },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_selected": null }
+  ]
+}

@@ -354,6 +354,27 @@ pub enum Step {
     /// drained as it is displayed, so asking it would be a race with the
     /// system that empties it.
     ExpectLog(String),
+    /// Select the unit that arrived at this index: `0` is the oldest thing in
+    /// the world, `1` the next, and a despawn closes the gap.
+    ///
+    /// Arrival order and not slot order, because a despawn leaves a hole that
+    /// the next spawn fills — `{"select": 0}` after despawning the first two
+    /// of three means the survivor, not whoever landed in slot 0.
+    ///
+    /// The intent-level way to pick somebody out of the crowd. Clicking is
+    /// the real one and a test of *selecting* should use `mouse` and `click`;
+    /// this is for the tests that are about what the panel does once
+    /// somebody is selected, and for the ones whose target has wandered since
+    /// it was spawned.
+    Select(usize),
+    /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
+    /// nobody.
+    ///
+    /// The kind and not the id, because a `Uid` is random and a test cannot
+    /// know one in advance; what a test does know is that it clicked on the
+    /// human it put there. Selecting is a mouse act, so the step that gets a
+    /// test into this state is a real `mouse` and `click` pair.
+    ExpectSelected(Option<String>),
     /// How many actor sprites exist in the world.
     ///
     /// The renderer's half of the contract: `expect_entities` can pass while

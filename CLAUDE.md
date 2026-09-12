@@ -28,7 +28,8 @@ resolves `assets/` relative to the manifest under cargo, and relative to the exe
 otherwise, so a direct run produces a blank window and asset-load errors.
 
 Controls: `WASD` / arrows pan the camera, `q` / `e` zoom in the game, `+` / `-` change
-the game speed and `p` pauses it, `F12` saves a screenshot to `screenshots/` (gitignored).
+the game speed and `p` pauses it, a left click selects the unit under it, `F12` saves a
+screenshot to `screenshots/` (gitignored).
 
 ### Verifying rendering changes without a human watching
 
@@ -263,11 +264,43 @@ back to the browser. `B` is the one departure from the `esc`/`B` means back conv
 rest of the game follows — it is zoom out here, so this screen reads the leave buttons
 directly instead of listening for the `Cancelled` it would otherwise fire on every zoom.
 
+#### Selecting somebody (`game/selection.rs`, `game/unitpanel.rs`)
+
+A left click on the map picks whoever is standing in that cell, a green frame
+(`selection.png`) says who, and a panel along the bottom shows their portrait and four
+menus: `life` (despawn, freeze), `debug`, `stats` and `brains` — the last two deliberately
+empty. Clicking empty ground, or `close`, selects nobody and the panel goes with them.
+
+- **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
+  position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the
+  crowd, and the same addressing the simulation itself uses. Hit-testing sprites would
+  scan every actor and would disagree with the simulation about a walker halfway across a
+  boundary.
+- **The selection is not simulation state.** `Selected` is a Bevy resource holding a
+  `Uid`: who you are looking at changes nothing about the world, and the same seed still
+  replays the same. What the panel *does* — despawn, freeze — goes back through
+  `sim::Command` on the same queue as everything else, so the screen still has exactly one
+  writer of the world.
+- **The panel is rebuilt, the readouts are written.** Structure (which portrait, which
+  menu) is rebuilt only when the selection or the open menu changes; the debug menu's
+  fields and the freeze button's own label are rewritten in place every frame, because
+  they follow the simulation rather than the player. That is what makes the debug menu
+  live.
+- The portrait is built from the same art the world draws with — `human::portrait_layers`
+  stacks the paperdoll as UI nodes, a dog gets frame 0 of its idle sheet — so a portrait
+  cannot show an outfit its character is not wearing.
+- **Every panel on this screen absorbs clicks** (`hud::absorbs_clicks`). A panel is not a
+  button, and `bevy_ui` only tracks nodes carrying an `Interaction`, so without it a click
+  on the log would reach through and select whoever stood behind it.
+
+Nothing here is `Focusable`, for the reason the corners are not (below), and every button
+still answers to `Activated` so a QA script can press it by name.
+
 #### The two corners (`game/hud.rs`)
 
 The screen is laid out as **the view on the left and the world on the right**: `- x4 +`
-over the map's name, size, crowd and tick count top left; `slower x1 faster pause menu`
-over the log top right, because the log is the readout for exactly those controls.
+over the map's name, size, crowd and tick count top left; `slower x1 faster pause spawn
+menu` over the log top right, because the log is the readout for exactly those controls.
 
 **Nothing here is `Focusable`,** and that is forced: the arrows pan the camera on this
 screen and `A` zooms, so `nav`'s one highlight would be walked around by the camera
@@ -276,6 +309,16 @@ instead, and the buttons are for the mouse — the one device this screen otherw
 use for. They still answer to `Activated`, so a QA script presses them by name like
 anything else; the speed pair says `slower`/`faster` rather than `-`/`+` because two
 buttons with one label are two buttons a test cannot tell apart.
+
+`spawn` is the exception that proves the rule: it opens a modal (`SpawnMenu`), and a modal
+is the one thing on this screen that *is* navigable — full screen, opaque, `GlobalZIndex`,
+its own `Scope(SPAWN_MENU)`, so the corner buttons behind it stop taking the pointer and
+the highlight cannot be walked out of it. Its buttons are dispatched apart from the corner
+controls (`spawn_menu_actions`, not `press`) precisely because `nav` only activates a
+widget in the scope that owns input. A kind is placed at the passable cell nearest the
+camera — `spawn_point` scans the map once per click rather than spiralling, which is what a
+once-per-click cost is allowed to do — and `leave` asks whether the menu is open before
+deciding whether `esc` closes it or leaves the game.
 
 ### The map (`src/map/`)
 
@@ -382,9 +425,31 @@ therefore never creates an overlap; spawning can** — an entity is placed exact
 was asked for, so two can share a cell, and `release` only ever clears a cell whose
 occupant is the entity leaving it, which is what keeps that contained.
 
-What the wanderers do with all this is: nothing clever. A blocked walker drops its goal
-and picks another next tick — no steering, no waiting, no queueing, no path. Each of those
-is a change to `Walker::react` and nothing else.
+**Freezing is the one thing done to an entity from outside it.** `Command::Freeze` rides
+the same queue as a spawn and is applied in the spawn pass, so a freeze asked for this tick
+is in force before anything thinks; the think step then hands a frozen entity an
+`Intent::Idle` instead of asking it, which costs a bool per entity and means a frozen
+entity is not deciding things nobody will carry out. It keeps its cell and its goal, so
+letting it go again carries on rather than starting over. `GameEntity::debug_fields` is the
+other half of that pair — what a kind would tell a debugger about itself, allocating
+freely because it is asked about the one entity somebody has selected and never in a tick.
+
+What the wanderers do with all this is walk a route, and the routing is **two stages of
+one A\*** (`sim/path.rs`, asked twice with two different predicates). The *far* stage
+plans against the terrain only, once per goal, and its cost is bounded by a count of
+expansions rather than by hope — an unreachable goal floods everything it can reach before
+it knows, so `FAR_LIMIT` turns a walled-off room from a frame-rate cliff into a bounded
+miss, and a miss pays `REPLAN_DELAY` ticks before trying again. The *near* stage is the
+detour: something was in the way, so `DETOUR_CELLS` of the plan are thrown out and rerouted
+against the crowd as well as the terrain, leaving the rest of the far route untouched. Both
+live in `Walker::react`, because a route is state and think may not write — and because the
+only moment the crowd is worth planning against is after all of it has moved.
+
+The search is 4-connected and movement is not: a walker leaves for the next cell as soon as
+it is inside the current one, so the line it walks cuts corners. `path.rs` says why that
+can never skip a cell the search vetted. What is still not here is waiting: a walker with
+no local way round drops the plan rather than queueing for a gap, since a wanderer has
+nowhere it needs to be.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -407,7 +472,9 @@ dropped. The renderer (`game/logview.rs`) is the only reader and it drains.
 
 The store is a **dict over a dense arena**: `get(uid)`, `insert`, `remove`, `iter`, backed
 by a `Vec` of slots plus a `HashMap` index. Callers look entities up by id; the tick walks
-the `Vec` in slot order and hashes nothing. Removal leaves a **tombstone** rather than
+the `Vec` in slot order and hashes nothing. Each insert is stamped with a serial, so `in_spawn_order` can
+answer "the third entity to arrive" — slot order cannot, since a despawn leaves a hole the
+next spawn fills. Removal leaves a **tombstone** rather than
 `swap_remove`-ing, because a slot index has to stay stable — the intent buffer is indexed
 by it, and reordering the tail on every despawn would make iteration order, and so the
 simulation, non-deterministic.
@@ -453,8 +520,11 @@ gamepad is spawned and connected through `RawGamepadEvent`, so `bevy_input` buil
 real `Gamepad` component; the pointer moves by setting the window's cursor position, the
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
-The simulation gets two steps of its own, both intent-level: `{"spawn": {"kind": "human",
-"x": 3, "y": 2}}` puts a command on the same queue the game uses, and `{"tick": 200}` runs
+The simulation gets three steps of its own, all intent-level: `{"spawn": {"kind": "human",
+"x": 3, "y": 2}}` puts a command on the same queue the game uses, `{"select": 0}` selects
+the unit that arrived first (arrival order, not slot order, because a despawn leaves a hole
+the next spawn fills — and because a `Uid` is random and a test cannot know one in
+advance), and `{"tick": 200}` runs
 one spawn pass and then exactly that many processing passes, *immediately* — so pending
 spawns are applied once however many ticks were asked for. Ticking rather than waiting is
 the point — `FixedUpdate` runs at whatever rate the frame allows, so a test that waited a
@@ -490,12 +560,13 @@ are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_log` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_selected`, `expect_log` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
 the readout shows (`x1`, `x0.25`, `paused`) rather than a number and a flag, since
-`paused` and `x1` are the same multiplier and a different game. `expect_entities` and
+`paused` and `x1` are the same multiplier and a different game. `expect_selected` names the kind (`"human"`, or `null` for nobody) rather
+than an id, for the same reason `select` takes an index. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
 catches a renderer that has quietly stopped keeping up.
@@ -545,6 +616,7 @@ src/browser.rs          BrowserPlugin - the saved-maps screen
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
                         speed.rs is how fast the world runs; hud.rs the two corners
+                        selection.rs is who was clicked; unitpanel.rs the bar about them
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs

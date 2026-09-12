@@ -31,11 +31,23 @@ pub struct Body {
     uid: Uid,
     /// World position in cell units. See the module docs.
     position: (f32, f32),
+    /// Held still: the tick decides nothing for it and it moves nowhere.
+    ///
+    /// A debugging handle rather than a state of the world — the unit panel
+    /// freezes whoever is being inspected so they stop wandering off the
+    /// screen mid-inspection. On [`Body`] rather than on one kind because
+    /// "stop moving" means the same thing for everything that has a position,
+    /// and [`super::think_step`] is the one place that reads it.
+    frozen: bool,
 }
 
 impl Body {
     pub fn new(uid: Uid, position: (f32, f32)) -> Body {
-        Body { uid, position }
+        Body {
+            uid,
+            position,
+            frozen: false,
+        }
     }
 
     /// A body standing in the middle of `cell`.
@@ -67,6 +79,14 @@ impl Body {
     /// Move to a world position, in cell units.
     pub fn set_position(&mut self, position: (f32, f32)) {
         self.position = position;
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
+    pub fn set_frozen(&mut self, frozen: bool) {
+        self.frozen = frozen;
     }
 }
 
@@ -140,6 +160,36 @@ pub trait GameEntity: Send + Sync {
     /// steps.
     fn facing(&self) -> Option<Facing> {
         None
+    }
+
+    /// Whether this entity is held still.
+    ///
+    /// Read once per entity per tick by [`super::think_step`], which hands a
+    /// frozen entity an [`super::Intent::Idle`] instead of asking it to think:
+    /// nothing it decided could be carried out, so deciding it is work with
+    /// nowhere to go. Overriding this is not the way to make a kind that never
+    /// moves — return [`super::Intent::Idle`] from `think` for that. This is
+    /// the flag something *outside* the entity sets.
+    fn is_frozen(&self) -> bool {
+        self.body().is_frozen()
+    }
+
+    fn set_frozen(&mut self, frozen: bool) {
+        self.body_mut().set_frozen(frozen);
+    }
+
+    /// What this kind would tell a debugger about itself, beyond the body.
+    ///
+    /// Name and value, in the order they should be read. The universal facts —
+    /// the id, the cell, whether it is frozen — are the same for everything
+    /// and are read off the body by whoever is displaying them; this is for
+    /// what only a `Human` or a `Dog` knows, like where it thinks it is going.
+    ///
+    /// It allocates, which nothing in a tick may do. That is fine, because
+    /// nothing in a tick calls it: it is asked once a frame about the one
+    /// entity somebody has selected.
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        Vec::new()
     }
 
     /// Stable randomness for the renderer to build an appearance from.

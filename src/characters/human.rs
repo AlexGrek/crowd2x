@@ -13,7 +13,7 @@ use rand::prelude::*;
 use super::{depth_for, snap_to_texel, upscale, Character, ART_SCALE};
 use crate::render::WORLD_LAYER;
 
-pub(super) const BASE: &str = "human/human_base.png";
+pub const BASE: &str = "human/human_base.png";
 pub(super) const CLOTHES: [&str; 2] = [
     "human/clothes_swimsuit_blue.png",
     "human/clothes_swimsuit_pink.png",
@@ -59,17 +59,34 @@ impl Look {
 #[derive(Component)]
 pub struct LookLayer;
 
-/// Returns the root entity: the paperdoll's layers are its children, so this
-/// is the one to move, despawn, or hang a marker on.
-pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Look) -> Entity {
-    let layers: Vec<(&'static str, f32)> = [
+/// The layers drawn over the base body, in draw order, with the depth offset
+/// each gets in the world.
+fn over_base(look: &Look) -> Vec<(&'static str, f32)> {
+    [
         Some((look.eyes, LAYER_EYES)),
-        look.clothes.map(|c| (c, LAYER_CLOTHES)),
+        look.clothes.map(|clothes| (clothes, LAYER_CLOTHES)),
         Some((look.hair, LAYER_HAIR)),
     ]
     .into_iter()
     .flatten()
-    .collect();
+    .collect()
+}
+
+/// Every layer of a paperdoll, base first, in draw order.
+///
+/// For drawing the same person somewhere that is not the world — the unit
+/// panel's portrait stacks these as UI nodes. It comes from here, off the same
+/// [`Look`], so a portrait cannot show an outfit its character is not wearing.
+pub fn portrait_layers(look: &Look) -> Vec<&'static str> {
+    std::iter::once(BASE)
+        .chain(over_base(look).into_iter().map(|(path, _)| path))
+        .collect()
+}
+
+/// Returns the root entity: the paperdoll's layers are its children, so this
+/// is the one to move, despawn, or hang a marker on.
+pub fn spawn(commands: &mut Commands, assets: &AssetServer, pos: Vec2, look: Look) -> Entity {
+    let layers = over_base(&look);
 
     // On the art's own grid: see `characters::snap_to_texel`.
     let pos = snap_to_texel(pos);

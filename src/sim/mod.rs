@@ -211,6 +211,14 @@ impl MoveOutcome {
 pub enum Command {
     Spawn { kind: EntityType, at: Point },
     Despawn(Uid),
+    /// Hold an entity still, or let it go again.
+    ///
+    /// Not a structural change, but a command all the same: it comes from
+    /// outside the world — somebody looking at an entity through the unit
+    /// panel — and it has to reach the entity by id, which is the shape every
+    /// command has. Applied in the spawn pass with the others, so a freeze
+    /// asked for this tick is in force before anything thinks.
+    Freeze { uid: Uid, frozen: bool },
 }
 
 /// One frame's worth of input to the simulation.
@@ -238,6 +246,11 @@ impl Input {
 
     pub fn despawn(&mut self, uid: Uid) -> &mut Input {
         self.commands.push(Command::Despawn(uid));
+        self
+    }
+
+    pub fn freeze(&mut self, uid: Uid, frozen: bool) -> &mut Input {
+        self.commands.push(Command::Freeze { uid, frozen });
         self
     }
 
@@ -405,6 +418,24 @@ impl GameState {
         }
     }
 
+    /// Hold an entity still, or let it go again. Returns whether there was
+    /// one to freeze.
+    ///
+    /// A frozen entity keeps its cell — it is standing in it, not removed from
+    /// the world — and keeps whatever goal it had, so letting it go again
+    /// carries on rather than starting over.
+    pub fn set_frozen(&mut self, uid: Uid, frozen: bool) -> bool {
+        match self.entities.get_mut(uid) {
+            Some(entity) => {
+                entity.set_frozen(frozen);
+                let verb = if frozen { "froze" } else { "unfroze" };
+                self.log.push(format!("{verb} {uid}"));
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -441,6 +472,11 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
+/// [`Command::Freeze`] is drained here too. It changes nothing structural, but
+/// it arrives on the same queue and wants the same timing: a freeze asked for
+/// this tick is in force before anything thinks, rather than one tick after
+/// the button was pressed.
+///
 /// This is also the only pass that may resize the entity table, and therefore
 /// the only one that may allocate. [`GameState::spawn`] keeps the intent
 /// buffer sized to the arena as it goes, which is what lets
@@ -454,6 +490,11 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             Command::Despawn(uid) => {
                 if !state.despawn(*uid) {
                     state.log.push(format!("despawn: no such entity {uid}"));
+                }
+            }
+            Command::Freeze { uid, frozen } => {
+                if !state.set_frozen(*uid, *frozen) {
+                    state.log.push(format!("freeze: no such entity {uid}"));
                 }
             }
         }
@@ -562,7 +603,7 @@ fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent
     let intents = &mut intents[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots() {
-            intents[slot as usize] = entity.think(ctx);
+            intents[slot as usize] = think_for(entity, ctx);
         }
         return;
     }
@@ -571,9 +612,23 @@ fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent
         .zip(table.par_iter_slots())
         .for_each(|(intent, entity)| {
             if let Some(entity) = entity {
-                *intent = entity.think(ctx);
+                *intent = think_for(entity, ctx);
             }
         });
+}
+
+/// What one entity decides this tick, whichever round asked it.
+///
+/// A frozen entity is not asked. Whatever it decided would be thrown away by a
+/// move step that is not going to move it, and the intent it did not produce
+/// is the [`Intent::Idle`] the move step wants anyway — so the freeze costs a
+/// bool per entity here rather than a decision per entity everywhere else.
+fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
+    if entity.is_frozen() {
+        Intent::Idle
+    } else {
+        entity.think(ctx)
+    }
 }
 
 /// **Step 2: everybody moves, one at a time, and the world may say no.**
@@ -759,6 +814,60 @@ mod tests {
 
         assert_eq!(state.entities().uids().collect::<Vec<_>>(), before);
         assert_eq!(state.entities().capacity(), arena, "the arena was resized");
+    }
+
+    #[test]
+    fn a_frozen_entity_stays_exactly_where_it_was() {
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+
+        // Long enough to be sure it would have wandered off on its own.
+        run(&mut state, 200);
+        let wandered_to = state.position_of(uid).expect("still alive");
+
+        let mut input = Input::new();
+        input.freeze(uid, true);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        run(&mut state, 500);
+
+        assert_eq!(state.position_of(uid), Some(wandered_to));
+        // Frozen, not gone: it is still in the world and still holds its cell.
+        assert_eq!(state.len(), 1);
+        assert_eq!(
+            state.occupancy().occupant(cell_of(wandered_to)),
+            Some(uid),
+        );
+    }
+
+    #[test]
+    fn letting_a_frozen_entity_go_starts_it_moving_again() {
+        let mut state = world();
+        let uid = state.spawn(EntityType::Dog, Point::new(4, 4));
+
+        let mut freeze = Input::new();
+        freeze.freeze(uid, true);
+        process_game_state(&mut state, 1.0 / 60.0, &freeze);
+        run(&mut state, 100);
+        let held_at = state.position_of(uid).expect("still alive");
+
+        let mut thaw = Input::new();
+        thaw.freeze(uid, false);
+        process_game_state(&mut state, 1.0 / 60.0, &thaw);
+        run(&mut state, 100);
+
+        assert_ne!(state.position_of(uid), Some(held_at));
+    }
+
+    #[test]
+    fn freezing_something_that_is_not_there_says_so_rather_than_panicking() {
+        let mut state = world();
+        let stranger = Uid::new(EntityType::Human, 99);
+
+        let mut input = Input::new();
+        input.freeze(stranger, true);
+        spawn_pass(&mut state, &input);
+
+        assert!(!state.set_frozen(stranger, true));
     }
 
     #[test]

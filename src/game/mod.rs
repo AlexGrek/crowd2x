@@ -8,6 +8,13 @@
 //! controls over the map, and [`logview`] drains what the simulation had to
 //! say into the panel under them.
 //!
+//! One thing on this screen is about a single member of the crowd rather than
+//! about the whole world: [`selection`] is the click that picks somebody and
+//! the green frame that says who, and [`unitpanel`] is the bar along the
+//! bottom — their portrait, and the menus that inspect them or act on them.
+//! Acting on them is still a [`crate::sim::Command`] on the same queue
+//! everything else uses; the panel decides nothing either.
+//!
 //! Three things this screen deliberately does *not* do:
 //!
 //! * **It does not own the map's art.** Terrain and props are drawn through
@@ -42,7 +49,9 @@
 pub mod actors;
 pub mod hud;
 pub mod logview;
+pub mod selection;
 pub mod speed;
+pub mod unitpanel;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -71,6 +80,8 @@ impl Plugin for GamePlugin {
             speed::SpeedPlugin,
             hud::HudPlugin,
             logview::LogViewPlugin,
+            selection::SelectionPlugin,
+            unitpanel::UnitPanelPlugin,
         ))
             .add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
             .add_systems(OnExit(AppState::Game), restore_zoom)

@@ -46,8 +46,8 @@ use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
 use crate::ui::{
-    button, label, labelled_button, plain_button, FIELD, FONT_BODY, FONT_TITLE, HIGHLIGHT_SOLID,
-    MODAL, PANEL, TEXT, TEXT_ACCENT, TEXT_DIM,
+    button, hover_highlight, label, labelled_button, plain_button, FONT_BODY, FONT_TITLE, MODAL,
+    PANEL, TEXT, TEXT_ACCENT, TEXT_DIM,
 };
 
 use super::actors::{Sim, SimInput};
@@ -120,7 +120,12 @@ impl Plugin for HudPlugin {
             .add_systems(OnExit(AppState::Game), reset_spawn_menu)
             .add_systems(
                 Update,
-                (press_controls, spawn_menu_actions, hover, update_readouts)
+                (
+                    press_controls,
+                    spawn_menu_actions,
+                    hover_highlight::<Control>,
+                    update_readouts,
+                )
                     .chain()
                     .after(NavSystems)
                     .run_if(in_state(AppState::Game)),
@@ -233,13 +238,24 @@ fn row(buttons: impl Bundle) -> impl Bundle {
             ..default()
         },
         BackgroundColor(PANEL),
+        absorbs_clicks(),
         buttons,
     )
 }
 
 /// The backing every panel under a control strip shares.
 pub fn panel() -> impl Bundle {
-    (panel_node(), BackgroundColor(PANEL))
+    (panel_node(), BackgroundColor(PANEL), absorbs_clicks())
+}
+
+/// What stops a click on a panel being a click on the map behind it.
+///
+/// `bevy_ui` only tracks nodes that carry an [`Interaction`], and a panel is
+/// not a button, so without this the game screen's own click — the one that
+/// selects a unit ([`super::selection`]) — would reach through the log and the
+/// stats and pick whoever happens to be standing under them.
+pub fn absorbs_clicks() -> Interaction {
+    Interaction::default()
 }
 
 /// ...and its layout on its own, for a panel with something to add to it.
@@ -504,25 +520,6 @@ pub(super) fn close_spawn_menu(commands: &mut Commands, menu: &mut SpawnMenu, sc
         commands.entity(overlay).despawn();
     }
     *scope = Scope(0);
-}
-
-/// The pointer's own highlight.
-///
-/// `nav::highlight` does this for focusable widgets and these are deliberately
-/// not focusable, so the corners light their own buttons — otherwise the only
-/// clickable things in the game give no sign that they can be clicked.
-fn hover(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (With<Control>, Changed<Interaction>)>,
-) {
-    for (interaction, mut background) in &mut buttons {
-        let wanted = match interaction {
-            Interaction::None => FIELD,
-            _ => HIGHLIGHT_SOLID,
-        };
-        if background.0 != wanted {
-            background.0 = wanted;
-        }
-    }
 }
 
 /// Keep every readout saying what is true.
