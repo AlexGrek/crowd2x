@@ -14,7 +14,11 @@
 //! number for the same reason: a zoom of 2.5 would give neighbouring texels
 //! different widths and break the grid the pipeline exists to protect. Zooming
 //! in therefore makes the canvas *smaller* — fewer, bigger pixels — so the
-//! canvas is rebuilt at the new resolution exactly as it is on a resize.
+//! canvas is rebuilt at the new resolution exactly as it is on a resize. Only
+//! the canvas's *resolution* jumps, though: the quad blitting it to the
+//! window eases its scale up to the new factor over a few frames
+//! ([`ZoomQuadScale`]) rather than snapping there, so a zoom step still reads
+//! as one whole step but does not feel like a cut.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -50,7 +54,13 @@ impl Plugin for PixelRenderPlugin {
             // not photographed one frame off the pixel grid first.
             .add_systems(
                 Update,
-                (resize_canvas, apply_camera_target, snap_camera_to_pixels).chain(),
+                (
+                    resize_canvas,
+                    ease_zoom_quad,
+                    apply_camera_target,
+                    snap_camera_to_pixels,
+                )
+                    .chain(),
             );
     }
 }
@@ -145,6 +155,41 @@ struct CanvasQuad;
 /// see `editor::pan_camera`.
 #[derive(Component, Default)]
 pub struct CameraPan(pub Vec2);
+
+/// The scale the canvas quad is actually drawn at, easing toward
+/// [`PixelZoom`]'s factor rather than jumping to it.
+///
+/// The canvas itself still snaps to the new resolution the instant the zoom
+/// changes — only a whole-number canvas keeps every texel the same size, and
+/// that is still true at every point during the ease — so this is the *blit*
+/// catching up to a step that has already happened underneath it, not a
+/// second, fractional zoom. It lands exactly on the target (see
+/// [`ease_toward`]) rather than trailing forever, so a screenshot taken once
+/// the ease is done is exactly as pixel-perfect as before this existed.
+#[derive(Resource)]
+struct ZoomQuadScale(f32);
+
+/// How quickly [`ZoomQuadScale`] closes the distance to the target zoom, in
+/// closed-fraction-per-second: at this rate a step is visually settled well
+/// under 300ms, which is brisk enough not to lag behind repeated key presses.
+const ZOOM_EASE_RATE: f32 = 14.0;
+
+/// Exponential ease toward `target`, snapping once the gap is not worth
+/// another frame of interpolation.
+///
+/// Framerate-independent (the rate is continuous, not "a fraction per
+/// frame"), and it terminates: without the snap, an exponential ease only
+/// ever approaches its target and a screenshot taken after the game has been
+/// sitting idle would still find the quad a fraction of a pixel off the grid.
+fn ease_toward(current: f32, target: f32, dt: f32) -> f32 {
+    const SNAP_EPSILON: f32 = 0.01;
+    let eased = current + (target - current) * (1.0 - (-ZOOM_EASE_RATE * dt).exp());
+    if (target - eased).abs() < SNAP_EPSILON {
+        target
+    } else {
+        eased
+    }
+}
 
 /// Allocate an image usable as a render target.
 fn create_canvas_image(size: UVec2) -> Image {
@@ -256,6 +301,10 @@ fn setup_pipeline(
     ));
 
     commands.insert_resource(PixelCanvas { image, size });
+    // Starts at the initial zoom exactly, not `PIXEL_SCALE`: `CROWD2X_ZOOM`
+    // picks a starting zoom in `Plugin::build`, before this runs, and easing
+    // from the default would put the very first frame off the pixel grid.
+    commands.insert_resource(ZoomQuadScale(zoom.factor()));
 }
 
 /// Rebuild the canvas at the new resolution whenever the window changes size
@@ -291,7 +340,10 @@ fn resize_canvas(
         sprite.image = image.clone();
         sprite.custom_size = Some(size.as_vec2());
         transform.translation = offset.extend(0.0);
-        transform.scale = Vec3::splat(zoom.factor());
+        // Scale is not set here: the canvas resolution jumps to the new zoom
+        // immediately (a fractional one would break the pixel grid), but the
+        // quad's on-screen scale eases up to it in `ease_zoom_quad` instead
+        // of jumping too, which is the whole of the "smoothed" zoom.
     }
     for mut target in &mut targets {
         *target = RenderTarget::Image(image.clone().into());
@@ -299,6 +351,22 @@ fn resize_canvas(
     images.remove(&canvas.image);
     canvas.image = image;
     canvas.size = size;
+}
+
+/// Ease the canvas quad's scale toward the current zoom instead of jumping to
+/// it, so a zoom step is felt as a brisk animation rather than a snap — while
+/// [`resize_canvas`] has already, in the same frame, rebuilt the canvas at the
+/// new resolution, so what is inside the quad is never itself stretched.
+fn ease_zoom_quad(
+    time: Res<Time>,
+    zoom: Res<PixelZoom>,
+    mut scale: ResMut<ZoomQuadScale>,
+    mut quads: Query<&mut Transform, With<CanvasQuad>>,
+) {
+    scale.0 = ease_toward(scale.0, zoom.factor(), time.delta_secs());
+    for mut transform in &mut quads {
+        transform.scale = Vec3::splat(scale.0);
+    }
 }
 
 /// Put the camera where a screen asked for it, once there is one to put.
@@ -479,5 +547,30 @@ mod tests {
 
         zoom.reset();
         assert_eq!(zoom.get(), PIXEL_SCALE);
+    }
+
+    /// Repeated small steps reach the target and stop there, rather than
+    /// creeping toward it forever — a screenshot taken any time after the game
+    /// has been idle a moment must find the quad on an exact zoom.
+    #[test]
+    fn easing_toward_a_zoom_arrives_and_stops() {
+        let mut scale = 4.0_f32;
+        let target = 6.0_f32;
+        for _ in 0..120 {
+            let next = ease_toward(scale, target, 1.0 / 60.0);
+            assert!(
+                (next - target).abs() <= (scale - target).abs(),
+                "must not overshoot or oscillate"
+            );
+            scale = next;
+        }
+        assert_eq!(scale, target);
+    }
+
+    /// A target already reached is a no-op, not a divide-by-zero or a tiny
+    /// oscillation around it.
+    #[test]
+    fn easing_toward_the_current_value_does_nothing() {
+        assert_eq!(ease_toward(5.0, 5.0, 1.0 / 60.0), 5.0);
     }
 }

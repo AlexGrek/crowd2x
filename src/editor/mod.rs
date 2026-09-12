@@ -199,6 +199,11 @@ struct EditorCursor;
 #[derive(Component)]
 struct Ghost;
 
+/// A [`Ghost`] but not the cursor it is a sibling of — they share a parent, so
+/// a query for one has to say it does not mean the other.
+type GhostQuery<'w> = (&'w mut Sprite, &'w mut Transform);
+type GhostFilter = (With<Ghost>, Without<EditorCursor>);
+
 #[derive(Component)]
 struct Hud;
 
@@ -645,7 +650,7 @@ fn update_cursor(
     tool: Res<Tool>,
     cursor: Res<Cursor>,
     mut cursors: Query<(&mut Transform, &mut Visibility), With<EditorCursor>>,
-    mut ghosts: Query<(&mut Sprite, &mut Transform), (With<Ghost>, Without<EditorCursor>)>,
+    mut ghosts: Query<GhostQuery, GhostFilter>,
 ) {
     if tool.is_changed() {
         for (mut sprite, mut transform) in &mut ghosts {

@@ -158,8 +158,11 @@ pub fn danger_button(label: &str, focus: Focusable, width: Val) -> impl Bundle {
 /// `app.add_systems(Update, ui::hover_highlight::<Control>)`. One
 /// implementation, so two panels of plain buttons cannot come to disagree
 /// about what hovering looks like.
+/// A button of marker `M` whose `Interaction` changed this frame.
+type HoveredButtonFilter<M> = (With<M>, Changed<Interaction>);
+
 pub fn hover_highlight<M: Component>(
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), (With<M>, Changed<Interaction>)>,
+    mut buttons: Query<(&Interaction, &mut BackgroundColor), HoveredButtonFilter<M>>,
 ) {
     for (interaction, mut background) in &mut buttons {
         let wanted = match interaction {
