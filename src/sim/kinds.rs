@@ -62,6 +62,7 @@ use rand::{RngExt, SeedableRng};
 use crate::map::Point;
 
 use super::entity::{Body, GameEntity, Think};
+use super::stats::Stats;
 use super::uid::{EntityType, Uid};
 use super::{Intent, MoveOutcome};
 
@@ -422,13 +423,24 @@ fn mix(mut x: u64) -> u64 {
 /// sources of truth for the same hairstyle.
 pub struct Human {
     walk: Walker,
+    /// Needs and condition, set once at spawn and from then on read-only by
+    /// [`Human::think`] — the first thinking process a human has, and so far
+    /// the only one. Nothing here changes them yet; that is the next thing to
+    /// build, not this one.
+    stats: Stats,
 }
 
 impl Human {
-    pub fn new(uid: Uid, cell: Point) -> Human {
+    pub fn new(uid: Uid, cell: Point, rng: &mut SmallRng) -> Human {
         Human {
             walk: Walker::new(uid, cell, HUMAN_SPEED),
+            stats: Stats::random(rng),
         }
+    }
+
+    /// What this person's body and mind are doing right now.
+    pub fn stats(&self) -> Stats {
+        self.stats
     }
 }
 
@@ -442,6 +454,10 @@ impl GameEntity for Human {
     }
 
     fn think(&self, ctx: &Think<'_>) -> Intent {
+        // `self.stats` is available here for exactly this reason — decisions
+        // that read a need (skip a detour while `stamina` is low, head
+        // somewhere on a full `bladder`) belong in this method, once there is
+        // more than one place to walk to.
         self.walk.think(ctx)
     }
 
@@ -454,7 +470,14 @@ impl GameEntity for Human {
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        self.walk.debug_fields()
+        let mut fields = self.walk.debug_fields();
+        fields.extend(
+            self.stats
+                .fields()
+                .into_iter()
+                .map(|(name, value)| (name, format!("{value:.1}"))),
+        );
+        fields
     }
 }
 
@@ -530,7 +553,7 @@ pub(super) fn build(
     rng: &mut SmallRng,
 ) -> Box<dyn GameEntity> {
     match kind {
-        EntityType::Human => Box::new(Human::new(uid, cell)),
+        EntityType::Human => Box::new(Human::new(uid, cell, rng)),
         EntityType::Dog => Box::new(Dog::new(
             uid,
             cell,
@@ -562,7 +585,8 @@ mod tests {
     }
 
     fn human(cell: Point) -> Human {
-        Human::new(Uid::new(EntityType::Human, 42), cell)
+        let mut rng = SmallRng::seed_from_u64(0);
+        Human::new(Uid::new(EntityType::Human, 42), cell, &mut rng)
     }
 
     /// Run one full tick by hand: think, apply what it asked for, react as
@@ -737,8 +761,9 @@ mod tests {
         // Neighbouring ids sharing a tick must not get correlated streams, or
         // a crowd wanders in formation.
         let (map, occ, log) = (room(), Occupancy::new(Size::new(9, 9)), Log::new());
-        let mut one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4));
-        let mut two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4));
+        let mut rng = SmallRng::seed_from_u64(0);
+        let mut one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4), &mut rng);
+        let mut two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4), &mut rng);
 
         let differ = (0..20).any(|t| {
             one.walk = Walker::new(one.walk.body.uid(), Point::new(4, 4), HUMAN_SPEED);

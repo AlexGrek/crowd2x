@@ -127,6 +127,7 @@ pub mod kinds;
 pub mod log;
 pub mod occupancy;
 pub mod path;
+pub mod stats;
 pub mod uid;
 
 use rand::rngs::SmallRng;
@@ -141,6 +142,7 @@ pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{find_path, Path, PathFinder};
+pub use stats::Stats;
 pub use uid::{EntityType, Uid};
 
 /// What an entity decided to do this tick.
