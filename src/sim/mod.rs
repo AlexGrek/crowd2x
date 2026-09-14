@@ -123,6 +123,7 @@
 
 pub mod entities;
 pub mod entity;
+pub mod identity;
 pub mod kinds;
 pub mod log;
 pub mod occupancy;

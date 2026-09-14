@@ -203,6 +203,15 @@ pub trait GameEntity: Send + Sync {
         Vec::new()
     }
 
+    /// This entity's own name, for a kind that has one.
+    ///
+    /// `None` rather than a made-up default: a dog is not almost a person,
+    /// and a fallback name would say otherwise. The unit panel falls back to
+    /// [`EntityType::name`] itself for a kind that answers `None`.
+    fn display_name(&self) -> Option<String> {
+        None
+    }
+
     /// Stable randomness for the renderer to build an appearance from.
     ///
     /// The simulation does not know what a human looks like and should not

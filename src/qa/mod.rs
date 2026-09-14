@@ -159,7 +159,7 @@ impl Plugin for QaPlugin {
         }
 
         app.insert_resource(Run::new(script))
-            .add_systems(Startup, (connect_virtual_gamepad, apply_present_mode))
+            .add_systems(Startup, (connect_virtual_gamepad, apply_present_mode, park_cursor))
             // After the input plugins have cleared last frame's state, so a
             // press made here is still `just_pressed` when the game reads it
             // in `Update`.
@@ -419,6 +419,28 @@ fn apply_present_mode(run: Res<Run>, mut windows: Query<&mut Window, With<Primar
     };
     window.present_mode = bevy::window::PresentMode::AutoNoVsync;
     info!("qa: vsync off - frames are timed as the game produces them");
+}
+
+/// Move the real cursor off the canvas before the first frame is drawn.
+///
+/// The pointer a script moves is the genuine OS cursor (see the module
+/// doc), and warping it outlives the process that did it. A script with no
+/// `mouse` step of its own inherits wherever the *last* qa process (or a
+/// human) left it, and if that happens to land on a widget that spawns
+/// under it — the on-screen keyboard opens at a fixed screen position every
+/// time — `nav::point` focuses it on the strength of a real hover event,
+/// ahead of whatever `nav::ensure_focus` would otherwise have picked. This
+/// is what made `type_a_name` fail once in a full suite run and never on
+/// its own: the previous test's last click happened to leave the cursor
+/// over a different key than the one the script expects to land on.
+/// Parking it beyond the window's own bounds guarantees no widget can ever
+/// contain it, so a fresh test starts with nothing hovered.
+fn park_cursor(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    let away = Vec2::new(window.width() + 100.0, window.height() + 100.0);
+    window.set_cursor_position(Some(away));
 }
 
 /// Everything a step might press.

@@ -62,6 +62,7 @@ use rand::{RngExt, SeedableRng};
 use crate::map::Point;
 
 use super::entity::{Body, GameEntity, Think};
+use super::identity::Identity;
 use super::stats::Stats;
 use super::uid::{EntityType, Uid};
 use super::{Intent, MoveOutcome};
@@ -434,6 +435,9 @@ pub struct Human {
     /// the only one. Nothing here changes them yet; that is the next thing to
     /// build, not this one.
     stats: Stats,
+    /// Name and gender, rolled once at spawn — see [`Identity`] for why the
+    /// two need not agree.
+    identity: Identity,
 }
 
 impl Human {
@@ -441,12 +445,18 @@ impl Human {
         Human {
             walk: Walker::new(uid, cell, HUMAN_SPEED),
             stats: Stats::random(rng),
+            identity: Identity::random(rng),
         }
     }
 
     /// What this person's body and mind are doing right now.
     pub fn stats(&self) -> Stats {
         self.stats
+    }
+
+    /// Who this person is: name and gender.
+    pub fn identity(&self) -> &Identity {
+        &self.identity
     }
 }
 
@@ -476,7 +486,11 @@ impl GameEntity for Human {
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        let mut fields = self.walk.debug_fields();
+        let mut fields = vec![
+            ("name", self.identity.name().to_string()),
+            ("gender", self.identity.gender().label().to_string()),
+        ];
+        fields.extend(self.walk.debug_fields());
         fields.extend(
             self.stats
                 .fields()
@@ -488,6 +502,10 @@ impl GameEntity for Human {
 
     fn planned_path(&self) -> Vec<Point> {
         self.walk.path_cells()
+    }
+
+    fn display_name(&self) -> Option<String> {
+        Some(self.identity.name().to_string())
     }
 }
 

@@ -532,13 +532,16 @@ fn freeze_label(entity: &dyn GameEntity) -> &'static str {
     }
 }
 
-/// The line beside the portrait: what this is, and whether it is being held.
+/// The line beside the portrait: this person's name, or the kind's for one
+/// that has none.
 fn title(entity: &dyn GameEntity) -> String {
-    let name = name_of(entity.kind());
+    let name = entity
+        .display_name()
+        .unwrap_or_else(|| name_of(entity.kind()).to_string());
     if entity.is_frozen() {
         format!("{name}  (frozen)")
     } else {
-        name.to_string()
+        name
     }
 }
 

@@ -12,6 +12,11 @@ bevy = { version = "0.19", default-features = false, features = ["2d", "ui", "pn
 # The simulation's log queue. Bounded, lock-free, and already in the tree via
 # Bevy, so naming it directly costs no compile time. See `src/sim/log.rs`.
 crossbeam-queue = "0.3"
+# First and last names for a spawned human (`sim::identity`). Driven through
+# the same seeded `SmallRng` every other per-entity randomness uses
+# (`fake_with_rng`), so a name is as deterministic as the stats rolled
+# alongside it and costs no RNG of its own.
+fake = "5.1.0"
 rand = "0.10"
 # The think and react rounds run across threads: rayon over the entity arena,
 # each thread holding one entity and writing one slot. It is the simulation's
