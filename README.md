@@ -63,7 +63,7 @@ CROWD2X_EXIT=3 cargo run                                       # smoke run, no c
 # The pixel grid check needs a frame with no UI in it: bevy_ui draws at window
 # resolution over the finished upscale, so on-screen text is not on the grid.
 CROWD2X_SHOT=/tmp/bare.png CROWD2X_HIDE_UI=1 cargo run
-python3 tools/check_pixel_grid.py /tmp/bare.png 4
+uv run tools/check_pixel_grid.py /tmp/bare.png 4
 ```
 
 Two Claude Code skills in `.claude/skills/` document the rest: `debugger` for the

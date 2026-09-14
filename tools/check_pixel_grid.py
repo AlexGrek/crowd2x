@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 """Verify that a captured frame is a genuine integer upscale.
 
 Every source texel must appear as a solid SCALE x SCALE block of identical
@@ -10,7 +10,7 @@ The block grid is allowed to be phase-shifted: when the canvas is rounded up to
 cover a window whose size is not a multiple of SCALE, it is centred and the grid
 can start up to SCALE-1 pixels in. All offsets are tried and the best reported.
 
-    python3 tools/check_pixel_grid.py screenshots/shot.png 4
+    uv run tools/check_pixel_grid.py screenshots/shot.png 4
 
 Exits non-zero if the frame is not pixel-perfect, so it can gate a check.
 """

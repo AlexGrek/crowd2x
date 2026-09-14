@@ -59,6 +59,21 @@ use super::speed::{self, Change, GameSpeed};
 /// exactly what [`Scope`] is for everywhere else it is used.
 const SPAWN_MENU: u8 = 1;
 
+/// Row the count stepper sits on, above the row of kinds — the same
+/// convention [`crate::browser`]'s `NAME_ROW` uses for a toolbar above a list:
+/// negative, so it reads as "above" the row under it.
+const SPAWN_COUNT_ROW: i32 = -1;
+
+/// The stepper's floor. Spawning at least one unit is the point of the
+/// button; zero would need pressing `+` again just to undo `-`.
+const MIN_SPAWN_COUNT: u32 = 1;
+
+/// The stepper's ceiling — comfortably above anything worth reaching by
+/// clicking `+` one at a time, and small enough that scanning the map for
+/// that many distinct cells is still the one-off cost per click
+/// [`spawn_points`] is written to be.
+const MAX_SPAWN_COUNT: u32 = 50;
+
 /// Every control has a key and a gamepad button of its own, since the
 /// highlight the rest of the game navigates with cannot live on this screen.
 ///
@@ -91,11 +106,40 @@ enum Control {
 #[derive(Resource, Default)]
 pub struct SpawnMenu(pub Option<Entity>);
 
+/// How many units the next spawn choice places at once — the stepper at the
+/// top of the spawn menu, `1` outside it.
+///
+/// A resource driven by a stepper rather than a number typed on the on-screen
+/// keyboard, for the same reason the zoom and the speed are steppers: `+`/`-`
+/// is exactly as reachable on a gamepad as with a mouse, and a count has no
+/// use for the keyboard's full alphabet.
+#[derive(Resource)]
+pub struct SpawnCount(u32);
+
+impl Default for SpawnCount {
+    fn default() -> Self {
+        SpawnCount(MIN_SPAWN_COUNT)
+    }
+}
+
+impl SpawnCount {
+    pub fn get(&self) -> u32 {
+        self.0
+    }
+}
+
+/// The spawn menu's own readout of [`SpawnCount`], rewritten in place when it
+/// changes — the panel is only ever rebuilt when the menu itself opens.
+#[derive(Component)]
+struct SpawnCountLabel;
+
 /// A button inside the spawn menu.
 #[derive(Component, Clone, Copy)]
 enum SpawnChoice {
     Kind(EntityType),
     Close,
+    CountDown,
+    CountUp,
 }
 
 /// A piece of text that has to be kept true.
@@ -116,6 +160,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpawnMenu>()
+            .init_resource::<SpawnCount>()
             .add_systems(OnEnter(AppState::Game), spawn_hud)
             .add_systems(OnExit(AppState::Game), reset_spawn_menu)
             .add_systems(
@@ -123,6 +168,7 @@ impl Plugin for HudPlugin {
                 (
                     press_controls,
                     spawn_menu_actions,
+                    update_spawn_count_label,
                     hover_highlight::<Control>,
                     update_readouts,
                 )
@@ -137,9 +183,10 @@ impl Plugin for HudPlugin {
 /// reset — the overlay itself goes with every other `DespawnOnExit`, but the
 /// resource pointing at it and the scope it raised would otherwise strand the
 /// next screen's own focus layer at 1.
-fn reset_spawn_menu(mut menu: ResMut<SpawnMenu>, mut scope: ResMut<Scope>) {
+fn reset_spawn_menu(mut menu: ResMut<SpawnMenu>, mut scope: ResMut<Scope>, mut count: ResMut<SpawnCount>) {
     menu.0 = None;
     *scope = Scope(0);
+    count.0 = MIN_SPAWN_COUNT;
 }
 
 /// Both corners, in one system.
@@ -296,6 +343,7 @@ fn press_controls(
     mut scope: ResMut<Scope>,
     mut focus: ResMut<Focus>,
     mut menu: ResMut<SpawnMenu>,
+    count: Res<SpawnCount>,
     sim: Option<Res<Sim>>,
 ) {
     for (control, interaction) in &clicked {
@@ -309,6 +357,7 @@ fn press_controls(
                 &mut scope,
                 &mut focus,
                 &mut menu,
+                count.get(),
                 sim.as_deref(),
             );
         }
@@ -327,6 +376,7 @@ fn press_controls(
                 &mut scope,
                 &mut focus,
                 &mut menu,
+                count.get(),
                 sim.as_deref(),
             );
         }
@@ -348,6 +398,7 @@ fn press(
     scope: &mut Scope,
     focus: &mut Focus,
     menu: &mut SpawnMenu,
+    count: u32,
     sim: Option<&Sim>,
 ) {
     match control {
@@ -360,20 +411,26 @@ fn press(
         Control::Slower => speed::apply(Change::Slower, speed, sim),
         Control::Faster => speed::apply(Change::Faster, speed, sim),
         Control::Pause => speed::apply(Change::TogglePause, speed, sim),
-        Control::Spawn => open_spawn_menu(commands, scope, focus, menu),
+        Control::Spawn => open_spawn_menu(commands, scope, focus, menu, count),
         Control::Menu => next.set(AppState::Maps),
     }
 }
 
-/// Build the spawn menu overlay: one button per [`EntityType`], and a close
-/// button beside them.
+/// Build the spawn menu overlay: a stepper for how many, one button per
+/// [`EntityType`], and a close button beside them.
 ///
 /// Full screen and opaque, like the browser's delete confirmation, so the
 /// corner buttons behind it stop receiving the pointer the moment it opens —
 /// the topmost node under the cursor is the only one `bevy_ui` reports a hover
 /// to, which is what keeps a click from reaching through a modal anywhere else
 /// in the game.
-fn open_spawn_menu(commands: &mut Commands, scope: &mut Scope, focus: &mut Focus, menu: &mut SpawnMenu) {
+fn open_spawn_menu(
+    commands: &mut Commands,
+    scope: &mut Scope,
+    focus: &mut Focus,
+    menu: &mut SpawnMenu,
+    count: u32,
+) {
     if menu.0.is_some() {
         return;
     }
@@ -430,6 +487,49 @@ fn open_spawn_menu(commands: &mut Commands, scope: &mut Scope, focus: &mut Focus
         ))
         .id();
 
+    let count_down = commands
+        .spawn((
+            SpawnChoice::CountDown,
+            button(
+                "-",
+                Focusable::new(SPAWN_COUNT_ROW, 0).in_scope(SPAWN_MENU),
+                px(11),
+            ),
+        ))
+        .id();
+    let count_label = commands
+        .spawn((
+            SpawnCountLabel,
+            label(count.to_string(), FONT_BODY, TEXT_ACCENT),
+            TextLayout::justify(Justify::Center),
+            Node { width: px(10), ..default() },
+        ))
+        .id();
+    let count_up = commands
+        .spawn((
+            SpawnChoice::CountUp,
+            button(
+                "+",
+                Focusable::new(SPAWN_COUNT_ROW, 1).in_scope(SPAWN_MENU),
+                px(11),
+            ),
+        ))
+        .id();
+
+    commands
+        .spawn((
+            Name::new("spawn count"),
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(3),
+                margin: UiRect::top(px(4)),
+                ..default()
+            },
+            ChildOf(overlay),
+        ))
+        .add_children(&[count_down, count_label, count_up]);
+
     commands
         .spawn((
             Node {
@@ -459,6 +559,7 @@ fn spawn_menu_actions(
     choices: Query<&SpawnChoice>,
     mut menu: ResMut<SpawnMenu>,
     mut scope: ResMut<Scope>,
+    mut count: ResMut<SpawnCount>,
     mut sim_input: ResMut<SimInput>,
     sim: Option<Res<Sim>>,
     cameras: Query<&CameraPan, With<WorldCamera>>,
@@ -473,6 +574,12 @@ fn spawn_menu_actions(
         match choices.get(*entity) {
             Ok(SpawnChoice::Kind(kind)) => chosen = Some(*kind),
             Ok(SpawnChoice::Close) => should_close = true,
+            Ok(SpawnChoice::CountDown) => {
+                count.0 = count.0.saturating_sub(1).max(MIN_SPAWN_COUNT);
+            }
+            Ok(SpawnChoice::CountUp) => {
+                count.0 = (count.0 + 1).min(MAX_SPAWN_COUNT);
+            }
             Err(_) => {}
         }
     }
@@ -482,11 +589,13 @@ fn spawn_menu_actions(
             .single()
             .map(|pan| background::point_of(background::cell_of(pan.0)))
             .unwrap_or(Point::ORIGIN);
-        match spawn_point(&sim.0.map, near) {
-            Some(at) => {
+        let points = spawn_points(&sim.0.map, near, count.get());
+        if points.is_empty() {
+            sim.0.log.push(format!("nowhere to stand for a {}", kind.name()));
+        } else {
+            for at in points {
                 sim_input.0.spawn(kind, at);
             }
-            None => sim.0.log.push(format!("nowhere to stand for a {}", kind.name())),
         }
     }
 
@@ -495,20 +604,43 @@ fn spawn_menu_actions(
     }
 }
 
-/// The nearest cell to `near` that a character can stand on, or `None` for a
-/// map with nowhere to stand at all.
+/// The `count` cells nearest to `near` that a character can stand on, closest
+/// first — fewer come back if the map does not have that many, and none at
+/// all for a map with nowhere to stand.
+///
+/// Distinct cells are what puts the spawned units at least one cell apart: no
+/// two cells on the grid are ever any closer than that, so a set of distinct
+/// cells is spacing for free without anything having to check for it.
 ///
 /// A full scan rather than a search that spirals outward from `near`: this
 /// runs once per click rather than once per tick, and even a large map is
 /// cheap to walk once.
-fn spawn_point(map: &Map, near: Point) -> Option<Point> {
-    if map.is_passable(near) {
-        return Some(near);
-    }
-    map.size()
+fn spawn_points(map: &Map, near: Point, count: u32) -> Vec<Point> {
+    let mut cells: Vec<Point> = map
+        .size()
         .points()
         .filter(|point| map.is_passable(*point))
-        .min_by_key(|point| (point.x - near.x).abs() + (point.y - near.y).abs())
+        .collect();
+    cells.sort_by_key(|point| (point.x - near.x).abs() + (point.y - near.y).abs());
+    cells.truncate(count as usize);
+    cells
+}
+
+/// Keep the spawn menu's own count readout saying what [`SpawnCount`] is.
+///
+/// The panel around it is only rebuilt when the menu opens — see
+/// [`open_spawn_menu`] — so the number the stepper changed has to be written
+/// in place, the same way the unit panel's live fields are.
+fn update_spawn_count_label(count: Res<SpawnCount>, mut texts: Query<&mut Text, With<SpawnCountLabel>>) {
+    if !count.is_changed() {
+        return;
+    }
+    let wanted = count.get().to_string();
+    for mut text in &mut texts {
+        if **text != wanted {
+            **text = wanted.clone();
+        }
+    }
 }
 
 /// Close the spawn menu, wherever it was closed from: its own `close` button,

@@ -147,7 +147,7 @@ Rules:
 - **Never commit a pre-upscaled PNG.** Store the true resolution and let the game scale
   it by a whole number (`characters::upscale`, X and Y only — Z is depth). A baked-in
   upscale takes the choice away from the game and disguises 16px art as 48px art.
-  `python3 tools/art_scale.py report assets` lists any file that is secretly an upscale;
+  `uv run tools/art_scale.py report assets` lists any file that is secretly an upscale;
   `shrink <src> <dst>` reduces one and refuses if the reduction would lose a pixel.
 - **16x16 is the intended resolution for everything**, and the palette is nearly there:
   every tile but `floor` and `floor_diag` is 16x16, and of the props only the beds, the
@@ -512,7 +512,7 @@ milliseconds, because that is the check the earlier prototype's O(parts x worker
 would have failed and a wall-clock budget would not. Add a `measure` step to them before
 optimising anything here, and read the `qa` skill's "Performance tests" section first:
 frame numbers need `"vsync": false`, and a debug timing (`opt-level = 1`) is a ratio, not a
-speed — `python3 tools/qa.py --release` for a number worth quoting.
+speed — `uv run tools/qa.py --release` for a number worth quoting.
 
 Beyond that: add `FrameTimeDiagnosticsPlugin` and look, or build with Bevy's `trace_tracy`
 feature. Guessing which of a dozen systems is the problem is exactly how the O(n^2) query in

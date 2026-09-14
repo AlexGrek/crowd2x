@@ -490,23 +490,14 @@ fn update_readouts(
 /// Radius of the marker drawn on the selected unit's goal, in canvas pixels.
 const GOAL_MARKER: f32 = 3.0;
 
-/// Draw the selected unit's planned route over the map, while the debug menu
-/// is open on them.
+/// Draw the selected unit's planned route over the map.
 ///
 /// A visual reading of what [`debug_block`]'s `goal` and `path` fields already
-/// say in words — tied to the same menu rather than to the selection itself,
-/// so a route is not drawn over the map for every unit clicked, only the one
-/// somebody is actually inspecting. World-space, through [`world_pos`], the
-/// same conversion the actor it is drawn over is placed with.
-fn draw_path(
-    selected: Res<Selected>,
-    menu: Res<OpenMenu>,
-    sim: Option<Res<Sim>>,
-    mut gizmos: Gizmos,
-) {
-    if menu.0 != Some(Menu::Debug) {
-        return;
-    }
+/// say in words, for whoever is selected rather than only while their debug
+/// menu happens to be open — a route worth glancing at is not a reason to
+/// have the text panel up too. World-space, through [`world_pos`], the same
+/// conversion the actor it is drawn over is placed with.
+fn draw_path(selected: Res<Selected>, sim: Option<Res<Sim>>, mut gizmos: Gizmos) {
     let Some((uid, sim)) = selected.get().zip(sim) else {
         return;
     };

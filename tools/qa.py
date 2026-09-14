@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 """Run the scripted QA tests in qa/ against the real game.
 
 Each test is a JSON script (see src/qa/script.rs) that the game replays as
@@ -16,11 +16,11 @@ qa-perf/<test>.json, and they are printed here whether it passed or failed -
 the measurement is the point of a perf test, and a run that failed a budget is
 exactly the one whose numbers are worth reading.
 
-    python3 tools/qa.py                    # every test in qa/
-    python3 tools/qa.py qa/create_map.json # just this one
-    python3 tools/qa.py -v                 # stream the game's log as it runs
-    python3 tools/qa.py --release          # optimised build; the only honest
-                                           # profile to quote a timing from
+    uv run tools/qa.py                    # every test in qa/
+    uv run tools/qa.py qa/create_map.json # just this one
+    uv run tools/qa.py -v                 # stream the game's log as it runs
+    uv run tools/qa.py --release          # optimised build; the only honest
+                                          # profile to quote a timing from
 
 Exits non-zero if any test failed, so it can gate a commit.
 """

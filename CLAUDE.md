@@ -19,8 +19,8 @@ cargo run              # debug build; deps are optimized (opt-level 3) so it's p
 cargo run --release
 cargo build
 cargo test             # the plain-Rust parts: map, coordinates, navigation, scripts
-python3 tools/qa.py    # the scripted QA tests in qa/, against the real binary
-python3 tools/qa.py --release   # ...optimised, which is the only profile to quote a timing from
+uv run tools/qa.py    # the scripted QA tests in qa/, against the real binary
+uv run tools/qa.py --release   # ...optimised, which is the only profile to quote a timing from
 ```
 
 **Always run through `cargo`, never the raw binary** (`./target/debug/crowd2x`) — Bevy
@@ -48,7 +48,7 @@ CROWD2X_EXIT=3 cargo run                                       # smoke run, no c
 # window resolution, so on-screen text is legitimately not on the pixel grid.
 # Its second argument is the zoom, and must match CROWD2X_ZOOM.
 CROWD2X_SHOT=/tmp/bare.png CROWD2X_HIDE_UI=1 cargo run
-python3 tools/check_pixel_grid.py /tmp/bare.png 4
+uv run tools/check_pixel_grid.py /tmp/bare.png 4
 ```
 
 A pure black capture almost always means the frame was grabbed before the first one was
@@ -493,9 +493,9 @@ buttons in this order, does the right thing happen?* A QA test is a JSON file th
 real binary replays as input and then checks.
 
 ```sh
-python3 tools/qa.py                      # every test in qa/, one process each
-python3 tools/qa.py qa/create_map.json   # one test
-python3 tools/qa.py -v                   # stream the game's log
+uv run tools/qa.py                      # every test in qa/, one process each
+uv run tools/qa.py qa/create_map.json   # one test
+uv run tools/qa.py -v                   # stream the game's log
 CROWD2X_QA=qa/create_map.json cargo run   # the same thing by hand
 ```
 

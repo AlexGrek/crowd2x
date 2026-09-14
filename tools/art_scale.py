@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 """Find sprites that are really a smaller image blown up, and shrink them back.
 
 Much of the imported art is an upscale: `doghd.png` is 48x48, but every texel
@@ -7,8 +7,8 @@ nothing in quality but throws away the game's ability to decide the scale, and
 makes "one asset pixel" mean different things in different files. This finds
 the true resolution and writes the reduced image; the game scales it back up.
 
-    python3 tools/art_scale.py report assets            # scan a tree
-    python3 tools/art_scale.py shrink assets/doghd.png assets/dog_small.png
+    uv run tools/art_scale.py report assets            # scan a tree
+    uv run tools/art_scale.py shrink assets/doghd.png assets/dog_small.png
 
 `shrink` refuses to run unless the reduction is lossless, so it can never
 silently degrade art that only looks blocky.

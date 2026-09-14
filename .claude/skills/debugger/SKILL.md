@@ -90,7 +90,7 @@ window resolution *on top of* the finished upscale, so any text on screen makes 
 report non-uniform blocks that have nothing to do with the pipeline:
 ```sh
 CROWD2X_SHOT=<scratchpad>/frame.png CROWD2X_HIDE_UI=1 cargo run
-python3 tools/check_pixel_grid.py <scratchpad>/frame.png 4
+uv run tools/check_pixel_grid.py <scratchpad>/frame.png 4
 ```
 Checks that every source texel is a solid 4x4 block of identical pixels. Exits non-zero
 if not, so it can gate a change. A reported phase offset like `x=3 y=3` is fine and
@@ -104,7 +104,7 @@ an odd zoom is where a half-pixel offset in the canvas quad shows up first:
 for z in 1 2 3 4 5 6 7 8; do
   CROWD2X_SHOT=<scratchpad>/z$z.png CROWD2X_HIDE_UI=1 CROWD2X_ZOOM=$z \
     CROWD2X_STATE=game CROWD2X_MAP="<a map>" cargo run
-  python3 tools/check_pixel_grid.py <scratchpad>/z$z.png $z
+  uv run tools/check_pixel_grid.py <scratchpad>/z$z.png $z
 done
 ```
 

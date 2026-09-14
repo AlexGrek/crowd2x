@@ -15,10 +15,10 @@ plugins and all — checks what happened, and exits with a status.
 
 ```sh
 cd /Users/vedmedik/dev/crowd2x
-python3 tools/qa.py                      # every test in qa/, one process each
-python3 tools/qa.py qa/create_map.json   # one test
-python3 tools/qa.py -v                   # stream the game's log while it runs
-python3 tools/qa.py --release            # optimised build, for a timing worth quoting
+uv run tools/qa.py                      # every test in qa/, one process each
+uv run tools/qa.py qa/create_map.json   # one test
+uv run tools/qa.py -v                   # stream the game's log while it runs
+uv run tools/qa.py --release            # optimised build, for a timing worth quoting
 CROWD2X_QA=qa/create_map.json cargo run  # by hand; set CROWD2X_MAPS too (see below)
 ```
 
@@ -274,7 +274,7 @@ set against.
   `"vsync": false` in any test that measures frames.
 - **A debug timing is not a speed.** This crate builds at `opt-level = 1` in debug (its
   dependencies at 3). Debug numbers are fine for *scaling* — the ratio is what matters —
-  and useless as an answer to "how fast is it". Run `python3 tools/qa.py --release` before
+  and useless as an answer to "how fast is it". Run `uv run tools/qa.py --release` before
   quoting one. The profile and the vsync setting are recorded in the report for exactly
   this reason.
 
@@ -326,7 +326,7 @@ Read the PNGs afterwards — you can see them.
 3. **Make it fail first.** Break an expectation deliberately, run it, and check the run
    reports a failure. A QA test that cannot fail is worse than none, and this suite has
    already passed vacuously once (see below).
-4. Put it back, run `python3 tools/qa.py`, and check the screenshots if it takes any.
+4. Put it back, run `uv run tools/qa.py`, and check the screenshots if it takes any.
 
 ## When a test fails
 

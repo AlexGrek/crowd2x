@@ -1,5 +1,8 @@
 /target
 
+# uv-managed virtualenv for tools/
+/.venv
+
 # macOS
 .DS_Store
 
