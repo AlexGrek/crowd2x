@@ -121,15 +121,22 @@
 // nothing did yet.
 #![allow(dead_code, unused_imports)]
 
+pub mod brain;
 pub mod entities;
 pub mod entity;
+pub mod feature;
 pub mod identity;
+pub mod item;
 pub mod kinds;
 pub mod log;
 pub mod occupancy;
 pub mod path;
+pub(crate) mod rng;
 pub mod stats;
+#[cfg(test)]
+pub(crate) mod testing;
 pub mod uid;
+pub mod walker;
 
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
@@ -137,14 +144,18 @@ use rayon::prelude::*;
 
 use crate::map::{Map, Point};
 
+pub use brain::{Brain, GoalId};
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
+pub use feature::{FeatureKind, Features};
+pub use item::ItemKind;
 pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{find_path, Path, PathFinder};
 pub use stats::Stats;
 pub use uid::{EntityType, Uid};
+pub use walker::Walker;
 
 /// What an entity decided to do this tick.
 ///
@@ -283,6 +294,9 @@ pub struct GameState {
     occupancy: Occupancy,
     /// Written from any thread, drained by the renderer. See [`Log`].
     pub log: Log,
+    /// Where the props a brain can use are. Derived from `map` once, here,
+    /// and never again: the simulation's map does not change.
+    features: Features,
     /// Mints ids and seeds new entities. Seeded, so a run replays.
     rng: SmallRng,
     tick: u64,
@@ -305,6 +319,7 @@ impl GameState {
     pub fn new(map: Map, seed: u64) -> GameState {
         GameState {
             occupancy: Occupancy::new(map.size()),
+            features: Features::from_map(&map),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -318,6 +333,11 @@ impl GameState {
 
     pub fn entities(&self) -> &Entities {
         &self.entities
+    }
+
+    /// What the map's props are for, and where. See [`feature`].
+    pub fn features(&self) -> &Features {
+        &self.features
     }
 
     /// Who is standing where. Read-only from outside the tick: the two places
@@ -536,6 +556,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         entities,
         occupancy,
         log,
+        features,
         tick,
         intents,
         moves,
@@ -561,6 +582,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             map,
             occupancy,
             log,
+            features,
             dt,
             tick: *tick,
         },
@@ -577,6 +599,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             map,
             occupancy,
             log,
+            features,
             dt,
             tick: *tick,
         },
@@ -713,12 +736,13 @@ fn move_step(
 /// **This is where pathfinding happens**, and it is the round that most wants
 /// the threads: a far route is a search over the map, one walker's search
 /// shares nothing with another's, and a crowd that has all arrived at once
-/// wants all of them planned at once. See [`kinds::Walker`].
+/// wants all of them planned at once. See [`walker::Walker`]; and since the
+/// brain runs here too, [`brain`] for what else a reaction decides.
 fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome]) {
     let moves = &moves[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots_mut() {
-            entity.react(ctx, moves[slot as usize]);
+            react_for(entity, ctx, moves[slot as usize]);
         }
         return;
     }
@@ -727,9 +751,25 @@ fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutc
         .zip(moves.par_iter())
         .for_each(|(entity, outcome)| {
             if let Some(entity) = entity {
-                entity.react(ctx, *outcome);
+                react_for(entity, ctx, *outcome);
             }
         });
+}
+
+/// One entity's reaction, whichever round asked for it — [`think_for`]'s
+/// other half.
+///
+/// A frozen entity is not asked here either, and it matters more here than
+/// in think: its brain would find no action running, and an executor asked
+/// for work every tick by a unit that can never walk what it plans is a fresh
+/// search every tick for nothing. Skipping is also more faithful to what
+/// freezing claims — "it keeps its cell and its goal" — than a brain that
+/// replans while held still. Its needs are held with it: no time passes for a
+/// frozen body.
+fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome) {
+    if !entity.is_frozen() {
+        entity.react(ctx, outcome);
+    }
 }
 
 #[cfg(test)]
@@ -1010,6 +1050,88 @@ mod tests {
                 .collect()
         };
         assert_eq!(positions(&a), positions(&b));
+    }
+
+    /// A map with fridges in it, so a crowd has two goals to take turns
+    /// between rather than one.
+    fn kitchen(size: i32, seed: u64) -> GameState {
+        let mut map = Map::new(Size::new(size, size), FLOOR);
+        for cell in [Point::new(2, 2), Point::new(size - 3, size - 3)] {
+            map.add_object(
+                crate::map::ObjectLayer::Props,
+                crate::map::Object {
+                    at: Point::new(
+                        cell.x * crate::map::PIXELS_PER_CELL + 24,
+                        cell.y * crate::map::PIXELS_PER_CELL + 24,
+                    ),
+                    kind: crate::map::ObjectKind::new("fridge"),
+                },
+            );
+        }
+        GameState::new(map, seed)
+    }
+
+    #[test]
+    fn determinism_survives_brains_and_hunger_in_the_parallel_rounds() {
+        // The same check as above with every part of the brain running: goals
+        // handing over, routes to fridges, a queue built and resumed — across
+        // the threshold where react goes onto rayon. Iteration order, routine
+        // order and tie-breaking are all properties of the types; this is the
+        // test that says they add up.
+        let build = || {
+            let mut state = kitchen(24, 17);
+            for i in 0..(PARALLEL_AT as i32 + 20) {
+                state.spawn(EntityType::Human, Point::new(i % 24, 4 + (i / 24) % 16));
+            }
+            state
+        };
+        let (mut a, mut b) = (build(), build());
+        let (mut meals_a, mut meals_b) = (0, 0);
+        for _ in 0..1500 {
+            run(&mut a, 1);
+            run(&mut b, 1);
+            meals_a += a.log.drain().iter().filter(|l| l.contains("ate at the fridge")).count();
+            meals_b += b.log.drain().iter().filter(|l| l.contains("ate at the fridge")).count();
+        }
+
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state
+                .entities()
+                .iter()
+                .map(|e| (e.uid().raw(), e.position()))
+                .collect()
+        };
+        assert!(meals_a > 0, "nobody ate, so the eating half of the brain never ran");
+        assert_eq!(meals_a, meals_b);
+        assert_eq!(positions(&a), positions(&b));
+    }
+
+    #[test]
+    fn a_frozen_entity_does_not_plan_while_it_is_held() {
+        // Its brain would find no action running every tick and ask for work
+        // every tick; a search it can never walk is a search for nothing.
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+        run(&mut state, 30);
+
+        let mut input = Input::new();
+        input.freeze(uid, true);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+
+        walker::ROUTES_ASKED.with(|asked| asked.set(0));
+        run(&mut state, 600);
+        assert_eq!(walker::ROUTES_ASKED.with(|asked| asked.get()), 0);
+    }
+
+    #[test]
+    fn a_human_stays_small_enough_to_be_worth_a_thousand_of() {
+        // The brain is inline — fixed arrays, no `Vec` of tasks or goals — so
+        // that a crowd is a run of entities a cache line apart rather than a
+        // pointer chase per unit per tick. The absence of a `Vec` is a property
+        // of the type, not something a test can see at runtime; its size is.
+        let human = std::mem::size_of::<Human>();
+        let brain = std::mem::size_of::<Brain>();
+        assert!(human <= 512, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]

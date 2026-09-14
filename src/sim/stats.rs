@@ -1,9 +1,8 @@
 //! What a person's body and mind are doing: [`Stats`].
 //!
-//! Read by [`super::kinds::Human::think`] — the first thinking process, and so
-//! far the only one — the same way [`super::entity::Think`] hands it the map
-//! and the crowd. Nothing here decides anything; a stat is a number a brain
-//! reads, not a brain of its own.
+//! Read by a human's brain — its routines turn a stat into how badly a goal is
+//! wanted, and a goal met changes one back ([`Stats::eat`]). Nothing here
+//! decides anything; a stat is a number a brain reads, not a brain of its own.
 //!
 //! One field per stat, not a map by name: a `Human` always has exactly this
 //! set of stats, so indexing by name would trade a compile error (a typo in a
@@ -16,13 +15,21 @@
 use rand::rngs::SmallRng;
 use rand::RngExt;
 
+/// Hunger gained per second. From fed to [`PECKISH`] in about a minute, which is
+/// slow enough that a crowd is not always eating and fast enough that watching
+/// one person for a minute shows a meal.
+///
+/// [`PECKISH`]: super::brain::routines::PECKISH
+pub const HUNGER_PER_SECOND: f32 = 1.0;
+
 /// A person's needs and condition. Every field is on a 0-100 scale except
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Read-only from outside this module: nothing but [`Stats::random`] sets one
-/// yet, because nothing changes them over time yet. That is the next thing to
-/// build, not this one.
+/// Changed from outside this module only through what a body does: time passing
+/// ([`Stats::metabolise`]) and a need being met ([`Stats::eat`]). Hunger is the
+/// only stat that moves so far — the rest are rolled at spawn and stay put
+/// until something wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
     health: f32,
@@ -47,6 +54,37 @@ impl Stats {
             mental_health: rng.random_range(0.0..=100.0),
             attention: rng.random_range(0.0..=1.0),
         }
+    }
+
+    /// Time passing: `dt` seconds' worth of getting hungrier.
+    pub fn metabolise(&mut self, dt: f32) {
+        self.hunger = (self.hunger + HUNGER_PER_SECOND * dt).clamp(0.0, 100.0);
+    }
+
+    /// A meal: `amount` hunger gone, and never below full.
+    pub fn eat(&mut self, amount: f32) {
+        self.hunger = (self.hunger - amount).clamp(0.0, 100.0);
+    }
+
+    /// Every stat at the middle of its range — a person with nothing unusual
+    /// about them, for a test that wants to set one stat and know the rest.
+    #[cfg(test)]
+    pub(crate) fn calm() -> Stats {
+        Stats {
+            health: 50.0,
+            stamina: 50.0,
+            fun: 50.0,
+            hunger: 50.0,
+            bladder: 50.0,
+            mental_health: 50.0,
+            attention: 0.5,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_hunger(mut self, hunger: f32) -> Stats {
+        self.hunger = hunger;
+        self
     }
 
     /// 0 (dead) to 100 (uninjured).
@@ -127,6 +165,24 @@ mod tests {
         let a = Stats::random(&mut rng);
         let b = Stats::random(&mut rng);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn time_makes_a_person_hungrier_and_never_past_starving() {
+        let mut stats = Stats::calm().with_hunger(10.0);
+        stats.metabolise(5.0);
+        assert_eq!(stats.hunger(), 10.0 + 5.0 * HUNGER_PER_SECOND);
+        stats.metabolise(10_000.0);
+        assert_eq!(stats.hunger(), 100.0);
+    }
+
+    #[test]
+    fn eating_takes_hunger_away_and_never_past_full() {
+        let mut stats = Stats::calm().with_hunger(70.0);
+        stats.eat(60.0);
+        assert_eq!(stats.hunger(), 10.0);
+        stats.eat(60.0);
+        assert_eq!(stats.hunger(), 0.0);
     }
 
     #[test]

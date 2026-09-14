@@ -38,6 +38,8 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::new("fire", "fire_static.png"),
     PaletteItem::upscaled("crate", "untitled.png"),
     PaletteItem::new("crate tall", "untitledtallhd.png"),
+    // Something to eat from: a brain finds it by this name (`sim::feature`).
+    PaletteItem::upscaled("fridge", "fridge.png"),
 ];
 
 /// A placed prop, carrying the object it stands for so erasing it can take
@@ -158,6 +160,19 @@ mod tests {
             assert_eq!(item_of(&ObjectKind::new(item.name)), Some(index));
         }
         assert_eq!(item_of(&ObjectKind::new("hat stand")), None);
+    }
+
+    /// A prop the simulation gives a use to has to be one the editor can place,
+    /// or the use is unreachable from any map a person can make.
+    #[test]
+    fn every_feature_the_simulation_knows_is_a_prop_the_editor_can_place() {
+        for feature in crate::sim::feature::FEATURES {
+            assert!(
+                item_of(&ObjectKind::new(feature.name)).is_some(),
+                "no palette entry for {:?}",
+                feature.name
+            );
+        }
     }
 
     #[test]

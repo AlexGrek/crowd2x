@@ -192,6 +192,18 @@ pub trait GameEntity: Send + Sync {
         Vec::new()
     }
 
+    /// What this kind's mind is doing, for the brains menu: the goal in
+    /// charge, the priority list, the task, the action. Empty for a kind with
+    /// no brain.
+    ///
+    /// Beside [`GameEntity::debug_fields`] rather than folded into it, because
+    /// the two are two menus; and on the trait rather than reached for with a
+    /// downcast to `Human`, for the reason [`GameEntity::facing`] is. Same
+    /// allocation licence: asked about one selected entity, never in a tick.
+    fn brain_fields(&self) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
+
     /// Where this kind is planning to walk, current step first — for a debug
     /// visualization to draw over the map. Empty for a kind that does not walk
     /// one, and for one with no plan right now.
@@ -258,9 +270,12 @@ pub struct Think<'a> {
     /// the crowd as it ended the previous tick, react sees it as it ended
     /// this one. The near stage of pathfinding wants the second, which is why
     /// it is a reaction and not a decision — see
-    /// [`crate::sim::kinds::Walker`].
+    /// [`crate::sim::walker::Walker`].
     pub occupancy: &'a super::occupancy::Occupancy,
     pub log: &'a super::log::Log,
+    /// Where the props a brain can use are — fridges, so far. Built once with
+    /// the world, so reading it is a scan of a handful of cells.
+    pub features: &'a super::feature::Features,
     /// Seconds since the previous tick.
     pub dt: f32,
     /// Which tick this is. Deterministic, so it is usable as an RNG seed

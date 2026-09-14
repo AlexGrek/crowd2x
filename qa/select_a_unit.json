@@ -39,6 +39,12 @@
     { "press": "brains" },
     { "press": "brains" },
 
+    { "note": "the brains menu is live: run the world a while and it says what the mind is doing now" },
+    { "tick": 600 },
+    { "press": "brains" },
+    { "shot": "the brains menu" },
+    { "press": "brains" },
+
     { "note": "freezing goes through the simulation's own command queue" },
     { "press": "life" },
     { "shot": "the life menu" },

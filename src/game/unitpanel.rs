@@ -66,7 +66,8 @@ use super::selection::Selected;
 /// the art stays on whole pixels of the interface.
 const PORTRAIT: f32 = 32.0;
 
-/// How wide a field name is in the debug menu, so the values line up.
+/// How wide a field name is in the debug and brains menus, so the values line
+/// up.
 const FIELD_WIDTH: usize = 8;
 
 /// Which menu is open under the bar, if any.
@@ -83,10 +84,11 @@ enum Menu {
     Life,
     /// Everything the simulation holds about it, as it changes.
     Debug,
-    /// Empty for now — there are no statistics to keep yet.
+    /// Empty for now. Every stat is already listed, live, in the debug menu;
+    /// this is for the history of them, which nothing keeps yet.
     Stats,
-    /// Empty for now — a wanderer's whole mind is one goal, and the debug
-    /// menu already shows it.
+    /// What its mind is doing: the goal in charge, the priority list, the task
+    /// and the action carrying it out — live, like the debug menu.
     Brains,
 }
 
@@ -126,6 +128,8 @@ struct UnitPanel;
 enum Readout {
     /// Every field of the debug menu, rewritten as a block.
     Debug,
+    /// Every field of the brains menu, rewritten as a block.
+    Brains,
     /// The freeze button's own label, which flips to `unfreeze`.
     Freeze,
     /// The line by the portrait: what it is, and whether it is held.
@@ -386,7 +390,13 @@ fn menu_contents(
         }
         // Deliberately empty, and saying so: a menu that opened onto nothing
         // at all would read as a menu that failed to load.
-        Menu::Stats | Menu::Brains => {
+        Menu::Brains => {
+            parent.spawn((
+                Readout::Brains,
+                label(brains_block(entity), FONT_BODY, TEXT),
+            ));
+        }
+        Menu::Stats => {
             parent.spawn(label("empty", FONT_BODY, TEXT_DIM));
         }
     }
@@ -478,6 +488,7 @@ fn update_readouts(
     for (readout, mut text) in &mut texts {
         let wanted = match readout {
             Readout::Debug => debug_block(&sim, entity),
+            Readout::Brains => brains_block(entity),
             Readout::Freeze => freeze_label(entity).to_string(),
             Readout::Title => title(entity),
         };
@@ -570,7 +581,22 @@ fn debug_block(sim: &Sim, entity: &dyn GameEntity) -> String {
     ];
     fields.extend(entity.debug_fields());
     fields.push(("tick", sim.0.tick().to_string()));
+    field_block(fields)
+}
 
+/// What the unit's mind is doing, as a block of lines — or a plain `empty` for
+/// a kind with no brain, which is more honest than a blank menu.
+fn brains_block(entity: &dyn GameEntity) -> String {
+    let fields = entity.brain_fields();
+    if fields.is_empty() {
+        return "empty".to_string();
+    }
+    field_block(fields)
+}
+
+/// Name and value pairs as aligned lines. One layout for both live menus, so
+/// the two cannot drift apart.
+fn field_block(fields: Vec<(&'static str, String)>) -> String {
     fields
         .into_iter()
         .map(|(name, value)| format!("{name:<FIELD_WIDTH$}{value}"))

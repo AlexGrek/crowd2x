@@ -4,7 +4,7 @@
 //! is walking the path: it is handed a start, a goal, a budget and a predicate
 //! that says whether a cell can be stood in. Which passability that predicate
 //! consults is the caller's business, and it is the whole of the difference
-//! between this module's two customers — see [`crate::sim::kinds::Walker`],
+//! between this module's two customers — see [`crate::sim::walker::Walker`],
 //! which asks twice with two different predicates.
 //!
 //! # Orthogonal, and only orthogonal

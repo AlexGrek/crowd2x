@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::PaletteItem;
-use crate::characters::{upscale, CELL};
+use crate::characters::upscale;
 use crate::map::{Map, Point, TerrainId, VOID};
 use crate::render::WORLD_LAYER;
 use crate::state::AppState;
@@ -29,7 +29,10 @@ use crate::state::AppState;
 /// Tiles are laid out on the character cell grid. The art is drawn at 16x16 and
 /// upscaled to fill it — each palette entry carries the scale that gets it
 /// there, since a few imported tiles are still stored at the full cell size.
-pub const TILE: f32 = CELL as f32;
+///
+/// Defined from [`crate::map::PIXELS_PER_CELL`], which is what a map file's
+/// object positions are measured against, so the two cannot drift.
+pub const TILE: f32 = crate::map::PIXELS_PER_CELL as f32;
 
 /// Depth of every background tile. `characters::depth_for` is `-y * 0.01`, so
 /// it would take a character at y = 10000 to reach this — far outside anything
@@ -221,6 +224,14 @@ fn spawn_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tile_is_a_character_cell_is_a_map_cell() {
+        // Three names for one size: what the art is drawn to fill, what the
+        // editor lays tiles out on, and what a map file's pixels divide by.
+        assert_eq!(TILE, crate::characters::CELL as f32);
+        assert_eq!(TILE, crate::map::PIXELS_PER_CELL as f32);
+    }
     use crate::map::{Size, FLOOR};
 
     #[test]

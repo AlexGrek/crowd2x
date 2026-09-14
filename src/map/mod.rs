@@ -15,9 +15,9 @@
 //!   has to handle a hole. Only the base layer exists so far; see
 //!   [`Map::terrain_layers`].
 //! * **Objects** — sparse lists of positioned things, one list per
-//!   [`ObjectLayer`]: props and spawners. Both are placeholders. Props are not
-//!   read yet (the editor still spawns its own entities), and what a spawner
-//!   is has deliberately not been decided.
+//!   [`ObjectLayer`]: props and spawners. The simulation reads props for what
+//!   they are *for* (`sim::feature` — a fridge is food), by name; what a
+//!   spawner is has deliberately not been decided.
 //!
 //! Maps serialise to JSON — see [`format`] for the on-disk shape, and
 //! [`Map::to_json`] / [`Map::from_json`].
@@ -47,6 +47,16 @@ pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
 pub use terrain::{Passability, Terrain, TerrainId, FLOOR, TERRAIN, VOID, WALL};
 
 use serde::{Deserialize, Serialize};
+
+/// How many whole pixels wide a cell is, which is what an [`Object::at`] is
+/// measured in.
+///
+/// Here rather than beside the art because the map format already commits to
+/// pixel coordinates for objects, so converting one to a cell is a fact about
+/// the format — and the simulation, which may not import the Bevy side where
+/// the tile size used to live, needs to do it. `editor::background::TILE` is
+/// defined from this, so the two cannot drift.
+pub const PIXELS_PER_CELL: i32 = 48;
 
 /// The terrain layer every map has. Overlay layers, when they arrive, are
 /// indices above this one.
@@ -127,6 +137,19 @@ pub struct Object {
     /// fractional pixel either.
     pub at: Point,
     pub kind: ObjectKind,
+}
+
+impl Object {
+    /// The cell the object's position falls in.
+    ///
+    /// Floored, like every other position-to-cell rule in the game, so an
+    /// object half a pixel left of the origin is in cell -1 and not cell 0.
+    pub fn cell(&self) -> Point {
+        Point::new(
+            self.at.x.div_euclid(PIXELS_PER_CELL),
+            self.at.y.div_euclid(PIXELS_PER_CELL),
+        )
+    }
 }
 
 /// Deliberately summarised rather than derived: a derived `Debug` on a map
@@ -386,6 +409,15 @@ mod tests {
         assert_eq!(map.objects(ObjectLayer::Props).len(), 1);
         assert!(map.remove_object(ObjectLayer::Props, &bed(at)));
         assert!(!map.remove_object(ObjectLayer::Props, &bed(at)));
+    }
+
+    #[test]
+    fn an_object_is_in_the_cell_its_pixel_position_falls_in() {
+        let at = |x, y| bed(Point::new(x, y)).cell();
+        assert_eq!(at(0, 0), Point::new(0, 0));
+        assert_eq!(at(PIXELS_PER_CELL - 1, PIXELS_PER_CELL), Point::new(0, 1));
+        assert_eq!(at(PIXELS_PER_CELL * 3 + 24, 24), Point::new(3, 0));
+        assert_eq!(at(-1, -PIXELS_PER_CELL), Point::new(-1, -1));
     }
 
     #[test]
