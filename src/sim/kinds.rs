@@ -395,6 +395,12 @@ impl Walker {
             ("speed", format!("{:.2} cells/s", self.speed)),
         ]
     }
+
+    /// The route still to walk, current step first — see
+    /// [`GameEntity::planned_path`].
+    fn path_cells(&self) -> Vec<Point> {
+        self.path.remaining().to_vec()
+    }
 }
 
 /// A deterministic RNG for one entity on one tick.
@@ -479,6 +485,10 @@ impl GameEntity for Human {
         );
         fields
     }
+
+    fn planned_path(&self) -> Vec<Point> {
+        self.walk.path_cells()
+    }
 }
 
 /// A dog.
@@ -539,6 +549,10 @@ impl GameEntity for Dog {
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         self.walk.debug_fields()
+    }
+
+    fn planned_path(&self) -> Vec<Point> {
+        self.walk.path_cells()
     }
 }
 

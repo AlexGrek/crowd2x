@@ -192,6 +192,17 @@ pub trait GameEntity: Send + Sync {
         Vec::new()
     }
 
+    /// Where this kind is planning to walk, current step first — for a debug
+    /// visualization to draw over the map. Empty for a kind that does not walk
+    /// one, and for one with no plan right now.
+    ///
+    /// It allocates, for the same reason [`GameEntity::debug_fields`] does:
+    /// nothing in a tick calls it, only a frame drawing the one entity that is
+    /// selected.
+    fn planned_path(&self) -> Vec<Point> {
+        Vec::new()
+    }
+
     /// Stable randomness for the renderer to build an appearance from.
     ///
     /// The simulation does not know what a human looks like and should not

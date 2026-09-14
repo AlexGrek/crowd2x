@@ -58,7 +58,7 @@ use crate::ui::{
     TEXT_DANGER, TEXT_DIM,
 };
 
-use super::actors::{facing_of, look_from, Sim, SimInput};
+use super::actors::{facing_of, look_from, world_pos, Sim, SimInput};
 use super::hud;
 use super::selection::Selected;
 
@@ -146,6 +146,7 @@ impl Plugin for UnitPanelPlugin {
                     rebuild,
                     update_readouts,
                     hover_highlight::<Action>,
+                    draw_path,
                 )
                     .chain()
                     .after(NavSystems)
@@ -483,6 +484,51 @@ fn update_readouts(
         if **text != wanted {
             **text = wanted;
         }
+    }
+}
+
+/// Radius of the marker drawn on the selected unit's goal, in canvas pixels.
+const GOAL_MARKER: f32 = 3.0;
+
+/// Draw the selected unit's planned route over the map, while the debug menu
+/// is open on them.
+///
+/// A visual reading of what [`debug_block`]'s `goal` and `path` fields already
+/// say in words — tied to the same menu rather than to the selection itself,
+/// so a route is not drawn over the map for every unit clicked, only the one
+/// somebody is actually inspecting. World-space, through [`world_pos`], the
+/// same conversion the actor it is drawn over is placed with.
+fn draw_path(
+    selected: Res<Selected>,
+    menu: Res<OpenMenu>,
+    sim: Option<Res<Sim>>,
+    mut gizmos: Gizmos,
+) {
+    if menu.0 != Some(Menu::Debug) {
+        return;
+    }
+    let Some((uid, sim)) = selected.get().zip(sim) else {
+        return;
+    };
+    let Some(entity) = sim.0.entities().get(uid) else {
+        return;
+    };
+    let cells = entity.planned_path();
+    if cells.is_empty() {
+        return;
+    }
+
+    let mut points = Vec::with_capacity(cells.len() + 1);
+    points.push(world_pos(entity.position()));
+    points.extend(
+        cells
+            .iter()
+            .map(|cell| world_pos((cell.x as f32 + 0.5, cell.y as f32 + 0.5))),
+    );
+
+    gizmos.linestrip_2d(points.iter().copied(), TEXT_ACCENT);
+    if let Some(&goal) = points.last() {
+        gizmos.circle_2d(goal, GOAL_MARKER, TEXT_ACCENT);
     }
 }
 
