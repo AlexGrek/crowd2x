@@ -445,7 +445,7 @@ impl Human {
         Human {
             walk: Walker::new(uid, cell, HUMAN_SPEED),
             stats: Stats::random(rng),
-            identity: Identity::random(rng),
+            identity: Identity::human(rng),
         }
     }
 
@@ -513,16 +513,24 @@ impl GameEntity for Human {
 pub struct Dog {
     walk: Walker,
     facing: Facing,
+    /// Name and gender, rolled once at spawn — [`Identity::pet`], not
+    /// [`Identity::human`]: a dog gets a first name and no surname.
+    identity: Identity,
 }
 
 impl Dog {
-    pub fn new(uid: Uid, cell: Point, facing: Facing) -> Dog {
+    pub fn new(uid: Uid, cell: Point, facing: Facing, rng: &mut SmallRng) -> Dog {
         Dog {
             walk: Walker::new(uid, cell, DOG_SPEED),
             facing,
+            identity: Identity::pet(rng),
         }
     }
 
+    /// Who this dog is: name and gender.
+    pub fn identity(&self) -> &Identity {
+        &self.identity
+    }
 }
 
 impl GameEntity for Dog {
@@ -566,11 +574,20 @@ impl GameEntity for Dog {
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        self.walk.debug_fields()
+        let mut fields = vec![
+            ("name", self.identity.name().to_string()),
+            ("gender", self.identity.gender().label().to_string()),
+        ];
+        fields.extend(self.walk.debug_fields());
+        fields
     }
 
     fn planned_path(&self) -> Vec<Point> {
         self.walk.path_cells()
+    }
+
+    fn display_name(&self) -> Option<String> {
+        Some(self.identity.name().to_string())
     }
 }
 
@@ -590,6 +607,7 @@ pub(super) fn build(
             uid,
             cell,
             if rng.random() { Facing::Left } else { Facing::Right },
+            rng,
         )),
     }
 }
@@ -809,7 +827,8 @@ mod tests {
 
     #[test]
     fn a_dog_turns_to_face_the_way_it_walks() {
-        let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Right);
+        let mut rng = SmallRng::seed_from_u64(0);
+        let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Right, &mut rng);
         let here = dog.position();
 
         dog.apply(&Intent::Move {
@@ -825,7 +844,8 @@ mod tests {
 
     #[test]
     fn a_dog_walking_straight_up_keeps_the_side_it_was_facing() {
-        let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Left);
+        let mut rng = SmallRng::seed_from_u64(0);
+        let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Left, &mut rng);
         let (x, y) = dog.position();
         dog.apply(&Intent::Move { to: (x, y + 1.0) });
         assert_eq!(dog.facing(), Some(Facing::Left));

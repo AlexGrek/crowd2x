@@ -1,14 +1,16 @@
-//! Who a human is, beyond their [`super::stats::Stats`]: [`Identity`].
+//! Who someone is, beyond a [`super::stats::Stats`] a human has and a dog
+//! does not: [`Identity`].
 //!
-//! Same shape as `Stats` on purpose — one struct, a `random` built from a
-//! seeded RNG at spawn, read-only from outside this module — because nothing
-//! here changes over the entity's life either.
+//! Same shape as `Stats` on purpose — one struct, built once from a seeded
+//! RNG at spawn ([`Identity::human`] or [`Identity::pet`]), read-only from
+//! outside this module — because nothing here changes over the entity's life
+//! either.
 //!
 //! [`Gender`] is rolled independently of [`Identity::name`]: `fake`'s
 //! `name::en::FirstName` draws from one unsplit pool rather than a male and a
 //! female list, so a name is not guaranteed to match the gender rolled beside
 //! it. That is a property of the crate, not a bug to route around with a
-//! second one — a wanderer's gender is cosmetic today and nothing reads it
+//! second one — an entity's gender is cosmetic today and nothing reads it
 //! yet.
 
 use fake::Fake;
@@ -48,11 +50,23 @@ pub struct Identity {
 }
 
 impl Identity {
-    pub fn random(rng: &mut SmallRng) -> Identity {
+    /// A person: first and last name.
+    pub fn human(rng: &mut SmallRng) -> Identity {
         let first: String = FirstName().fake_with_rng(rng);
         let last: String = LastName().fake_with_rng(rng);
         Identity {
             name: format!("{first} {last}"),
+            gender: Gender::random(rng),
+        }
+    }
+
+    /// A pet: a first name and nothing else — a dog has no surname to draw
+    /// on, and `fake`'s pool has no separate one for animals. Drawn from the
+    /// same list a person's first name comes from, which happens to already
+    /// cover most names a dog plausibly has (Max, Bella, Charlie, Rosie).
+    pub fn pet(rng: &mut SmallRng) -> Identity {
+        Identity {
+            name: FirstName().fake_with_rng(rng),
             gender: Gender::random(rng),
         }
     }
@@ -72,19 +86,28 @@ mod tests {
     use rand::SeedableRng;
 
     #[test]
-    fn a_random_identity_has_a_first_and_a_last_name() {
+    fn a_human_identity_has_a_first_and_a_last_name() {
         let mut rng = SmallRng::seed_from_u64(1);
         for _ in 0..1000 {
-            let identity = Identity::random(&mut rng);
+            let identity = Identity::human(&mut rng);
             assert_eq!(identity.name().split(' ').count(), 2);
+        }
+    }
+
+    #[test]
+    fn a_pet_identity_has_only_a_first_name() {
+        let mut rng = SmallRng::seed_from_u64(4);
+        for _ in 0..1000 {
+            let identity = Identity::pet(&mut rng);
+            assert_eq!(identity.name().split(' ').count(), 1);
         }
     }
 
     #[test]
     fn two_random_identities_are_not_carbon_copies() {
         let mut rng = SmallRng::seed_from_u64(2);
-        let a = Identity::random(&mut rng);
-        let b = Identity::random(&mut rng);
+        let a = Identity::human(&mut rng);
+        let b = Identity::human(&mut rng);
         assert_ne!(a, b);
     }
 
@@ -93,7 +116,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(3);
         let mut saw = (false, false);
         for _ in 0..1000 {
-            match Identity::random(&mut rng).gender() {
+            match Identity::human(&mut rng).gender() {
                 Gender::Male => saw.0 = true,
                 Gender::Female => saw.1 = true,
             }
