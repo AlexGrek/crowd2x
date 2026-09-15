@@ -5,6 +5,11 @@
 //! inventory — a `Vec` of items per unit is an allocation per unit, and there
 //! is nothing yet that wants to hold two things.
 
+use super::stats::Stats;
+
+/// How much hunger one meal takes away.
+pub const MEAL: f32 = 60.0;
+
 /// What is being held.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ItemKind {
@@ -16,6 +21,16 @@ impl ItemKind {
     pub const fn name(self) -> &'static str {
         match self {
             ItemKind::Food => "food",
+        }
+    }
+
+    /// What using this up does to whoever used it.
+    ///
+    /// Here, on the item, rather than in whichever task or goal consumes it:
+    /// food is filling however it came to be eaten.
+    pub fn consume(self, stats: &mut Stats) {
+        match self {
+            ItemKind::Food => stats.eat(MEAL),
         }
     }
 }

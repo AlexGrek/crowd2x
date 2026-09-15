@@ -7,13 +7,14 @@
 //! memory       what it remembers                (empty, for now)
 //! routines     arrange the priority list        KeepFed, StayBusy
 //! goals        the list, and who is in charge   Idle, Wander, Eat
-//! tasks        the plan the goal in charge made MoveTo, Interact, Wait
-//! action       the task being carried out       pathfinding and timing only
+//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, Wait
+//! action       what a task is doing with body   pathfinding and timing only
 //! ```
 //!
 //! Each layer only talks to the one below it. A routine does not queue tasks,
-//! a goal does not ask for routes, an action does not decide anything — which
-//! is what lets two goals take turns without either knowing about the other.
+//! a goal does not ask for routes or change the world, a task does not choose
+//! what comes next, an action does not decide anything — which is what lets
+//! two goals take turns without either knowing about the other.
 //!
 //! # The pipeline
 //!
@@ -23,30 +24,34 @@
 //! and stays parallel.
 //!
 //! ```text
-//! 0.  perception.observe(..)                          stub, costs nothing
-//! 0b. advance the current action (this tick's MoveOutcome)
-//!        -> Running | Finished | Failed, which becomes the TaskResult
-//! 1.  every routine arranges the priority list        every tick
-//! 3.  settle the top; if it changed:
-//!        old.deprioritized() -> tasks.clear() -> walk.halt() -> new.prioritized()
-//! 4.  if (goal changed || no action running): top executor.process(last result)
-//! 6.  if no action is running, pop the front task and start its action
+//! 0. perception.observe(..)                              stub, costs nothing
+//! 1. every routine runs
+//! 2.   ...and arranges the priority list
+//! 3. if the goal on top changed: old.deprioritized() -> current task
+//!      abandoned, walk halted -> queue cleared -> new.prioritized()
+//! 4. ONLY IF the goal changed or no task is current: top.process(last result)
+//! 5.   ...which manages the task queue
+//! 6. the current task's executor runs (the front of the queue, if none is
+//!      current), and writes the task's result
 //! ```
 //!
-//! Advancing the action comes first because step 4's gate needs to know
-//! whether it is still running; starting the next one comes last because
-//! doing it before step 4 would cost an idle tick at every task boundary.
+//! **A goal hears how a task went on the tick after it ended.** The task ends
+//! in step 6; the next tick nothing is current, so step 4 asks the goal, which
+//! decides — carry on, retry, replan — before step 6 starts anything else.
+//! That is one tick between tasks, and it is the price of the goal getting a
+//! say. "No task is current" also covers a goal that queued nothing, which is
+//! asked again next tick; without that it would never be asked again.
 //!
 //! # Planning cadence, which is what matters
 //!
-//! A route is asked for in one place — step 6, starting a `MoveTo` — so the
-//! number of far searches is the number of walks started, and a walk takes
-//! many ticks. An executor is only asked for more work when an action ends or
+//! A route is asked for in one place — a [`tasks::MoveTo`] starting its walk —
+//! so the number of far searches is the number of walks started, and a walk
+//! takes many ticks. A goal is only asked for more work when a task ends or
 //! the goal in charge changes, and a goal that finds out expensively that it
 //! cannot be done is held off ([`goal::BLOCKED_TICKS`], doubling). Per-agent,
-//! per-tick planning is what killed the earlier prototype, and
-//! `a_brain_never_asks_for_a_route_more_than_once_a_task` is the test that
-//! says this is not that.
+//! per-tick planning is what killed the earlier prototype;
+//! `a_goal_that_keeps_failing_does_not_ask_for_a_route_every_tick` is the test
+//! that says this is not that.
 
 pub mod action;
 pub mod goal;
@@ -56,13 +61,14 @@ pub mod perception;
 pub mod routine;
 pub mod routines;
 pub mod task;
+pub mod tasks;
 
 pub use action::{Action, ActionState};
 pub use goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress, Goals};
 pub use memory::{Memory, Recall};
 pub use perception::Perception;
 pub use routine::{Routine, RoutineCtx};
-pub use task::{Task, TaskResult, Tasks};
+pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
 use super::entity::Think;
 use super::item::ItemKind;
@@ -87,16 +93,16 @@ pub struct Brain {
     /// answer to how an executor keeps state across being put down.
     executors: [Option<Box<dyn GoalExecutor>>; GoalId::COUNT],
     tasks: Tasks,
-    action: Action,
-    /// The task `action` is carrying out.
+    /// The task being carried out — off the queue, not yet ended.
     task: Option<Task>,
-    /// The task that ended since the executor was last asked, and what
-    /// refused it if a body did — handed over in [`GoalCtx`] and then
-    /// forgotten.
+    /// What that task is doing with the body.
+    action: Action,
+    /// The task that ended since the goal was last asked, and what refused it
+    /// if a body did — handed over in [`GoalCtx`] and then forgotten.
     finished: Option<Task>,
     blocked_by: Option<Uid>,
-    /// How the last task to end went, kept for a debugger after the executor
-    /// has been told.
+    /// How the last task to end went, kept for a debugger after the goal has
+    /// been told.
     last_result: TaskResult,
 }
 
@@ -169,8 +175,8 @@ impl Brain {
         ctx: &Think<'_>,
         outcome: MoveOutcome,
         walk: &mut Walker,
-        stats: Option<&mut Stats>,
-        carried: Option<&mut Option<ItemKind>>,
+        mut stats: Option<&mut Stats>,
+        mut carried: Option<&mut Option<ItemKind>>,
     ) {
         // Disjoint field borrows, so the compiler is what checks the steps
         // below do not overlap — the same trick `process_pass` uses.
@@ -181,49 +187,18 @@ impl Brain {
             goals,
             executors,
             tasks,
-            action,
             task,
+            action,
             finished,
             blocked_by,
             last_result,
         } = self;
         let body = *walk.body();
-        let here = body.center_position();
 
         // 0. Look around.
         perception.observe(ctx, &body);
 
-        // 0b. Advance the action. A walk is the walker's to judge.
-        let running = !action.is_none();
-        let state = match *action {
-            Action::Move { .. } => {
-                action.advance(ctx.dt, here);
-                walk.advance(ctx, outcome)
-            }
-            _ => action.advance(ctx.dt, here),
-        };
-        match state {
-            ActionState::Running => tasks.set_result(TaskResult::Executing),
-            ActionState::Finished | ActionState::Failed if running => {
-                let result = if state == ActionState::Finished {
-                    TaskResult::Success
-                } else {
-                    TaskResult::Failed
-                };
-                *blocked_by = match (result, *action) {
-                    (TaskResult::Failed, Action::Move { .. }) => outcome.obstacle(),
-                    _ => None,
-                };
-                tasks.set_result(result);
-                *last_result = result;
-                *finished = task.take();
-                *action = Action::None;
-                walk.halt();
-            }
-            ActionState::Finished | ActionState::Failed => {}
-        }
-
-        // 1. Arrange the list, from scratch.
+        // 1, 2. Every routine arranges the list, from scratch.
         goals.clear_priorities();
         goals.tick_cooldowns();
         {
@@ -237,80 +212,92 @@ impl Brain {
             }
         }
 
-        let mut goal_ctx = GoalCtx {
-            think: ctx,
-            body: &body,
-            perception,
-            stats,
-            memory,
-            tasks,
-            carried,
-            blocked_by: *blocked_by,
-            finished: *finished,
-        };
-
-        // 3. Settle, and hand over if the top changed.
         let changed = goals.settle();
-        if let Some((old, new)) = changed {
-            if let Some(executor) = executors[old as usize].as_deref_mut() {
-                executor.deprioritized(&mut goal_ctx);
-            }
-            goal_ctx.tasks.clear();
-            walk.halt();
-            *action = Action::None;
-            *task = None;
-            // What ended belonged to the goal that queued it.
-            goal_ctx.tasks.set_result(TaskResult::InProgress);
-            goal_ctx.finished = None;
-            goal_ctx.blocked_by = None;
-            if let Some(executor) = executors[new as usize].as_deref_mut() {
-                executor.prioritized(&mut goal_ctx);
-            }
-        }
+        {
+            // Goals read stats and hands; only tasks, below, change them.
+            let mut goal_ctx = GoalCtx {
+                think: ctx,
+                body: &body,
+                perception,
+                stats: stats.as_deref(),
+                memory,
+                tasks,
+                carried: carried.as_deref(),
+                blocked_by: *blocked_by,
+                finished: *finished,
+            };
 
-        // 4. Ask the goal in charge for more, if there is room for more.
-        let top = goals.top();
-        if changed.is_some() || action.is_none() {
-            if let Some(executor) = executors[top as usize].as_deref_mut() {
-                let last = goal_ctx.tasks.result();
-                match executor.process(&mut goal_ctx, last) {
-                    GoalProgress::Working => {
-                        if last == TaskResult::Success {
-                            goals.progressed(top);
-                        }
-                    }
-                    GoalProgress::Achieved => goals.achieved(top),
-                    GoalProgress::Blocked => {
-                        goals.block(top);
-                        goal_ctx.tasks.clear();
-                    }
+            // 3. Hand over, if the goal on top changed.
+            if let Some((old, new)) = changed {
+                if let Some(executor) = executors[old as usize].as_deref_mut() {
+                    executor.deprioritized(&mut goal_ctx);
+                }
+                *task = None;
+                *action = Action::None;
+                walk.halt();
+                goal_ctx.tasks.clear();
+                // What ended belonged to the goal that queued it.
+                goal_ctx.tasks.set_result(TaskResult::InProgress);
+                goal_ctx.finished = None;
+                goal_ctx.blocked_by = None;
+                if let Some(executor) = executors[new as usize].as_deref_mut() {
+                    executor.prioritized(&mut goal_ctx);
                 }
             }
-            // Told, so forgotten: the next call hears about the next task.
-            goal_ctx.tasks.set_result(TaskResult::InProgress);
-            *finished = None;
-            *blocked_by = None;
+
+            // 4, 5. Ask the goal in charge — only if it just took charge, or
+            // there is no task going on (which a task that ended last tick
+            // leaves behind it).
+            if changed.is_some() || task.is_none() {
+                let top = goals.top();
+                if let Some(executor) = executors[top as usize].as_deref_mut() {
+                    let last = goal_ctx.tasks.result();
+                    match executor.process(&mut goal_ctx, last) {
+                        GoalProgress::Working => {
+                            if last == TaskResult::Success {
+                                goals.progressed(top);
+                            }
+                        }
+                        GoalProgress::Achieved => {
+                            goals.progressed(top);
+                            goal_ctx.tasks.clear();
+                        }
+                        GoalProgress::Blocked => {
+                            goals.block(top);
+                            goal_ctx.tasks.clear();
+                        }
+                    }
+                }
+                // Told, so forgotten: the next call hears about the next task.
+                goal_ctx.tasks.set_result(TaskResult::InProgress);
+                *finished = None;
+                *blocked_by = None;
+            }
         }
 
-        // 6. Start the next task.
-        if action.is_none()
-            && let Some(next) = goal_ctx.tasks.pop_front()
-        {
-            let routed = match next {
-                Task::MoveTo { cell } => walk.route_to(ctx, cell),
-                Task::Interact { .. } | Task::Wait { .. } => true,
-            };
-            if routed {
-                *action = Action::start(next);
-                *task = Some(next);
-                goal_ctx.tasks.set_result(TaskResult::Executing);
-            } else {
-                // No way there. Reported next tick like any other ending, so
-                // an executor hears about every task the same way.
-                goal_ctx.tasks.set_result(TaskResult::Failed);
-                *last_result = TaskResult::Failed;
-                *finished = Some(next);
-                *blocked_by = None;
+        // 6. The current task's executor, which writes the task's result.
+        if task.is_none() {
+            *task = tasks.pop_front();
+        }
+        if let Some(current) = task.as_mut() {
+            let result = current.execute(&mut TaskCtx {
+                think: ctx,
+                outcome,
+                walk: &mut *walk,
+                action: &mut *action,
+                stats: stats.as_deref_mut(),
+                carried: carried.as_deref_mut(),
+            });
+            tasks.set_result(result);
+            if result.is_finished() {
+                *last_result = result;
+                *blocked_by = match result {
+                    TaskResult::Failed => outcome.obstacle(),
+                    _ => None,
+                };
+                *finished = task.take();
+                *action = Action::None;
+                walk.halt();
             }
         }
     }
@@ -377,10 +364,12 @@ impl Brain {
             ("queue", self.tasks.len().to_string()),
             (
                 "result",
-                if self.action.is_none() {
-                    self.last_result.name().to_string()
+                // What the current task last wrote; between tasks, how the one
+                // before ended.
+                if self.task.is_some() {
+                    self.tasks.result().name().to_string()
                 } else {
-                    TaskResult::Executing.name().to_string()
+                    self.last_result.name().to_string()
                 },
             ),
             ("action", self.action.describe()),
@@ -421,7 +410,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::map::{Map, Point, Size, FLOOR};
+    use crate::map::{Map, Point, Size, FLOOR, WALL};
     use crate::sim::testing::World;
     use crate::sim::uid::EntityType;
     use crate::sim::walker::ROUTES_ASKED;
@@ -550,7 +539,7 @@ mod tests {
     fn a_fresh_brain_asks_its_goal_for_something_on_its_very_first_reaction() {
         let journal = Arc::new(Mutex::new(Vec::new()));
         let (wander, _) = dial(GoalId::Wander, 1.0);
-        let wait = Task::Wait { seconds: 10.0 };
+        let wait = Task::wait(10.0);
         let mut puppet = Puppet::new(
             Point::new(4, 4),
             Brain::new([wander], [recorder(GoalId::Wander, &journal, Some(wait))]),
@@ -568,7 +557,7 @@ mod tests {
         let journal = Arc::new(Mutex::new(Vec::new()));
         let (wander, _) = dial(GoalId::Wander, 0.5);
         let (eat, hunger) = dial(GoalId::Eat, 0.0);
-        let wait = Some(Task::Wait { seconds: 100.0 });
+        let wait = Some(Task::wait(100.0));
         let mut puppet = Puppet::new(
             Point::new(4, 4),
             Brain::new(
@@ -602,7 +591,7 @@ mod tests {
         let (eat, hunger) = dial(GoalId::Eat, 0.0);
         // A short wait, so wandering finishes tasks — and so gets further
         // along — while it is in charge.
-        let short = Some(Task::Wait { seconds: 0.05 });
+        let short = Some(Task::wait(0.05));
         let mut puppet = Puppet::new(
             Point::new(4, 4),
             Brain::new(
@@ -642,7 +631,7 @@ mod tests {
             Point::new(4, 4),
             Brain::new(
                 [wander],
-                [recorder(GoalId::Wander, &journal, Some(Task::Wait { seconds: 1.0 }))],
+                [recorder(GoalId::Wander, &journal, Some(Task::wait(1.0)))],
             ),
         );
         let mut world = room();
@@ -678,7 +667,7 @@ mod tests {
             Brain::new(
                 [wander, eat],
                 [
-                    recorder(GoalId::Wander, &journal, Some(Task::Wait { seconds: 100.0 })),
+                    recorder(GoalId::Wander, &journal, Some(Task::wait(100.0))),
                     Box::new(Hopeless) as Box<dyn GoalExecutor>,
                 ],
             ),
@@ -693,21 +682,153 @@ mod tests {
         assert_eq!(puppet.brain.goals().priority(GoalId::Eat), 5.0);
     }
 
-    /// Queues a walk to a random nearby cell whenever it has nothing queued,
-    /// and counts the walks.
+    /// Hears everything: the tick of every call, what it was handed and which
+    /// task that was about — and, when put down, what it was handed then.
+    /// Queues the tasks it was given, once.
+    struct Listener {
+        goal: GoalId,
+        heard: Arc<Mutex<Vec<(u64, TaskResult, Option<Task>)>>>,
+        put_down: Arc<Mutex<Option<(TaskResult, Option<Task>)>>>,
+        plan: Vec<Task>,
+    }
+
+    impl GoalExecutor for Listener {
+        fn goal(&self) -> GoalId {
+            self.goal
+        }
+        fn deprioritized(&mut self, ctx: &mut GoalCtx<'_>) {
+            *self.put_down.lock().unwrap() = Some((ctx.tasks.result(), ctx.finished));
+        }
+        fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
+            self.heard.lock().unwrap().push((ctx.think.tick, last, ctx.finished));
+            for task in self.plan.drain(..) {
+                let _ = ctx.tasks.push_back(task);
+            }
+            GoalProgress::Working
+        }
+    }
+
+    struct Listening {
+        puppet: Puppet,
+        world: World,
+        heard: Arc<Mutex<Vec<(u64, TaskResult, Option<Task>)>>>,
+        put_down: Arc<Mutex<Option<(TaskResult, Option<Task>)>>>,
+        hunger: Arc<Mutex<f32>>,
+    }
+
+    const SHORT: Task = Task::wait(0.05);
+    const LONG: Task = Task::wait(10.0);
+
+    /// A wanderer that queues a short wait then a long one, and an eat goal
+    /// that is not wanted until the test turns it up.
+    fn listening() -> Listening {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let put_down = Arc::new(Mutex::new(None));
+        let (wander, _) = dial(GoalId::Wander, 0.5);
+        let (eat, hunger) = dial(GoalId::Eat, 0.0);
+        let listener = |goal, plan| {
+            Box::new(Listener {
+                goal,
+                heard: heard.clone(),
+                put_down: put_down.clone(),
+                plan,
+            }) as Box<dyn GoalExecutor>
+        };
+        let brain = Brain::new(
+            [wander, eat],
+            [listener(GoalId::Wander, vec![SHORT, LONG]), listener(GoalId::Eat, vec![])],
+        );
+        Listening {
+            puppet: Puppet::new(Point::new(4, 4), brain),
+            world: room(),
+            heard,
+            put_down,
+            hunger,
+        }
+    }
+
+    impl Listening {
+        /// Step until the short wait has ended; the tick it ended on.
+        fn until_the_short_wait_ends(&mut self) -> u64 {
+            for _ in 0..100 {
+                self.world.step(&mut self.puppet);
+                if self.puppet.brain.current_task().is_none()
+                    && self.puppet.brain.last_result() == TaskResult::Success
+                {
+                    return self.world.tick;
+                }
+            }
+            panic!("the short wait never ended");
+        }
+    }
+
+    #[test]
+    fn a_goal_hears_how_a_task_went_on_the_tick_after_it_ended() {
+        let mut l = listening();
+        let ended = l.until_the_short_wait_ends();
+        {
+            let heard = l.heard.lock().unwrap();
+            assert!(
+                heard.iter().all(|(tick, last, _)| *tick < ended || !last.is_finished()),
+                "told on the very tick the task ended: {heard:?}"
+            );
+        }
+
+        l.world.step(&mut l.puppet);
+        assert_eq!(
+            l.heard.lock().unwrap().last(),
+            Some(&(ended + 1, TaskResult::Success, Some(SHORT)))
+        );
+    }
+
+    #[test]
+    fn the_next_task_does_not_start_before_the_goal_has_seen_the_last_one_end() {
+        let mut l = listening();
+        l.until_the_short_wait_ends();
+        assert_eq!(l.puppet.brain.current_task(), None, "nothing starts on the tick one ends");
+        assert_eq!(l.puppet.brain.tasks().len(), 1);
+
+        l.world.step(&mut l.puppet);
+        assert_eq!(l.puppet.brain.current_task(), Some(LONG));
+    }
+
+    #[test]
+    fn a_goal_put_down_is_handed_the_result_it_had_not_read() {
+        // The short wait ends; before the wanderer can be told, eating takes
+        // over. Being put down is its last chance to hear.
+        let mut l = listening();
+        l.until_the_short_wait_ends();
+        *l.hunger.lock().unwrap() = 2.0;
+        l.world.step(&mut l.puppet);
+
+        assert_eq!(l.puppet.brain.top_goal(), GoalId::Eat);
+        assert_eq!(*l.put_down.lock().unwrap(), Some((TaskResult::Success, Some(SHORT))));
+    }
+
+    /// Walks to a random cell whenever nothing is queued, and gives up — the
+    /// expensive miss — on a walk that failed with no body to blame. Keeps a
+    /// count of the walks, and notes if it is ever asked for work while a
+    /// task is still running.
     struct Roamer {
         queued: Arc<Mutex<u64>>,
+        asked_mid_task: Arc<Mutex<bool>>,
     }
 
     impl GoalExecutor for Roamer {
         fn goal(&self) -> GoalId {
             GoalId::Wander
         }
-        fn process(&mut self, ctx: &mut GoalCtx<'_>, _last: TaskResult) -> GoalProgress {
+        fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
+            if last == TaskResult::Executing {
+                *self.asked_mid_task.lock().unwrap() = true;
+            }
+            if last == TaskResult::Failed && ctx.blocked_by.is_none() {
+                return GoalProgress::Blocked;
+            }
             if ctx.tasks.is_empty() {
                 let mut rng = crate::sim::rng::tick_rng(ctx.body.uid(), ctx.think.tick);
                 let cell = Point::new(rng.random_range(1..11), rng.random_range(1..11));
-                let _ = ctx.tasks.push_back(Task::MoveTo { cell });
+                let _ = ctx.tasks.push_back(Task::move_to(cell));
                 *self.queued.lock().unwrap() += 1;
             }
             GoalProgress::Working
@@ -715,24 +836,31 @@ mod tests {
     }
 
     #[test]
-    fn a_brain_never_asks_for_a_route_more_than_once_a_task() {
-        // The performance test that matters. If `process` ends up running every
-        // tick and its tasks asking for routes, the brain has reintroduced
-        // unbudgeted per-agent A* — the named cause of the earlier prototype's
-        // death. Counted rather than timed, so it cannot pass by being on a
-        // fast machine.
+    fn a_goal_that_keeps_failing_does_not_ask_for_a_route_every_tick() {
+        // The performance test that matters. Half the room is walled off, so a
+        // good share of the walks this goal picks have no way there — each a
+        // flood of everything reachable before it knows. What stands between
+        // that and a search every tick is the gate on step 4 and the back-off
+        // on a blocked goal; this fails if either stops holding. Counted rather
+        // than timed, so it cannot pass by being on a fast machine.
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        for y in 0..12 {
+            map.set_terrain(Point::new(6, y), WALL);
+        }
         let queued = Arc::new(Mutex::new(0));
+        let asked_mid_task = Arc::new(Mutex::new(false));
         let (wander, _) = dial(GoalId::Wander, 1.0);
         let mut puppet = Puppet::new(
-            Point::new(4, 4),
+            Point::new(2, 4),
             Brain::new(
                 [wander],
                 [Box::new(Roamer {
                     queued: queued.clone(),
+                    asked_mid_task: asked_mid_task.clone(),
                 }) as Box<dyn GoalExecutor>],
             ),
         );
-        let mut world = room();
+        let mut world = World::new(map);
 
         ROUTES_ASKED.with(|asked| asked.set(0));
         const TICKS: u64 = 1000;
@@ -740,10 +868,9 @@ mod tests {
             world.step(&mut puppet);
         }
         let routes = ROUTES_ASKED.with(|asked| asked.get());
-        let tasks = *queued.lock().unwrap();
 
-        assert!(tasks > 5, "it should have walked about: {tasks} tasks");
-        assert!(routes <= tasks, "{routes} routes for {tasks} tasks");
+        assert!(*queued.lock().unwrap() > 3, "it should have tried to walk about");
+        assert!(!*asked_mid_task.lock().unwrap(), "a goal was asked for work mid-task");
         assert!(routes * 10 < TICKS, "{routes} routes in {TICKS} ticks");
     }
 
@@ -752,9 +879,7 @@ mod tests {
         let journal = Arc::new(Mutex::new(Vec::new()));
         let (wander, _) = dial(GoalId::Wander, 1.0);
         // Off the map: never reachable.
-        let nowhere = Some(Task::MoveTo {
-            cell: Point::new(50, 50),
-        });
+        let nowhere = Some(Task::move_to(Point::new(50, 50)));
         let mut puppet = Puppet::new(
             Point::new(4, 4),
             Brain::new([wander], [recorder(GoalId::Wander, &journal, nowhere)]),

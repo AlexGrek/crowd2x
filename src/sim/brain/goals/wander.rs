@@ -112,7 +112,7 @@ impl GoalExecutor for WanderGoal {
         let here = ctx.body.center_position();
         match self.target {
             Some(target) if here.manhattan_distance(target) <= WANDER_RADIUS * 2 => {
-                let _ = ctx.tasks.push_front(Task::MoveTo { cell: target });
+                let _ = ctx.tasks.push_front(Task::move_to(target));
             }
             _ => self.forget(),
         }
@@ -134,10 +134,8 @@ impl GoalExecutor for WanderGoal {
                     // Somebody in the way: give them a moment, then go again.
                     (Some(target), Some(_)) if self.retries < PATIENCE => {
                         self.retries += 1;
-                        let _ = ctx.tasks.push_front(Task::Wait {
-                            seconds: WAIT_FOR_A_GAP,
-                        });
-                        let _ = ctx.tasks.push_back(Task::MoveTo { cell: target });
+                        let _ = ctx.tasks.push_front(Task::wait(WAIT_FOR_A_GAP));
+                        let _ = ctx.tasks.push_back(Task::move_to(target));
                         return GoalProgress::Working;
                     }
                     // Out of patience with them: somewhere else, next tick.
@@ -165,7 +163,7 @@ impl GoalExecutor for WanderGoal {
             Some(target) => {
                 self.target = Some(target);
                 self.retries = 0;
-                let _ = ctx.tasks.push_back(Task::MoveTo { cell: target });
+                let _ = ctx.tasks.push_back(Task::move_to(target));
             }
             None => Self::report_stuck(ctx),
         }

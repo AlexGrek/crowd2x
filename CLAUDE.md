@@ -9,8 +9,9 @@ wholesale from an earlier prototype; all code is new.
 What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
 editor backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
-advanced by one function; what it does so far is wander, which is enough to exercise every
-part of a tick and nothing more.
+advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
+actions. What those brains do so far is wander, and get hungry and eat at a fridge: enough
+for two goals to take turns, and nothing more.
 
 ## Commands
 
@@ -428,8 +429,10 @@ occupant is the entity leaving it, which is what keeps that contained.
 **Freezing is the one thing done to an entity from outside it.** `Command::Freeze` rides
 the same queue as a spawn and is applied in the spawn pass, so a freeze asked for this tick
 is in force before anything thinks; the think step then hands a frozen entity an
-`Intent::Idle` instead of asking it, which costs a bool per entity and means a frozen
-entity is not deciding things nobody will carry out. It keeps its cell and its goal, so
+`Intent::Idle` instead of asking it, and the react step skips it too — its brain would
+find nothing running and ask for work every tick, a route searched for nothing each time.
+That costs a bool per entity and means a frozen entity is not deciding things nobody will
+carry out; no time passes for it, hunger included. It keeps its cell and its goal, so
 letting it go again carries on rather than starting over. `GameEntity::debug_fields` is the
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.

@@ -66,10 +66,6 @@ use super::selection::Selected;
 /// the art stays on whole pixels of the interface.
 const PORTRAIT: f32 = 32.0;
 
-/// How wide a field name is in the debug and brains menus, so the values line
-/// up.
-const FIELD_WIDTH: usize = 8;
-
 /// Which menu is open under the bar, if any.
 ///
 /// One at a time: these are four views of one unit, not four panels, and two
@@ -596,10 +592,15 @@ fn brains_block(entity: &dyn GameEntity) -> String {
 
 /// Name and value pairs as aligned lines. One layout for both live menus, so
 /// the two cannot drift apart.
+///
+/// The names are padded to the longest one in the block, plus a space — not
+/// to a fixed width, which a name as long as it (`priority`) runs straight
+/// into its value, and any longer one (`mental_health`) pushes out of line.
 fn field_block(fields: Vec<(&'static str, String)>) -> String {
+    let width = fields.iter().map(|(name, _)| name.len()).max().unwrap_or(0) + 1;
     fields
         .into_iter()
-        .map(|(name, value)| format!("{name:<FIELD_WIDTH$}{value}"))
+        .map(|(name, value)| format!("{name:<width$}{value}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -635,5 +636,28 @@ fn name_of(kind: Option<EntityType>) -> &'static str {
     match kind {
         Some(kind) => kind.name(),
         None => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_value_in_a_block_starts_in_the_same_column_after_a_space() {
+        let block = field_block(vec![
+            ("goal", "wander".to_string()),
+            ("priority", "wander 0.10".to_string()),
+            ("mental_health", "50.0".to_string()),
+        ]);
+        let columns: Vec<usize> = block
+            .lines()
+            .map(|line| {
+                let name = line.split(' ').next().unwrap();
+                assert!(line[name.len()..].starts_with(' '), "no gap after {name:?} in {line:?}");
+                line.len() - line.trim_start_matches(|c: char| c != ' ').trim_start().len()
+            })
+            .collect();
+        assert!(columns.windows(2).all(|pair| pair[0] == pair[1]), "{block}");
     }
 }

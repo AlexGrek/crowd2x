@@ -164,14 +164,6 @@ impl Goals {
         self.strikes[goal.index()] = 0;
     }
 
-    /// `goal` is done. Its priority drops to zero for what is left of this
-    /// tick; the routine that raised it will raise it again when it matters
-    /// again.
-    pub(super) fn achieved(&mut self, goal: GoalId) {
-        self.priority[goal.index()] = 0.0;
-        self.progressed(goal);
-    }
-
     /// Which goal *should* be in charge: the highest priority not on a
     /// cooldown.
     ///
@@ -224,23 +216,29 @@ impl Goals {
     }
 }
 
-/// Everything an executor may touch while it works: the world to read, and
-/// the parts of its own unit it is allowed to change.
+/// Everything an executor may look at while it works, and the two things it
+/// may change: its unit's memory, and the task queue.
 ///
-/// No walker. An executor decides where to go by queueing a task; the brain is
-/// the one that asks for a route, once per task — which is what keeps the
-/// number of searches a function of how many decisions were made rather than
-/// of how many ticks went by.
+/// **Stats and hands are read-only here.** A goal decides; the tasks it queues
+/// act — food goes into a hand when a [`TakeItem`](super::tasks::TakeItem)
+/// finishes, not when a goal hears that it did. Which also means a goal that
+/// misses hearing about a task, because something more important took over,
+/// has lost nothing: what the task did is done.
+///
+/// No walker either. An executor decides where to go by queueing a task, and a
+/// route is asked for once per walk started — which is what keeps the number
+/// of searches a function of how many decisions were made rather than of how
+/// many ticks went by.
 pub struct GoalCtx<'a> {
     pub think: &'a Think<'a>,
     pub body: &'a Body,
     pub perception: &'a Perception,
     /// `None` for a kind that has no needs.
-    pub stats: Option<&'a mut Stats>,
+    pub stats: Option<&'a Stats>,
     pub memory: &'a mut Memory,
     pub tasks: &'a mut Tasks,
     /// What is in its hand. `None` for a kind that has no hands.
-    pub carried: Option<&'a mut Option<ItemKind>>,
+    pub carried: Option<&'a Option<ItemKind>>,
     /// Who refused the move that ended the last task, when a body did.
     ///
     /// A failed walk is two different things — somebody is in the way, and
@@ -259,8 +257,11 @@ pub enum GoalProgress {
     /// Still working, or this tick's attempt missed cheaply and is worth
     /// retrying immediately — a wanderer's unlucky dice roll is that.
     Working,
-    /// Done. The brain drops this goal's priority to zero; the routine that
-    /// raised it will raise it again when it matters again.
+    /// Done. The brain clears whatever is still queued. **It does not hand
+    /// over** — who is in charge is the routines' to say: if the routine that
+    /// raised this goal still wants it, it stays on top and is asked again next
+    /// tick, which starts it over. That is a second meal for someone one meal
+    /// did not fill.
     Achieved,
     /// Cannot be done from here, and finding that out was expensive. Held off
     /// for [`BLOCKED_TICKS`] (and longer, if it keeps happening).
@@ -279,26 +280,30 @@ pub enum GoalProgress {
 /// remembered stage implies — on the front, because a resume is a
 /// prerequisite.
 ///
-/// The handover order is fixed: **old executor told → queue cleared → walk
-/// halted → new executor told.** So `deprioritized` can still see its own
-/// tasks and `prioritized` always sees an empty queue.
+/// The handover order is fixed: **old executor told → current task abandoned
+/// and walk halted → queue cleared → new executor told.** So `deprioritized`
+/// can still see its own tasks and `prioritized` always sees an empty queue.
 pub trait GoalExecutor: Send + Sync {
     fn goal(&self) -> GoalId;
 
-    /// Just put in charge.
+    /// Just put in charge. The queue is empty and nothing has ended that this
+    /// goal queued.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
         let _ = ctx;
     }
 
-    /// About to stop being in charge.
+    /// About to stop being in charge. The queue still holds its tasks, and
+    /// `ctx.tasks.result()` / `ctx.finished` are the last task's ending if it
+    /// had not been heard yet — this is the last chance to hear it.
     fn deprioritized(&mut self, ctx: &mut GoalCtx<'_>) {
         let _ = ctx;
     }
 
-    /// Work on the goal. Called when it has just been put in charge and
-    /// whenever no action is running — so `last` is how the most recent task
-    /// went, or [`TaskResult::InProgress`] when nothing has finished since the
-    /// last call.
+    /// Work on the goal. Called only when the goal has just been put in charge
+    /// or when no task is current — which is the tick after one ended, so
+    /// `last` is what that task wrote, or [`TaskResult::InProgress`] when
+    /// nothing has ended since the last call. `ctx.finished` says which task
+    /// it was.
     ///
     /// **Must either queue a task, or return something other than
     /// [`GoalProgress::Working`], unless the miss was cheap.** An executor

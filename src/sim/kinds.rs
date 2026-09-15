@@ -99,6 +99,11 @@ impl Human {
     pub(crate) fn set_hunger(&mut self, hunger: f32) {
         self.stats = self.stats.with_hunger(hunger);
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_carried(&mut self, item: Option<ItemKind>) {
+        self.carried = item;
+    }
 }
 
 impl GameEntity for Human {

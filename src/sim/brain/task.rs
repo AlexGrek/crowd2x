@@ -1,51 +1,135 @@
-//! Tasks: the steps a goal breaks itself into, and the queue they wait in.
+//! Tasks: the small steps a goal breaks itself into, the queue they wait in,
+//! and [`TaskExecutor`] — what carries one out.
 //!
-//! A task is a *decision already made* — walk to this cell, use that fridge,
-//! wait this long. Choosing them is a goal's job ([`super::goal`]); carrying
-//! one out is an action's ([`super::action`]). This module is only the
-//! vocabulary between the two and the queue that holds it.
+//! A goal *chooses* tasks ([`super::goal`]); a task *manages* one small thing
+//! — walk to that cell, take food out of that fridge if already standing
+//! beside it, eat what is in hand — by starting an [`Action`], watching it,
+//! and applying what finishing it means. **A task writes the [`TaskResult`]**,
+//! and the goal that queued it reads it on the tick after, to decide whether
+//! to carry on, retry or replan.
+//!
+//! # Executors without a box
+//!
+//! Every task is its own executor struct ([`super::tasks`]), and [`Task`] is
+//! the enum over them, dispatched by `match`. A `Box<dyn TaskExecutor>` per
+//! queued task would be an allocation every time a goal plans, inside the pass
+//! that may not allocate; an enum of `Copy` structs lives inline in the queue.
+//! Adding a task is a struct, an [`TaskExecutor`] impl and a variant here.
 
 use crate::map::Point;
+use crate::sim::entity::Think;
+use crate::sim::item::ItemKind;
+use crate::sim::stats::Stats;
+use crate::sim::walker::Walker;
+use crate::sim::MoveOutcome;
+
+use super::action::{Action, ActionState};
+use super::tasks::{ConsumeItem, MoveTo, TakeItem, Wait};
+
+/// What a task may touch while it runs: the world to read, the body it moves,
+/// the action it drives, and the parts of its unit a task can change.
+pub struct TaskCtx<'a> {
+    pub think: &'a Think<'a>,
+    /// What became of this tick's step, for a walk to repair its route by.
+    pub outcome: MoveOutcome,
+    pub walk: &'a mut Walker,
+    /// The action this task started, or [`Action::None`] before it has.
+    pub action: &'a mut Action,
+    /// `None` for a kind that has no needs.
+    pub stats: Option<&'a mut Stats>,
+    /// What is in its hand. `None` for a kind that has no hands.
+    pub carried: Option<&'a mut Option<ItemKind>>,
+}
+
+impl TaskCtx<'_> {
+    /// Advance the running action by one tick.
+    pub fn advance_action(&mut self) -> ActionState {
+        self.action.advance(self.think, self.outcome, self.walk)
+    }
+
+    /// Where the unit is standing.
+    pub fn here(&self) -> Point {
+        self.walk.body().center_position()
+    }
+}
+
+/// Carries out one task, a tick at a time.
+pub trait TaskExecutor {
+    /// One tick of the task. With no action running, check what has to be
+    /// true and start one — or fail; with one running, advance it, and when it
+    /// finishes, apply what that means.
+    ///
+    /// Called every tick the task is current, so what it checks it checks
+    /// every tick: a precondition that was true when the action started is
+    /// not assumed to still be.
+    fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult;
+
+    /// How it reads in a debug view.
+    fn describe(&self) -> String;
+}
 
 /// One step of a plan.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Task {
-    /// Walk until standing in `cell`.
-    MoveTo { cell: Point },
-    /// Do something to whatever is in `cell`, from a cell beside it.
-    ///
-    /// **Fails rather than walking** — the walking is a task that should have
-    /// been queued in front of this one. An interaction that quietly walked
-    /// would hide a goal that forgot to plan the route, and it would be a
-    /// second place a route gets asked for.
-    Interact { cell: Point, seconds: f32 },
-    /// Stand still for a while.
-    Wait { seconds: f32 },
+    MoveTo(MoveTo),
+    TakeItem(TakeItem),
+    ConsumeItem(ConsumeItem),
+    Wait(Wait),
 }
 
 impl Task {
-    /// How it reads in a debug view.
+    /// Walk until standing in the middle of `cell`.
+    pub const fn move_to(cell: Point) -> Task {
+        Task::MoveTo(MoveTo { cell })
+    }
+
+    /// Take `item` out of whatever is in `from`, from a cell beside it.
+    pub const fn take(from: Point, item: ItemKind, seconds: f32) -> Task {
+        Task::TakeItem(TakeItem {
+            from,
+            item,
+            seconds,
+        })
+    }
+
+    /// Use up the `item` in hand.
+    pub const fn consume(item: ItemKind, seconds: f32) -> Task {
+        Task::ConsumeItem(ConsumeItem { item, seconds })
+    }
+
+    /// Stand still for a while.
+    pub const fn wait(seconds: f32) -> Task {
+        Task::Wait(Wait { seconds })
+    }
+
+    /// Run this task's executor for a tick.
+    pub fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
+        match self {
+            Task::MoveTo(task) => task.execute(ctx),
+            Task::TakeItem(task) => task.execute(ctx),
+            Task::ConsumeItem(task) => task.execute(ctx),
+            Task::Wait(task) => task.execute(ctx),
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
-            Task::MoveTo { cell } => format!("move to {}, {}", cell.x, cell.y),
-            Task::Interact { cell, seconds } => {
-                format!("use {}, {} for {seconds:.1}s", cell.x, cell.y)
-            }
-            Task::Wait { seconds } => format!("wait {seconds:.1}s"),
+            Task::MoveTo(task) => task.describe(),
+            Task::TakeItem(task) => task.describe(),
+            Task::ConsumeItem(task) => task.describe(),
+            Task::Wait(task) => task.describe(),
         }
     }
 }
 
-/// What became of the most recent task.
-///
-/// Handed to [`super::goal::GoalExecutor::process`] as `last`, which is how a
-/// goal learns that the step it queued is over and how it went.
+/// What a task says about itself, and what the goal that queued it reads.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum TaskResult {
-    /// Nothing has finished since the executor was last told anything.
+    /// The task has not got an action going. Also what a goal is handed when
+    /// no task has ended since it was last asked.
     #[default]
     InProgress,
-    /// An action is running.
+    /// Its action is running.
     Executing,
     Failed,
     Success,
@@ -64,6 +148,16 @@ impl TaskResult {
     /// Whether this is the end of a task rather than the middle of one.
     pub const fn is_finished(self) -> bool {
         matches!(self, TaskResult::Failed | TaskResult::Success)
+    }
+
+    /// The result an action's state makes, for a task whose action is all
+    /// there is to it.
+    pub const fn of(state: ActionState) -> TaskResult {
+        match state {
+            ActionState::Running => TaskResult::Executing,
+            ActionState::Finished => TaskResult::Success,
+            ActionState::Failed => TaskResult::Failed,
+        }
     }
 }
 
@@ -186,11 +280,13 @@ impl Tasks {
         (0..self.len()).filter_map(|offset| self.slots[self.index(offset)])
     }
 
+    /// What the most recent task wrote.
     pub fn result(&self) -> TaskResult {
         self.result
     }
 
-    /// Only the brain says how a task went — an executor reads it.
+    /// Where a task's result is written. The brain passes on what the task
+    /// returned and nothing else; an executor only reads it.
     pub(super) fn set_result(&mut self, result: TaskResult) {
         self.result = result;
     }
@@ -201,7 +297,7 @@ mod tests {
     use super::*;
 
     fn wait(seconds: f32) -> Task {
-        Task::Wait { seconds }
+        Task::wait(seconds)
     }
 
     #[test]

@@ -169,14 +169,29 @@ impl Walker {
     /// is what makes a corner read as a turn instead of a stop: the next
     /// heading is picked up at the boundary, so the walked line cuts the
     /// corner diagonally. `path.rs` says why that can never skip a cell.
+    ///
+    /// **Except the last cell**, which is left for [`Walker::advance`] to tick
+    /// off once the body stands in the middle of it. There is no corner after
+    /// it to cut, and a walk that ended on entering would leave whoever walked
+    /// it standing on the line between two cells — eating at a fridge from
+    /// the edge of the tile beside it.
     pub fn apply(&mut self, intent: &Intent) {
         let Intent::Move { to } = intent else {
             return;
         };
         self.body.set_position(*to);
-        if self.path.current() == Some(self.body.center_position()) {
+        if self.path.remaining().len() > 1 && self.path.current() == Some(self.body.center_position())
+        {
             self.path.advance();
         }
+    }
+
+    /// Whether the body is in the middle of the cell it is standing in.
+    fn is_centred(&self) -> bool {
+        let (x, y) = self.body.position();
+        let cell = self.body.center_position();
+        let (dx, dy) = (cell.x as f32 + 0.5 - x, cell.y as f32 + 0.5 - y);
+        (dx * dx + dy * dy).sqrt() <= ARRIVED
     }
 
     /// **The far stage.** Find the way to `cell` over the static passability
@@ -198,6 +213,12 @@ impl Walker {
 
         let here = self.body.center_position();
         match path::find_path(here, cell, FAR_LIMIT, |c| ctx.is_passable(c)) {
+            // Already in the cell, which still means walking to the middle of
+            // it: a route of one step, ticked off by `advance` on arrival.
+            Some(steps) if steps.is_empty() => {
+                self.path = Path::new(vec![cell]);
+                true
+            }
             Some(steps) => {
                 self.path = Path::new(steps);
                 true
@@ -219,11 +240,19 @@ impl Walker {
     ///
     /// * blocked → [`Walker::detour`]; a detour that finds nothing is
     ///   [`ActionState::Failed`], with the route cleared
-    /// * route walked → [`ActionState::Finished`]
+    /// * route walked, standing in the middle of its last cell →
+    ///   [`ActionState::Finished`]
     /// * otherwise → [`ActionState::Running`]
     pub fn advance(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> ActionState {
         if outcome.is_blocked() && !self.detour(ctx) {
             return ActionState::Failed;
+        }
+        // The last step, which `apply` leaves for arrival rather than entry.
+        if self.path.remaining().len() == 1
+            && self.path.current() == Some(self.body.center_position())
+            && self.is_centred()
+        {
+            self.path.advance();
         }
         if self.path.is_done() {
             ActionState::Finished
@@ -401,6 +430,50 @@ mod tests {
         }
         assert!(finished);
         assert_eq!(walker.body().center_position(), goal);
+    }
+
+    #[test]
+    fn a_walk_ends_in_the_middle_of_its_last_cell() {
+        // Entering the last cell is not arriving: whoever walked there is about
+        // to stand still in it, and standing on a cell's edge reads as being
+        // between two places.
+        let world = World::new(Map::new(Size::new(9, 9), FLOOR));
+        let mut walker = walker(Point::new(1, 1));
+        assert!(walker.route_to(&world.ctx(0), Point::new(5, 1)));
+
+        for t in 0..600 {
+            let ctx = world.ctx(t);
+            let intent = walker.think(&ctx);
+            walker.apply(&intent);
+            if walker.advance(&ctx, MoveOutcome::Moved) == ActionState::Finished {
+                break;
+            }
+        }
+        let (x, y) = walker.body().position();
+        assert!((x - 5.5).abs() < 1e-3 && (y - 1.5).abs() < 1e-3, "stopped at {x}, {y}");
+    }
+
+    #[test]
+    fn a_walk_to_the_cell_it_is_already_in_still_centres_it() {
+        let world = World::new(Map::new(Size::new(9, 9), FLOOR));
+        let mut walker = walker(Point::new(3, 3));
+        walker.body_mut().set_position((3.02, 3.9));
+        assert!(walker.route_to(&world.ctx(0), Point::new(3, 3)));
+        assert!(walker.is_walking(), "off-centre is somewhere left to walk");
+
+        let mut finished = false;
+        for t in 0..600 {
+            let ctx = world.ctx(t);
+            let intent = walker.think(&ctx);
+            walker.apply(&intent);
+            if walker.advance(&ctx, MoveOutcome::Moved) == ActionState::Finished {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished);
+        let (x, y) = walker.body().position();
+        assert!((x - 3.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3, "stopped at {x}, {y}");
     }
 
     #[test]
