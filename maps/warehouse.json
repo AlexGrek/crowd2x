@@ -66,6 +66,10 @@
       {
         "at": { "x": 840, "y": 360 },
         "kind": "trash can"
+      },
+      {
+        "at": { "x": 600, "y": 456 },
+        "kind": "fridge"
       }
     ],
     "spawners": []
