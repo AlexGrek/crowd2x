@@ -348,9 +348,11 @@ thing for everything that has a position.
 
 React is the second thinking round, after the *whole* crowd has moved: an entity revises
 its plan, writing only to itself (`GameEntity::react`). Reacting inside the move loop
-would mean answering a world that is halfway through the tick. Today a blocked `Walker`
-just drops its goal — steering, waiting, queueing and pathfinding are each a change to
-`Walker::react` and nowhere else.
+would mean answering a world that is halfway through the tick. React is where each unit's
+`Brain` runs (`sim/brain/`, and CLAUDE.md's "The brain"): **a new behaviour is a `Routine`
+(what to want), a `GoalExecutor` (how to get it) or a task executor (one small step) — not a
+new `Intent` variant and not a Bevy system.** Routes are asked for only by `Action::walk_to`;
+steering, detours and the near stage stay in `sim/walker.rs`.
 
 `Occupancy` is exactly the dynamic layer `map::PassabilityMap`'s docs reserve a space for,
 and it lives in `sim/` because who is standing where is simulation state. Movement never

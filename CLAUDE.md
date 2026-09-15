@@ -269,8 +269,9 @@ directly instead of listening for the `Cancelled` it would otherwise fire on eve
 
 A left click on the map picks whoever is standing in that cell, a green frame
 (`selection.png`) says who, and a panel along the bottom shows their portrait and four
-menus: `life` (despawn, freeze), `debug`, `stats` and `brains` — the last two deliberately
-empty. Clicking empty ground, or `close`, selects nobody and the panel goes with them.
+menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty) and `brains` (the
+goal in charge, the priority list, the task, its result and action — live, like `debug`).
+Clicking empty ground, or `close`, selects nobody and the panel goes with them.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
   position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the
@@ -437,22 +438,61 @@ letting it go again carries on rather than starting over. `GameEntity::debug_fie
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
 
-What the wanderers do with all this is walk a route, and the routing is **two stages of
-one A\*** (`sim/path.rs`, asked twice with two different predicates). The *far* stage
-plans against the terrain only, once per goal, and its cost is bounded by a count of
-expansions rather than by hope — an unreachable goal floods everything it can reach before
-it knows, so `FAR_LIMIT` turns a walled-off room from a frame-rate cliff into a bounded
-miss, and a miss pays `REPLAN_DELAY` ticks before trying again. The *near* stage is the
-detour: something was in the way, so `DETOUR_CELLS` of the plan are thrown out and rerouted
-against the crowd as well as the terrain, leaving the rest of the far route untouched. Both
-live in `Walker::react`, because a route is state and think may not write — and because the
-only moment the crowd is worth planning against is after all of it has moved.
+#### The brain (`sim/brain/`)
+
+What an entity does with all this is decided by a `Brain`, which runs entirely in
+`GameEntity::react` — the only `&mut self` hook, after the whole crowd has moved — while
+`think` stays what it was: walk the current route, arithmetic, parallel. Six layers, each
+talking only to the one below:
+
+- **perception** — a named stub. What it wants is a spatial index on `Think`, never a
+  per-unit scan of the crowd.
+- **memory** — a `BTreeMap<String, Recall>`, empty; a `BTreeMap` so iterating it can never
+  be a hash order.
+- **routines** (`KeepFedRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
+  The list is zeroed every tick and each routine raises what it cares about
+  (`Goals::raise_to` is a max, so two routines cannot undo each other).
+- **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
+  `GoalExecutor` (`WanderGoal`, `EatGoal`) is a `Box` owned for the entity's life, so **its
+  fields are its saved state** across being put down and picked up. It reads stats, hands
+  and memory, and manages the task queue; it never changes the world itself.
+- **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `Wait`), `match`-dispatched so queueing
+  one allocates nothing. **A task writes its `TaskResult`** (`InProgress`, `Executing`,
+  `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only from one step
+  away), and applies what finishing means: food goes into a hand when a `TakeItem` ends,
+  not when a goal hears that it did.
+- **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
+  is asked for.
+
+The pipeline runs in the order specified and the order is the design: perception; every
+routine arranges the list; on a change at the top, the old goal's `deprioritized`, the
+current task abandoned, the queue cleared, the new goal's `prioritized`; the goal on top's
+`process` **only if the goal changed or no task is current**; then the current task's
+executor. So a task that ends at tick N is heard by its goal at N+1, which decides — carry
+on, retry, replan — before anything else starts: one tick between tasks, the price of the
+goal having a say. A goal put down before it heard is handed that result in
+`deprioritized`. A goal that returns `Blocked` is held off (`BLOCKED_TICKS`, doubling), and
+`Achieved` does not hand over — if the routine still wants it, it starts again.
+
+The routing under `MoveTo` is **two stages of one A\*** (`sim/path.rs`, asked twice with two
+different predicates), in `sim/walker.rs`. The *far* stage plans against the terrain only,
+once per walk, and its cost is bounded by a count of expansions rather than by hope — an
+unreachable goal floods everything it can reach before it knows, so `FAR_LIMIT` turns a
+walled-off room from a frame-rate cliff into a bounded miss. The *near* stage is the detour:
+something was in the way, so `DETOUR_CELLS` of the plan are thrown out and rerouted against
+the crowd as well as the terrain; no local way round fails the walk, and the goal decides
+whether to wait for a gap (`WAIT_FOR_A_GAP`, up to `PATIENCE` times) or give up.
 
 The search is 4-connected and movement is not: a walker leaves for the next cell as soon as
-it is inside the current one, so the line it walks cuts corners. `path.rs` says why that
-can never skip a cell the search vetted. What is still not here is waiting: a walker with
-no local way round drops the plan rather than queueing for a gap, since a wanderer has
-nowhere it needs to be.
+it is inside the current one, so the line it walks cuts corners — except the last cell,
+which a walk ends in the *middle* of. `path.rs` says why corner cutting can never skip a
+cell the search vetted.
+
+**Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
+a prop name (`"fridge"`) to a `FeatureKind`, and `GameState::new` indexes the map's props by
+cell once. A fridge never runs out. Adding a use for a prop is an entry there, a palette
+entry in `editor/props.rs` (a test fails without one), and a goal that queues the tasks.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -624,6 +664,9 @@ src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
                         occupancy.rs is who stands where: passability's dynamic half
+                        walker.rs is the movement action; feature.rs what props are for
+                        brain/ is the mind: routine(s), goal(s)/, task(s)/, action
+                        item.rs and stats.rs are what a brain's tasks change
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed
