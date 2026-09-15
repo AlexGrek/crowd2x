@@ -48,7 +48,9 @@ use rand::SeedableRng;
 use crate::characters::{depth_for, dog, human, snap_to_texel, CELL};
 use crate::editor::{background, CurrentMap};
 use crate::render::WORLD_LAYER;
-use crate::sim::{self, process_pass, spawn_pass, EntityType, GameEntity, GameState, Input, Uid};
+use crate::sim::{
+    self, process_pass, spawn_pass, EntityType, GameEntity, GameState, GoalId, Input, Uid,
+};
 use crate::state::AppState;
 use crate::ui::{MODAL, TEXT_ACCENT};
 
@@ -117,6 +119,34 @@ impl ActionBarSprites {
     }
 }
 
+/// One entity's goal-change notification: the emoji for whichever
+/// [`GoalId`] was last seen in charge, and how long it has left to show.
+struct GoalLabel {
+    /// `None` until the goal has changed at least once. There is nothing to
+    /// show for a unit's very first goal — it did not change from
+    /// anything — so nothing is spawned until the first real handover.
+    sprite: Option<Entity>,
+    last_goal: GoalId,
+    /// Seconds left before the label is fully faded: `0.0` both before the
+    /// first change and once one has finished fading, and
+    /// [`GOAL_EMOJI_FADE`] the instant one is seen.
+    remaining: f32,
+}
+
+/// Which entity is showing what about its last goal handover — see
+/// [`GoalLabel`]. Kept for as long as the entity is, so a second handover
+/// reuses the same sprite rather than despawning and respawning it.
+#[derive(Resource, Default)]
+struct GoalLabelSprites {
+    by_uid: HashMap<Uid, GoalLabel>,
+}
+
+impl GoalLabelSprites {
+    fn clear(&mut self) {
+        self.by_uid.clear();
+    }
+}
+
 pub struct ActorsPlugin;
 
 impl Plugin for ActorsPlugin {
@@ -129,6 +159,7 @@ impl Plugin for ActorsPlugin {
         app.init_resource::<SimInput>()
             .init_resource::<ActorSprites>()
             .init_resource::<ActionBarSprites>()
+            .init_resource::<GoalLabelSprites>()
             .add_systems(OnEnter(AppState::Game), build_world)
             .add_systems(OnExit(AppState::Game), tear_down_world)
             // Fixed, not per-frame: the simulation advances in equal steps
@@ -141,7 +172,7 @@ impl Plugin for ActorsPlugin {
             )
             .add_systems(
                 Update,
-                (sync_sprites, sync_action_bars)
+                (sync_sprites, sync_action_bars, sync_goal_labels)
                     .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
     }
@@ -187,11 +218,13 @@ fn tear_down_world(
     mut commands: Commands,
     mut sprites: ResMut<ActorSprites>,
     mut bars: ResMut<ActionBarSprites>,
+    mut labels: ResMut<GoalLabelSprites>,
     mut input: ResMut<SimInput>,
 ) {
     commands.remove_resource::<Sim>();
     sprites.clear();
     bars.clear();
+    labels.clear();
     input.0.clear();
 }
 
@@ -410,6 +443,128 @@ fn spawn_action_bar(commands: &mut Commands) -> (Entity, Entity) {
         ))
         .id();
     (track, fill)
+}
+
+/// The bundled color-emoji font — see the `dev` skill for why this needs one
+/// of its own rather than reusing Bevy's built-in default: a COLRv0 table is
+/// what `swash` (which `bevy_text` rasterizes glyphs through) knows how to
+/// turn into a colored glyph rather than a blank one.
+const EMOJI_FONT: &str = "fonts/Twemoji.Mozilla.ttf";
+
+/// Canvas pixels tall the goal emoji is drawn at — the world camera's own
+/// unit, the same one [`BAR_WIDTH`] is in. Large enough to read as a status
+/// icon rather than a decoration, since it is only up for
+/// [`GOAL_EMOJI_FADE`] seconds at a time.
+const GOAL_EMOJI_SIZE: f32 = 22.0;
+/// Above the reverse progress bar, which is itself above the character —
+/// see [`BAR_LIFT`] — so the two never overlap when both are showing.
+const GOAL_EMOJI_LIFT: f32 = CELL as f32 / 2.0 + 20.0;
+/// Clear of a paperdoll's own layers, the selection frame and the action bar
+/// (0.006), so the goal emoji draws in front of everything about its
+/// character.
+const GOAL_EMOJI_DEPTH: f32 = 0.007;
+/// Seconds a goal-change label stays up before it has faded out completely.
+const GOAL_EMOJI_FADE: f32 = 3.0;
+
+/// Flash the emoji for whichever goal just took charge of a unit's mind
+/// above its head, fading it out over [`GOAL_EMOJI_FADE`] seconds — see
+/// [`sim::GameEntity::current_goal`]. Nothing is shown while a goal holds
+/// charge; this is a notification of the handover, not a status bar.
+///
+/// Real time, [`Time`] rather than [`Time::<Fixed>`]: the fade is a reading
+/// aid, not a fact about the simulation, so it runs at the same rate whatever
+/// [`GameSpeed`] the world itself is ticking at.
+fn sync_goal_labels(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    time: Res<Time>,
+    sim: Res<Sim>,
+    mut labels: ResMut<GoalLabelSprites>,
+    mut texts: Query<(&mut Transform, &mut TextColor, &mut Text2d, &mut Visibility)>,
+) {
+    let state = &sim.0;
+    let dt = time.delta_secs();
+
+    // Anyone who left.
+    labels.by_uid.retain(|uid, label| {
+        let keep = state.entities().contains(*uid);
+        if !keep {
+            if let Some(sprite) = label.sprite {
+                commands.entity(sprite).despawn();
+            }
+        }
+        keep
+    });
+
+    for entity in state.entities().iter() {
+        let Some(goal) = entity.current_goal() else {
+            continue;
+        };
+        let uid = entity.uid();
+        let pos = world_pos(entity.position());
+        let base = Vec3::new(
+            pos.x,
+            pos.y + GOAL_EMOJI_LIFT,
+            depth_for(pos.y) + GOAL_EMOJI_DEPTH,
+        );
+
+        let label = labels.by_uid.entry(uid).or_insert(GoalLabel {
+            sprite: None,
+            last_goal: goal,
+            remaining: 0.0,
+        });
+        let changed = label.last_goal != goal;
+        label.last_goal = goal;
+        label.remaining = if changed {
+            GOAL_EMOJI_FADE
+        } else {
+            (label.remaining - dt).max(0.0)
+        };
+
+        let sprite = match label.sprite {
+            Some(sprite) => sprite,
+            // Nothing to show until the first handover — see `GoalLabel`.
+            None if !changed => continue,
+            None => {
+                let sprite = commands
+                    .spawn((
+                        Text2d::new(goal.emoji()),
+                        TextFont {
+                            font: assets.load(EMOJI_FONT).into(),
+                            font_size: GOAL_EMOJI_SIZE.into(),
+                            ..default()
+                        },
+                        Transform::from_translation(base),
+                        WORLD_LAYER,
+                        DespawnOnExit(AppState::Game),
+                    ))
+                    .id();
+                label.sprite = Some(sprite);
+                sprite
+            }
+        };
+
+        let Ok((mut transform, mut color, mut text, mut visibility)) = texts.get_mut(sprite)
+        else {
+            continue;
+        };
+
+        if transform.translation != base {
+            transform.translation = base;
+        }
+        if changed {
+            *text = Text2d::new(goal.emoji());
+        }
+
+        let alpha = (label.remaining / GOAL_EMOJI_FADE).clamp(0.0, 1.0);
+        if color.0.alpha() != alpha {
+            color.0.set_alpha(alpha);
+        }
+        let wanted = if alpha > 0.0 { Visibility::Visible } else { Visibility::Hidden };
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+    }
 }
 
 /// Cell units to world pixels, on the art's own grid.

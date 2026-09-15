@@ -50,6 +50,19 @@ impl GoalId {
         }
     }
 
+    /// The emoji shown above a unit's head while this goal is in charge —
+    /// see [`crate::sim::GameEntity::current_goal`]. Single codepoints only,
+    /// deliberately: a multi-codepoint sequence (a skin tone, a ZWJ join)
+    /// risks falling back to its unjoined parts on a renderer that does not
+    /// merge them, which is a worse failure than a plainer emoji.
+    pub const fn emoji(self) -> &'static str {
+        match self {
+            GoalId::Idle => "💤",
+            GoalId::Wander => "🚶",
+            GoalId::Eat => "🍎",
+        }
+    }
+
     const fn index(self) -> usize {
         self as usize
     }
@@ -419,6 +432,13 @@ mod tests {
         let mut goals = Goals::new();
         goals.block(GoalId::Idle);
         assert_eq!(goals.cooldown(GoalId::Idle), 0);
+    }
+
+    #[test]
+    fn every_goal_has_an_emoji() {
+        for goal in GoalId::ALL {
+            assert!(!goal.emoji().is_empty(), "{goal:?} has no emoji");
+        }
     }
 
     #[test]

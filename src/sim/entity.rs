@@ -162,6 +162,18 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// The goal in charge of this kind's mind right now, for a label drawn
+    /// above it — `None` for a kind with no brain.
+    ///
+    /// On the trait rather than reached for with a downcast, for the reason
+    /// [`GameEntity::facing`] is above. Unlike [`GameEntity::debug_fields`]
+    /// this is cheap and allocates nothing — [`super::brain::Brain::top_goal`]
+    /// is a field read — which is what lets the renderer ask it every frame
+    /// for every actor rather than only for the one selected.
+    fn current_goal(&self) -> Option<super::brain::GoalId> {
+        None
+    }
+
     /// Whether this entity is held still.
     ///
     /// Read once per entity per tick by [`super::think_step`], which hands a

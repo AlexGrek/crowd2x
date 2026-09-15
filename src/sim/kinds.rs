@@ -28,7 +28,7 @@ use rand::RngExt;
 
 use crate::map::Point;
 
-use super::brain::Brain;
+use super::brain::{Brain, GoalId};
 use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::item::ItemKind;
@@ -134,6 +134,10 @@ impl GameEntity for Human {
             Some(&mut self.stats),
             Some(&mut self.carried),
         );
+    }
+
+    fn current_goal(&self) -> Option<GoalId> {
+        Some(self.brain.top_goal())
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
@@ -242,6 +246,10 @@ impl GameEntity for Dog {
         } else if now > was {
             self.facing = Facing::Right;
         }
+    }
+
+    fn current_goal(&self) -> Option<GoalId> {
+        Some(self.brain.top_goal())
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
