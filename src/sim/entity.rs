@@ -215,6 +215,18 @@ pub trait GameEntity: Send + Sync {
         Vec::new()
     }
 
+    /// Fraction complete of whatever timed action is running right now, for
+    /// the reverse progress bar drawn over a unit doing something other than
+    /// walking or waiting — see [`super::brain::Action::progress`]. `None`
+    /// for a kind with no brain, and for one with nothing running that a bar
+    /// is shown for.
+    ///
+    /// On the trait rather than reached for with a downcast, for the reason
+    /// [`GameEntity::facing`] is.
+    fn action_progress(&self) -> Option<f32> {
+        None
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,

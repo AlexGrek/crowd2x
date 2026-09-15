@@ -164,6 +164,10 @@ impl GameEntity for Human {
         self.walk.path_cells()
     }
 
+    fn action_progress(&self) -> Option<f32> {
+        self.brain.action().progress()
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
@@ -256,6 +260,10 @@ impl GameEntity for Dog {
 
     fn planned_path(&self) -> Vec<Point> {
         self.walk.path_cells()
+    }
+
+    fn action_progress(&self) -> Option<f32> {
+        self.brain.action().progress()
     }
 
     fn display_name(&self) -> Option<String> {

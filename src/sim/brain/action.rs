@@ -99,6 +99,21 @@ impl Action {
         matches!(self, Action::None)
     }
 
+    /// Fraction complete, for an action worth drawing a reverse progress bar
+    /// over. `None` for [`Action::None`]; for a walk, which has no notion of
+    /// "done in n seconds" — only of having arrived or not; and for
+    /// [`Action::Wait`], which a bar is deliberately not shown for either.
+    /// Only [`Action::Interact`] and [`Action::Consume`] answer.
+    pub fn progress(&self) -> Option<f32> {
+        match self {
+            Action::Interact {
+                seconds, elapsed, ..
+            }
+            | Action::Consume { seconds, elapsed } => Some((elapsed / seconds).clamp(0.0, 1.0)),
+            Action::None | Action::Move { .. } | Action::Wait { .. } => None,
+        }
+    }
+
     /// One tick of the action.
     ///
     /// A walk is the walker's to judge — it repairs the route if this tick's
@@ -176,6 +191,32 @@ mod tests {
             assert_eq!(action.advance(&world.ctx(), MoveOutcome::Idle, &mut walk), ActionState::Finished);
             assert_eq!(action.elapsed(), 1.0);
         }
+    }
+
+    #[test]
+    fn progress_only_answers_for_an_interact_or_a_consume() {
+        let mut world = World::new(Map::new(Size::new(4, 4), FLOOR));
+        world.dt = 0.25;
+        let mut walk = walker();
+
+        assert_eq!(Action::None.progress(), None);
+        assert_eq!(Action::wait(1.0).progress(), None);
+
+        let mut moving = Action::walk_to(&mut walk, &world.ctx(), Point::new(2, 1)).expect("open floor");
+        assert_eq!(moving.progress(), None);
+        moving.advance(&world.ctx(), MoveOutcome::Idle, &mut walk);
+        assert_eq!(moving.progress(), None, "still no notion of a fraction done");
+
+        let mut interacting = Action::interact(Point::new(2, 1), 1.0);
+        assert_eq!(interacting.progress(), Some(0.0));
+        interacting.advance(&world.ctx(), MoveOutcome::Idle, &mut walk);
+        assert_eq!(interacting.progress(), Some(0.25));
+
+        let mut consuming = Action::consume(1.0);
+        for _ in 0..4 {
+            consuming.advance(&world.ctx(), MoveOutcome::Idle, &mut walk);
+        }
+        assert_eq!(consuming.progress(), Some(1.0), "never past done, however long it ran");
     }
 
     #[test]

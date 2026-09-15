@@ -41,13 +41,16 @@
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
-use crate::characters::{depth_for, dog, human, snap_to_texel};
+use crate::characters::{depth_for, dog, human, snap_to_texel, CELL};
 use crate::editor::{background, CurrentMap};
+use crate::render::WORLD_LAYER;
 use crate::sim::{self, process_pass, spawn_pass, EntityType, GameEntity, GameState, Input, Uid};
 use crate::state::AppState;
+use crate::ui::{MODAL, TEXT_ACCENT};
 
 use super::speed::GameSpeed;
 
@@ -95,6 +98,25 @@ impl ActorSprites {
 #[derive(Component, Clone, Copy)]
 pub struct Actor(pub Uid);
 
+/// Which pair of plain-colour sprites (track, then fill) draws the reverse
+/// progress bar over an entity mid-way through a timed action.
+///
+/// A pair per entity that currently needs one — spawned the tick a timed
+/// action starts and despawned the moment it ends or the entity does, rather
+/// than kept around hidden: most of a crowd is walking or waiting at any
+/// given moment, and a hidden sprite still costs a place in every query that
+/// visits it.
+#[derive(Resource, Default)]
+struct ActionBarSprites {
+    by_uid: HashMap<Uid, (Entity, Entity)>,
+}
+
+impl ActionBarSprites {
+    fn clear(&mut self) {
+        self.by_uid.clear();
+    }
+}
+
 pub struct ActorsPlugin;
 
 impl Plugin for ActorsPlugin {
@@ -106,6 +128,7 @@ impl Plugin for ActorsPlugin {
         // find. `Sim` itself has to wait — it needs the map.
         app.init_resource::<SimInput>()
             .init_resource::<ActorSprites>()
+            .init_resource::<ActionBarSprites>()
             .add_systems(OnEnter(AppState::Game), build_world)
             .add_systems(OnExit(AppState::Game), tear_down_world)
             // Fixed, not per-frame: the simulation advances in equal steps
@@ -118,7 +141,8 @@ impl Plugin for ActorsPlugin {
             )
             .add_systems(
                 Update,
-                sync_sprites.run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
+                (sync_sprites, sync_action_bars)
+                    .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
     }
 }
@@ -162,10 +186,12 @@ fn build_world(
 fn tear_down_world(
     mut commands: Commands,
     mut sprites: ResMut<ActorSprites>,
+    mut bars: ResMut<ActionBarSprites>,
     mut input: ResMut<SimInput>,
 ) {
     commands.remove_resource::<Sim>();
     sprites.clear();
+    bars.clear();
     input.0.clear();
 }
 
@@ -293,6 +319,97 @@ fn sync_sprites(
             }
         }
     }
+}
+
+/// Reverse progress bar dimensions and placement, all in canvas pixels — the
+/// world camera's own unit. A plain colour has no texture to keep from
+/// splitting across a texel, only a canvas pixel to land on whole, which
+/// rounding the fill's width to the nearest one already gives it; nothing here
+/// needs [`snap_to_texel`].
+const BAR_WIDTH: f32 = 20.0;
+const BAR_HEIGHT: f32 = 3.0;
+/// Above the top of a character sprite, which [`characters::human::spawn`] and
+/// [`dog::spawn`] both centre on their position.
+const BAR_LIFT: f32 = CELL as f32 / 2.0 + 5.0;
+/// Clear of a paperdoll's own layers (hair reaches 0.003) and of the selection
+/// frame (0.004), so the bar draws in front of both.
+const BAR_DEPTH: f32 = 0.006;
+
+/// Show a reverse progress bar over anyone mid-way through something that
+/// takes time to do — not walking, not waiting, see
+/// [`sim::brain::Action::progress`] — and take it down the moment they are
+/// not, rather than leaving it hidden: see [`ActionBarSprites`].
+fn sync_action_bars(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    mut bars: ResMut<ActionBarSprites>,
+    mut parts: Query<(&mut Transform, &mut Sprite)>,
+) {
+    let state = &sim.0;
+
+    // Anyone who finished, or left.
+    bars.by_uid.retain(|uid, &mut (track, fill)| {
+        let still_running = state
+            .entities()
+            .get(*uid)
+            .is_some_and(|entity| entity.action_progress().is_some());
+        if still_running {
+            return true;
+        }
+        commands.entity(track).despawn();
+        commands.entity(fill).despawn();
+        false
+    });
+
+    // Anyone running one, new or continuing.
+    for entity in state.entities().iter() {
+        let Some(progress) = entity.action_progress() else {
+            continue;
+        };
+        let uid = entity.uid();
+        let &mut (track, fill) = bars
+            .by_uid
+            .entry(uid)
+            .or_insert_with(|| spawn_action_bar(&mut commands));
+
+        let pos = world_pos(entity.position());
+        let base = Vec3::new(pos.x, pos.y + BAR_LIFT, depth_for(pos.y) + BAR_DEPTH);
+        let remaining = ((1.0 - progress) * BAR_WIDTH).round();
+
+        if let Ok((mut transform, _)) = parts.get_mut(track) {
+            transform.translation = base;
+        }
+        if let Ok((mut transform, mut sprite)) = parts.get_mut(fill) {
+            transform.translation = Vec3::new(base.x - BAR_WIDTH / 2.0, base.y, base.z + 0.0001);
+            sprite.custom_size = Some(Vec2::new(remaining, BAR_HEIGHT));
+        }
+    }
+}
+
+/// One bar: a fixed-width track and a fill that shrinks from its right edge as
+/// [`sim::brain::Action::progress`] rises, anchored on its left so the shrink
+/// reads as time running out rather than as sliding sideways.
+fn spawn_action_bar(commands: &mut Commands) -> (Entity, Entity) {
+    let track = commands
+        .spawn((
+            Name::new("action bar track"),
+            Sprite::from_color(MODAL, Vec2::new(BAR_WIDTH, BAR_HEIGHT)),
+            Transform::default(),
+            WORLD_LAYER,
+            DespawnOnExit(AppState::Game),
+        ))
+        .id();
+    let fill = commands
+        .spawn((
+            Name::new("action bar fill"),
+            Sprite::from_color(TEXT_ACCENT, Vec2::new(BAR_WIDTH, BAR_HEIGHT)),
+            Anchor::CENTER_LEFT,
+            Transform::default(),
+            WORLD_LAYER,
+            DespawnOnExit(AppState::Game),
+        ))
+        .id();
+    (track, fill)
 }
 
 /// Cell units to world pixels, on the art's own grid.
