@@ -143,6 +143,15 @@ Goals then call `ctx.think.features.nearest(FeatureKind::Bed, here)`.
   and the crates already exist.
 - A new prop needs a **16×16** PNG in `assets/` and `PaletteItem::upscaled("name", "file.png")`.
   Never draw it pre-upscaled; CLAUDE.md "Characters" says why.
+- A new prop also needs a `map::PROPS` entry (`src/map/props.rs`) saying whether it can be
+  walked through; `every_palette_prop_is_in_the_map_s_prop_catalogue` fails otherwise.
+
+**Props block the cell their centre is in.** A feature is therefore used from one of the four
+cells beside it — `goals::stand_beside` never offers the feature's own cell, and a feature with
+no passable side is `Stand::Nowhere` (the goal returns `Blocked`). Use tasks with a
+`manhattan_distance(..) <= 1` precondition, as `TakeItem` and `UseToilet` do. A test map that
+puts a unit on a prop's cell, or a prop in a one-wide corridor, gets exactly what a real map
+would: a wall.
 
 Features are indexed once, in `GameState::new`, and never change. A feature that depletes (a
 fridge that runs out) is state that changes during a tick, which is a design change: raise it
@@ -330,7 +339,16 @@ Priority is `stat / 50`, the same scale for every need. Hysteresis (commit high,
 is built in. Test it like `bladder_hovering_at_the_threshold_does_not_flip_the_decision`.
 
 Write a new routine type only for something that is not a stat with thresholds (a time of day,
-a threat). Such a routine:
+a threat). A routine type is:
+
+- a struct in `brain/routines.rs` implementing `RoutineExecutor` (`name`, `arrange`,
+  `debug_fields`). Keep it small: it is stored inline, once per unit, and the largest variant
+  sizes every routine slot. Put anything shared by every unit (thresholds, names) in a
+  `&'static` descriptor, as `Need` does, and keep only per-unit state in the struct.
+- a variant in `Routine` (`brain/routine.rs`), a `const fn` constructor beside
+  `Routine::need`, and its arm in `Routine::name`, `arrange` and `debug_fields`.
+
+Such a routine:
 
 - **raises every tick** it wants something, because the list is zeroed before routines run;
 - only ever calls `goals.raise_to` and never queues tasks;
@@ -347,10 +365,10 @@ a threat). Such a routine:
 pub fn human() -> Brain {
     Brain::new(
         [
-            Box::new(NeedRoutine::new(&HUNGER)) as Box<dyn Routine>,
-            Box::new(NeedRoutine::new(&THIRST)),
-            Box::new(NeedRoutine::new(&BLADDER)),
-            Box::new(StayBusyRoutine),
+            Routine::need(&HUNGER),
+            Routine::need(&THIRST),
+            Routine::need(&BLADDER),
+            Routine::stay_busy(),
         ],
         [
             Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
@@ -362,14 +380,14 @@ pub fn human() -> Brain {
 }
 ```
 
-- `MAX_ROUTINES` is 4, **and the human uses all four**. `Brain::new` panics past it or on two
-  executors for one goal. Raise the constant rather than working round it; it sizes an inline
-  array.
+- **A brain takes as many routines as it is given.** They go into a `Box<[Routine]>` at
+  construction (the spawn pass, which may allocate), so there is no cap and no spare slots.
+  `Brain::new` panics only on two executors for one goal.
 - Routine order is fixed at construction, and determinism depends on that.
 - Update `a_human_s_brain_says_what_it_is_doing`, which asserts the routine list.
-- Watch `a_human_stays_small_enough_to_be_worth_a_thousand_of` (`size_of::<Human>() <= 576`).
-  A need costs about 30 bytes (a goal slot plus a stat). Raise the wall by a cache line on
-  purpose, with a note, never silently.
+- Watch `a_human_stays_small_enough_to_be_worth_a_thousand_of` (`size_of::<Human>() <= 576`,
+  496 today). Routines do not count against it. A goal slot (16 bytes, per `GoalId`, on every
+  kind) and a stat do: raise the wall by a cache line on purpose, with a note, never silently.
 
 A new **unit kind** (not just a new behaviour) is:
 

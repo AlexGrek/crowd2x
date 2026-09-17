@@ -5,6 +5,10 @@
 //!
 //! * [`background`] — one tile per grid cell, all at a single depth behind the
 //!   world. Painted by dragging, since filling a floor is the common case.
+//!   `wall*` and `block` are the exception: [`Instrument::Wall`] and
+//!   [`Instrument::Block`] turn a drag into a rectangle — hollow for a wall,
+//!   filled for a block — committed on release rather than as it is dragged,
+//!   since only the release knows where the far corner landed.
 //! * [`props`] — objects placed freely at the cursor and depth-sorted by world
 //!   Y exactly like characters, so they interleave with the crowd. Placed one
 //!   per click, since dragging would bury a pile of beds in one spot.
@@ -123,6 +127,39 @@ impl Layer {
     }
 }
 
+/// How a background palette entry responds to a drag, chosen by its name so
+/// picking the tile is the only choice a player makes.
+///
+/// `Wall` and `Block` both hold their paint until release rather than
+/// painting every cell crossed like [`Brush`](Instrument::Brush) does — a
+/// rectangle is only known once both corners are, and painting eagerly would
+/// leave a trail behind wherever the drag passed on its way there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Instrument {
+    /// Paints every cell held over, the way the rest of the palette works.
+    Brush,
+    /// Drag corner to corner; on release, paints the rectangle's four sides —
+    /// a room's walls in one stroke.
+    Wall,
+    /// Drag corner to corner; on release, paints the whole rectangle — a
+    /// solid block of tiles in one stroke.
+    Block,
+}
+
+impl Instrument {
+    /// `"block"` and anything named `"wall..."` get the rectangle behaviour;
+    /// every other background tile keeps painting by the cell.
+    fn for_background_item(name: &str) -> Self {
+        if name == "block" {
+            Instrument::Block
+        } else if name.starts_with("wall") {
+            Instrument::Wall
+        } else {
+            Instrument::Brush
+        }
+    }
+}
+
 /// What the editor will place next. Each layer keeps its own selection, so
 /// switching layers does not lose your place in the other palette.
 #[derive(Resource, Default)]
@@ -180,12 +217,21 @@ impl Tool {
     }
 
     fn describe(&self) -> String {
+        let hint = match self.layer {
+            Layer::Background => match Instrument::for_background_item(self.item().name) {
+                Instrument::Wall => "  drag corner to corner for a room's walls",
+                Instrument::Block => "  drag corner to corner for a filled block",
+                Instrument::Brush => "",
+            },
+            Layer::Props => "",
+        };
         format!(
-            "layer  {}\nitem   {}  {}/{}",
+            "layer  {}\nitem   {}  {}/{}{}",
             self.layer.name(),
             self.item().name,
             self.index() + 1,
             self.palette().len(),
+            hint,
         )
     }
 }
@@ -261,12 +307,110 @@ impl Cursor {
     }
 }
 
+/// An in-progress [`Instrument::Wall`] or [`Instrument::Block`] drag.
+///
+/// `anchor` is the cell the press started in; `None` means no drag is under
+/// way. Nothing here touches the map until release — `cells` and `preview`
+/// are only the on-screen rehearsal of what release will do, mirroring the
+/// single-tile ghost the cursor always shows.
+#[derive(Resource, Default)]
+struct RectangleDrag {
+    anchor: Option<IVec2>,
+    /// Placing or erasing, fixed for the life of the drag so letting go of
+    /// the wrong button mid-drag can't flip what release does.
+    erasing: bool,
+    /// The background palette entry this drag paints, captured at the press
+    /// so cycling the palette mid-drag can't change what release paints.
+    item: usize,
+    /// What the last frame's preview covered, so a still drag does not
+    /// respawn the same sprites every frame.
+    cells: Vec<IVec2>,
+    preview: Vec<Entity>,
+}
+
+impl RectangleDrag {
+    /// Every cell from `anchor` to `current`: the whole rectangle for
+    /// [`Instrument::Block`], only its four sides for [`Instrument::Wall`].
+    fn cells(anchor: IVec2, current: IVec2, instrument: Instrument) -> Vec<IVec2> {
+        let min = anchor.min(current);
+        let max = anchor.max(current);
+        let mut cells = Vec::new();
+        for y in min.y..=max.y {
+            for x in min.x..=max.x {
+                let border = x == min.x || x == max.x || y == min.y || y == max.y;
+                if border || instrument == Instrument::Block {
+                    cells.push(IVec2::new(x, y));
+                }
+            }
+        }
+        cells
+    }
+
+    /// Bring the preview sprites in line with `cells`, which is a no-op once
+    /// a drag has settled since most frames do not change it.
+    fn show(&mut self, commands: &mut Commands, assets: &AssetServer, cells: Vec<IVec2>) {
+        if self.cells == cells {
+            return;
+        }
+        for entity in self.preview.drain(..) {
+            commands.entity(entity).despawn();
+        }
+        for &cell in &cells {
+            let centre = background::cell_centre(cell);
+            let entity = if self.erasing {
+                commands.spawn((
+                    Sprite::from_color(ERASE_TINT, Vec2::splat(background::TILE)),
+                    Transform::from_xyz(centre.x, centre.y, RECT_PREVIEW_Z),
+                    WORLD_LAYER,
+                    DespawnOnExit(AppState::Editor),
+                ))
+            } else {
+                let item = &background::PALETTE[self.item];
+                commands.spawn((
+                    Sprite {
+                        image: assets.load(item.path),
+                        color: GHOST_TINT,
+                        ..default()
+                    },
+                    Transform::from_xyz(centre.x, centre.y, RECT_PREVIEW_Z)
+                        .with_scale(upscale(item.scale)),
+                    WORLD_LAYER,
+                    DespawnOnExit(AppState::Editor),
+                ))
+            }
+            .id();
+            self.preview.push(entity);
+        }
+        self.cells = cells;
+    }
+
+    /// Drop the preview and forget the drag, whether it was just committed or
+    /// abandoned (a tool switch, or leaving the editor mid-drag).
+    fn cancel(&mut self, commands: &mut Commands) {
+        for entity in self.preview.drain(..) {
+            commands.entity(entity).despawn();
+        }
+        self.anchor = None;
+        self.cells.clear();
+    }
+}
+
+/// Depth of a rectangle-drag preview sprite — under the single-tile cursor
+/// ghost at [`CURSOR_Z`], but well clear of any background tile or prop so it
+/// always reads as an overlay rather than as something already placed.
+const RECT_PREVIEW_Z: f32 = 90.0;
+/// Tint for a cell an in-progress erase would clear. Plain colour rather than
+/// the tile's own texture: erasing does not leave that texture behind, so
+/// showing it would say the wrong thing about what release does.
+const ERASE_TINT: Color = Color::srgba(1.0, 0.25, 0.25, 0.4);
+
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Tool>()
             .init_resource::<Cursor>()
+            .init_resource::<RectangleDrag>()
             .init_resource::<background::Tiles>()
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
@@ -354,12 +498,18 @@ fn leave_editor(
     current: Res<CurrentMap>,
     mut tiles: ResMut<background::Tiles>,
     mut cursor: ResMut<Cursor>,
+    mut rect: ResMut<RectangleDrag>,
 ) {
     save(&maps, &current);
     // The sprites go with `DespawnOnExit`; the index of them must not outlive
     // them or the next entry would think cells are already painted.
     tiles.clear();
     cursor.world = None;
+    // Its preview sprites went with `DespawnOnExit` too — this just forgets
+    // the entities so nothing here tries to despawn them a second time.
+    rect.anchor = None;
+    rect.cells.clear();
+    rect.preview.clear();
 }
 
 fn save(maps: &Maps, current: &CurrentMap) {
@@ -599,6 +749,7 @@ fn edit(
     cursor: Res<Cursor>,
     mut tiles: ResMut<background::Tiles>,
     mut current: ResMut<CurrentMap>,
+    mut rect: ResMut<RectangleDrag>,
     placed: Query<(Entity, &props::Prop, &Transform)>,
 ) {
     let Some(world) = cursor.world else {
@@ -614,22 +765,95 @@ fn edit(
         || pads().any(|pad| pad.just_pressed(GamepadButton::South));
     let erase_once = buttons.just_pressed(MouseButton::Right)
         || pads().any(|pad| pad.just_pressed(GamepadButton::West));
+    let place_released = buttons.just_released(MouseButton::Left)
+        || pads().any(|pad| pad.just_released(GamepadButton::South));
+    let erase_released = buttons.just_released(MouseButton::Right)
+        || pads().any(|pad| pad.just_released(GamepadButton::West));
+
+    // Switching away from the background layer mid-drag would otherwise
+    // leave the preview on screen with nothing left driving it.
+    if rect.anchor.is_some() && tool.layer != Layer::Background {
+        rect.cancel(&mut commands);
+    }
 
     match tool.layer {
-        // Held rather than clicked: floors are painted by dragging over cells.
         Layer::Background => {
             let cell = background::cell_of(world);
-            if place_held {
-                background::paint(
-                    &mut commands,
-                    &assets,
-                    &mut tiles,
-                    &mut current.map,
-                    cell,
-                    tool.background,
-                );
-            } else if erase_held {
-                background::erase(&mut commands, &mut tiles, &mut current.map, cell);
+            match Instrument::for_background_item(tool.item().name) {
+                // Held rather than clicked: most tiles are painted by
+                // dragging over cells.
+                Instrument::Brush => {
+                    // A tool switched away from mid-drag: same reasoning as
+                    // above, just within the one layer.
+                    if rect.anchor.is_some() {
+                        rect.cancel(&mut commands);
+                    }
+                    if place_held {
+                        background::paint(
+                            &mut commands,
+                            &assets,
+                            &mut tiles,
+                            &mut current.map,
+                            cell,
+                            tool.background,
+                        );
+                    } else if erase_held {
+                        background::erase(&mut commands, &mut tiles, &mut current.map, cell);
+                    }
+                }
+                // Corner to corner: nothing is painted until release, so the
+                // rectangle can grow, shrink or flip freely on the way there.
+                instrument @ (Instrument::Wall | Instrument::Block) => {
+                    if rect.anchor.is_none() {
+                        if place_once {
+                            rect.anchor = Some(cell);
+                            rect.erasing = false;
+                            rect.item = tool.background;
+                        } else if erase_once {
+                            rect.anchor = Some(cell);
+                            rect.erasing = true;
+                            rect.item = tool.background;
+                        }
+                    }
+
+                    if let Some(anchor) = rect.anchor {
+                        let cells: Vec<IVec2> = RectangleDrag::cells(anchor, cell, instrument)
+                            .into_iter()
+                            .filter(|&cell| current.map.contains(background::point_of(cell)))
+                            .collect();
+                        rect.show(&mut commands, &assets, cells);
+
+                        let released = if rect.erasing {
+                            erase_released
+                        } else {
+                            place_released
+                        };
+                        if released {
+                            let erasing = rect.erasing;
+                            let item = rect.item;
+                            for cell in std::mem::take(&mut rect.cells) {
+                                if erasing {
+                                    background::erase(
+                                        &mut commands,
+                                        &mut tiles,
+                                        &mut current.map,
+                                        cell,
+                                    );
+                                } else {
+                                    background::paint(
+                                        &mut commands,
+                                        &assets,
+                                        &mut tiles,
+                                        &mut current.map,
+                                        cell,
+                                        item,
+                                    );
+                                }
+                            }
+                            rect.cancel(&mut commands);
+                        }
+                    }
+                }
             }
         }
         // One press, one prop.
@@ -723,5 +947,89 @@ mod tests {
                 item.scale,
             );
         }
+    }
+
+    /// `"block"` and every `"wall..."` variant get the rectangle instruments;
+    /// nothing else in the palette does, or a plain floor would start
+    /// dragging rectangles instead of painting the cell under the cursor.
+    #[test]
+    fn only_wall_and_block_are_rectangle_instruments() {
+        for item in background::PALETTE {
+            let instrument = Instrument::for_background_item(item.name);
+            let expected = if item.name == "block" {
+                Instrument::Block
+            } else if item.name.starts_with("wall") {
+                Instrument::Wall
+            } else {
+                Instrument::Brush
+            };
+            assert_eq!(instrument, expected, "{}", item.name);
+        }
+    }
+
+    /// A press and release on the same cell — a plain click, not a drag — is
+    /// a one-cell rectangle either way, so the wall and block instruments
+    /// paint exactly the one tile a click on any other tile would.
+    #[test]
+    fn a_click_with_no_drag_is_a_single_cell_for_either_instrument() {
+        let cell = IVec2::new(3, 2);
+        assert_eq!(RectangleDrag::cells(cell, cell, Instrument::Wall), [cell]);
+        assert_eq!(RectangleDrag::cells(cell, cell, Instrument::Block), [cell]);
+    }
+
+    #[test]
+    fn a_wall_rectangle_is_hollow_and_a_block_rectangle_is_filled() {
+        let anchor = IVec2::new(0, 0);
+        let far = IVec2::new(2, 3);
+
+        let wall = RectangleDrag::cells(anchor, far, Instrument::Wall);
+        let block = RectangleDrag::cells(anchor, far, Instrument::Block);
+
+        // A 3x4 rectangle: 10 sides, 12 filled.
+        assert_eq!(wall.len(), 10);
+        assert_eq!(block.len(), 12);
+        // The middle of the rectangle is inside the block, not on the wall.
+        assert!(!wall.contains(&IVec2::new(1, 1)));
+        assert!(block.contains(&IVec2::new(1, 1)));
+        // Both agree on the corners.
+        for corner in [
+            IVec2::new(0, 0),
+            IVec2::new(2, 0),
+            IVec2::new(0, 3),
+            IVec2::new(2, 3),
+        ] {
+            assert!(wall.contains(&corner));
+            assert!(block.contains(&corner));
+        }
+    }
+
+    /// Dragging backwards — releasing above or to the left of where the
+    /// press started — has to give the same rectangle as dragging forwards,
+    /// since a player drags whichever way is toward the far corner they want.
+    #[test]
+    fn a_rectangle_does_not_care_which_corner_is_the_anchor() {
+        let a = IVec2::new(5, 5);
+        let b = IVec2::new(2, 1);
+        let sorted = |anchor, current| {
+            let mut cells: Vec<_> = RectangleDrag::cells(anchor, current, Instrument::Wall)
+                .into_iter()
+                .map(|c| (c.x, c.y))
+                .collect();
+            cells.sort();
+            cells
+        };
+        assert_eq!(sorted(a, b), sorted(b, a));
+    }
+
+    /// A one-cell-wide or one-cell-tall drag has no interior to be hollow
+    /// about — every cell on it is a side — so a wall and a block agree.
+    #[test]
+    fn a_single_row_has_no_interior_to_leave_out() {
+        let a = IVec2::new(0, 0);
+        let b = IVec2::new(4, 0);
+        let wall = RectangleDrag::cells(a, b, Instrument::Wall);
+        let block = RectangleDrag::cells(a, b, Instrument::Block);
+        assert_eq!(wall.len(), 5);
+        assert_eq!(block.len(), 5);
     }
 }

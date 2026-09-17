@@ -67,7 +67,7 @@ pub use action::{Action, ActionState};
 pub use goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress, Goals};
 pub use memory::{Memory, Recall};
 pub use perception::Perception;
-pub use routine::{Routine, RoutineCtx};
+pub use routine::{Routine, RoutineCtx, RoutineExecutor};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
 use super::biology::Biology;
@@ -78,15 +78,20 @@ use super::walker::Walker;
 use super::MoveOutcome;
 
 use goals::{DrinkGoal, EatGoal, RelieveGoal, WanderGoal};
-use routines::{NeedRoutine, StayBusyRoutine, BLADDER, HUNGER, THIRST};
+use routines::{BLADDER, HUNGER, THIRST};
 
 pub struct Brain {
     perception: Perception,
     memory: Memory,
-    /// Run in this order every tick. A fixed array rather than a `Vec`, and the
-    /// order is fixed at construction: an order that depended on anything at
-    /// runtime is a determinism bug waiting for a thousand-tick test to find it.
-    routines: [Option<Box<dyn Routine>>; Brain::MAX_ROUTINES],
+    /// Run in this order every tick, as many as the brain was built with.
+    ///
+    /// Sized once, at construction, in the spawn pass — the one pass allowed to
+    /// allocate — and never again: a boxed slice has no `push`, so the order is
+    /// fixed for the unit's life, and an order that depended on anything at
+    /// runtime is a determinism bug waiting for a thousand-tick test to find
+    /// it. One allocation per unit however many routines it has, with their
+    /// state inline; [`routine`] says why they are an enum and not boxes.
+    routines: Box<[Routine]>,
     goals: Goals,
     /// One executor per [`GoalId`] this brain can pursue, `None` for one it
     /// cannot. **Owned for the entity's whole life** — which is the whole
@@ -107,22 +112,19 @@ pub struct Brain {
 }
 
 impl Brain {
-    pub const MAX_ROUTINES: usize = 4;
-
     /// A brain with these routines, run in the order given, and these
     /// executors, filed under the goal each pursues.
     ///
-    /// Panics on more than [`Brain::MAX_ROUTINES`] routines or two executors
-    /// for one goal: both are a kind built wrong, found the first time one is
-    /// spawned.
+    /// Panics on two executors for one goal: a kind built wrong, found the
+    /// first time one is spawned.
     pub fn new(
-        routines: impl IntoIterator<Item = Box<dyn Routine>>,
+        routines: impl IntoIterator<Item = Routine>,
         executors: impl IntoIterator<Item = Box<dyn GoalExecutor>>,
     ) -> Brain {
         let mut brain = Brain {
             perception: Perception,
             memory: Memory::new(),
-            routines: [const { None }; Brain::MAX_ROUTINES],
+            routines: routines.into_iter().collect(),
             goals: Goals::new(),
             executors: [const { None }; GoalId::COUNT],
             tasks: Tasks::new(),
@@ -132,10 +134,6 @@ impl Brain {
             blocked_by: None,
             last_result: TaskResult::InProgress,
         };
-        for (i, routine) in routines.into_iter().enumerate() {
-            assert!(i < Brain::MAX_ROUTINES, "more than {} routines", Brain::MAX_ROUTINES);
-            brain.routines[i] = Some(routine);
-        }
         for executor in executors {
             let slot = &mut brain.executors[executor.goal() as usize];
             assert!(slot.is_none(), "two executors for {:?}", executor.goal());
@@ -149,10 +147,10 @@ impl Brain {
     pub fn human() -> Brain {
         Brain::new(
             [
-                Box::new(NeedRoutine::new(&HUNGER)) as Box<dyn Routine>,
-                Box::new(NeedRoutine::new(&THIRST)),
-                Box::new(NeedRoutine::new(&BLADDER)),
-                Box::new(StayBusyRoutine),
+                Routine::need(&HUNGER),
+                Routine::need(&THIRST),
+                Routine::need(&BLADDER),
+                Routine::stay_busy(),
             ],
             [
                 Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
@@ -166,7 +164,7 @@ impl Brain {
     /// A dog: stays busy; wanders. Same machinery, fewer parts.
     pub fn dog() -> Brain {
         Brain::new(
-            [Box::new(StayBusyRoutine) as Box<dyn Routine>],
+            [Routine::stay_busy()],
             [Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>],
         )
     }
@@ -212,7 +210,7 @@ impl Brain {
                 body: &body,
                 biology: biology.as_deref(),
             };
-            for routine in routines.iter_mut().flatten() {
+            for routine in routines.iter_mut() {
                 routine.arrange(&routine_ctx, goals);
             }
         }
@@ -382,13 +380,12 @@ impl Brain {
                 "routines",
                 self.routines
                     .iter()
-                    .flatten()
-                    .map(|routine| routine.name())
+                    .map(Routine::name)
                     .collect::<Vec<_>>()
                     .join(", "),
             ),
         ]);
-        for routine in self.routines.iter().flatten() {
+        for routine in self.routines.iter() {
             fields.extend(routine.debug_fields());
         }
         if let Some(executor) = self.executors[top as usize].as_deref() {
@@ -416,6 +413,7 @@ mod tests {
 
     use super::*;
     use crate::map::{Map, Point, Size, FLOOR, WALL};
+    use crate::sim::brain::routines::Dial;
     use crate::sim::testing::World;
     use crate::sim::uid::EntityType;
     use crate::sim::walker::ROUTES_ASKED;
@@ -453,22 +451,6 @@ mod tests {
         }
         fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
             self.brain.react(ctx, outcome, &mut self.walk, None, None);
-        }
-    }
-
-    /// Raises one goal to a priority read from a shared dial, so a test can
-    /// turn a goal up and down from outside the brain.
-    struct Dial {
-        goal: GoalId,
-        level: Arc<Mutex<f32>>,
-    }
-
-    impl Routine for Dial {
-        fn name(&self) -> &'static str {
-            "dial"
-        }
-        fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-            goals.raise_to(self.goal, *self.level.lock().unwrap());
         }
     }
 
@@ -525,10 +507,10 @@ mod tests {
         })
     }
 
-    fn dial(goal: GoalId, level: f32) -> (Box<dyn Routine>, Arc<Mutex<f32>>) {
+    fn dial(goal: GoalId, level: f32) -> (Routine, Arc<Mutex<f32>>) {
         let level = Arc::new(Mutex::new(level));
         (
-            Box::new(Dial {
+            Routine::Dial(Dial {
                 goal,
                 level: level.clone(),
             }),
@@ -899,6 +881,35 @@ mod tests {
             ["wander prioritized at stage 0", "wander process in progress", "wander process failed"]
                 .map(String::from)
         );
+    }
+
+    #[test]
+    fn a_brain_runs_every_routine_it_was_given_in_order_however_many_there_are() {
+        // Far more than any fixed cap there used to be. Each dial raises
+        // wandering a little higher than the one before, so the priority that
+        // comes out is the last routine's: it only gets there if all of them
+        // ran.
+        const MANY: usize = 64;
+        let dials: Vec<Routine> = (1..=MANY).map(|i| dial(GoalId::Wander, i as f32).0).collect();
+        let mut puppet = Puppet::new(Point::new(4, 4), Brain::new(dials, []));
+        let mut world = room();
+        world.step(&mut puppet);
+
+        assert_eq!(puppet.brain.goals().priority(GoalId::Wander), MANY as f32);
+        let listed = puppet
+            .brain
+            .debug_fields()
+            .into_iter()
+            .find(|(name, _)| *name == "routines")
+            .map(|(_, value)| value.split(", ").count());
+        assert_eq!(listed, Some(MANY));
+    }
+
+    #[test]
+    fn a_brain_with_no_routines_wants_nothing() {
+        let mut puppet = Puppet::new(Point::new(4, 4), Brain::new([], []));
+        room().step(&mut puppet);
+        assert_eq!(puppet.brain.top_goal(), GoalId::Idle);
     }
 
     #[test]

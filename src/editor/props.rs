@@ -175,6 +175,29 @@ mod tests {
         }
     }
 
+    /// Every prop that can be placed says whether it can be walked through.
+    /// One the catalogue does not know would still block — unknown props do —
+    /// but a rug added to the palette alone would block by accident.
+    #[test]
+    fn every_palette_prop_is_in_the_map_s_prop_catalogue() {
+        for item in PALETTE {
+            assert!(
+                ObjectKind::new(item.name).prop().is_some(),
+                "{:?} is not in map::PROPS",
+                item.name
+            );
+        }
+    }
+
+    /// ...and the other way: a catalogue entry nobody can place is a name that
+    /// has drifted from the one the palette saves.
+    #[test]
+    fn every_catalogue_prop_can_be_placed() {
+        for prop in crate::map::PROPS {
+            assert!(item_of(&ObjectKind::new(prop.name)).is_some(), "no palette entry for {:?}", prop.name);
+        }
+    }
+
     #[test]
     fn a_prop_erases_the_object_it_was_placed_from() {
         let prop = Prop {

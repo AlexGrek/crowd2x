@@ -203,7 +203,8 @@ halfway there.
   task's effect on a stat is exact.
 - **Brain test doubles in `brain/mod.rs` tests:**
   - `Puppet` — a walker plus a brain, driven by `World::step`;
-  - `dial(goal, level)` — a routine whose priority a test turns up and down;
+  - `dial(goal, level)` — a `Routine::Dial` (test-only variant, struct in `routines.rs`) whose
+    priority a test turns up and down;
   - `Recorder` / `Listener` — executors that journal every call.
 - **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_carried`,
   `Biology::edit(|stats| stats.with_thirst(..))`, and `Stats::calm().with_hunger(..)`.

@@ -340,13 +340,15 @@ mod tests {
     }
 
     #[test]
-    fn loading_rebuilds_passability_from_the_terrain() {
+    fn loading_rebuilds_passability_from_the_terrain_and_the_props() {
         // Passability is never stored, so this is the check that a loaded map
-        // is actually walkable-in the way its terrain says.
+        // is actually walkable-in the way its terrain and its furniture say.
         let map = reload(&sample());
         assert!(map.is_passable(Point::new(0, 0)));
-        assert!(map.passability().is_blocked(Point::new(1, 1)));
-        assert_eq!(map.passability().count_passable(), 5);
+        assert!(map.passability().is_blocked(Point::new(1, 1)), "the wall");
+        assert!(map.passability().is_blocked(Point::new(0, 1)), "the bed");
+        assert!(map.is_passable(Point::new(2, 0)), "a spawner is not in the way");
+        assert_eq!(map.passability().count_passable(), 4);
     }
 
     #[test]

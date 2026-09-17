@@ -243,6 +243,22 @@ mod tests {
     }
 
     #[test]
+    fn a_fridge_across_a_corridor_is_a_wall_to_somebody_trying_to_reach_the_toilet_beyond_it() {
+        // One cell wide: the only way to the toilet is through the fridge.
+        let mut map = Map::new(Size::new(9, 1), FLOOR);
+        prop_at(&mut map, "fridge", Point::new(4, 0));
+        prop_at(&mut map, "toilet", Point::new(8, 0));
+        let mut world = World::new(map);
+        let mut human = bursting_human(Point::new(0, 0), 95.0);
+
+        for tick in 0..2000 {
+            world.step(&mut human);
+            assert!(human.center_position().x < 4, "tick {tick}: got past the fridge");
+        }
+        assert_eq!(world.reliefs(), 0);
+    }
+
+    #[test]
     fn drinking_is_what_sends_a_human_to_the_toilet_in_a_minute_and_a_half() {
         // The same thirsty human twice, once with thirst switched off so
         // nothing makes it drink. Hunger is off in both: no meals in the way.

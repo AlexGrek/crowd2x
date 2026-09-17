@@ -44,10 +44,10 @@ pub(super) enum Stand {
 /// The cell to use the feature in `cell` from: beside it, passable, preferably
 /// free, and nearest.
 ///
-/// Four cells and the feature's own — props do not block terrain, so standing
-/// in the feature's cell is allowed as a last resort. The crowd is read for
-/// those five cells and nothing else: a human choosing the free side of a
-/// fridge is a lookup, not a scan.
+/// The four cells beside it and never its own — a prop blocks the cell it
+/// stands in, so a fridge is used from the side or not at all. The crowd is
+/// read for those four cells and nothing else: a human choosing the free side
+/// of a fridge is a lookup, not a scan.
 pub(super) fn stand_beside(ctx: &GoalCtx<'_>, cell: Point) -> Stand {
     let here = ctx.body.center_position();
     if here.manhattan_distance(cell) <= 1 {
@@ -57,12 +57,10 @@ pub(super) fn stand_beside(ctx: &GoalCtx<'_>, cell: Point) -> Stand {
     Point::CARDINALS
         .iter()
         .map(|&step| cell + step)
-        .chain(std::iter::once(cell))
         .filter(|&beside| ctx.think.is_passable(beside))
         .min_by_key(|&beside| {
             (
                 !ctx.think.occupancy.is_free_for(beside, uid),
-                beside == cell,
                 here.manhattan_distance(beside),
                 beside,
             )

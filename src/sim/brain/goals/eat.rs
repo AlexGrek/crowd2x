@@ -349,6 +349,34 @@ mod tests {
     }
 
     #[test]
+    fn a_hungry_human_goes_round_the_furniture_and_eats_from_the_side_of_the_fridge_it_can_reach() {
+        // A crate and the fridge sit in a row between walls, the crate on the
+        // near side: straight through them is the short way to the fridge's
+        // far side, (5, 3), and the only way that is allowed is round.
+        let mut map = Map::new(Size::new(7, 7), FLOOR);
+        let (fridge, crate_) = (Point::new(4, 3), Point::new(3, 3));
+        prop_at(&mut map, "fridge", fridge);
+        prop_at(&mut map, "crate", crate_);
+        for x in 3..6 {
+            map.set_terrain(Point::new(x, 2), WALL);
+            map.set_terrain(Point::new(x, 4), WALL);
+        }
+        let mut world = World::new(map);
+        let mut human = hungry_human(Point::new(1, 3), 90.0);
+
+        for _ in 0..3000 {
+            world.step(&mut human);
+            let here = human.center_position();
+            assert!(here != fridge && here != crate_, "walked into the furniture at {here:?}");
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1, "brain: {:?}", human.brain_fields());
+        assert_eq!(human.center_position(), Point::new(5, 3), "the one side of it there is");
+    }
+
+    #[test]
     fn a_hungry_human_holding_water_drinks_it_before_taking_food() {
         // Taking needs an empty hand. Water taken just before hunger took over
         // would otherwise fail every meal, and nothing thirsty enough is left

@@ -208,10 +208,17 @@ different, and new placeable content should respect that split:
 
 - `editor/background.rs` — one tile per grid cell at a single depth behind everything,
   indexed by cell in the `Tiles` resource so painting can replace in place. Drag to paint.
-  It is the drawn face of the map's terrain layer.
+  It is the drawn face of the map's terrain layer. `"block"` and anything named
+  `"wall..."` are instruments rather than plain tiles (`Instrument`, in `editor/mod.rs`):
+  a drag is a rectangle from corner to corner, held as a ghost preview and committed only
+  on release — hollow (the four sides) for a wall, filled for a block. A single click is
+  just a one-cell rectangle, so it paints exactly the one tile a plain drag would, which
+  is what keeps a script that clicks once still passing.
 - `editor/props.rs` — free placement, depth from `characters::depth_for`, so props
   interleave with characters. One click, one prop; erase hits the nearest centre. These
   are the map's `Props` object layer, positioned in whole *pixels* rather than cells.
+  **A prop blocks the cell its centre is in** (below); a new palette entry needs a
+  matching `map::PROPS` entry, and two tests fail if the lists stop lining up.
 
 **Art and data are linked by name, never by index.** A palette entry is called after the
 terrain it paints (`"wall brown"`) or the prop it places (`"bed 1"`), and that name is
@@ -341,12 +348,23 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
 - A cell holds a `TerrainId` into the static `TERRAIN` catalogue, so a big map is a flat
   array of `u16`. Passability lives in the catalogue, and an id this build does not know
   is impassable rather than a panic.
-- **Passability is derived, never authored.** `PassabilityMap` is one bit per cell, kept
-  in sync by `Map::set_terrain` and rebuildable in bulk by `Map::rebuild_passability` —
-  which is also where combining overlay layers will land when there is a second one. It is
-  a separate structure because it is the hottest read in the simulation: every path
-  expansion asks about four cells, and here that is four bits from one cache line. Off the
-  map answers "impassable", so callers need no bounds check of their own.
+- **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
+  `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
+  through, and today nothing can — beds, the fridge, the toilet, crates, fire. A blocking
+  prop takes **the cell its centre falls in** (`Object::cell`) and no other: passability is
+  a whole-cell fact, the rule bodies follow too, so tall art overhanging the cell above does
+  not wall it off. A prop name this build does not know blocks, as unknown terrain does.
+  Spawners never block. The consequence for the brain is that a feature is used *from
+  beside it*, never from its own cell (`goals::stand_beside`).
+- **Passability is derived, never authored.** `PassabilityMap` is one bit per cell: a cell
+  is passable when its terrain is and no blocking prop stands in it. Kept in sync by
+  `Map::set_terrain`, `add_object` and `remove_object` (floor painted under a fridge stays
+  blocked; a cell opens only when its last prop goes) and rebuildable in bulk by
+  `Map::rebuild_passability` — which is also where combining overlay layers will land when
+  there is a second one. It is a separate structure because it is the hottest read in the
+  simulation: every path expansion asks about four cells, and here that is four bits from
+  one cache line. Off the map answers "impassable", so callers need no bounds check of
+  their own.
 - Art is not in here. Which PNG draws a floor belongs to the Bevy adapter; the editor is
   not wired to this format yet and still spawns its own tile entities.
 
@@ -421,7 +439,8 @@ it are three steps:
    the tick, with the later slots not moved yet.
 
 **Passability is at the tile level, on the centre cell**, and it is two layers asked in
-order: `map`'s `PassabilityMap` for the terrain, then `sim/occupancy.rs` for the crowd —
+order: `map`'s `PassabilityMap` for the terrain and the furniture, then `sim/occupancy.rs`
+for the crowd —
 `Occupancy` is the dynamic layer the passability map's docs always said belonged
 elsewhere. One entity to a cell, `claim` naming the occupant when it refuses. **Movement
 therefore never creates an overlap; spawning can** — an entity is placed exactly where it
@@ -456,7 +475,13 @@ talking only to the one below:
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
   `BLADDER` ("stay comfortable") — with hysteresis between a commit and a release
   threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
-  process behind the need is switched off.
+  process behind the need is switched off. **There is no cap on how many a brain has**:
+  `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
+  and a brain holds them in a `Box<[Routine]>` built once at spawn — one allocation per
+  unit however many routines, state inline and contiguous, no `push` so the order cannot
+  change. A per-routine `Box<dyn>` would be dozens of allocations per unit and a pointer
+  chase per routine per unit per tick, which is what a human with dozens of routines in a
+  crowd of thousands cannot afford.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
   `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
@@ -504,8 +529,10 @@ cell the search vetted.
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
 a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — and `"toilet"` is
-`Toilet`. A fridge never runs out. Adding a use for a prop is an entry there, a palette
-entry in `editor/props.rs` (a test fails without one), and a goal that queues the tasks.
+`Toilet`. A fridge never runs out, and is used from one of the four cells beside it — it
+blocks its own. Adding a use for a prop is an entry there, a palette entry in
+`editor/props.rs` and a `map::PROPS` entry (tests fail without them), and a goal that
+queues the tasks.
 
 #### Biology (`sim/biology/`)
 

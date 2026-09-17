@@ -1,9 +1,9 @@
 //! The static passability map: which cells the crowd can walk through.
 //!
-//! "Static" as in *not the agents*. It answers only what the terrain says, so
-//! it changes when the map is edited and not once per tick; anything dynamic —
-//! who is standing where, a door someone is holding shut — belongs in a
-//! separate layer that a query consults after this one.
+//! "Static" as in *not the agents*. It answers what the terrain and the props
+//! say, so it changes when the map is edited and not once per tick; anything
+//! dynamic — who is standing where, a door someone is holding shut — belongs in
+//! a separate layer that a query consults after this one.
 //!
 //! It exists as its own structure, derived from the terrain rather than read
 //! through it, because it is the single hottest read in the simulation: every

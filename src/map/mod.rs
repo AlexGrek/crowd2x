@@ -15,17 +15,19 @@
 //!   has to handle a hole. Only the base layer exists so far; see
 //!   [`Map::terrain_layers`].
 //! * **Objects** — sparse lists of positioned things, one list per
-//!   [`ObjectLayer`]: props and spawners. The simulation reads props for what
-//!   they are *for* (`sim::feature` — a fridge is food), by name; what a
-//!   spawner is has deliberately not been decided.
+//!   [`ObjectLayer`]: props and spawners. A prop blocks the cell it stands in
+//!   ([`PROPS`]); the simulation reads props for what they are *for*
+//!   (`sim::feature` — a fridge is food), by name; what a spawner is has
+//!   deliberately not been decided.
 //!
 //! Maps serialise to JSON — see [`format`] for the on-disk shape, and
 //! [`Map::to_json`] / [`Map::from_json`].
 //!
 //! Passability is *derived*, not authored: it is rebuilt from the terrain and
-//! kept in sync by [`Map::set_terrain`], so a map cannot end up claiming a
-//! wall can be walked through. See [`PassabilityMap`] for why it is a separate
-//! structure at all.
+//! the props, and kept in sync by [`Map::set_terrain`], [`Map::add_object`]
+//! and [`Map::remove_object`], so a map cannot end up claiming a wall or a
+//! fridge can be walked through. See [`PassabilityMap`] for why it is a
+//! separate structure at all.
 
 // The map is the foundation for a simulation that does not exist yet, so most
 // of it is reached only from tests until there is something to walk around on
@@ -37,12 +39,14 @@
 mod coords;
 mod format;
 mod passability;
+mod props;
 mod storage;
 mod terrain;
 
 pub use coords::{Point, Size};
 pub use format::{MapFormatError, FORMAT_VERSION};
 pub use passability::PassabilityMap;
+pub use props::{Prop, PROPS};
 pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
 pub use terrain::{Passability, Terrain, TerrainId, FLOOR, TERRAIN, VOID, WALL};
 
@@ -234,26 +238,48 @@ impl Map {
 
     /// Paint a base-layer cell, keeping the passability map in step. Returns
     /// whether the point was on the map.
+    ///
+    /// Floor painted under a fridge is still a fridge's cell: the cell is
+    /// worked out again from everything that decides it, not from the tile.
     pub fn set_terrain(&mut self, point: Point, tile: TerrainId) -> bool {
         let Some(index) = self.size.index_of(point) else {
             return false;
         };
         self.terrain[BASE].tiles[index] = tile;
-        self.passability.set(point, tile.is_passable());
+        self.refresh_passability(point);
         true
     }
 
     /// Recompute passability for the whole map.
     ///
-    /// Only needed after a bulk change that bypassed [`Map::set_terrain`] —
-    /// loading a file, say. It is also the one place the rule lives, so when
-    /// overlay layers arrive (a rug over a floor, a table over both) combining
+    /// Only needed after a bulk change that bypassed the setters — loading a
+    /// file, say. With [`Map::refresh_passability`] it is where the rule lives
+    /// — **a cell is passable when its terrain is and no blocking prop stands
+    /// in it** — so when overlay layers arrive (a rug over a floor) combining
     /// them happens here and every caller keeps asking the same question.
     pub fn rebuild_passability(&mut self) {
         for (index, tile) in self.terrain[BASE].tiles.iter().enumerate() {
             self.passability
                 .set(self.size.point_at(index), tile.is_passable());
         }
+        for prop in &self.objects[ObjectLayer::Props as usize] {
+            if !prop.kind.prop_passability().is_passable() {
+                self.passability.set(prop.cell(), false);
+            }
+        }
+    }
+
+    /// Recompute passability for one cell: the rule of
+    /// [`Map::rebuild_passability`], for the cell an edit touched.
+    ///
+    /// Scans the props, which is the cost of an edit and never of a tick —
+    /// nothing in the simulation changes the map.
+    fn refresh_passability(&mut self, point: Point) {
+        let passable = self.terrain(point).is_some_and(TerrainId::is_passable)
+            && !self.objects(ObjectLayer::Props).iter().any(|prop| {
+                prop.cell() == point && !prop.kind.prop_passability().is_passable()
+            });
+        self.passability.set(point, passable);
     }
 
     /// The static passability map, for pathfinding and steering to hold on to.
@@ -261,8 +287,8 @@ impl Map {
         &self.passability
     }
 
-    /// Whether the terrain lets an agent stand at `point`. Off the map is not
-    /// passable.
+    /// Whether an agent can stand at `point`: the terrain allows it and no
+    /// prop is in the way. Off the map is not passable.
     pub fn is_passable(&self, point: Point) -> bool {
         self.passability.is_passable(point)
     }
@@ -276,8 +302,12 @@ impl Map {
     /// They are free placement, and the useful ones sit exactly where the grid
     /// ends: a wall lamp on the last row, a crate half a cell past the last
     /// floor tile. Clamping them to the terrain rectangle would move somebody's
-    /// prop rather than protect anything — nothing indexes an object by cell.
+    /// prop rather than protect anything. A blocking prop off the map blocks
+    /// nothing, there being no cell there to block.
     pub fn add_object(&mut self, layer: ObjectLayer, object: Object) {
+        if layer == ObjectLayer::Props && !object.kind.prop_passability().is_passable() {
+            self.passability.set(object.cell(), false);
+        }
         self.objects[layer as usize].push(object);
     }
 
@@ -291,6 +321,10 @@ impl Map {
         match objects.iter().position(|placed| placed == object) {
             Some(index) => {
                 objects.remove(index);
+                if layer == ObjectLayer::Props {
+                    // Another prop may still stand in that cell.
+                    self.refresh_passability(object.cell());
+                }
                 true
             }
             None => false,
@@ -418,6 +452,91 @@ mod tests {
         assert_eq!(at(PIXELS_PER_CELL - 1, PIXELS_PER_CELL), Point::new(0, 1));
         assert_eq!(at(PIXELS_PER_CELL * 3 + 24, 24), Point::new(3, 0));
         assert_eq!(at(-1, -PIXELS_PER_CELL), Point::new(-1, -1));
+    }
+
+    fn prop(name: &str, cell: Point) -> Object {
+        Object {
+            at: Point::new(cell.x * PIXELS_PER_CELL + 24, cell.y * PIXELS_PER_CELL + 24),
+            kind: ObjectKind::new(name),
+        }
+    }
+
+    #[test]
+    fn a_prop_blocks_the_cell_its_centre_is_in_and_no_other() {
+        let mut map = Map::new(Size::new(5, 5), FLOOR);
+        map.add_object(ObjectLayer::Props, prop("fridge", Point::new(2, 3)));
+
+        assert!(!map.is_passable(Point::new(2, 3)));
+        assert_eq!(map.passability().count_passable(), 24);
+    }
+
+    #[test]
+    fn a_prop_on_a_cell_boundary_blocks_the_cell_its_centre_landed_in() {
+        let mut map = Map::new(Size::new(3, 3), FLOOR);
+        let on_the_line = Object {
+            at: Point::new(PIXELS_PER_CELL, PIXELS_PER_CELL),
+            kind: ObjectKind::new("crate"),
+        };
+        map.add_object(ObjectLayer::Props, on_the_line);
+        assert!(!map.is_passable(Point::new(1, 1)));
+        assert_eq!(map.passability().count_passable(), 8);
+    }
+
+    #[test]
+    fn a_spawner_blocks_nothing() {
+        let mut map = Map::new(Size::new(3, 3), FLOOR);
+        map.add_object(ObjectLayer::Spawners, prop("fridge", Point::new(1, 1)));
+        assert_eq!(map.passability().count_passable(), 9);
+    }
+
+    #[test]
+    fn painting_floor_under_a_prop_leaves_its_cell_blocked() {
+        let mut map = Map::new(Size::new(3, 3), WALL);
+        let cell = Point::new(1, 1);
+        map.add_object(ObjectLayer::Props, prop("bed 1", cell));
+
+        assert!(map.set_terrain(cell, FLOOR));
+        assert!(!map.is_passable(cell));
+    }
+
+    #[test]
+    fn a_cell_opens_only_when_the_last_prop_in_it_goes() {
+        let mut map = Map::new(Size::new(3, 3), FLOOR);
+        let cell = Point::new(1, 1);
+        map.add_object(ObjectLayer::Props, prop("crate", cell));
+        map.add_object(ObjectLayer::Props, prop("fridge", cell));
+
+        assert!(map.remove_object(ObjectLayer::Props, &prop("crate", cell)));
+        assert!(!map.is_passable(cell), "the fridge is still there");
+        assert!(map.remove_object(ObjectLayer::Props, &prop("fridge", cell)));
+        assert!(map.is_passable(cell));
+    }
+
+    #[test]
+    fn taking_a_prop_off_a_wall_leaves_a_wall() {
+        let mut map = Map::new(Size::new(3, 3), WALL);
+        let cell = Point::new(1, 1);
+        map.add_object(ObjectLayer::Props, prop("crate", cell));
+        assert!(map.remove_object(ObjectLayer::Props, &prop("crate", cell)));
+        assert!(!map.is_passable(cell));
+    }
+
+    #[test]
+    fn a_rebuild_agrees_with_the_incremental_updates_props_included() {
+        let mut map = room();
+        map.add_object(ObjectLayer::Props, prop("fridge", Point::new(0, 0)));
+        map.add_object(ObjectLayer::Props, prop("toilet", Point::new(4, 4)));
+        map.add_object(ObjectLayer::Props, prop("crate", Point::new(3, 1)));
+        map.remove_object(ObjectLayer::Props, &prop("crate", Point::new(3, 1)));
+        map.set_terrain(Point::new(0, 0), FLOOR);
+        let incremental: Vec<bool> = map.size().points().map(|p| map.is_passable(p)).collect();
+
+        map.rebuild_passability();
+        let rebuilt: Vec<bool> = map.size().points().map(|p| map.is_passable(p)).collect();
+
+        assert_eq!(incremental, rebuilt);
+        assert!(!map.is_passable(Point::new(0, 0)) && !map.is_passable(Point::new(4, 4)));
+        assert!(map.is_passable(Point::new(3, 1)));
     }
 
     #[test]

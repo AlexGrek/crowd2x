@@ -3,7 +3,7 @@
 use crate::sim::biology::{ProcessId, Stats};
 
 use super::goal::{GoalId, Goals};
-use super::routine::{Routine, RoutineCtx};
+use super::routine::{RoutineCtx, RoutineExecutor};
 
 /// Hunger at which a human decides it is time to eat.
 pub const PECKISH: f32 = 60.0;
@@ -108,7 +108,7 @@ pub struct NeedRoutine {
 }
 
 impl NeedRoutine {
-    pub fn new(need: &'static Need) -> NeedRoutine {
+    pub const fn new(need: &'static Need) -> NeedRoutine {
         NeedRoutine {
             need,
             committed: false,
@@ -116,7 +116,7 @@ impl NeedRoutine {
     }
 }
 
-impl Routine for NeedRoutine {
+impl RoutineExecutor for NeedRoutine {
     fn name(&self) -> &'static str {
         self.need.routine
     }
@@ -151,13 +151,34 @@ pub const BUSY: f32 = 0.1;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct StayBusyRoutine;
 
-impl Routine for StayBusyRoutine {
+impl RoutineExecutor for StayBusyRoutine {
     fn name(&self) -> &'static str {
         "stay busy"
     }
 
     fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         goals.raise_to(GoalId::Wander, BUSY);
+    }
+}
+
+/// Raises one goal to a priority read from a shared dial, so a test can turn a
+/// goal up and down from outside the brain — the brain's own tests drive
+/// handovers with it.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct Dial {
+    pub goal: GoalId,
+    pub level: std::sync::Arc<std::sync::Mutex<f32>>,
+}
+
+#[cfg(test)]
+impl RoutineExecutor for Dial {
+    fn name(&self) -> &'static str {
+        "dial"
+    }
+
+    fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        goals.raise_to(self.goal, *self.level.lock().unwrap());
     }
 }
 

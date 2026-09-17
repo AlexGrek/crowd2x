@@ -1227,10 +1227,16 @@ mod tests {
         // pointer chase per unit per tick. The absence of a `Vec` is a property
         // of the type, not something a test can see at runtime; its size is.
         //
+        // The one deliberate exception is the routine list: one boxed slice,
+        // sized at spawn, because a human's routines are going to number in the
+        // dozens and an inline array would charge every unit for the longest
+        // list any kind has. However many routines there are, they cost a
+        // Human the same sixteen bytes.
+        //
         // The wall is a number of cache lines, and it moves by one when a need
         // is added on purpose: a need is a stat and a goal slot, about thirty
-        // bytes, and thirst took a Human from 512 to 520. What this is here to
-        // catch is a jump nobody meant, not a need somebody did.
+        // bytes. A Human is 496 bytes with hunger, thirst and bladder. What this
+        // is here to catch is a jump nobody meant, not a need somebody did.
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
         assert!(human <= 576, "a Human is {human} bytes, {brain} of them brain");
