@@ -1,0 +1,72 @@
+{
+  "name": "a thirsty human leaves off wandering, drinks at the fridge, and wanders again",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "kitchen",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 456, "y": 264 }, "kind": "fridge" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "kitchen",
+  "steps": [
+    { "note": "the fridge sits in cell (9, 5): x 9*48+24, y 5*48+24, and a map's objects are in pixels" },
+    { "note": "zoomed out so the whole room is on screen at once" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "expect_entities": 0 },
+    { "shot": "an empty kitchen with a fridge in it" },
+
+    { "note": "one human, in the far corner from the fridge; thirst is rolled at spawn" },
+    { "spawn": { "kind": "human", "x": 2, "y": 1 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "press": "brains" },
+    { "shot": "a new human, and what its mind is doing" },
+
+    { "note": "thirst rises a point and a half a second and drinking takes over at 60, so however" },
+    { "note": "thirsty it was born, and whatever it ate first, a minute and a half of world is enough to drink" },
+    { "tick": 6000 },
+    { "expect_entities": 1 },
+    { "expect_log": "drank at the fridge at 9, 5" },
+    { "expect_selected": "human" },
+    { "shot": "after a drink, and the brains menu saying so" },
+
+    { "note": "the menu follows the simulation, so it is still live as the world runs on" },
+    { "tick": 300 },
+    { "shot": "wandering again" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "kitchen" }
+  ]
+}

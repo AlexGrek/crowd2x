@@ -190,6 +190,18 @@ pub trait GameEntity: Send + Sync {
         self.body_mut().set_frozen(frozen);
     }
 
+    /// This kind's body — its stats and the processes that change them — or
+    /// `None` for a kind that has none. On the trait for the reason
+    /// [`GameEntity::facing`] is: a test, the debug view and
+    /// `Command::SetProcess` all reach a unit through `dyn GameEntity`.
+    fn biology(&self) -> Option<&super::biology::Biology> {
+        None
+    }
+
+    fn biology_mut(&mut self) -> Option<&mut super::biology::Biology> {
+        None
+    }
+
     /// What this kind would tell a debugger about itself, beyond the body.
     ///
     /// Name and value, in the order they should be read. The universal facts —

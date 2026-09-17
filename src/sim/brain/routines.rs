@@ -1,5 +1,7 @@
 //! The routines that exist.
 
+use crate::sim::biology::{ProcessId, Stats};
+
 use super::goal::{GoalId, Goals};
 use super::routine::{Routine, RoutineCtx};
 
@@ -7,57 +9,137 @@ use super::routine::{Routine, RoutineCtx};
 pub const PECKISH: f32 = 60.0;
 
 /// Hunger a human has to be brought down to before it stops thinking about
-/// food. Well below [`PECKISH`], which is the point — see [`KeepFedRoutine`].
+/// food. Well below [`PECKISH`], which is the point — see [`NeedRoutine`].
 pub const SATED: f32 = 25.0;
 
-/// Hunger per point of priority. Hunger is 0-100 and the floor under
-/// everything ([`StayBusyRoutine`]) is 0.1, so a human who has only just
-/// committed to eating (hunger 25-ish) already outranks wandering five times
-/// over, and a starving one is at 2.
-const HUNGER_PER_PRIORITY: f32 = 50.0;
+/// Thirst at which a human decides it is time for a drink. The same line as
+/// [`PECKISH`]: thirst is on the same scale and only rises faster
+/// ([`THIRST_PER_SECOND`](crate::sim::biology::thirst::THIRST_PER_SECOND)).
+pub const THIRSTY: f32 = 60.0;
 
-/// Maps hunger onto how badly [`GoalId::Eat`] is wanted.
+/// Thirst a human has to be brought down to before it stops thinking about
+/// drinking.
+pub const QUENCHED: f32 = 25.0;
+
+/// Bladder at which a human decides it is time for the toilet.
+pub const BURSTING: f32 = 70.0;
+
+/// Bladder a human has to be brought down to before it stops thinking about
+/// the toilet. A toilet empties it, so anything above zero will do; low,
+/// because a bladder refilling from a recent drink should not send somebody
+/// straight back.
+pub const RELIEVED: f32 = 10.0;
+
+/// Points of a need per point of priority. Every need is 0-100 and the floor
+/// under everything ([`StayBusyRoutine`]) is 0.1, so a human who has only just
+/// committed to eating (hunger 25-ish) already outranks wandering five times
+/// over, and a starving one is at 2. One number for every need, so that how
+/// urgent hunger is and how urgent thirst is can be compared at all.
+const NEED_PER_PRIORITY: f32 = 50.0;
+
+/// A need a [`NeedRoutine`] keeps met: which stat it watches, the process
+/// that drives that stat, which goal meets it, and where it commits and lets
+/// go.
+#[derive(Clone, Copy, Debug)]
+pub struct Need {
+    /// The routine's name, for the brains menu.
+    pub routine: &'static str,
+    /// What the brains menu says while it is committed: `hungry yes`.
+    pub feeling: &'static str,
+    pub stat: fn(&Stats) -> f32,
+    /// The process behind the stat. Switched off, the need is not wanted at
+    /// all: a stat that cannot move is not one a goal could ever meet.
+    pub process: ProcessId,
+    pub goal: GoalId,
+    /// The stat at which it commits to the goal...
+    pub commit_at: f32,
+    /// ...and the stat it has to be brought down to before letting go.
+    pub release_at: f32,
+}
+
+/// Keep fed: hunger, met by eating.
+pub const HUNGER: Need = Need {
+    routine: "keep fed",
+    feeling: "hungry",
+    stat: Stats::hunger,
+    process: ProcessId::Hunger,
+    goal: GoalId::Eat,
+    commit_at: PECKISH,
+    release_at: SATED,
+};
+
+/// Keep hydrated: thirst, met by drinking.
+pub const THIRST: Need = Need {
+    routine: "keep hydrated",
+    feeling: "thirsty",
+    stat: Stats::thirst,
+    process: ProcessId::Thirst,
+    goal: GoalId::Drink,
+    commit_at: THIRSTY,
+    release_at: QUENCHED,
+};
+
+/// Stay comfortable: bladder, met by using the toilet.
+pub const BLADDER: Need = Need {
+    routine: "stay comfortable",
+    feeling: "bursting",
+    stat: Stats::bladder,
+    process: ProcessId::Bladder,
+    goal: GoalId::Relieve,
+    commit_at: BURSTING,
+    release_at: RELIEVED,
+};
+
+/// Maps a need onto how badly the goal that meets it is wanted.
 ///
-/// **With hysteresis.** It commits at [`PECKISH`] and stays committed until
-/// hunger is down to [`SATED`], so a stat hovering at a single threshold does
-/// not make a human walk half way to the fridge and turn round — and a meal
-/// that only takes the edge off sends it back for a second one rather than
-/// leaving it one step from peckish.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub struct KeepFedRoutine {
+/// **With hysteresis.** It commits at [`Need::commit_at`] and stays committed
+/// until the stat is down to [`Need::release_at`], so a stat hovering at a
+/// single threshold does not make a human walk half way to the fridge and
+/// turn round — and a meal that only takes the edge off sends it back for a
+/// second one rather than leaving it one step from peckish.
+///
+/// One routine for every need rather than one per need: keeping fed, keeping
+/// hydrated and staying comfortable are the same decision about different
+/// numbers, and the numbers are what [`Need`] holds.
+#[derive(Clone, Copy, Debug)]
+pub struct NeedRoutine {
+    need: &'static Need,
     committed: bool,
 }
 
-impl KeepFedRoutine {
-    pub fn new() -> KeepFedRoutine {
-        KeepFedRoutine::default()
+impl NeedRoutine {
+    pub fn new(need: &'static Need) -> NeedRoutine {
+        NeedRoutine {
+            need,
+            committed: false,
+        }
     }
 }
 
-impl Routine for KeepFedRoutine {
+impl Routine for NeedRoutine {
     fn name(&self) -> &'static str {
-        "keep fed"
+        self.need.routine
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        // Nothing to keep fed.
-        let Some(stats) = ctx.stats else {
+        // Nothing to keep met: no body, or not this process in it.
+        let Some(biology) = ctx.biology.filter(|biology| biology.is_running(self.need.process)) else {
             self.committed = false;
             return;
         };
-        let hunger = stats.hunger();
-        if hunger >= PECKISH {
+        let level = (self.need.stat)(biology.stats());
+        if level >= self.need.commit_at {
             self.committed = true;
-        } else if hunger <= SATED {
+        } else if level <= self.need.release_at {
             self.committed = false;
         }
         if self.committed {
-            goals.raise_to(GoalId::Eat, hunger / HUNGER_PER_PRIORITY);
+            goals.raise_to(self.need.goal, level / NEED_PER_PRIORITY);
         }
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        vec![("hungry", if self.committed { "yes" } else { "no" }.to_string())]
+        vec![(self.need.feeling, if self.committed { "yes" } else { "no" }.to_string())]
     }
 }
 
@@ -87,10 +169,15 @@ mod tests {
     use crate::sim::feature::Features;
     use crate::sim::log::Log;
     use crate::sim::occupancy::Occupancy;
-    use crate::sim::stats::Stats;
+    use crate::sim::biology::Biology;
     use crate::sim::uid::{EntityType, Uid};
 
-    fn eat_priority(routine: &mut KeepFedRoutine, hunger: f32) -> f32 {
+    /// The priority `routine` gives its goal for a human whose `stats` these are.
+    fn priority(routine: &mut NeedRoutine, stats: Stats) -> f32 {
+        priority_in(routine, &Biology::new(stats))
+    }
+
+    fn priority_in(routine: &mut NeedRoutine, biology: &Biology) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
         let (occupancy, log, features) = (Occupancy::new(map.size()), Log::new(), Features::default());
         let think = Think {
@@ -102,32 +189,39 @@ mod tests {
             tick: 0,
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
-        let stats = Stats::calm().with_hunger(hunger);
         let mut goals = Goals::new();
         routine.arrange(
             &RoutineCtx {
                 think: &think,
                 body: &body,
-                stats: Some(&stats),
+                biology: Some(biology),
             },
             &mut goals,
         );
-        goals.priority(GoalId::Eat)
+        goals.priority(routine.need.goal)
+    }
+
+    fn eat_priority(routine: &mut NeedRoutine, hunger: f32) -> f32 {
+        priority(routine, Stats::calm().with_hunger(hunger))
+    }
+
+    fn drink_priority(routine: &mut NeedRoutine, thirst: f32) -> f32 {
+        priority(routine, Stats::calm().with_thirst(thirst))
     }
 
     #[test]
     fn a_fed_human_does_not_want_to_eat() {
-        assert_eq!(eat_priority(&mut KeepFedRoutine::new(), 10.0), 0.0);
+        assert_eq!(eat_priority(&mut NeedRoutine::new(&HUNGER), 10.0), 0.0);
     }
 
     #[test]
     fn a_hungry_human_wants_to_eat_more_than_it_wants_to_wander() {
-        assert!(eat_priority(&mut KeepFedRoutine::new(), 70.0) > BUSY);
+        assert!(eat_priority(&mut NeedRoutine::new(&HUNGER), 70.0) > BUSY);
     }
 
     #[test]
     fn hunger_hovering_at_the_threshold_does_not_flip_the_decision() {
-        let mut routine = KeepFedRoutine::new();
+        let mut routine = NeedRoutine::new(&HUNGER);
         // Not hungry enough to start...
         assert_eq!(eat_priority(&mut routine, PECKISH - 1.0), 0.0);
         // ...hungry enough...
@@ -138,5 +232,62 @@ mod tests {
         // Properly fed is.
         assert_eq!(eat_priority(&mut routine, SATED), 0.0);
         assert_eq!(eat_priority(&mut routine, SATED + 1.0), 0.0);
+    }
+
+    #[test]
+    fn thirst_hovering_at_the_threshold_does_not_flip_the_decision() {
+        let mut routine = NeedRoutine::new(&THIRST);
+        assert_eq!(drink_priority(&mut routine, THIRSTY - 1.0), 0.0);
+        assert!(drink_priority(&mut routine, THIRSTY) > BUSY);
+        assert!(drink_priority(&mut routine, THIRSTY - 1.0) > BUSY);
+        assert!(drink_priority(&mut routine, QUENCHED + 1.0) > BUSY);
+        assert_eq!(drink_priority(&mut routine, QUENCHED), 0.0);
+        assert_eq!(drink_priority(&mut routine, QUENCHED + 1.0), 0.0);
+    }
+
+    #[test]
+    fn bladder_hovering_at_the_threshold_does_not_flip_the_decision() {
+        let bladder = |routine: &mut NeedRoutine, level| priority(routine, Stats::calm().with_bladder(level));
+        let mut routine = NeedRoutine::new(&BLADDER);
+        assert_eq!(bladder(&mut routine, BURSTING - 1.0), 0.0);
+        assert!(bladder(&mut routine, BURSTING) > BUSY);
+        assert!(bladder(&mut routine, RELIEVED + 1.0) > BUSY);
+        assert_eq!(bladder(&mut routine, RELIEVED), 0.0);
+        assert_eq!(bladder(&mut routine, BURSTING - 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_need_whose_process_is_switched_off_is_not_wanted_and_lets_go_of_a_commitment() {
+        let mut biology = Biology::new(Stats::calm().with_hunger(90.0));
+        let mut routine = NeedRoutine::new(&HUNGER);
+        assert!(priority_in(&mut routine, &biology) > BUSY);
+
+        biology.set_running(ProcessId::Hunger, false);
+        assert_eq!(priority_in(&mut routine, &biology), 0.0);
+        assert_eq!(routine.debug_fields(), [("hungry", "no".to_string())]);
+
+        // Only the one switched off.
+        assert!(priority_in(&mut NeedRoutine::new(&THIRST), &Biology::new(Stats::calm().with_thirst(90.0))) > BUSY);
+    }
+
+    #[test]
+    fn each_need_raises_its_own_goal_and_reads_only_its_own_stat() {
+        let starving_but_quenched = Stats::calm().with_hunger(100.0).with_thirst(0.0);
+        let parched_but_fed = Stats::calm().with_hunger(0.0).with_thirst(100.0);
+        assert!(priority(&mut NeedRoutine::new(&HUNGER), starving_but_quenched) > BUSY);
+        assert_eq!(priority(&mut NeedRoutine::new(&THIRST), starving_but_quenched), 0.0);
+        assert!(priority(&mut NeedRoutine::new(&THIRST), parched_but_fed) > BUSY);
+        assert_eq!(priority(&mut NeedRoutine::new(&HUNGER), parched_but_fed), 0.0);
+    }
+
+    #[test]
+    fn hunger_and_thirst_that_are_equally_bad_are_equally_urgent() {
+        // One scale for every need, or which one a human sees to first would
+        // be an accident of two constants.
+        let stats = Stats::calm().with_hunger(80.0).with_thirst(80.0);
+        assert_eq!(
+            priority(&mut NeedRoutine::new(&HUNGER), stats),
+            priority(&mut NeedRoutine::new(&THIRST), stats)
+        );
     }
 }

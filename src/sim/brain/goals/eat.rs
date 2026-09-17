@@ -10,7 +10,7 @@
 //! out of it, [`ConsumeItem`](crate::sim::brain::tasks::ConsumeItem) the food —
 //! and what this goal does is choose the fridge, queue them, and decide what a
 //! failure means. Food going into a hand and hunger going down are the tasks'
-//! doing, not this goal's.
+//! and the body's doing, not this goal's.
 
 use crate::map::Point;
 use crate::sim::feature::FeatureKind;
@@ -18,13 +18,11 @@ use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
-use super::{PATIENCE, WAIT_FOR_A_GAP};
+use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
 
-/// Seconds spent at the fridge getting food out of it.
+/// Seconds spent at the fridge getting food out of it. Eating it takes
+/// [`CHEW_SECONDS`](crate::sim::item::CHEW_SECONDS).
 pub const TAKE_SECONDS: f32 = 1.0;
-
-/// Seconds spent eating what was taken.
-pub const CHEW_SECONDS: f32 = 2.0;
 
 /// Where a meal has got to, for a debugger — the queue is what the meal
 /// actually is.
@@ -33,6 +31,8 @@ pub enum Stage {
     /// Deciding which fridge.
     #[default]
     Finding,
+    /// Using up something else it was holding, which is in the way of taking.
+    Clearing,
     /// On the way to it.
     Walking,
     /// Standing at it, taking food out.
@@ -42,9 +42,22 @@ pub enum Stage {
 }
 
 impl Stage {
+    /// The stage the next task in the queue puts a meal at.
+    fn of(next: Option<Task>) -> Stage {
+        match next {
+            Some(Task::ConsumeItem(task)) if task.item == ItemKind::Food => Stage::Eating,
+            Some(Task::ConsumeItem(_)) => Stage::Clearing,
+            // A wait is only ever queued in front of a walk.
+            Some(Task::MoveTo(_) | Task::Wait(_)) => Stage::Walking,
+            Some(Task::TakeItem(_)) => Stage::Taking,
+            None | Some(Task::UseToilet(_)) => Stage::Finding,
+        }
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Stage::Finding => "finding",
+            Stage::Clearing => "clearing its hand",
             Stage::Walking => "walking",
             Stage::Taking => "taking",
             Stage::Eating => "eating",
@@ -77,36 +90,41 @@ impl EatGoal {
 
     /// Queue the rest of the meal **from what is true now**, on the back of
     /// the queue: food already in hand is eaten; otherwise walk beside the
-    /// fridge (unless already there), take food, eat it.
+    /// fridge (unless already there), take food, eat it. Anything else in hand
+    /// is finished first, since taking needs an empty hand.
     ///
     /// Worked out from the world rather than from a remembered stage, so a
     /// meal picked back up after an interruption starts from wherever it had
     /// really got to — the food a finished `TakeItem` put in hand is in hand
     /// whether or not this goal heard about it. `false` when there is nowhere
     /// to stand to use the fridge.
+    ///
+    /// Finishing what is in hand rather than giving up on it is what keeps
+    /// eating and drinking from deadlocking: water taken just before hunger
+    /// took over would otherwise make every `TakeItem` fail, with nothing left
+    /// in charge that wants to drink it.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
-        if holding_food(ctx) {
-            let _ = ctx.tasks.push_back(Task::consume(ItemKind::Food, CHEW_SECONDS));
-            self.stage = Stage::Eating;
-            return true;
-        }
-        let Some(fridge) = self.target else {
-            self.stage = Stage::Finding;
-            return false;
-        };
-        match stand_beside(ctx, fridge) {
-            Stand::Nowhere => {
-                self.stage = Stage::Finding;
+        let held = held(ctx);
+        if held != Some(ItemKind::Food) {
+            let Some(fridge) = self.target else {
+                return false;
+            };
+            let stand = stand_beside(ctx, fridge);
+            if let Stand::Nowhere = stand {
                 return false;
             }
-            Stand::Here => self.stage = Stage::Taking,
-            Stand::At(cell) => {
-                let _ = ctx.tasks.push_back(Task::move_to(cell));
-                self.stage = Stage::Walking;
+            if let Some(other) = held {
+                let _ = ctx.tasks.push_back(Task::consume(other, other.consume_seconds()));
             }
+            if let Stand::At(cell) = stand {
+                let _ = ctx.tasks.push_back(Task::move_to(cell));
+            }
+            let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Food, TAKE_SECONDS));
         }
-        let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Food, TAKE_SECONDS));
-        let _ = ctx.tasks.push_back(Task::consume(ItemKind::Food, CHEW_SECONDS));
+        let _ = ctx
+            .tasks
+            .push_back(Task::consume(ItemKind::Food, ItemKind::Food.consume_seconds()));
+        self.stage = Stage::of(ctx.tasks.front());
         true
     }
 
@@ -127,46 +145,14 @@ impl EatGoal {
     }
 }
 
-fn holding_food(ctx: &GoalCtx<'_>) -> bool {
-    ctx.carried == Some(&Some(ItemKind::Food))
+fn held(ctx: &GoalCtx<'_>) -> Option<ItemKind> {
+    ctx.carried.copied().flatten()
 }
 
-/// Where to stand to use a fridge.
-enum Stand {
-    /// Already close enough.
-    Here,
-    At(Point),
-    /// Nowhere passable touches it.
-    Nowhere,
-}
-
-/// The cell to use `fridge` from: beside it, passable, preferably free, and
-/// nearest.
-///
-/// Four cells and the fridge's own — props do not block terrain, so standing
-/// in the fridge's cell is allowed as a last resort. The crowd is read for
-/// those five cells and nothing else: a human choosing the free side of a
-/// fridge is a lookup, not a scan.
-fn stand_beside(ctx: &GoalCtx<'_>, fridge: Point) -> Stand {
-    let here = ctx.body.center_position();
-    if here.manhattan_distance(fridge) <= 1 {
-        return Stand::Here;
-    }
-    let uid = ctx.body.uid();
-    Point::CARDINALS
-        .iter()
-        .map(|&step| fridge + step)
-        .chain(std::iter::once(fridge))
-        .filter(|&cell| ctx.think.is_passable(cell))
-        .min_by_key(|&cell| {
-            (
-                !ctx.think.occupancy.is_free_for(cell, uid),
-                cell == fridge,
-                here.manhattan_distance(cell),
-                cell,
-            )
-        })
-        .map_or(Stand::Nowhere, Stand::At)
+/// Whether `finished` is the last step of a meal — food eaten, not whatever
+/// was cleared out of the hand first.
+fn is_a_meal(finished: Option<Task>) -> bool {
+    matches!(finished, Some(Task::ConsumeItem(task)) if task.item == ItemKind::Food)
 }
 
 impl GoalExecutor for EatGoal {
@@ -177,7 +163,7 @@ impl GoalExecutor for EatGoal {
     /// The half-walked route is gone — the brain dropped it — but the fridge
     /// is not, so what is left of the meal goes back on the queue.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() && !holding_food(ctx) {
+        if self.target.is_none() && held(ctx) != Some(ItemKind::Food) {
             return;
         }
         self.retries = 0;
@@ -191,13 +177,13 @@ impl GoalExecutor for EatGoal {
     /// and the routine lets go before this goal has been told the meal is
     /// over. So it is told here.
     fn deprioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if ctx.tasks.result() == TaskResult::Success && matches!(ctx.finished, Some(Task::ConsumeItem(_))) {
+        if ctx.tasks.result() == TaskResult::Success && is_a_meal(ctx.finished) {
             self.eaten(ctx);
         }
     }
 
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
-        if ctx.stats.is_none() || ctx.carried.is_none() {
+        if ctx.biology.is_none() || ctx.carried.is_none() {
             // A kind with no appetite, or no hands to eat with.
             return GoalProgress::Blocked;
         }
@@ -226,14 +212,15 @@ impl GoalExecutor for EatGoal {
                 self.forget();
                 return GoalProgress::Working;
             }
-            (TaskResult::Success, Some(Task::MoveTo(_))) => {
-                self.stage = Stage::Taking;
-                self.retries = 0;
-            }
-            (TaskResult::Success, Some(Task::TakeItem(_))) => self.stage = Stage::Eating,
-            (TaskResult::Success, Some(Task::ConsumeItem(_))) => {
+            (TaskResult::Success, finished) if is_a_meal(finished) => {
                 self.eaten(ctx);
                 return GoalProgress::Achieved;
+            }
+            (TaskResult::Success, finished) => {
+                if let Some(Task::MoveTo(_)) = finished {
+                    self.retries = 0;
+                }
+                self.stage = Stage::of(ctx.tasks.front());
             }
             _ => {}
         }
@@ -243,7 +230,7 @@ impl GoalExecutor for EatGoal {
         }
 
         // Nothing queued: start, or start again.
-        if !holding_food(ctx) {
+        if held(ctx) != Some(ItemKind::Food) {
             let here = ctx.body.center_position();
             let Some(fridge) = ctx.think.features.nearest(FeatureKind::Food, here) else {
                 return GoalProgress::Blocked;
@@ -275,39 +262,22 @@ impl GoalExecutor for EatGoal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::{Map, Object, ObjectKind, ObjectLayer, Size, FLOOR, PIXELS_PER_CELL, WALL};
+    use crate::map::{Map, Size, FLOOR, WALL};
     use crate::sim::brain::GoalId;
     use crate::sim::item::MEAL;
-    use crate::sim::testing::World;
-    use crate::sim::{EntityType, GameEntity, Human};
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    use crate::sim::testing::{needy_human, prop_at, World};
+    use crate::sim::{GameEntity, Human};
 
-    fn fridge_at(map: &mut Map, cell: Point) {
-        map.add_object(
-            ObjectLayer::Props,
-            Object {
-                at: Point::new(
-                    cell.x * PIXELS_PER_CELL + PIXELS_PER_CELL / 2,
-                    cell.y * PIXELS_PER_CELL + PIXELS_PER_CELL / 2,
-                ),
-                kind: ObjectKind::new("fridge"),
-            },
-        );
-    }
-
+    /// Hungry, and nothing else pressing.
     fn hungry_human(cell: Point, hunger: f32) -> Human {
-        let mut rng = SmallRng::seed_from_u64(3);
-        let mut human = Human::new(crate::sim::Uid::new(EntityType::Human, 77), cell, &mut rng);
-        human.set_hunger(hunger);
-        human
+        needy_human(cell, hunger, 0.0, 0.0)
     }
 
     #[test]
     fn a_hungry_human_walks_to_the_fridge_and_stops_being_hungry() {
         let mut map = Map::new(Size::new(14, 10), FLOOR);
         let fridge = Point::new(11, 7);
-        fridge_at(&mut map, fridge);
+        prop_at(&mut map, "fridge", fridge);
         let mut world = World::new(map);
         let mut human = hungry_human(Point::new(2, 2), 90.0);
 
@@ -336,12 +306,13 @@ mod tests {
         // Loose: time passed on the walk there, and hunger rose while it did.
         assert!(human.stats().hunger() < 90.0 - MEAL / 2.0, "hunger {}", human.stats().hunger());
         assert_eq!(human.carried(), None, "the food was eaten, not kept");
+        assert_eq!(world.drinks(), 0, "a meal is not a drink");
     }
 
     #[test]
     fn a_hungry_human_keeps_eating_until_it_is_sated_and_then_wanders_again() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
-        fridge_at(&mut map, Point::new(5, 5));
+        prop_at(&mut map, "fridge", Point::new(5, 5));
         let mut world = World::new(map);
         // One meal is not enough to come down from here.
         let mut human = hungry_human(Point::new(1, 1), 100.0);
@@ -360,7 +331,7 @@ mod tests {
     #[test]
     fn a_human_already_holding_food_eats_it_without_going_to_the_fridge() {
         let mut map = Map::new(Size::new(12, 12), FLOOR);
-        fridge_at(&mut map, Point::new(10, 10));
+        prop_at(&mut map, "fridge", Point::new(10, 10));
         let mut world = World::new(map);
         let mut human = hungry_human(Point::new(2, 2), 90.0);
         human.set_carried(Some(ItemKind::Food));
@@ -375,6 +346,29 @@ mod tests {
         assert_eq!(human.carried(), None, "the food should have been eaten");
         assert_eq!(human.position(), start, "and eaten on the spot");
         assert!(human.stats().hunger() < 90.0 - MEAL / 2.0, "hunger {}", human.stats().hunger());
+    }
+
+    #[test]
+    fn a_hungry_human_holding_water_drinks_it_before_taking_food() {
+        // Taking needs an empty hand. Water taken just before hunger took over
+        // would otherwise fail every meal, and nothing thirsty enough is left
+        // in charge to drink it.
+        let mut map = Map::new(Size::new(8, 8), FLOOR);
+        prop_at(&mut map, "fridge", Point::new(4, 4));
+        let mut world = World::new(map);
+        let mut human = needy_human(Point::new(3, 4), 90.0, 40.0, 0.0);
+        human.set_carried(Some(ItemKind::Water));
+
+        for _ in 0..1000 {
+            world.step(&mut human);
+            assert_ne!(human.brain().top_goal(), GoalId::Drink, "not thirsty enough to be drinking");
+            if world.log_contains("ate at the fridge") {
+                break;
+            }
+        }
+        assert!(world.log_contains("ate at the fridge"), "brain: {:?}", human.brain_fields());
+        assert_eq!(human.carried(), None);
+        assert!(human.stats().thirst() < 40.0 - 20.0, "the water was drunk on the way");
     }
 
     #[test]
@@ -401,7 +395,7 @@ mod tests {
             map.set_terrain(Point::new(i, 7), WALL);
             map.set_terrain(Point::new(7, i), WALL);
         }
-        fridge_at(&mut map, Point::new(10, 10));
+        prop_at(&mut map, "fridge", Point::new(10, 10));
         let mut world = World::new(map);
         let mut human = hungry_human(Point::new(2, 2), 95.0);
 

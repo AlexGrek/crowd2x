@@ -1,4 +1,4 @@
-//! Who someone is, beyond a [`super::stats::Stats`] a human has and a dog
+//! Who someone is, beyond a [`super::biology::Stats`] a human has and a dog
 //! does not: [`Identity`].
 //!
 //! Same shape as `Stats` on purpose — one struct, built once from a seeded

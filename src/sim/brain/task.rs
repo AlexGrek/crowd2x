@@ -17,14 +17,14 @@
 //! Adding a task is a struct, an [`TaskExecutor`] impl and a variant here.
 
 use crate::map::Point;
+use crate::sim::biology::Biology;
 use crate::sim::entity::Think;
 use crate::sim::item::ItemKind;
-use crate::sim::stats::Stats;
 use crate::sim::walker::Walker;
 use crate::sim::MoveOutcome;
 
 use super::action::{Action, ActionState};
-use super::tasks::{ConsumeItem, MoveTo, TakeItem, Wait};
+use super::tasks::{ConsumeItem, MoveTo, TakeItem, UseToilet, Wait};
 
 /// What a task may touch while it runs: the world to read, the body it moves,
 /// the action it drives, and the parts of its unit a task can change.
@@ -35,8 +35,10 @@ pub struct TaskCtx<'a> {
     pub walk: &'a mut Walker,
     /// The action this task started, or [`Action::None`] before it has.
     pub action: &'a mut Action,
+    /// The body. A task never writes a stat: it tells the body what happened
+    /// ([`Biology::handle`]) and the body's processes decide what that means.
     /// `None` for a kind that has no needs.
-    pub stats: Option<&'a mut Stats>,
+    pub biology: Option<&'a mut Biology>,
     /// What is in its hand. `None` for a kind that has no hands.
     pub carried: Option<&'a mut Option<ItemKind>>,
 }
@@ -74,6 +76,7 @@ pub enum Task {
     MoveTo(MoveTo),
     TakeItem(TakeItem),
     ConsumeItem(ConsumeItem),
+    UseToilet(UseToilet),
     Wait(Wait),
 }
 
@@ -97,6 +100,11 @@ impl Task {
         Task::ConsumeItem(ConsumeItem { item, seconds })
     }
 
+    /// Use the toilet in `toilet`, from a cell beside it.
+    pub const fn use_toilet(toilet: Point, seconds: f32) -> Task {
+        Task::UseToilet(UseToilet { toilet, seconds })
+    }
+
     /// Stand still for a while.
     pub const fn wait(seconds: f32) -> Task {
         Task::Wait(Wait { seconds })
@@ -108,6 +116,7 @@ impl Task {
             Task::MoveTo(task) => task.execute(ctx),
             Task::TakeItem(task) => task.execute(ctx),
             Task::ConsumeItem(task) => task.execute(ctx),
+            Task::UseToilet(task) => task.execute(ctx),
             Task::Wait(task) => task.execute(ctx),
         }
     }
@@ -117,6 +126,7 @@ impl Task {
             Task::MoveTo(task) => task.describe(),
             Task::TakeItem(task) => task.describe(),
             Task::ConsumeItem(task) => task.describe(),
+            Task::UseToilet(task) => task.describe(),
             Task::Wait(task) => task.describe(),
         }
     }

@@ -1,6 +1,6 @@
 ---
 name: brain-engineer
-description: Add and change what crowd2x units decide and do - the unit brain in src/sim/brain/. Covers routines (what a unit wants and how badly), goals and goal executors (how a want is pursued), task executors (one small step like walk, take, consume, wait), actions (pathfinding and timing), features (what a map prop is for, e.g. a fridge is food), items, and stats/needs such as hunger or bladder. Use when adding a behaviour, need, goal, routine, task, action, item or prop use; when a unit gets stuck, dithers between goals, stands still, or replans too often; or when writing brain tests.
+description: Add and change what crowd2x units decide and do - the unit brain in src/sim/brain/ and the body in src/sim/biology/. Covers routines (what a unit wants and how badly), goals and goal executors (how a want is pursued), task executors (one small step like walk, take, consume, use the toilet, wait), actions (pathfinding and timing), features (what a map prop is for, e.g. a fridge is food and water), items, stats/needs such as hunger, thirst or bladder, and biological processes that change stats and can be switched on/off per unit. Use when adding a behaviour, need, goal, routine, task, action, item or prop use; when a unit gets stuck, dithers between goals, stands still, or replans too often; or when writing brain tests.
 ---
 
 # Engineering the unit brain
@@ -18,16 +18,20 @@ writing any of them.
 
 | Layer | Answers | Reads | May change | Lives in |
 | --- | --- | --- | --- | --- |
-| routine | *how badly is each goal wanted?* | stats, body, `Think` | the priority list only | `brain/routines.rs` |
-| goal executor | *how is this want pursued?* | stats, hands, memory, `Think`, last task result | the task queue, memory, its own fields | `brain/goals/` |
-| task executor | *how is one small step done?* | everything in `TaskCtx` | the action, stats, hands — the world | `brain/tasks/` |
+| routine | *how badly is each goal wanted?* | biology (stats, switches), body, `Think` | the priority list only | `brain/routines.rs` |
+| goal executor | *how is this want pursued?* | biology, hands, memory, `Think`, last task result | the task queue, memory, its own fields | `brain/goals/` |
+| task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body — the world | `brain/tasks/` |
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
 | feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
-| item / stat | *what can be held / what does a body need?* | — | via tasks only | `sim/item.rs`, `sim/stats.rs` |
+| item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
+| process | *what does a body do by itself?* | its stats, `dt`, events | **the only writer of stats** | `sim/biology/` |
 
-**Goals decide, tasks act.** A goal never writes stats or hands (`GoalCtx` gives it read-only
-references for exactly this reason). Food goes into a hand when a `TakeItem` *finishes*, not
-when a goal hears that it did. That is what makes it safe for a goal to miss a result.
+**Goals decide, tasks act, processes change the body.** A goal never writes the body or hands
+(`GoalCtx` gives it read-only references for exactly this reason). Food goes into a hand when
+a `TakeItem` *finishes*, not when a goal hears that it did. That is what makes it safe for a
+goal to miss a result. A task never writes a stat either: it calls
+`biology.handle(Event::Ingested(item))` / `Event::Relieved`, and the processes decide what that
+means (the `Stats` setters are private to `biology`, so this is compiler-held).
 
 ## The pipeline (every tick, in this order)
 
@@ -54,12 +58,14 @@ This order has consequences:
 
 | I want units to... | Add |
 | --- | --- |
-| care about a new need, a time of day, a threat | a **routine** (plus a stat if the need is new) |
-| do a new multi-step thing ("go to the toilet") | a **goal** (`GoalId` variant + executor) |
+| care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
+| care about a time of day, a threat | a **routine** |
+| have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
+| do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |
 | do a new kind of single step ("sit", "open door") | a **task executor** |
 | show a new kind of body activity (animation) | an **action** variant |
 | use a prop on the map | a **feature** entry (+ palette entry if the prop is new) |
-| carry a new thing | an **item** variant with its `consume` effect |
+| carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`) |
 | change *when* something is chosen | the routine's priority curve, not the goal |
 | change *how* something is done | the goal executor, not the routine |
 
@@ -122,8 +128,21 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
     `WanderGoal::report_stuck` does. One line per unit per tick floods the bounded log.
 
 13. **A kind without the needs or hands a goal requires**: either don't register the executor
-    on that kind's brain, or return `Blocked` when `ctx.stats` / `ctx.carried` is `None`
+    on that kind's brain, or return `Blocked` when `ctx.biology` / `ctx.carried` is `None`
     (`EatGoal` does).
+
+14. **One goal per need, in its own file.** Do not fold two needs into one parameterised
+    executor even when their plans match today (eating and drinking did); the processes
+    behind them diverge. Share helpers (`stand_beside`) in `goals/mod.rs`, not plans.
+
+15. **A goal that takes an item must cope with a hand already holding another one.** Taking
+    needs an empty hand, so queue `Task::consume(other, other.consume_seconds())` first
+    (`EatGoal`/`DrinkGoal::plan`). Otherwise an item taken just before another goal took over
+    fails every `TakeItem` forever, and nothing in charge wants to use it.
+
+16. **Off means off.** A `Need` names its `ProcessId`; `NeedRoutine` wants nothing while that
+    process is switched off in the body. A routine that read the stat alone would chase a
+    number that can no longer move.
 
 </rules>
 
@@ -134,7 +153,9 @@ Priorities are unitless `f32`s compared only against each other.
 | Source | Value |
 | --- | --- |
 | `StayBusyRoutine` (wander) | `BUSY = 0.1`, the floor everything should beat when it matters |
-| `KeepFedRoutine` | `hunger / 50`: 1.2 at `PECKISH` (60), 2.0 at starving |
+| `NeedRoutine(HUNGER)` → eat | `hunger / 50`: 1.2 at `PECKISH` (60), released at `SATED` (25) |
+| `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
+| `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 
 Put a new need on the same 0–2 scale so that urgency is comparable across needs. Give a
@@ -146,12 +167,12 @@ halfway there.
 
 1. **Decide the layer(s)** with the table above. A new behaviour is usually a stat plus a
    routine plus a goal, reusing existing tasks. A new task or action is rarer.
-2. **Write it from [recipes.md](recipes.md)**, in dependency order: stat/item/feature → action →
-   task → goal → routine → registration in `Brain::human()`/`dog()`.
+2. **Write it from [recipes.md](recipes.md)**, in dependency order: stat/process/item/feature →
+   action → task → goal → routine (`Need`) → registration in `Brain::human()`/`dog()`.
 3. **Write unit tests alongside each piece** (below). Names are full sentences in snake_case;
    tests are inline `#[cfg(test)] mod tests`.
 4. **Run `cargo test`.** The two determinism tests in `src/sim/mod.rs` are the gate on any brain
-   change. If you added a goal, extend `determinism_survives_brains_and_hunger_in_the_parallel_rounds`
+   change. If you added a goal, extend `determinism_survives_brains_and_biology_in_the_parallel_rounds`
    (or a sibling) so the new goal actually runs in it.
 5. **Prove a new guard test fails** by breaking what it guards, run it, then restore. Tests in
    this repo have passed vacuously before.
@@ -169,23 +190,28 @@ halfway there.
 ## Testing tools that already exist
 
 - **`crate::sim::testing::World`** — one unit, the real think / move-rules / react sequence.
-  `World::new(map)`, `step(&mut entity)`, `log_contains(..)`, `meals()`, `ctx()`, pub `dt`,
-  `tick`, `occupancy` (claim cells to put bodies in the way).
+  `World::new(map)`, `step(&mut entity)`, `log_contains(..)`, `lines()`, `meals()`, `drinks()`,
+  `reliefs()`, `ctx()`, pub `dt`, `tick`, `occupancy` (claim cells to put bodies in the way).
+- **`crate::sim::testing::{needy_human, prop_at}`** — `needy_human(cell, hunger, thirst,
+  bladder)` so a test decides which needs press; `prop_at(&mut map, "toilet", cell)` puts a prop
+  in the middle of a cell (object positions are **pixels**, and this does the conversion).
+- **Switching a process off in a test:** `human.biology_mut().unwrap().set_running(ProcessId::Hunger, false)`
+  isolates one need from the others without a hook — the same switch `Command::SetProcess` uses.
 - **`crate::sim::brain::tasks::rig::Rig`** — a task executor with no brain:
-  `Rig::new(map, cell)`, pub `walk`/`action`/`stats`/`carried`, `tick(&mut task)`,
-  `run(&mut task, max_ticks)`.
+  `Rig::new(map, cell)`, pub `walk`/`action`/`biology`/`carried`, `tick(&mut task)`,
+  `run(&mut task, max_ticks)`. Its biology does not advance with time, only with events, so a
+  task's effect on a stat is exact.
 - **Brain test doubles in `brain/mod.rs` tests:**
   - `Puppet` — a walker plus a brain, driven by `World::step`;
   - `dial(goal, level)` — a routine whose priority a test turns up and down;
   - `Recorder` / `Listener` — executors that journal every call.
-- **Human test hooks:** `Human::set_hunger`, `Human::set_carried`, and `Stats::calm().with_hunger(..)`.
+- **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_carried`,
+  `Biology::edit(|stats| stats.with_thirst(..))`, and `Stats::calm().with_hunger(..)`.
   Add `#[cfg(test)] pub(crate)` hooks the same way rather than widening visibility.
 - **`crate::sim::walker::ROUTES_ASKED`** — a thread-local count of far routes. Assert it stays
   far below the tick count for any goal that can fail (see
   `a_goal_that_keeps_failing_does_not_ask_for_a_route_every_tick`,
   `a_fridge_nobody_can_reach_is_given_up_on_rather_than_retried_every_tick`).
-- **Props in a test map:** `Object { at: Point::new(x * PIXELS_PER_CELL + 24, y * PIXELS_PER_CELL + 24), kind: ObjectKind::new("fridge") }`.
-  Object positions are **pixels**, not cells.
 
 Every behaviour should have at least:
 

@@ -1,44 +1,43 @@
-//! What a person's body and mind are doing: [`Stats`].
+//! What a person's body and mind are like right now: [`Stats`].
 //!
 //! Read by a human's brain — its routines turn a stat into how badly a goal is
-//! wanted, and a goal met changes one back ([`Stats::eat`]). Nothing here
-//! decides anything; a stat is a number a brain reads, not a brain of its own.
+//! wanted. **Written only by a [`Process`](super::Process)**: the setters
+//! below are visible to `biology` and nothing outside it, so a task that feeds
+//! somebody says what happened ([`Event`](super::Event)) and the processes
+//! decide what that does to the numbers. Nothing here decides anything; a stat
+//! is a number, not a mechanism.
 //!
 //! One field per stat, not a map by name: a `Human` always has exactly this
 //! set of stats, so indexing by name would trade a compile error (a typo in a
-//! field) for a runtime one (a typo in a string). Adding a stat is three
-//! small edits, all in this file — a field, a line in [`Stats::random`], and
-//! a getter — and nothing outside it changes, because [`Stats::fields`] is
-//! the one place that turns the struct into the name/value pairs a debug view
+//! field) for a runtime one (a typo in a string). Adding a stat is a field, a
+//! line in [`Stats::random`], a getter and a line in [`Stats::fields`] — the
+//! one place that turns the struct into the name/value pairs a debug view
 //! wants.
 
 use rand::rngs::SmallRng;
 use rand::RngExt;
 
-/// Hunger gained per second. From fed to [`PECKISH`] in about a minute, which is
-/// slow enough that a crowd is not always eating and fast enough that watching
-/// one person for a minute shows a meal.
-///
-/// [`PECKISH`]: super::brain::routines::PECKISH
-pub const HUNGER_PER_SECOND: f32 = 1.0;
-
 /// A person's needs and condition. Every field is on a 0-100 scale except
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Changed from outside this module only through what a body does: time passing
-/// ([`Stats::metabolise`]) and a need being met ([`Stats::eat`]). Hunger is the
-/// only stat that moves so far — the rest are rolled at spawn and stay put
-/// until something wants them to.
+/// Hunger, thirst and bladder are the stats that move so far — the rest are
+/// rolled at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
     health: f32,
     stamina: f32,
     fun: f32,
     hunger: f32,
+    thirst: f32,
     bladder: f32,
     mental_health: f32,
     attention: f32,
+}
+
+/// A need kept to its 0-100 range.
+fn need(value: f32) -> f32 {
+    value.clamp(0.0, 100.0)
 }
 
 impl Stats {
@@ -50,20 +49,24 @@ impl Stats {
             stamina: rng.random_range(0.0..=100.0),
             fun: rng.random_range(0.0..=100.0),
             hunger: rng.random_range(0.0..=100.0),
+            thirst: rng.random_range(0.0..=100.0),
             bladder: rng.random_range(0.0..=100.0),
             mental_health: rng.random_range(0.0..=100.0),
             attention: rng.random_range(0.0..=1.0),
         }
     }
 
-    /// Time passing: `dt` seconds' worth of getting hungrier.
-    pub fn metabolise(&mut self, dt: f32) {
-        self.hunger = (self.hunger + HUNGER_PER_SECOND * dt).clamp(0.0, 100.0);
+    /// `by` more hunger (less, for a negative `by`), never past its range.
+    pub(super) fn change_hunger(&mut self, by: f32) {
+        self.hunger = need(self.hunger + by);
     }
 
-    /// A meal: `amount` hunger gone, and never below full.
-    pub fn eat(&mut self, amount: f32) {
-        self.hunger = (self.hunger - amount).clamp(0.0, 100.0);
+    pub(super) fn change_thirst(&mut self, by: f32) {
+        self.thirst = need(self.thirst + by);
+    }
+
+    pub(super) fn change_bladder(&mut self, by: f32) {
+        self.bladder = need(self.bladder + by);
     }
 
     /// Every stat at the middle of its range — a person with nothing unusual
@@ -75,6 +78,7 @@ impl Stats {
             stamina: 50.0,
             fun: 50.0,
             hunger: 50.0,
+            thirst: 50.0,
             bladder: 50.0,
             mental_health: 50.0,
             attention: 0.5,
@@ -84,6 +88,18 @@ impl Stats {
     #[cfg(test)]
     pub(crate) fn with_hunger(mut self, hunger: f32) -> Stats {
         self.hunger = hunger;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_thirst(mut self, thirst: f32) -> Stats {
+        self.thirst = thirst;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_bladder(mut self, bladder: f32) -> Stats {
+        self.bladder = bladder;
         self
     }
 
@@ -107,6 +123,11 @@ impl Stats {
         self.hunger
     }
 
+    /// 0 (quenched) to 100 (parched).
+    pub fn thirst(&self) -> f32 {
+        self.thirst
+    }
+
     /// 0 (empty) to 100 (desperate).
     pub fn bladder(&self) -> f32 {
         self.bladder
@@ -123,15 +144,16 @@ impl Stats {
     }
 
     /// Name and value of every stat, in the order above — the shape
-    /// [`super::entity::GameEntity::debug_fields`] wants, so a kind that
-    /// carries stats can hand them over in one line rather than naming each
-    /// field again at the call site.
+    /// [`crate::sim::GameEntity::debug_fields`] wants, so a kind that carries
+    /// stats can hand them over in one line rather than naming each field
+    /// again at the call site.
     pub fn fields(&self) -> Vec<(&'static str, f32)> {
         vec![
             ("health", self.health),
             ("stamina", self.stamina),
             ("fun", self.fun),
             ("hunger", self.hunger),
+            ("thirst", self.thirst),
             ("bladder", self.bladder),
             ("mental_health", self.mental_health),
             ("attention", self.attention),
@@ -153,6 +175,7 @@ mod tests {
             assert!((0.0..=100.0).contains(&stats.stamina()));
             assert!((0.0..=100.0).contains(&stats.fun()));
             assert!((0.0..=100.0).contains(&stats.hunger()));
+            assert!((0.0..=100.0).contains(&stats.thirst()));
             assert!((0.0..=100.0).contains(&stats.bladder()));
             assert!((0.0..=100.0).contains(&stats.mental_health()));
             assert!((0.0..=1.0).contains(&stats.attention()));
@@ -168,21 +191,12 @@ mod tests {
     }
 
     #[test]
-    fn time_makes_a_person_hungrier_and_never_past_starving() {
-        let mut stats = Stats::calm().with_hunger(10.0);
-        stats.metabolise(5.0);
-        assert_eq!(stats.hunger(), 10.0 + 5.0 * HUNGER_PER_SECOND);
-        stats.metabolise(10_000.0);
-        assert_eq!(stats.hunger(), 100.0);
-    }
-
-    #[test]
-    fn eating_takes_hunger_away_and_never_past_full() {
-        let mut stats = Stats::calm().with_hunger(70.0);
-        stats.eat(60.0);
-        assert_eq!(stats.hunger(), 10.0);
-        stats.eat(60.0);
-        assert_eq!(stats.hunger(), 0.0);
+    fn a_need_never_leaves_its_range_however_far_it_is_pushed() {
+        let mut stats = Stats::calm();
+        stats.change_hunger(1000.0);
+        stats.change_thirst(-1000.0);
+        stats.change_bladder(1000.0);
+        assert_eq!((stats.hunger(), stats.thirst(), stats.bladder()), (100.0, 0.0, 100.0));
     }
 
     #[test]
@@ -192,7 +206,7 @@ mod tests {
         let names: Vec<&str> = stats.fields().iter().map(|(name, _)| *name).collect();
         assert_eq!(
             names,
-            ["health", "stamina", "fun", "hunger", "bladder", "mental_health", "attention"]
+            ["health", "stamina", "fun", "hunger", "thirst", "bladder", "mental_health", "attention"]
         );
     }
 }

@@ -1,0 +1,72 @@
+{
+  "name": "a human drinks, fills up, and uses the toilet",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "washroom",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 456, "y": 264 }, "kind": "fridge" },
+              { "at": { "x": 456, "y": 72 }, "kind": "toilet" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "washroom",
+  "steps": [
+    { "note": "the fridge sits in cell (9, 5) and the toilet in (9, 1): x 9*48+24, y 5*48+24 and 1*48+24" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "shot": "a room with a fridge and a toilet in it" },
+
+    { "note": "one human; hunger, thirst and bladder are all rolled at spawn" },
+    { "spawn": { "kind": "human", "x": 2, "y": 3 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "press": "brains" },
+    { "shot": "a new human, and what its mind is doing" },
+
+    { "note": "thirst takes a drink every forty-odd seconds, each drink puts thirty on the bladder over" },
+    { "note": "six seconds on top of a quarter a second, and 70 sends it to the toilet: from an empty" },
+    { "note": "bladder that is about two minutes, so three minutes of world is enough however it was born" },
+    { "tick": 12000 },
+    { "expect_entities": 1 },
+    { "expect_log": "drank at the fridge at 9, 5" },
+    { "expect_log": "used the toilet at 9, 1" },
+    { "expect_selected": "human" },
+    { "shot": "after the toilet, and the brains menu saying so" },
+
+    { "press": "debug" },
+    { "shot": "the debug menu: bladder, what is on its way, and the processes running" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "washroom" }
+  ]
+}

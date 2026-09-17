@@ -121,6 +121,7 @@
 // nothing did yet.
 #![allow(dead_code, unused_imports)]
 
+pub mod biology;
 pub mod brain;
 pub mod entities;
 pub mod entity;
@@ -132,7 +133,6 @@ pub mod log;
 pub mod occupancy;
 pub mod path;
 pub(crate) mod rng;
-pub mod stats;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod uid;
@@ -144,6 +144,7 @@ use rayon::prelude::*;
 
 use crate::map::{Map, Point};
 
+pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
@@ -153,7 +154,6 @@ pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{find_path, Path, PathFinder};
-pub use stats::Stats;
 pub use uid::{EntityType, Uid};
 pub use walker::Walker;
 
@@ -233,6 +233,10 @@ pub enum Command {
     /// command has. Applied in the spawn pass with the others, so a freeze
     /// asked for this tick is in force before anything thinks.
     Freeze { uid: Uid, frozen: bool },
+    /// Switch one of an entity's biological processes on or off — see
+    /// [`biology`] for what off means. From outside the world for the same
+    /// reasons a freeze is, and applied at the same point in the tick.
+    SetProcess { uid: Uid, process: ProcessId, running: bool },
 }
 
 /// One frame's worth of input to the simulation.
@@ -265,6 +269,11 @@ impl Input {
 
     pub fn freeze(&mut self, uid: Uid, frozen: bool) -> &mut Input {
         self.commands.push(Command::Freeze { uid, frozen });
+        self
+    }
+
+    pub fn set_process(&mut self, uid: Uid, process: ProcessId, running: bool) -> &mut Input {
+        self.commands.push(Command::SetProcess { uid, process, running });
         self
     }
 
@@ -459,6 +468,25 @@ impl GameState {
         }
     }
 
+    /// Switch one of an entity's biological processes on or off. `false`, and
+    /// a line in the log saying why, for an entity that is not there or has no
+    /// biology to switch.
+    pub fn set_process(&mut self, uid: Uid, process: ProcessId, running: bool) -> bool {
+        let name = process.name();
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("{name}: no such entity {uid}"));
+            return false;
+        };
+        let Some(biology) = entity.biology_mut() else {
+            self.log.push(format!("{name}: {uid} has no biology"));
+            return false;
+        };
+        biology.set_running(process, running);
+        let state = if running { "on" } else { "off" };
+        self.log.push(format!("switched {name} {state} for {uid}"));
+        true
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -495,10 +523,10 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
-/// [`Command::Freeze`] is drained here too. It changes nothing structural, but
-/// it arrives on the same queue and wants the same timing: a freeze asked for
-/// this tick is in force before anything thinks, rather than one tick after
-/// the button was pressed.
+/// [`Command::Freeze`] and [`Command::SetProcess`] are drained here too. They
+/// change nothing structural, but they arrive on the same queue and want the
+/// same timing: a freeze asked for this tick is in force before anything
+/// thinks, rather than one tick after the button was pressed.
 ///
 /// This is also the only pass that may resize the entity table, and therefore
 /// the only one that may allocate. [`GameState::spawn`] keeps the intent
@@ -519,6 +547,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
                 if !state.set_frozen(*uid, *frozen) {
                     state.log.push(format!("freeze: no such entity {uid}"));
                 }
+            }
+            Command::SetProcess { uid, process, running } => {
+                state.set_process(*uid, *process, *running);
             }
         }
     }
@@ -901,6 +932,50 @@ mod tests {
         assert_ne!(state.position_of(uid), Some(held_at));
     }
 
+    fn hunger_of(state: &GameState, uid: Uid) -> f32 {
+        let entity = state.entities().get(uid).expect("still alive");
+        entity.biology().expect("a human has a body").stats().hunger()
+    }
+
+    #[test]
+    fn switching_a_process_off_holds_its_stat_and_switching_it_on_lets_it_move_again() {
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+        run(&mut state, 1);
+
+        let mut off = Input::new();
+        off.set_process(uid, ProcessId::Hunger, false);
+        process_game_state(&mut state, 1.0 / 60.0, &off);
+        let held = hunger_of(&state, uid);
+        run(&mut state, 300);
+        assert_eq!(hunger_of(&state, uid), held);
+        let biology = *state.entities().get(uid).unwrap().biology().unwrap();
+        assert!(!biology.is_running(ProcessId::Hunger));
+        assert!(biology.is_running(ProcessId::Thirst), "only the one asked for");
+
+        let mut on = Input::new();
+        on.set_process(uid, ProcessId::Hunger, true);
+        process_game_state(&mut state, 1.0 / 60.0, &on);
+        run(&mut state, 300);
+        assert!(hunger_of(&state, uid) > held || held == 100.0);
+    }
+
+    #[test]
+    fn switching_a_process_on_something_without_a_body_says_so_rather_than_panicking() {
+        let mut state = world();
+        let dog = state.spawn(EntityType::Dog, Point::new(4, 4));
+        let stranger = Uid::new(EntityType::Human, 99);
+
+        let mut input = Input::new();
+        input.set_process(dog, ProcessId::Bladder, false);
+        input.set_process(stranger, ProcessId::Bladder, false);
+        spawn_pass(&mut state, &input);
+
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("has no biology")), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("no such entity")), "{lines:?}");
+    }
+
     #[test]
     fn freezing_something_that_is_not_there_says_so_rather_than_panicking() {
         let mut state = world();
@@ -1052,11 +1127,17 @@ mod tests {
         assert_eq!(positions(&a), positions(&b));
     }
 
-    /// A map with fridges in it, so a crowd has two goals to take turns
-    /// between rather than one.
+    /// A map with fridges and toilets in it, so a crowd has every goal to
+    /// take turns between rather than one.
     fn kitchen(size: i32, seed: u64) -> GameState {
         let mut map = Map::new(Size::new(size, size), FLOOR);
-        for cell in [Point::new(2, 2), Point::new(size - 3, size - 3)] {
+        let props = [
+            (Point::new(2, 2), "fridge"),
+            (Point::new(size - 3, size - 3), "fridge"),
+            (Point::new(size - 3, 2), "toilet"),
+            (Point::new(2, size - 3), "toilet"),
+        ];
+        for (cell, kind) in props {
             map.add_object(
                 crate::map::ObjectLayer::Props,
                 crate::map::Object {
@@ -1064,7 +1145,7 @@ mod tests {
                         cell.x * crate::map::PIXELS_PER_CELL + 24,
                         cell.y * crate::map::PIXELS_PER_CELL + 24,
                     ),
-                    kind: crate::map::ObjectKind::new("fridge"),
+                    kind: crate::map::ObjectKind::new(kind),
                 },
             );
         }
@@ -1072,9 +1153,10 @@ mod tests {
     }
 
     #[test]
-    fn determinism_survives_brains_and_hunger_in_the_parallel_rounds() {
+    fn determinism_survives_brains_and_biology_in_the_parallel_rounds() {
         // The same check as above with every part of the brain running: goals
-        // handing over, routes to fridges, a queue built and resumed — across
+        // handing over, eating, drinking and the toilet competing for the top,
+        // routes to fridges and toilets, a queue built and resumed — across
         // the threshold where react goes onto rayon. Iteration order, routine
         // order and tie-breaking are all properties of the types; this is the
         // test that says they add up.
@@ -1086,12 +1168,24 @@ mod tests {
             state
         };
         let (mut a, mut b) = (build(), build());
-        let (mut meals_a, mut meals_b) = (0, 0);
+        let count = |lines: &[String], needle: &str| lines.iter().filter(|l| l.contains(needle)).count();
+        let tally = |lines: &[String]| {
+            [
+                count(lines, "ate at the fridge"),
+                count(lines, "drank at the fridge"),
+                count(lines, "used the toilet"),
+            ]
+        };
+        let (mut done_a, mut done_b) = ([0; 3], [0; 3]);
         for _ in 0..1500 {
             run(&mut a, 1);
             run(&mut b, 1);
-            meals_a += a.log.drain().iter().filter(|l| l.contains("ate at the fridge")).count();
-            meals_b += b.log.drain().iter().filter(|l| l.contains("ate at the fridge")).count();
+            for (total, now) in done_a.iter_mut().zip(tally(&a.log.drain())) {
+                *total += now;
+            }
+            for (total, now) in done_b.iter_mut().zip(tally(&b.log.drain())) {
+                *total += now;
+            }
         }
 
         let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
@@ -1101,8 +1195,11 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        assert!(meals_a > 0, "nobody ate, so the eating half of the brain never ran");
-        assert_eq!(meals_a, meals_b);
+        let [meals, drinks, reliefs] = done_a;
+        assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
+        assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
+        assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
+        assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
     }
 
@@ -1129,9 +1226,14 @@ mod tests {
         // that a crowd is a run of entities a cache line apart rather than a
         // pointer chase per unit per tick. The absence of a `Vec` is a property
         // of the type, not something a test can see at runtime; its size is.
+        //
+        // The wall is a number of cache lines, and it moves by one when a need
+        // is added on purpose: a need is a stat and a goal slot, about thirty
+        // bytes, and thirst took a Human from 512 to 520. What this is here to
+        // catch is a jump nobody meant, not a need somebody did.
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 512, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 576, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]

@@ -3,13 +3,14 @@
 //! A kind is a body, a mind and whatever else only that kind has. The body is
 //! a [`Walker`] — the movement action, shared by everything that walks — and
 //! the mind is a [`Brain`], built from the routines and goals that kind has:
-//! a human keeps fed and stays busy, a dog only stays busy. Neither kind
+//! a human keeps fed and hydrated and stays busy, a dog only stays busy. Neither kind
 //! decides anything in here. What a kind does with its three hooks is hand
 //! them on:
 //!
 //! * `think` — walk the current route. Arithmetic, and parallel.
 //! * `apply` — take the step the world granted.
-//! * `react` — time passes for the body, then the brain runs its pipeline.
+//! * `react` — time passes for the body ([`Biology::advance`]), then the brain
+//!   runs its pipeline.
 //!
 //! # Nothing here knows what a human looks like
 //!
@@ -28,11 +29,11 @@ use rand::RngExt;
 
 use crate::map::Point;
 
+use super::biology::{Biology, Stats};
 use super::brain::{Brain, GoalId};
 use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::item::ItemKind;
-use super::stats::Stats;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Intent, MoveOutcome};
@@ -56,9 +57,11 @@ pub enum Facing {
 pub struct Human {
     walk: Walker,
     brain: Brain,
-    /// Needs and condition. Rolled at spawn, then changed by time passing and
-    /// by what the brain gets done — hunger rises, a meal brings it down.
-    stats: Stats,
+    /// Needs and condition, and the processes that change them. Stats are
+    /// rolled at spawn, then moved by time passing and by what the brain gets
+    /// done — hunger and thirst rise, a meal and a drink bring them down, a
+    /// drink fills the bladder and a toilet empties it.
+    biology: Biology,
     /// Name and gender, rolled once at spawn — see [`Identity`] for why the
     /// two need not agree.
     identity: Identity,
@@ -71,7 +74,7 @@ impl Human {
         Human {
             walk: Walker::new(uid, cell, HUMAN_SPEED),
             brain: Brain::human(),
-            stats: Stats::random(rng),
+            biology: Biology::new(Stats::random(rng)),
             identity: Identity::human(rng),
             carried: None,
         }
@@ -79,7 +82,7 @@ impl Human {
 
     /// What this person's body and mind are doing right now.
     pub fn stats(&self) -> Stats {
-        self.stats
+        *self.biology.stats()
     }
 
     /// Who this person is: name and gender.
@@ -97,7 +100,17 @@ impl Human {
 
     #[cfg(test)]
     pub(crate) fn set_hunger(&mut self, hunger: f32) {
-        self.stats = self.stats.with_hunger(hunger);
+        self.biology.edit(|stats| stats.with_hunger(hunger));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_thirst(&mut self, thirst: f32) {
+        self.biology.edit(|stats| stats.with_thirst(thirst));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_bladder(&mut self, bladder: f32) {
+        self.biology.edit(|stats| stats.with_bladder(bladder));
     }
 
     #[cfg(test)]
@@ -123,17 +136,25 @@ impl GameEntity for Human {
         self.walk.apply(intent);
     }
 
-    /// Time passes for the body first, so a routine reads this tick's hunger
+    /// Time passes for the body first, so a routine reads this tick's needs
     /// and not last tick's.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
-        self.stats.metabolise(ctx.dt);
+        self.biology.advance(ctx.dt);
         self.brain.react(
             ctx,
             outcome,
             &mut self.walk,
-            Some(&mut self.stats),
+            Some(&mut self.biology),
             Some(&mut self.carried),
         );
+    }
+
+    fn biology(&self) -> Option<&Biology> {
+        Some(&self.biology)
+    }
+
+    fn biology_mut(&mut self) -> Option<&mut Biology> {
+        Some(&mut self.biology)
     }
 
     fn current_goal(&self) -> Option<GoalId> {
@@ -151,12 +172,7 @@ impl GameEntity for Human {
             "holding",
             self.carried.map_or("nothing", ItemKind::name).to_string(),
         ));
-        fields.extend(
-            self.stats
-                .fields()
-                .into_iter()
-                .map(|(name, value)| (name, format!("{value:.1}"))),
-        );
+        fields.extend(self.biology.debug_fields());
         fields
     }
 
@@ -312,12 +328,14 @@ mod tests {
         Map::new(Size::new(9, 9), FLOOR)
     }
 
-    /// A human with no appetite to speak of, so what these tests watch is
-    /// wandering and not a walk to a fridge that is not there.
+    /// A human with no needs to speak of, so what these tests watch is
+    /// wandering and not a walk to a fridge or a toilet that is not there.
     fn human(cell: Point) -> Human {
         let mut rng = SmallRng::seed_from_u64(0);
         let mut human = Human::new(Uid::new(EntityType::Human, 42), cell, &mut rng);
         human.set_hunger(0.0);
+        human.set_thirst(0.0);
+        human.set_bladder(0.0);
         human
     }
 
@@ -435,8 +453,11 @@ mod tests {
             let mut rng = SmallRng::seed_from_u64(0);
             let mut one = Human::new(Uid::new(EntityType::Human, 1), Point::new(4, 4), &mut rng);
             let mut two = Human::new(Uid::new(EntityType::Human, 2), Point::new(4, 4), &mut rng);
-            one.set_hunger(0.0);
-            two.set_hunger(0.0);
+            for human in [&mut one, &mut two] {
+                human.set_hunger(0.0);
+                human.set_thirst(0.0);
+                human.set_bladder(0.0);
+            }
             w1.step(&mut one);
             w2.step(&mut two);
             one.walk.path() != two.walk.path()
@@ -471,25 +492,28 @@ mod tests {
     }
 
     #[test]
-    fn a_dog_wanders_and_never_thinks_about_food() {
+    fn a_dog_wanders_and_never_thinks_about_its_needs() {
         let mut world = World::new(room());
         let mut rng = SmallRng::seed_from_u64(0);
         let mut dog = Dog::new(Uid::new(EntityType::Dog, 7), Point::new(4, 4), Facing::Left, &mut rng);
         let start = dog.position();
         for _ in 0..300 {
             world.step(&mut dog);
-            assert_ne!(dog.brain.top_goal(), GoalId::Eat);
+            assert_eq!(dog.brain.top_goal(), GoalId::Wander);
         }
         assert_ne!(dog.position(), start);
+        assert!(dog.biology().is_none());
     }
 
     #[test]
-    fn a_human_gets_hungrier_as_time_passes() {
+    fn a_human_s_needs_grow_as_time_passes() {
         let mut world = World::new(room());
         let mut walker = human(Point::new(4, 4));
         for _ in 0..64 {
             world.step(&mut walker);
         }
         assert!(walker.stats().hunger() > 0.0);
+        assert!(walker.stats().thirst() > 0.0);
+        assert!(walker.stats().bladder() > 0.0);
     }
 }

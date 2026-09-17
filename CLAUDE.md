@@ -10,8 +10,9 @@ What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-l
 editor backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
-actions. What those brains do so far is wander, and get hungry and eat at a fridge: enough
-for two goals to take turns, and nothing more.
+actions. What those brains do so far is wander, eat and drink at a fridge, and use a toilet
+— driven by biological processes (hunger, thirst, a bladder that a drink fills) that can be
+switched off per unit.
 
 ## Commands
 
@@ -433,7 +434,7 @@ is in force before anything thinks; the think step then hands a frozen entity an
 `Intent::Idle` instead of asking it, and the react step skips it too — its brain would
 find nothing running and ask for work every tick, a route searched for nothing each time.
 That costs a bool per entity and means a frozen entity is not deciding things nobody will
-carry out; no time passes for it, hunger included. It keeps its cell and its goal, so
+carry out; no time passes for it, its biology included. It keeps its cell and its goal, so
 letting it go again carries on rather than starting over. `GameEntity::debug_fields` is the
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
@@ -449,19 +450,30 @@ talking only to the one below:
   per-unit scan of the crowd.
 - **memory** — a `BTreeMap<String, Recall>`, empty; a `BTreeMap` so iterating it can never
   be a hash order.
-- **routines** (`KeepFedRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
+- **routines** (`NeedRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
-  (`Goals::raise_to` is a max, so two routines cannot undo each other).
+  (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
+  one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
+  `BLADDER` ("stay comfortable") — with hysteresis between a commit and a release
+  threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
+  process behind the need is switched off.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
-  `GoalExecutor` (`WanderGoal`, `EatGoal`) is a `Box` owned for the entity's life, so **its
-  fields are its saved state** across being put down and picked up. It reads stats, hands
-  and memory, and manages the task queue; it never changes the world itself.
+  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`) is a `Box` owned for
+  the entity's life, so **its fields are its saved state** across being put down and
+  picked up. It reads the body, hands and memory, and manages the task queue; it never
+  changes the world itself. **One goal per need, each in its own file**, even where two
+  plans look alike today (eating and drinking): the processes behind them will not stay
+  alike. What they share — `stand_beside`, `PATIENCE`, `WAIT_FOR_A_GAP` — is in
+  `goals/mod.rs`. A goal whose hand holds somebody else's item finishes it first, since
+  taking needs an empty hand; without that, food taken just before thirst took over makes
+  every drink fail forever.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `Wait`), `match`-dispatched so queueing
-  one allocates nothing. **A task writes its `TaskResult`** (`InProgress`, `Executing`,
-  `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only from one step
-  away), and applies what finishing means: food goes into a hand when a `TakeItem` ends,
-  not when a goal hears that it did.
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `Wait`), `match`-dispatched so
+  queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
+  `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
+  from one step away), and applies what finishing means: food goes into a hand when a
+  `TakeItem` ends, not when a goal hears that it did. A task never writes a stat — it tells
+  the body what happened (`Event::Ingested`, `Event::Relieved`), below.
 - **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
   is asked for.
 
@@ -490,9 +502,45 @@ which a walk ends in the *middle* of. `path.rs` says why corner cutting can neve
 cell the search vetted.
 
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
-a prop name (`"fridge"`) to a `FeatureKind`, and `GameState::new` indexes the map's props by
-cell once. A fridge never runs out. Adding a use for a prop is an entry there, a palette
+a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
+A name may appear more than once — `"fridge"` is both `Food` and `Water` — and `"toilet"` is
+`Toilet`. A fridge never runs out. Adding a use for a prop is an entry there, a palette
 entry in `editor/props.rs` (a test fails without one), and a goal that queues the tasks.
+
+#### Biology (`sim/biology/`)
+
+What a body does *by itself* — getting hungry, getting thirsty, a bladder filling — is a
+**process**, and `Biology` is a unit's `Stats` plus its processes. Plain Rust, inline in
+`Human`, `Copy`; a dog has none.
+
+- **One writer.** A stat is changed by a process and nothing else: `Stats`' setters are
+  private to `biology`, so the compiler holds it. A task that finishes a meal says
+  `Event::Ingested(item)`, and each process decides what that means — hunger falls by the
+  item's `nutrition`, thirst by its `hydration`, and the bladder puts that hydration *on its
+  way*. So eating something that also fills the bladder is a change to a process, not a hunt
+  through every task that consumes anything. An item says what it is made of, not what it
+  does to a body.
+- **A process** is a struct in its own file implementing `Process`: `advance(stats, dt)` for
+  time passing and `handle(event, stats)` for something happening to the body. It may keep
+  state of its own — `Bladder` holds what has been drunk but has not arrived, filling at
+  `FILLING_PER_SECOND` on top of the slow `BLADDER_PER_SECOND`. Processes run in `ProcessId`
+  order through `&mut dyn` over `Biology`'s own fields: nothing boxed, nothing allocated.
+- **Switches.** Every body has its own `Switches`, a bit per `ProcessId`, all on at spawn.
+  **Off means the process does not happen in that body at all**: its stats hold still both
+  ways, events reach it and do nothing, and `NeedRoutine` stops wanting the need it drives —
+  otherwise a human with hunger switched off at 80 would go back to the fridge forever.
+  Switched from code (`Biology::set_running`) or from outside the world with
+  `Command::SetProcess`, applied in the spawn pass like a freeze. There is no interface for
+  it yet.
+- **Adding a process** is a `ProcessId` variant, a struct and file, a field on `Biology`, and
+  its slot in `Biology::parts`/`processes` in id order (a test fails if the slots and ids
+  drift). Food reaching the bladder later is a new process between `Hunger` and `Bladder`,
+  not a change to eating.
+
+The timings, all in the files that own them: hunger `1.0`/s, thirst `1.5`/s, bladder
+`0.25`/s plus `0.5` per point of hydration drunk; take food `1.0`s and chew `2.0`s, pour
+`0.5`s and sip `1.0`s, the toilet `3.0`s. Eating and drinking commit at 60 and release at
+25, the toilet at 70 and 10.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -666,7 +714,9 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         occupancy.rs is who stands where: passability's dynamic half
                         walker.rs is the movement action; feature.rs what props are for
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action
-                        item.rs and stats.rs are what a brain's tasks change
+                        item.rs is what can be held and what it is made of
+                        biology/ is the body: Stats, and the processes that alone
+                        change them (hunger, thirst, bladder), each switchable
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed

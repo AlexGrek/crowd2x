@@ -7,7 +7,9 @@
 //! looks like is none of this module's business, and that it holds food is
 //! none of the editor's.
 //!
-//! A prop with no entry here is scenery, which today is every prop but one.
+//! A prop with no entry here is scenery, which today is every prop but the
+//! fridge and the toilet. A prop with two entries is two things at once: a
+//! fridge is food and water.
 
 use crate::map::{Map, ObjectLayer, Point};
 
@@ -15,6 +17,8 @@ use crate::map::{Map, ObjectLayer, Point};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FeatureKind {
     Food,
+    Water,
+    Toilet,
 }
 
 pub struct Feature {
@@ -25,19 +29,32 @@ pub struct Feature {
 
 /// Every prop a brain can use.
 ///
+/// A name may appear more than once, once per use: the fridge has drinks in
+/// it as well as food, rather than there being a second prop to walk to.
+///
 /// A fridge never runs out: there is no depletion state, so there is nothing
 /// about a fridge that can change during a tick, which is what lets the index
 /// below be built once and read from every thread.
-pub const FEATURES: &[Feature] = &[Feature {
-    name: "fridge",
-    kind: FeatureKind::Food,
-}];
+pub const FEATURES: &[Feature] = &[
+    Feature {
+        name: "fridge",
+        kind: FeatureKind::Food,
+    },
+    Feature {
+        name: "fridge",
+        kind: FeatureKind::Water,
+    },
+    Feature {
+        name: "toilet",
+        kind: FeatureKind::Toilet,
+    },
+];
 
-/// What a prop name is for, or `None` for scenery.
-pub fn kind_of(name: &str) -> Option<FeatureKind> {
+/// Everything a prop name is for — nothing, for scenery.
+pub fn kinds_of(name: &str) -> impl Iterator<Item = FeatureKind> + '_ {
     FEATURES
         .iter()
-        .find(|feature| feature.name == name)
+        .filter(move |feature| feature.name == name)
         .map(|feature| feature.kind)
 }
 
@@ -49,15 +66,20 @@ pub fn kind_of(name: &str) -> Option<FeatureKind> {
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Features {
     food: Vec<Point>,
+    water: Vec<Point>,
+    toilet: Vec<Point>,
 }
 
 impl Features {
     pub fn from_map(map: &Map) -> Features {
         let mut features = Features::default();
         for object in map.objects(ObjectLayer::Props) {
-            match kind_of(object.kind.as_str()) {
-                Some(FeatureKind::Food) => features.food.push(object.cell()),
-                None => {}
+            for kind in kinds_of(object.kind.as_str()) {
+                match kind {
+                    FeatureKind::Food => features.food.push(object.cell()),
+                    FeatureKind::Water => features.water.push(object.cell()),
+                    FeatureKind::Toilet => features.toilet.push(object.cell()),
+                }
             }
         }
         features
@@ -66,6 +88,8 @@ impl Features {
     fn cells(&self, kind: FeatureKind) -> &[Point] {
         match kind {
             FeatureKind::Food => &self.food,
+            FeatureKind::Water => &self.water,
+            FeatureKind::Toilet => &self.toilet,
         }
     }
 
@@ -106,14 +130,27 @@ mod tests {
     }
 
     #[test]
-    fn a_fridge_on_the_map_is_food_in_the_index_and_a_bed_is_nothing() {
+    fn a_fridge_on_the_map_is_food_and_water_in_the_index_and_a_bed_is_nothing() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         map.add_object(ObjectLayer::Props, prop("fridge", Point::new(3, 4)));
         map.add_object(ObjectLayer::Props, prop("bed 1", Point::new(6, 6)));
 
         let features = Features::from_map(&map);
-        assert_eq!(features.count(FeatureKind::Food), 1);
-        assert_eq!(features.nearest(FeatureKind::Food, Point::new(0, 0)), Some(Point::new(3, 4)));
+        for kind in [FeatureKind::Food, FeatureKind::Water] {
+            assert_eq!(features.count(kind), 1, "{kind:?}");
+            assert_eq!(features.nearest(kind, Point::new(0, 0)), Some(Point::new(3, 4)), "{kind:?}");
+        }
+        assert_eq!(features.count(FeatureKind::Toilet), 0, "a fridge is not a toilet");
+    }
+
+    #[test]
+    fn a_toilet_on_the_map_is_a_toilet_in_the_index_and_nothing_else() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        map.add_object(ObjectLayer::Props, prop("toilet", Point::new(7, 2)));
+
+        let features = Features::from_map(&map);
+        assert_eq!(features.nearest(FeatureKind::Toilet, Point::new(0, 0)), Some(Point::new(7, 2)));
+        assert_eq!(features.count(FeatureKind::Food) + features.count(FeatureKind::Water), 0);
     }
 
     #[test]

@@ -8,23 +8,25 @@
 pub mod consume_item;
 pub mod move_to;
 pub mod take_item;
+pub mod use_toilet;
 pub mod wait;
 
 pub use consume_item::ConsumeItem;
 pub use move_to::MoveTo;
 pub use take_item::TakeItem;
+pub use use_toilet::UseToilet;
 pub use wait::Wait;
 
 #[cfg(test)]
 pub(crate) mod rig {
-    //! One unit's body, hands and stomach, with no brain above them, so a task
+    //! One unit's body, hands and biology, with no brain above them, so a task
     //! executor can be run tick by tick on its own.
 
     use crate::map::{Map, Point};
+    use crate::sim::biology::{Biology, Stats};
     use crate::sim::brain::action::Action;
     use crate::sim::brain::task::{Task, TaskCtx, TaskResult};
     use crate::sim::item::ItemKind;
-    use crate::sim::stats::Stats;
     use crate::sim::testing::World;
     use crate::sim::uid::{EntityType, Uid};
     use crate::sim::walker::Walker;
@@ -34,7 +36,7 @@ pub(crate) mod rig {
         pub world: World,
         pub walk: Walker,
         pub action: Action,
-        pub stats: Stats,
+        pub biology: Biology,
         pub carried: Option<ItemKind>,
     }
 
@@ -44,7 +46,7 @@ pub(crate) mod rig {
                 world: World::new(map),
                 walk: Walker::new(Uid::new(EntityType::Human, 9), cell, 2.0),
                 action: Action::None,
-                stats: Stats::calm(),
+                biology: Biology::new(Stats::calm()),
                 carried: None,
             }
         }
@@ -56,7 +58,7 @@ pub(crate) mod rig {
                 world,
                 walk,
                 action,
-                stats,
+                biology,
                 carried,
             } = self;
             world.tick += 1;
@@ -72,7 +74,7 @@ pub(crate) mod rig {
                 outcome,
                 walk,
                 action,
-                stats: Some(stats),
+                biology: Some(biology),
                 carried: Some(carried),
             })
         }

@@ -6,8 +6,8 @@
 //! without fighting: each raises what it cares about ([`Goals::raise_to`] is a
 //! max), and the executors below never see who asked.
 
+use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
-use crate::sim::stats::Stats;
 
 use super::goal::Goals;
 
@@ -16,8 +16,9 @@ use super::goal::Goals;
 pub struct RoutineCtx<'a> {
     pub think: &'a Think<'a>,
     pub body: &'a Body,
-    /// `None` for a kind that has no needs.
-    pub stats: Option<&'a Stats>,
+    /// The body's stats and which processes are running in it. `None` for a
+    /// kind that has no needs.
+    pub biology: Option<&'a Biology>,
 }
 
 pub trait Routine: Send + Sync {

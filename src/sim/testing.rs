@@ -6,12 +6,17 @@
 //! three steps as `process_pass`, over one entity, with the move step's rules
 //! applied by hand.
 
-use crate::map::Map;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
+
+use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
+use super::kinds::Human;
 use super::log::Log;
 use super::occupancy::Occupancy;
+use super::uid::{EntityType, Uid};
 use super::{Intent, MoveOutcome};
 
 pub struct World {
@@ -79,15 +84,57 @@ impl World {
         self.lines.extend(self.log.drain());
     }
 
+    /// Everything the log has said, oldest first.
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
     pub fn log_contains(&self, needle: &str) -> bool {
         self.lines.iter().any(|line| line.contains(needle))
     }
 
     /// How many meals have been eaten here.
     pub fn meals(&self) -> usize {
-        self.lines
-            .iter()
-            .filter(|line| line.contains("ate at the fridge"))
-            .count()
+        self.count("ate at the fridge")
     }
+
+    /// How many drinks have been drunk here.
+    pub fn drinks(&self) -> usize {
+        self.count("drank at the fridge")
+    }
+
+    /// How many times a toilet has been used here.
+    pub fn reliefs(&self) -> usize {
+        self.count("used the toilet")
+    }
+
+    fn count(&self, needle: &str) -> usize {
+        self.lines.iter().filter(|line| line.contains(needle)).count()
+    }
+}
+
+/// Put the prop called `name` in the middle of `cell`, where the editor would
+/// have — a map's objects are positioned in pixels, not cells.
+pub fn prop_at(map: &mut Map, name: &str, cell: Point) {
+    map.add_object(
+        ObjectLayer::Props,
+        Object {
+            at: Point::new(
+                cell.x * PIXELS_PER_CELL + PIXELS_PER_CELL / 2,
+                cell.y * PIXELS_PER_CELL + PIXELS_PER_CELL / 2,
+            ),
+            kind: ObjectKind::new(name),
+        },
+    );
+}
+
+/// A human standing in `cell` with exactly these needs, so a test decides
+/// which of them are pressing rather than the spawn roll.
+pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human {
+    let mut rng = SmallRng::seed_from_u64(3);
+    let mut human = Human::new(Uid::new(EntityType::Human, 77), cell, &mut rng);
+    human.set_hunger(hunger);
+    human.set_thirst(thirst);
+    human.set_bladder(bladder);
+    human
 }

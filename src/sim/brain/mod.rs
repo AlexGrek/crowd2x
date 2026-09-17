@@ -5,9 +5,9 @@
 //! ```text
 //! perception   what it can see                  (a stub, for now)
 //! memory       what it remembers                (empty, for now)
-//! routines     arrange the priority list        KeepFed, StayBusy
-//! goals        the list, and who is in charge   Idle, Wander, Eat
-//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, Wait
+//! routines     arrange the priority list        Need (fed, hydrated, comfortable), StayBusy
+//! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve
+//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, UseToilet, Wait
 //! action       what a task is doing with body   pathfinding and timing only
 //! ```
 //!
@@ -70,15 +70,15 @@ pub use perception::Perception;
 pub use routine::{Routine, RoutineCtx};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
+use super::biology::Biology;
 use super::entity::Think;
 use super::item::ItemKind;
-use super::stats::Stats;
 use super::uid::Uid;
 use super::walker::Walker;
 use super::MoveOutcome;
 
-use goals::{EatGoal, WanderGoal};
-use routines::{KeepFedRoutine, StayBusyRoutine};
+use goals::{DrinkGoal, EatGoal, RelieveGoal, WanderGoal};
+use routines::{NeedRoutine, StayBusyRoutine, BLADDER, HUNGER, THIRST};
 
 pub struct Brain {
     perception: Perception,
@@ -144,16 +144,21 @@ impl Brain {
         brain
     }
 
-    /// A person: keeps fed, stays busy; wanders, eats.
+    /// A person: keeps fed, hydrated and comfortable, stays busy; wanders,
+    /// eats, drinks, uses the toilet.
     pub fn human() -> Brain {
         Brain::new(
             [
-                Box::new(KeepFedRoutine::new()) as Box<dyn Routine>,
+                Box::new(NeedRoutine::new(&HUNGER)) as Box<dyn Routine>,
+                Box::new(NeedRoutine::new(&THIRST)),
+                Box::new(NeedRoutine::new(&BLADDER)),
                 Box::new(StayBusyRoutine),
             ],
             [
                 Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
                 Box::new(EatGoal::new()),
+                Box::new(DrinkGoal::new()),
+                Box::new(RelieveGoal::new()),
             ],
         )
     }
@@ -168,14 +173,14 @@ impl Brain {
 
     /// **The pipeline.** See the module docs for the steps and their order.
     ///
-    /// `walk` is the body being driven; `stats` and `carried` are `None` for a
-    /// kind that has no needs or no hands.
+    /// `walk` is the body being driven; `biology` and `carried` are `None` for
+    /// a kind that has no needs or no hands.
     pub fn react(
         &mut self,
         ctx: &Think<'_>,
         outcome: MoveOutcome,
         walk: &mut Walker,
-        mut stats: Option<&mut Stats>,
+        mut biology: Option<&mut Biology>,
         mut carried: Option<&mut Option<ItemKind>>,
     ) {
         // Disjoint field borrows, so the compiler is what checks the steps
@@ -205,7 +210,7 @@ impl Brain {
             let routine_ctx = RoutineCtx {
                 think: ctx,
                 body: &body,
-                stats: stats.as_deref(),
+                biology: biology.as_deref(),
             };
             for routine in routines.iter_mut().flatten() {
                 routine.arrange(&routine_ctx, goals);
@@ -214,12 +219,12 @@ impl Brain {
 
         let changed = goals.settle();
         {
-            // Goals read stats and hands; only tasks, below, change them.
+            // Goals read the body and hands; only tasks, below, change them.
             let mut goal_ctx = GoalCtx {
                 think: ctx,
                 body: &body,
                 perception,
-                stats: stats.as_deref(),
+                biology: biology.as_deref(),
                 memory,
                 tasks,
                 carried: carried.as_deref(),
@@ -285,7 +290,7 @@ impl Brain {
                 outcome,
                 walk: &mut *walk,
                 action: &mut *action,
-                stats: stats.as_deref_mut(),
+                biology: biology.as_deref_mut(),
                 carried: carried.as_deref_mut(),
             });
             tasks.set_result(result);
@@ -904,6 +909,6 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, stay busy"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, stay busy"));
     }
 }

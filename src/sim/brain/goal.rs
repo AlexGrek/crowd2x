@@ -12,9 +12,9 @@
 //!
 //! [`Task`]: super::task::Task
 
+use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 use crate::sim::item::ItemKind;
-use crate::sim::stats::Stats;
 use crate::sim::uid::Uid;
 
 use super::memory::Memory;
@@ -36,17 +36,22 @@ pub enum GoalId {
     Idle = 0,
     Wander = 1,
     Eat = 2,
+    Drink = 3,
+    Relieve = 4,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 3;
-    pub const ALL: [GoalId; GoalId::COUNT] = [GoalId::Idle, GoalId::Wander, GoalId::Eat];
+    pub const COUNT: usize = 5;
+    pub const ALL: [GoalId; GoalId::COUNT] =
+        [GoalId::Idle, GoalId::Wander, GoalId::Eat, GoalId::Drink, GoalId::Relieve];
 
     pub const fn name(self) -> &'static str {
         match self {
             GoalId::Idle => "idle",
             GoalId::Wander => "wander",
             GoalId::Eat => "eat",
+            GoalId::Drink => "drink",
+            GoalId::Relieve => "relieve",
         }
     }
 
@@ -60,6 +65,8 @@ impl GoalId {
             GoalId::Idle => "💤",
             GoalId::Wander => "🚶",
             GoalId::Eat => "🍎",
+            GoalId::Drink => "💧",
+            GoalId::Relieve => "🚽",
         }
     }
 
@@ -232,7 +239,7 @@ impl Goals {
 /// Everything an executor may look at while it works, and the two things it
 /// may change: its unit's memory, and the task queue.
 ///
-/// **Stats and hands are read-only here.** A goal decides; the tasks it queues
+/// **The body and hands are read-only here.** A goal decides; the tasks it queues
 /// act — food goes into a hand when a [`TakeItem`](super::tasks::TakeItem)
 /// finishes, not when a goal hears that it did. Which also means a goal that
 /// misses hearing about a task, because something more important took over,
@@ -246,8 +253,9 @@ pub struct GoalCtx<'a> {
     pub think: &'a Think<'a>,
     pub body: &'a Body,
     pub perception: &'a Perception,
-    /// `None` for a kind that has no needs.
-    pub stats: Option<&'a Stats>,
+    /// Stats, and which processes are running. `None` for a kind that has no
+    /// needs.
+    pub biology: Option<&'a Biology>,
     pub memory: &'a mut Memory,
     pub tasks: &'a mut Tasks,
     /// What is in its hand. `None` for a kind that has no hands.
@@ -444,11 +452,19 @@ mod tests {
     #[test]
     fn the_ranked_list_is_highest_first_with_ties_in_goal_order() {
         let mut goals = Goals::new();
+        goals.raise_to(GoalId::Relieve, 0.1);
+        goals.raise_to(GoalId::Drink, 0.1);
         goals.raise_to(GoalId::Eat, 0.1);
         goals.raise_to(GoalId::Wander, 0.1);
         assert_eq!(
             goals.ranked(),
-            [(GoalId::Wander, 0.1), (GoalId::Eat, 0.1), (GoalId::Idle, 0.0)]
+            [
+                (GoalId::Wander, 0.1),
+                (GoalId::Eat, 0.1),
+                (GoalId::Drink, 0.1),
+                (GoalId::Relieve, 0.1),
+                (GoalId::Idle, 0.0)
+            ]
         );
     }
 }
