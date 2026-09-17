@@ -636,7 +636,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
     );
 
-    move_step(&mut table, map, occupancy, intents, moves);
+    move_step(&mut table, map, occupancy, features, intents, moves);
 
     // ...and as it ends this one, which is the layer a detour is worth
     // planning against. Same struct, deliberately different moment.
@@ -711,12 +711,13 @@ fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
 /// race this exists to settle, and it settles it the same way on every run.
 ///
 /// An [`Intent::Move`] is granted only if the destination cell is passable
-/// terrain *and* nobody else is standing in it. Otherwise the move is
-/// **cancelled outright** — no partial step, no sliding along the wall — and
-/// the entity is told what stopped it. Cancelling rather than trimming is what
-/// makes the outcome meaningful: "you did not get there, and this is who was
-/// in the way" is something an entity can act on, where "you got 40% of the
-/// way" is not.
+/// terrain — or a feature's cell whose [`feature::Access`] is `Entered`, the
+/// one deliberate exception — *and* nobody else is standing in
+/// it. Otherwise the move is **cancelled outright** — no partial step, no
+/// sliding along the wall — and the entity is told what stopped it.
+/// Cancelling rather than trimming is what makes the outcome meaningful: "you
+/// did not get there, and this is who was in the way" is something an entity
+/// can act on, where "you got 40% of the way" is not.
 ///
 /// A step that stays inside the entity's own cell is the common case by a wide
 /// margin — at a walking pace of two cells a second, a boundary is crossed
@@ -727,6 +728,7 @@ fn move_step(
     table: &mut FrozenEntities<'_>,
     map: &Map,
     occupancy: &mut Occupancy,
+    features: &Features,
     intents: &[Intent],
     moves: &mut [MoveOutcome],
 ) {
@@ -746,9 +748,14 @@ fn move_step(
             // Still in its own cell: it already holds this one.
             entity.apply(&intent);
             MoveOutcome::Moved
-        } else if !map.is_passable(into) {
+        } else if !map.is_passable(into) && !features.is_enterable(into) {
             // The terrain first — a wall is cheaper to hit than a crowd, and
             // off the map is impassable, so this is the bounds check too.
+            // An `Access::Entered` feature's cell is the one exception: it
+            // reads as impassable here on purpose (a route never targets it,
+            // so nobody walks through it as a shortcut) but is allowed
+            // through to the claim below, which is what actually decides
+            // whether this particular step is granted.
             MoveOutcome::Blocked { by: None }
         } else if let Err(other) = occupancy.claim(into, uid) {
             // A refused claim writes nothing, so there is nothing to undo.
@@ -1471,11 +1478,12 @@ mod tests {
             map,
             entities,
             occupancy,
+            features,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, features, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -1486,6 +1494,44 @@ mod tests {
         );
         assert_eq!(state.occupancy().occupant(contested), Some(left));
         assert_eq!(state.position_of(right), Some((6.5, 4.5)));
+    }
+
+    #[test]
+    fn an_enterable_cell_admits_one_entity_and_blocks_a_second_the_same_way_a_contested_cell_does() {
+        // A toilet's cell is impassable in the terrain, exactly like a wall
+        // — the one thing different about it is that a `Move` straight onto
+        // it is not refused out of hand, only by whoever already holds it.
+        // Two entities aimed at it on the same tick settle it exactly the way
+        // two entities aimed at the same *empty* cell do.
+        let mut map = Map::new(Size::new(6, 1), FLOOR);
+        let toilet = Point::new(3, 0);
+        crate::sim::testing::prop_at(&mut map, "toilet", toilet);
+        assert!(!map.is_passable(toilet), "a toilet blocks the terrain layer");
+
+        let mut state = GameState::new(map, 7);
+        let first = state.spawn(EntityType::Human, Point::new(2, 0));
+        let second = state.spawn(EntityType::Human, Point::new(4, 0));
+
+        for uid in [first, second] {
+            let slot = state.entities.slot_of(uid).expect("just spawned") as usize;
+            state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
+        }
+
+        let GameState {
+            map,
+            entities,
+            occupancy,
+            features,
+            intents,
+            moves,
+            ..
+        } = &mut state;
+        move_step(&mut entities.freeze(), map, occupancy, features, intents, moves);
+
+        assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
+        assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
+        assert_eq!(state.occupancy().occupant(toilet), Some(first));
+        assert_eq!(state.entities().get(second).unwrap().center_position(), Point::new(4, 0));
     }
 
     #[test]

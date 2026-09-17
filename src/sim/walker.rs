@@ -235,6 +235,20 @@ impl Walker {
         self.path.clear();
     }
 
+    /// **Step directly onto `cell`, no search.** For the one case a route
+    /// would refuse to reach: a cell that is impassable to ordinary movement
+    /// but enterable by whoever holds its claim
+    /// ([`crate::sim::feature::Access::Entered`]). [`Walker::route_to`]'s
+    /// predicate would refuse the very cell this exists to reach, and
+    /// searching for it would be pointless anyway — by the time this is
+    /// called the cell is always exactly one step away, so there is nothing
+    /// to plan. The move step still has the final say: this only sets the
+    /// route, the way [`Walker::route_to`] does, and a claim already held by
+    /// somebody else refuses the step exactly as a wall would.
+    pub fn enter(&mut self, cell: Point) {
+        self.path = Path::new(vec![cell]);
+    }
+
     /// **The reaction round for a walk in progress.** Repair the route if the
     /// world refused this tick's step, and say where the walk has got to.
     ///
@@ -474,6 +488,57 @@ mod tests {
         assert!(finished);
         let (x, y) = walker.body().position();
         assert!((x - 3.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3, "stopped at {x}, {y}");
+    }
+
+    #[test]
+    fn entering_sets_a_one_cell_route_with_no_search() {
+        // No terrain on this map would let a route reach (4, 4) at all —
+        // `enter` has to not care, because it never asks.
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        map.set_terrain(Point::new(4, 4), WALL);
+        let world = World::new(map);
+        let mut walker = walker(Point::new(3, 4));
+        let target = Point::new(4, 4);
+
+        walker.enter(target);
+        assert_eq!(walker.destination(), Some(target));
+        assert!(walker.is_walking());
+
+        for t in 0..600 {
+            let ctx = world.ctx(t);
+            let intent = walker.think(&ctx);
+            walker.apply(&intent);
+            if walker.advance(&ctx, MoveOutcome::Moved) == ActionState::Finished {
+                break;
+            }
+        }
+        assert_eq!(walker.body().center_position(), target);
+    }
+
+    #[test]
+    fn an_ordinary_route_treats_an_enterable_feature_exactly_like_a_wall() {
+        // A toilet plugging the only doorway through: an `Access::Entered`
+        // cell is impassable for `route_to` and `detour` alike, the far
+        // stage's predicate never having heard of `Features::is_enterable`.
+        // Whatever `Action::enter` lets one task do, an ordinary walk is not
+        // it — that is the whole of "still impassable for coming through
+        // it".
+        let mut map = Map::new(Size::new(9, 5), FLOOR);
+        for x in 0..9 {
+            map.set_terrain(Point::new(x, 2), WALL);
+        }
+        let toilet = Point::new(4, 2);
+        map.set_terrain(toilet, FLOOR);
+        crate::sim::testing::prop_at(&mut map, "toilet", toilet);
+        let features = Features::from_map(&map);
+        assert!(features.is_enterable(toilet), "the fixture should have made a real toilet");
+
+        let mut world = World::new(map);
+        world.features = features;
+        let mut walker = walker(Point::new(1, 1));
+
+        assert!(!walker.route_to(&world.ctx(0), Point::new(7, 4)), "the toilet is not a doorway");
+        assert!(!walker.is_walking());
     }
 
     #[test]

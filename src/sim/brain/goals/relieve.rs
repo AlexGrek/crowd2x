@@ -1,9 +1,10 @@
-//! [`RelieveGoal`]: walk to the nearest toilet and use it.
+//! [`RelieveGoal`]: walk to the nearest toilet, then into it, and use it.
 //!
 //! Two tasks — [`MoveTo`](crate::sim::brain::tasks::MoveTo) beside the toilet,
-//! [`UseToilet`](crate::sim::brain::tasks::UseToilet) — and what this goal
-//! does is choose the toilet, queue them, and decide what a failure means. The
-//! bladder emptying is the task's and the body's doing.
+//! [`UseToilet`](crate::sim::brain::tasks::UseToilet), which finishes the walk
+//! by stepping inside — and what this goal does is choose the toilet, queue
+//! them, and decide what a failure means. The bladder emptying is the task's
+//! and the body's doing.
 //!
 //! Nothing in hand matters here: a human carrying food to the toilet carries
 //! it back out again, and eats it when eating is next in charge.
@@ -23,14 +24,18 @@ pub const TOILET_SECONDS: f32 = watched(5.0 * MINUTE);
 
 /// Use the toilet.
 ///
-/// A toilet is never busy — there is no occupancy on a prop, only on the cells
-/// beside it — so the toilet it chose and how many times a body has been in the
-/// way are all there is to remember.
+/// A toilet **is** busy while somebody is inside it: entering claims its cell
+/// the same way any other movement claims a cell
+/// (`crate::sim::occupancy::Occupancy`), so a second body finding it taken is
+/// simply blocked, exactly as one standing in a doorway would be. What this
+/// goal remembers is the toilet it chose and how many times in a row either
+/// the walk there or the step inside it has been refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct RelieveGoal {
     /// The toilet, by cell.
     target: Option<Point>,
-    /// Walks to the toilet blocked by a body so far, in a row.
+    /// Walks to the toilet, or attempts to step inside it, blocked by a body
+    /// so far, in a row.
     retries: u8,
 }
 
@@ -105,18 +110,24 @@ impl GoalExecutor for RelieveGoal {
         }
 
         match (last, ctx.finished) {
-            (TaskResult::Failed, Some(Task::MoveTo(_))) => {
+            (TaskResult::Failed, Some(Task::MoveTo(_)) | Some(Task::UseToilet(_))) => {
+                // A body in the way of the walk there, or already inside the
+                // toilet when this one tried to step in — either way,
+                // something a moving body caused, so it may move again.
                 ctx.tasks.clear();
                 if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    // Somebody in the way: bodies move. Give them a moment,
-                    // then set off again.
+                    // Give them a moment, then set off again — which,
+                    // starting from beside it already, is straight back to
+                    // trying to step in.
                     self.retries += 1;
                     let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
                     if self.plan(ctx) {
                         return GoalProgress::Working;
                     }
                 }
-                // No way to the toilet, or no end to the crowd round it.
+                // No way to the toilet, no end to the crowd round it, or it
+                // is still occupied after waiting: any of them means giving
+                // up on this visit rather than retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
             }
@@ -172,6 +183,7 @@ mod tests {
     use crate::sim::brain::routines::RELIEVED;
     use crate::sim::brain::GoalId;
     use crate::sim::testing::{needy_human, prop_at, World};
+    use crate::sim::uid::{EntityType, Uid};
     use crate::sim::{GameEntity, Human};
 
     /// Bursting, and nothing else pressing.
@@ -201,7 +213,7 @@ mod tests {
             "never got there; the brain says {:?}",
             human.brain_fields()
         );
-        assert!(human.center_position().manhattan_distance(toilet) <= 1);
+        assert_eq!(human.center_position(), toilet, "should be standing inside it, not beside it");
         assert!(human.stats().bladder() <= RELIEVED, "bladder {}", human.stats().bladder());
 
         // ...and, relieved, back to wandering.
@@ -223,6 +235,63 @@ mod tests {
         assert_eq!(human.brain().top_goal(), GoalId::Wander);
         assert!(human.brain().goals().cooldown(GoalId::Relieve) > 0, "the toilet should be held off");
         assert_ne!(human.position(), start, "and it should be walking about meanwhile");
+    }
+
+    #[test]
+    fn a_toilet_already_taken_is_waited_out_and_used_once_it_frees_up() {
+        // Standing beside the toilet already, so what plays out is entirely
+        // the contention over its own cell, not a walk across the room.
+        // `occupancy.claim` by hand stands in for a second unit already
+        // inside it — the same trick `walker.rs`'s detour tests use for "a
+        // body in the way" without a second entity to drive.
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        let toilet = Point::new(6, 6);
+        prop_at(&mut map, "toilet", toilet);
+        let mut world = World::new(map);
+        let occupant = Uid::new(EntityType::Human, 999);
+        world.occupancy.claim(toilet, occupant).expect("empty at the start");
+
+        let mut human = bursting_human(Point::new(5, 6), 95.0);
+        for _ in 0..200 {
+            world.step(&mut human);
+        }
+        assert_eq!(world.reliefs(), 0, "the toilet was taken the whole time");
+
+        world.occupancy.release(toilet, occupant);
+        for _ in 0..500 {
+            world.step(&mut human);
+            if world.reliefs() > 0 {
+                break;
+            }
+        }
+        assert!(
+            world.reliefs() > 0,
+            "never got in once it was free; brain: {:?}",
+            human.brain_fields()
+        );
+        assert_eq!(human.center_position(), toilet);
+    }
+
+    #[test]
+    fn a_toilet_that_stays_taken_is_given_up_on_rather_than_retried_forever() {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        let toilet = Point::new(6, 6);
+        prop_at(&mut map, "toilet", toilet);
+        let mut world = World::new(map);
+        let occupant = Uid::new(EntityType::Human, 999);
+        world.occupancy.claim(toilet, occupant).expect("empty at the start");
+
+        // Already beside it, so no walk across the room to pay for — but the
+        // first attempt at stepping in still has to cross from beside it to
+        // the boundary of the toilet's cell before it can be refused, and
+        // each retry after that waits out `WAIT_FOR_A_GAP` in between.
+        let mut human = bursting_human(Point::new(5, 6), 95.0);
+        for _ in 0..1000 {
+            world.step(&mut human);
+        }
+        assert_eq!(world.reliefs(), 0);
+        assert_eq!(human.brain().top_goal(), GoalId::Wander);
+        assert!(human.brain().goals().cooldown(GoalId::Relieve) > 0, "the toilet should be held off");
     }
 
     #[test]

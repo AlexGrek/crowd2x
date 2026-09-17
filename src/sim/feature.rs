@@ -21,6 +21,37 @@ pub enum FeatureKind {
     Toilet,
 }
 
+/// How a feature is used: from a cell beside it, or by entering its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Access {
+    /// From a cell beside it, any number of units queuing up one after
+    /// another — the fridge, and everything before the toilet. The prop's
+    /// own cell stays off limits to everyone, as it always has
+    /// (`goals::stand_beside` never offers it).
+    Beside,
+    /// From inside its own cell, one unit at a time. The cell is impassable
+    /// to ordinary movement — nobody routes through it and nobody walks
+    /// through it — but the move step lets exactly one unit *in*, once a
+    /// task asks for it by entering directly
+    /// (`crate::sim::brain::action::Action::enter`) rather than by an
+    /// ordinary route, which a search would refuse.
+    ///
+    /// [`crate::sim::occupancy::Occupancy`] is the taken/free state: the
+    /// unit standing in the cell holds the claim, and the cell is free again
+    /// the instant it leaves — the same bookkeeping every other cell already
+    /// gets from ordinary movement, asked of one more kind of cell.
+    Entered,
+}
+
+impl FeatureKind {
+    pub const fn access(self) -> Access {
+        match self {
+            FeatureKind::Food | FeatureKind::Water => Access::Beside,
+            FeatureKind::Toilet => Access::Entered,
+        }
+    }
+}
+
 pub struct Feature {
     /// The prop name, exactly as the palette and the map file spell it.
     pub name: &'static str,
@@ -68,21 +99,38 @@ pub struct Features {
     food: Vec<Point>,
     water: Vec<Point>,
     toilet: Vec<Point>,
+    /// Cells whose kind is [`Access::Entered`] — gathered once, across every
+    /// kind, so the move step can ask "can anyone at all step in here"
+    /// without knowing what the feature is for. A handful of cells on any
+    /// real map, so a linear scan is what asking it costs.
+    entered: Vec<Point>,
 }
 
 impl Features {
     pub fn from_map(map: &Map) -> Features {
         let mut features = Features::default();
         for object in map.objects(ObjectLayer::Props) {
+            let cell = object.cell();
             for kind in kinds_of(object.kind.as_str()) {
                 match kind {
-                    FeatureKind::Food => features.food.push(object.cell()),
-                    FeatureKind::Water => features.water.push(object.cell()),
-                    FeatureKind::Toilet => features.toilet.push(object.cell()),
+                    FeatureKind::Food => features.food.push(cell),
+                    FeatureKind::Water => features.water.push(cell),
+                    FeatureKind::Toilet => features.toilet.push(cell),
+                }
+                if kind.access() == Access::Entered && !features.entered.contains(&cell) {
+                    features.entered.push(cell);
                 }
             }
         }
         features
+    }
+
+    /// Whether `cell` is a feature that must be entered to use, and so may
+    /// be stepped onto — by whoever currently holds it, via
+    /// [`crate::sim::occupancy::Occupancy`] — despite being impassable to
+    /// ordinary movement. See [`Access::Entered`].
+    pub fn is_enterable(&self, cell: Point) -> bool {
+        self.entered.contains(&cell)
     }
 
     fn cells(&self, kind: FeatureKind) -> &[Point] {
@@ -184,5 +232,26 @@ mod tests {
     fn a_world_with_no_fridge_has_nowhere_to_eat() {
         let map = Map::new(Size::new(4, 4), FLOOR);
         assert_eq!(Features::from_map(&map).nearest(FeatureKind::Food, Point::new(1, 1)), None);
+    }
+
+    #[test]
+    fn a_toilet_is_entered_and_a_fridge_is_touched() {
+        assert_eq!(FeatureKind::Toilet.access(), Access::Entered);
+        assert_eq!(FeatureKind::Food.access(), Access::Beside);
+        assert_eq!(FeatureKind::Water.access(), Access::Beside);
+    }
+
+    #[test]
+    fn a_toilets_cell_is_enterable_and_a_fridges_is_not() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let toilet = Point::new(7, 2);
+        let fridge = Point::new(3, 4);
+        map.add_object(ObjectLayer::Props, prop("toilet", toilet));
+        map.add_object(ObjectLayer::Props, prop("fridge", fridge));
+
+        let features = Features::from_map(&map);
+        assert!(features.is_enterable(toilet));
+        assert!(!features.is_enterable(fridge));
+        assert!(!features.is_enterable(Point::new(0, 0)), "a plain empty cell");
     }
 }

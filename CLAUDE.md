@@ -354,8 +354,10 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   prop takes **the cell its centre falls in** (`Object::cell`) and no other: passability is
   a whole-cell fact, the rule bodies follow too, so tall art overhanging the cell above does
   not wall it off. A prop name this build does not know blocks, as unknown terrain does.
-  Spawners never block. The consequence for the brain is that a feature is used *from
-  beside it*, never from its own cell (`goals::stand_beside`).
+  Spawners never block. The consequence for the brain is that a feature is normally used
+  *from beside it*, never from its own cell (`goals::stand_beside`) — the toilet is the one
+  exception, used by entering, and "The brain" below says how a cell can stay impassable
+  here and still be walked into by exactly one unit.
 - **Passability is derived, never authored.** `PassabilityMap` is one bit per cell: a cell
   is passable when its terrain is and no blocking prop stands in it. Kept in sync by
   `Map::set_terrain`, `add_object` and `remove_object` (floor painted under a fridge stays
@@ -556,6 +558,23 @@ A name may appear more than once — `"fridge"` is both `Food` and `Water` — a
 blocks its own. Adding a use for a prop is an entry there, a palette entry in
 `editor/props.rs` and a `map::PROPS` entry (tests fail without them), and a goal that
 queues the tasks.
+
+Every `FeatureKind` also has an `Access`: `Beside` (the fridge, touched from next to it) or
+`Entered` (the toilet, used by walking *into* it). An `Entered` cell stays impassable in
+`map::PassabilityMap` — nobody routes through it, and an ordinary walk refuses it exactly
+like a wall — but `sim::move_step` lets a `Move` straight onto it through to `Occupancy`,
+which is the taken/free state: whoever is standing there holds the claim, and the cell is
+free again the moment they leave, the same bookkeeping any other cell already gets from
+ordinary movement. A task gets there by starting an `Action::enter`, which sets the walker's
+route directly rather than asking for one — the one cell it targets is exactly the one a
+search would refuse, and by the time it is asked for it is always a single step away.
+`UseToilet` is the pattern for a task built on `Entered` access: it starts by entering, and
+once `ctx.here()` is the feature's own cell, carries on exactly as a `Beside` task would.
+
+When `UseToilet` fails because the cell was already taken, `blocked_by` names the occupant —
+the same signal a `MoveTo` refused by a body in the way carries — so `RelieveGoal` treats the
+two failures alike: wait it out (`WAIT_FOR_A_GAP`, up to `PATIENCE` times), then give up and
+be held off by `BLOCKED_TICKS` like any other goal that found itself impossible.
 
 #### Biology (`sim/biology/`)
 

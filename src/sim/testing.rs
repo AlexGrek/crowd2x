@@ -69,7 +69,11 @@ impl World {
                 if into == from {
                     entity.apply(&intent);
                     MoveOutcome::Moved
-                } else if !self.map.is_passable(into) {
+                } else if !self.map.is_passable(into) && !self.features.is_enterable(into) {
+                    // Kept in step with `sim::move_step`'s own exception for
+                    // an `Access::Entered` feature — see that function's
+                    // docs for why the cell is let through to the claim
+                    // below rather than refused outright.
                     MoveOutcome::Blocked { by: None }
                 } else if let Err(other) = self.occupancy.claim(into, uid) {
                     MoveOutcome::Blocked { by: Some(other) }

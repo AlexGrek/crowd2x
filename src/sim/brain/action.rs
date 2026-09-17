@@ -51,6 +51,16 @@ impl Action {
         })
     }
 
+    /// Walk directly onto `cell` — see [`Walker::enter`]. Like
+    /// [`Action::walk_to`] but skipping the search: the one cell this exists
+    /// to reach is exactly the one a route would refuse, and by the time
+    /// this is called it is always one step away, so there is nothing to
+    /// plan.
+    pub fn enter(walk: &mut Walker, cell: Point) -> Action {
+        walk.enter(cell);
+        Action::Move { to: cell, elapsed: 0.0 }
+    }
+
     pub const fn interact(cell: Point, seconds: f32) -> Action {
         Action::Interact {
             cell,
