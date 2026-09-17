@@ -309,7 +309,7 @@ still answers to `Activated` so a QA script can press it by name.
 #### The two corners (`game/hud.rs`)
 
 The screen is laid out as **the view on the left and the world on the right**: `- x4 +`
-over the map's name, size, crowd and tick count top left; `slower x1 faster pause spawn
+over the map's name, size, crowd, tick count and the world's clock top left; `slower x1 faster pause spawn
 menu` over the log top right, because the log is the readout for exactly those controls.
 
 **Nothing here is `Focusable`,** and that is forced: the arrows pan the camera on this
@@ -458,6 +458,29 @@ letting it go again carries on rather than starting over. `GameEntity::debug_fie
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
 
+#### What a second is (`sim/clock.rs`)
+
+**A second of watching is two minutes of world** (`TIME_SCALE`), so an hour goes by in
+thirty seconds and a day in twelve minutes. `GameState::clock` is that time of day,
+derived from `elapsed` rather than counted beside it, and the HUD's left corner shows it.
+
+Which leaves a tick measuring two different things, and the unit a duration is written in
+says which:
+
+- **What is watched happening** is on the watched clock: `Think::dt`, the fixed timestep.
+  A walk crosses cells at a pace a person can follow, and `WAIT_FOR_A_GAP` is half a
+  second of standing aside for somebody. Scaling these would make a crowd teleport — a
+  tick is two minutes of world, and nobody should cross a room between two frames.
+- **What the world's clock governs** is on `Think::game_dt`, a hundred and twenty times as
+  much: the biology, and nothing else so far. Getting hungry takes hours, and hours are
+  what that clock counts.
+
+A duration that is *watched* but means something in world time is written as
+`watched(15.0 * MINUTE)` — a quarter of an hour of eating, seven and a half seconds of
+watching it — so even those say what the world thinks is going on. The game speed
+multiplies how many *ticks* happen, so it moves both clocks together and 4x is the same
+world watched faster.
+
 #### The brain (`sim/brain/`)
 
 What an entity does with all this is decided by a `Brain`, which runs entirely in
@@ -564,10 +587,18 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   drift). Food reaching the bladder later is a new process between `Hunger` and `Bladder`,
   not a change to eating.
 
-The timings, all in the files that own them: hunger `1.0`/s, thirst `1.5`/s, bladder
-`0.25`/s plus `0.5` per point of hydration drunk; take food `1.0`s and chew `2.0`s, pour
-`0.5`s and sip `1.0`s, the toilet `3.0`s. Eating and drinking commit at 60 and release at
-25, the toilet at 70 and 10.
+**The rates are in world time, and they are a person's**, which is what the time scale
+above is for: full to starving in 8 hours, quenched to parched in 5, an untouched bladder
+full in 6 — plus `0.5` of a bladder per point of hydration drunk, arriving over the half
+hour after the drink. So a human eats three or four times a day, drinks rather more often,
+and goes to the toilet after a drink; at 1x that is a meal every couple of minutes of
+watching, and the speed control is for watching a day go by. Every rate is written as
+`100.0 / (hours * HOUR)` in the file that owns it, so the number in the source is the
+number of hours.
+
+The doing is in world time too, converted at the point it is defined: 2 minutes to take
+food out of a fridge and 15 to eat it, 1 to pour a drink and 2 to drink it, 5 on the
+toilet. Eating and drinking commit at 60 and release at 25, the toilet at 70 and 10.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -678,7 +709,7 @@ are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_selected`, `expect_log` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_selected`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -738,6 +769,7 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
+                        clock.rs is what a second is: 1s watched = 2min of world
                         occupancy.rs is who stands where: passability's dynamic half
                         walker.rs is the movement action; feature.rs what props are for
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action

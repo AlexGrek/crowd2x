@@ -21,9 +21,15 @@ use crate::map::Point;
 use super::goal::GoalCtx;
 
 /// How long to stand aside for somebody who is in the way before trying the
-/// same walk again, in seconds. About as long as the old replan delay was,
-/// for the same reason: long enough for a body to move, short enough that
-/// nobody looks stuck.
+/// same walk again. About as long as the old replan delay was, for the same
+/// reason: long enough for a body to move, short enough that nobody looks
+/// stuck.
+///
+/// **Watched seconds, and written as watched seconds** — the one duration in
+/// the brain that is not about world time at all. What it waits for is another
+/// *body* getting out of the way, and bodies move at the pace they are watched
+/// moving at ([`crate::sim::clock`]); a minute of world here would be half a
+/// step of somebody else's walk.
 pub const WAIT_FOR_A_GAP: f32 = 0.5;
 
 /// How many times in a row a walk blocked by a body is retried before the goal

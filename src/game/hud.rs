@@ -4,7 +4,7 @@
 //! ```text
 //! +---------------------------------------------------------------+
 //! | [-] x4 [+]              [slower] x1 [faster] [pause] [menu]    |
-//! | map, crowd, tick                        what the world is doing |
+//! | map, crowd, clock                       what the world is doing |
 //! |                                                               |
 //! |                       the map                                 |
 //! +---------------------------------------------------------------+
@@ -41,7 +41,7 @@ use bevy::prelude::*;
 use crate::editor::{background, CurrentMap};
 use crate::map::{Map, Point};
 use crate::render::{CameraPan, PixelZoom, WorldCamera};
-use crate::sim::EntityType;
+use crate::sim::{Clock, EntityType, GameState};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
@@ -151,7 +151,7 @@ enum Readout {
     Speed,
     /// The pause button's own label, which flips to `resume`.
     Pause,
-    /// The map, the size of the crowd and the tick count.
+    /// The map, the size of the crowd, the tick count and the time of day.
     Stats,
 }
 
@@ -657,7 +657,7 @@ pub(super) fn close_spawn_menu(commands: &mut Commands, menu: &mut SpawnMenu, sc
 /// Keep every readout saying what is true.
 ///
 /// Each asks its own source whether it changed, except the stats — the tick
-/// count moves every fixed step, so there is nothing to ask.
+/// count and the clock move every fixed step, so there is nothing to ask.
 fn update_readouts(
     zoom: Res<PixelZoom>,
     speed: Res<GameSpeed>,
@@ -665,7 +665,7 @@ fn update_readouts(
     sim: Option<Res<Sim>>,
     mut texts: Query<(Ref<Readout>, &mut Text)>,
 ) {
-    let running = sim.as_ref().map(|sim| (sim.0.len(), sim.0.tick()));
+    let world = sim.as_deref().map(|sim| &sim.0);
 
     for (kind, mut text) in &mut texts {
         // `is_added` matters on a second visit: the HUD is respawned empty and
@@ -675,7 +675,7 @@ fn update_readouts(
             Readout::Zoom if fresh || zoom.is_changed() => format!("x{}", zoom.get()),
             Readout::Speed if fresh || speed.is_changed() => speed.label(),
             Readout::Pause if fresh || speed.is_changed() => speed.toggle_label().to_string(),
-            Readout::Stats => stats(&current, running),
+            Readout::Stats => stats(&current, world),
             // Nothing this readout is about has moved.
             _ => continue,
         };
@@ -687,15 +687,21 @@ fn update_readouts(
     }
 }
 
-fn stats(current: &CurrentMap, running: Option<(usize, u64)>) -> String {
+/// The map, the crowd, and what time it is in there.
+///
+/// The clock is the world's own — a second of watching is two minutes of it
+/// ([`crate::sim::clock`]) — and it sits under the tick count rather than
+/// replacing it: a tick is what a QA script and a profile count in, and the
+/// time of day is what somebody watching a crowd get hungry wants.
+fn stats(current: &CurrentMap, world: Option<&GameState>) -> String {
     let size = current.map.size();
-    let (actors, tick) = running.unwrap_or((0, 0));
     format!(
-        "map    {}  {}x{}\nactors {}  tick {}",
+        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}",
         current.title(),
         size.width,
         size.height,
-        actors,
-        tick,
+        world.map_or(0, GameState::len),
+        world.map_or(0, GameState::tick),
+        world.map_or_else(|| Clock::after_watching(0.0), GameState::clock),
     )
 }

@@ -1,0 +1,36 @@
+{
+  "name": "the world's clock runs at two minutes to the watched second",
+  "state": "game",
+  "given": {
+    "maps": [{ "name": "yard", "file": "qa/fixtures/yard.json" }]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a world opens at eight in the morning on day one, and the corner says so" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "shot": "a world that has just opened" },
+
+    { "note": "1920 ticks is thirty seconds of watching at 64Hz, and thirty seconds of" },
+    { "note": "watching is an hour of world: the clock should read about nine o'clock" },
+    { "tick": 1920 },
+    { "expect_world_time": { "hours": 1.0 } },
+    { "shot": "an hour of world later" },
+
+    { "note": "and eight more minutes of watching is the rest of the day: past midnight," },
+    { "note": "which is the point of showing which day it is beside the time" },
+    { "tick": 30720 },
+    { "expect_world_time": { "hours": 17.0 } },
+    { "shot": "day two, an hour after midnight" },
+
+    { "note": "somebody spawned into the middle of the night is spawned at that time too" },
+    { "spawn": { "kind": "human", "x": 4, "y": 4 } },
+    { "tick": 64 },
+    { "expect_entities": 1 },
+    { "expect_world_time": { "hours": 17.0 } },
+
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

@@ -9,14 +9,17 @@
 //! it back out again, and eats it when eating is next in charge.
 
 use crate::map::Point;
+use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
 
-/// Seconds spent on the toilet.
-pub const TOILET_SECONDS: f32 = 3.0;
+/// Five world minutes on the toilet — two and a half seconds of watching,
+/// written in world units like every duration a body is watched standing
+/// through (see [`crate::sim::clock`]).
+pub const TOILET_SECONDS: f32 = watched(5.0 * MINUTE);
 
 /// Use the toilet.
 ///

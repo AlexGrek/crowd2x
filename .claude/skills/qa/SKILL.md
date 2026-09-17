@@ -181,6 +181,7 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
+| `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
 | `{"expect_scaling": {"from": "100 humans", "to": "1000 humans", "slack": 1.5}}` | Cost per entity did not grow with the crowd. |
 
@@ -192,6 +193,12 @@ holding three entities and the screen showing three actors are separate claims, 
 second is the one that catches a renderer that has quietly stopped keeping up — which is
 the failure a screenshot is worst at showing, because a missing sprite looks like an
 actor that walked off the edge of the view.
+
+`expect_world_time` is a **floor**, not an equality, and that is not slack: a second of
+watching is two minutes of world (`sim/clock.rs`), and the game runs its own fixed steps
+between a script's steps, so a world is always a little further along than the ticks the
+script asked for. The floor still says everything it needs to — a build that had lost the
+time scale would be an hour short of it, not a minute.
 
 `expect_log` reads the log *panel*'s lines, not the queue. The queue is drained as it is
 displayed, so asking it directly would be a race with the system emptying it — and the

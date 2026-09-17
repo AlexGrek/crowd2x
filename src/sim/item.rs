@@ -11,17 +11,25 @@
 //! eaten, so a drink filling a bladder is the bladder's doing, not the
 //! water's.
 
+use super::clock::{watched, MINUTE};
+
 /// How nourishing one meal is: the hunger it takes away.
 pub const MEAL: f32 = 60.0;
 
 /// How much water one drink is: the thirst it takes away.
 pub const DRINK: f32 = 60.0;
 
-/// Seconds spent eating food.
-pub const CHEW_SECONDS: f32 = 2.0;
+/// Time spent eating food: a quarter of an hour at the table, seven and a half
+/// seconds of watching it.
+///
+/// Written in world minutes and converted, like every duration a body is
+/// *watched* standing through — the action's own clock is the watched one
+/// (see [`crate::sim::clock`]), and this is what that quarter hour comes to on
+/// it.
+pub const CHEW_SECONDS: f32 = watched(15.0 * MINUTE);
 
-/// Seconds spent drinking water: half as long as a meal.
-pub const SIP_SECONDS: f32 = 1.0;
+/// Time spent drinking water: a couple of minutes, a fraction of a meal.
+pub const SIP_SECONDS: f32 = watched(2.0 * MINUTE);
 
 /// What is being held.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -123,6 +123,7 @@
 
 pub mod biology;
 pub mod brain;
+pub mod clock;
 pub mod entities;
 pub mod entity;
 pub mod feature;
@@ -146,6 +147,7 @@ use crate::map::{Map, Point};
 
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
+pub use clock::Clock;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
@@ -380,10 +382,24 @@ impl GameState {
         self.tick
     }
 
-    /// Simulated seconds since the world was created. `f64` because at 60Hz an
-    /// `f32` stops being able to represent whole ticks after a few hours.
+    /// Watched seconds since the world was created — how long somebody has
+    /// been looking at it, not how much world has gone by. `f64` because at
+    /// 60Hz an `f32` stops being able to represent whole ticks after a few
+    /// hours.
+    ///
+    /// [`GameState::clock`] is the same number in the world's own units, and
+    /// is what anything about the world's time of day should ask.
     pub fn elapsed(&self) -> f64 {
         self.elapsed
+    }
+
+    /// What time it is in the world: a second of watching is two minutes here
+    /// ([`clock::TIME_SCALE`]).
+    ///
+    /// Derived from [`GameState::elapsed`] rather than counted beside it, so
+    /// there is one clock and no way for two to disagree.
+    pub fn clock(&self) -> Clock {
+        Clock::after_watching(self.elapsed)
     }
 
     /// An id nobody in this world holds.
@@ -1070,6 +1086,22 @@ mod tests {
         // 1e-7 of a second, and tightening this would only be asserting that
         // binary floating point works differently than it does.
         assert!((state.elapsed() - 1.0).abs() < 1e-6, "{}", state.elapsed());
+    }
+
+    /// The time scale, seen from the outside: a second of watching is two
+    /// minutes of world, and the world's clock is what says so.
+    #[test]
+    fn a_second_of_watching_moves_the_world_clock_two_minutes() {
+        let mut state = world();
+        assert_eq!(state.clock().time(), "08:00:00");
+
+        run(&mut state, 60);
+        assert_eq!(state.clock().time(), "08:02:00");
+        assert_eq!(state.clock().day(), 1);
+
+        // Half an hour of world, which is fifteen seconds of watching.
+        run(&mut state, 14 * 60);
+        assert_eq!(state.clock().time(), "08:30:00");
     }
 
     #[test]

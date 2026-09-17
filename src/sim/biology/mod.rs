@@ -20,9 +20,16 @@
 //!
 //! One struct, one file, two hooks:
 //!
-//! * [`Process::advance`] — `dt` seconds going by. Hunger rising.
+//! * [`Process::advance`] — `dt` **world** seconds going by. Hunger rising.
 //! * [`Process::handle`] — something happened to the body. Hunger falling
 //!   because food was eaten; a bladder filling because water was drunk.
+//!
+//! Every rate here is per world second, and a world second is a hundred and
+//! twentieth of a watched one ([`crate::sim::clock`]): a body ages on the
+//! world's clock, because getting hungry takes hours and hours are what that
+//! clock counts. `Think::game_dt` is what a caller hands
+//! [`Biology::advance`]; handing it `dt` would make a day's worth of hunger
+//! take a day.
 //!
 //! A process may keep state of its own between the two (a [`Bladder`] keeps
 //! what has been drunk but has not reached it yet), which is what a more
@@ -136,7 +143,8 @@ pub enum Event {
 pub trait Process {
     fn id(&self) -> ProcessId;
 
-    /// `dt` seconds of this process going on.
+    /// `dt` **world** seconds of this process going on — the scale every rate
+    /// in this module is written at.
     fn advance(&mut self, stats: &mut Stats, dt: f32);
 
     /// Something happened to the body. Most processes care about few events,
@@ -194,8 +202,10 @@ impl Biology {
         self.switches = self.switches.with(process, running);
     }
 
-    /// Time passing: `dt` seconds of every running process, in [`ProcessId`]
-    /// order.
+    /// Time passing: `dt` **world** seconds of every running process, in
+    /// [`ProcessId`] order. That is
+    /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's
+    /// own `dt`.
     pub fn advance(&mut self, dt: f32) {
         let (stats, switches, processes) = self.parts();
         for process in processes {
@@ -270,6 +280,7 @@ impl Biology {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::clock::HOUR;
     use crate::sim::item::MEAL;
 
     fn calm() -> Biology {
@@ -314,7 +325,7 @@ mod tests {
     #[test]
     fn time_moves_every_running_process() {
         let mut biology = calm();
-        biology.advance(10.0);
+        biology.advance(HOUR);
         let stats = biology.stats();
         assert!(stats.hunger() > 50.0 && stats.thirst() > 50.0 && stats.bladder() > 50.0, "{stats:?}");
     }
@@ -324,7 +335,7 @@ mod tests {
         let mut biology = calm();
         biology.set_running(ProcessId::Hunger, false);
 
-        biology.advance(10.0);
+        biology.advance(HOUR);
         assert_eq!(biology.stats().hunger(), 50.0, "time passing");
         biology.handle(Event::Ingested(ItemKind::Food));
         assert_eq!(biology.stats().hunger(), 50.0, "a meal");

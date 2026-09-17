@@ -24,7 +24,7 @@ writing any of them.
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
 | feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
-| process | *what does a body do by itself?* | its stats, `dt`, events | **the only writer of stats** | `sim/biology/` |
+| process | *what does a body do by itself?* | its stats, **world** `dt`, events | **the only writer of stats** | `sim/biology/` |
 
 **Goals decide, tasks act, processes change the body.** A goal never writes the body or hands
 (`GoalCtx` gives it read-only references for exactly this reason). Food goes into a hand when
@@ -143,6 +143,15 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 16. **Off means off.** A `Need` names its `ProcessId`; `NeedRoutine` wants nothing while that
     process is switched off in the body. A routine that read the stat alone would chase a
     number that can no longer move.
+
+17. **There are two clocks, and a duration says which it is on** (`sim/clock.rs`). A second
+    of watching is two minutes of world.
+    - A **process** is handed `Think::game_dt` — world seconds. Write its rate as
+      `100.0 / (hours * HOUR)`, because a body's needs are in hours.
+    - Everything **watched** — a walk, an action being stood through, `WAIT_FOR_A_GAP` — is
+      measured in `Think::dt`, watched seconds, or a crowd teleports. A duration there that
+      means something in world time is written `watched(15.0 * MINUTE)` and converted at the
+      point it is defined.
 
 </rules>
 

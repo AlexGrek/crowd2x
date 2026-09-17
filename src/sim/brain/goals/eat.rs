@@ -13,6 +13,7 @@
 //! and the body's doing, not this goal's.
 
 use crate::map::Point;
+use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 use crate::sim::item::ItemKind;
 
@@ -20,9 +21,9 @@ use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
 
-/// Seconds spent at the fridge getting food out of it. Eating it takes
-/// [`CHEW_SECONDS`](crate::sim::item::CHEW_SECONDS).
-pub const TAKE_SECONDS: f32 = 1.0;
+/// A couple of world minutes at the fridge getting food out of it. Eating it
+/// takes [`CHEW_SECONDS`](crate::sim::item::CHEW_SECONDS).
+pub const TAKE_SECONDS: f32 = watched(2.0 * MINUTE);
 
 /// Where a meal has got to, for a debugger — the queue is what the meal
 /// actually is.

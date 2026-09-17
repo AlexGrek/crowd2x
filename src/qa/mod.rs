@@ -1013,6 +1013,19 @@ fn perform(
                 .ok_or(format!("expected {wanted} entities, found {actual}"))
         }
 
+        Step::ExpectWorldTime { hours } => {
+            let clock = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0
+                .clock();
+            let gone_by = clock.elapsed() / crate::sim::clock::HOUR as f64;
+            (gone_by >= *hours).then_some(Next::Now).ok_or(format!(
+                "expected at least {hours:.2} hours of world, found {gone_by:.2} ({clock})"
+            ))
+        }
+
         Step::ExpectSprites(wanted) => {
             let actual = checks.sprites.iter().count();
             (actual == *wanted)

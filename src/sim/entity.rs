@@ -312,7 +312,13 @@ pub struct Think<'a> {
     /// Where the props a brain can use are — fridges, so far. Built once with
     /// the world, so reading it is a scan of a handful of cells.
     pub features: &'a super::feature::Features,
-    /// Seconds since the previous tick.
+    /// **Watched** seconds since the previous tick: what a body *moves* by.
+    ///
+    /// A walk, an action being stood through, a pause to let somebody past —
+    /// everything measured in front of the player is measured with this. What
+    /// the world's clock governs is [`Think::game_dt`] instead, which is a
+    /// hundred and twenty times as much; [`crate::sim::clock`] says why the
+    /// two are different numbers.
     pub dt: f32,
     /// Which tick this is. Deterministic, so it is usable as an RNG seed
     /// alongside an entity's own id.
@@ -320,6 +326,20 @@ pub struct Think<'a> {
 }
 
 impl Think<'_> {
+    /// **World** seconds since the previous tick: what a body *ages* by.
+    ///
+    /// The same slice of time as [`Think::dt`], read off the world's clock
+    /// rather than the player's — so a tick at 64Hz is not a sixty-fourth of a
+    /// second of getting hungry but nearly two seconds of it. Every rate a
+    /// [`Process`](crate::sim::biology::Process) is written with is per one of
+    /// these.
+    ///
+    /// Derived rather than carried: one `dt` arrives from the outside, and a
+    /// second field would be a second thing that could be wrong.
+    pub fn game_dt(&self) -> f32 {
+        self.dt * super::clock::TIME_SCALE
+    }
+
     /// Whether the *terrain* would let an entity stand in `cell`. The static
     /// half, and the only half the far stage of a path is planned against.
     pub fn is_passable(&self, cell: Point) -> bool {

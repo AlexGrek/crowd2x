@@ -268,6 +268,12 @@ One super-object, one entry point. Bevy renders it, reads the devices, runs the 
 draws the UI; it decides nothing. `src/game/actors.rs` is the entire bridge and is worth
 reading before adding to either side.
 
+`dt` there is **watched** seconds, the fixed timestep — and a second of watching is two
+minutes of world (`sim/clock.rs`, `TIME_SCALE`). Everything that is watched happening (a
+walk, an action being stood through) is measured with it; the world's clock and the bodies
+it governs run on `Think::game_dt`, a hundred and twenty times as much. A duration that is
+watched but means something in world time is written `watched(15.0 * MINUTE)`.
+
 **Do not** add a Bevy system that decides something, a `Component` holding agent state, or
 a second function that advances the world. Add an entity kind (`sim/kinds.rs`), an
 `Intent` variant, or a `Command`.

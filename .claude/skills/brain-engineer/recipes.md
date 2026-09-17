@@ -38,10 +38,17 @@ A new process is its own file. Copy `biology/hunger.rs` for a stateless one and
 ```rust
 //! [`Tiredness`]: more tired with time, rested by sleeping.
 
+use crate::sim::clock::HOUR;
+
 use super::{Event, Process, ProcessId, Stats};
 
-/// Stamina lost per second. [Say what the number means in play time.]
-pub const STAMINA_PER_SECOND: f32 = 0.2;
+/// World hours from rested to exhausted. [A process runs on the world's clock
+/// — `Think::game_dt`, two minutes to the watched second — so say what the
+/// number means in hours of a person's day, not in seconds of watching.]
+pub const HOURS_TO_EXHAUSTED: f32 = 16.0;
+
+/// Stamina lost per world second.
+pub const STAMINA_PER_SECOND: f32 = 100.0 / (HOURS_TO_EXHAUSTED * HOUR);
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]   // Copy: Biology is inline in Human
 pub struct Tiredness;
@@ -51,7 +58,7 @@ impl Process for Tiredness {
         ProcessId::Tiredness
     }
 
-    /// Time passing.
+    /// Time passing, in world seconds.
     fn advance(&mut self, stats: &mut Stats, dt: f32) {
         stats.change_stamina(-STAMINA_PER_SECOND * dt);
     }
@@ -304,7 +311,7 @@ whatever else is in hand (see `EatGoal::plan`). Otherwise `TakeItem` fails forev
 
 `GoalCtx` gives you:
 
-- `think` — map, occupancy, log, features, `dt`, `tick`;
+- `think` — map, occupancy, log, features, `dt` (watched) and `game_dt()` (world), `tick`;
 - `body` (a copy), `perception`;
 - `biology: Option<&Biology>` and `carried: Option<&Option<ItemKind>>`, both **read-only**;
 - `memory: &mut Memory`, `tasks: &mut Tasks`;

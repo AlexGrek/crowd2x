@@ -138,8 +138,11 @@ impl GameEntity for Human {
 
     /// Time passes for the body first, so a routine reads this tick's needs
     /// and not last tick's.
+    ///
+    /// The world's clock, not the player's: a body gets hungry over hours, and
+    /// an hour is thirty seconds of watching ([`crate::sim::clock`]).
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
-        self.biology.advance(ctx.dt);
+        self.biology.advance(ctx.game_dt());
         self.brain.react(
             ctx,
             outcome,

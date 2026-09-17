@@ -348,6 +348,16 @@ pub enum Step {
     },
     /// How many entities are alive in the simulation.
     ExpectEntities(usize),
+    /// That at least this many hours have gone by on the **world's** clock —
+    /// a hundred and twenty times as fast as the one the test is watched on
+    /// (`sim::clock`).
+    ///
+    /// A floor rather than an equality, and that is not slack: the game runs
+    /// its own fixed steps between a script's steps, so a world is always a
+    /// little further along than the ticks a script asked for. The floor still
+    /// says everything it needs to — a build that had lost the time scale
+    /// would be an hour short of it, not a minute.
+    ExpectWorldTime { hours: f64 },
     /// That the simulation has said something containing this text.
     ///
     /// Reads the log panel's own lines rather than the queue: the queue is
