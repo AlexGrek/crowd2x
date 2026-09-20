@@ -24,6 +24,7 @@ writing any of them.
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
 | feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
+| inventory | *what is being carried, and does it still fit?* | its own slots | only a task writes it | `sim/inventory.rs` |
 | process | *what does a body do by itself?* | its stats, **world** `dt`, events | **the only writer of stats** | `sim/biology/` |
 
 **Goals decide, tasks act, processes change the body.** A goal never writes the body or hands
@@ -65,7 +66,7 @@ This order has consequences:
 | do a new kind of single step ("sit", "open door") | a **task executor** |
 | show a new kind of body activity (animation) | an **action** variant |
 | use a prop on the map | a **feature** entry (+ palette entry if the prop is new) |
-| carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`) |
+| carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`, `mass`, `volume`) |
 | change *when* something is chosen | the routine's priority curve, not the goal |
 | change *how* something is done | the goal executor, not the routine |
 
@@ -128,7 +129,7 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
     `WanderGoal::report_stuck` does. One line per unit per tick floods the bounded log.
 
 13. **A kind without the needs or hands a goal requires**: either don't register the executor
-    on that kind's brain, or return `Blocked` when `ctx.biology` / `ctx.carried` is `None`
+    on that kind's brain, or return `Blocked` when `ctx.biology` / `ctx.inventory` is `None`
     (`EatGoal` does).
 
 14. **One goal per need, in its own file.** Do not fold two needs into one parameterised
@@ -207,7 +208,8 @@ halfway there.
 - **Switching a process off in a test:** `human.biology_mut().unwrap().set_running(ProcessId::Hunger, false)`
   isolates one need from the others without a hook — the same switch `Command::SetProcess` uses.
 - **`crate::sim::brain::tasks::rig::Rig`** — a task executor with no brain:
-  `Rig::new(map, cell)`, pub `walk`/`action`/`biology`/`carried`, `tick(&mut task)`,
+  `Rig::new(map, cell)`, pub `walk`/`action`/`biology`/`inventory` (with `hand()`/`set_hand(..)`
+  for the slot the item tasks use), `tick(&mut task)`,
   `run(&mut task, max_ticks)`. Its biology does not advance with time, only with events, so a
   task's effect on a stat is exact.
 - **Brain test doubles in `brain/mod.rs` tests:**
@@ -215,7 +217,7 @@ halfway there.
   - `dial(goal, level)` — a `Routine::Dial` (test-only variant, struct in `routines.rs`) whose
     priority a test turns up and down;
   - `Recorder` / `Listener` — executors that journal every call.
-- **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_carried`,
+- **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_carried`/`inventory_mut`,
   `Biology::edit(|stats| stats.with_thirst(..))`, and `Stats::calm().with_hunger(..)`.
   Add `#[cfg(test)] pub(crate)` hooks the same way rather than widening visibility.
 - **`crate::sim::walker::ROUTES_ASKED`** — a thread-local count of far routes. Assert it stays

@@ -33,6 +33,7 @@ use super::biology::{Biology, Stats};
 use super::brain::{Brain, GoalId};
 use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
+use super::inventory::Inventory;
 use super::item::ItemKind;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
@@ -65,8 +66,10 @@ pub struct Human {
     /// Name and gender, rolled once at spawn — see [`Identity`] for why the
     /// two need not agree.
     identity: Identity,
-    /// What is in its hand. One hand, one thing — see [`ItemKind`].
-    carried: Option<ItemKind>,
+    /// What it is carrying: one hand, and what it has stowed away. Inline and
+    /// `Copy`, like the biology — see [`Inventory`] for which of its two
+    /// limits counts the hand.
+    inventory: Inventory,
 }
 
 impl Human {
@@ -76,7 +79,7 @@ impl Human {
             brain: Brain::human(),
             biology: Biology::new(Stats::random(rng)),
             identity: Identity::human(rng),
-            carried: None,
+            inventory: Inventory::human(),
         }
     }
 
@@ -94,8 +97,14 @@ impl Human {
         &self.brain
     }
 
+    /// What is in its hand, which is the one slot the brain uses.
     pub fn carried(&self) -> Option<ItemKind> {
-        self.carried
+        self.inventory.hand()
+    }
+
+    /// Everything it is carrying, hand and stowed together.
+    pub fn inventory(&self) -> &Inventory {
+        &self.inventory
     }
 
     #[cfg(test)]
@@ -115,7 +124,12 @@ impl Human {
 
     #[cfg(test)]
     pub(crate) fn set_carried(&mut self, item: Option<ItemKind>) {
-        self.carried = item;
+        let _ = self.inventory.set_hand(item);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inventory_mut(&mut self) -> &mut Inventory {
+        &mut self.inventory
     }
 }
 
@@ -148,7 +162,7 @@ impl GameEntity for Human {
             outcome,
             &mut self.walk,
             Some(&mut self.biology),
-            Some(&mut self.carried),
+            Some(&mut self.inventory),
         );
     }
 
@@ -158,6 +172,14 @@ impl GameEntity for Human {
 
     fn biology_mut(&mut self) -> Option<&mut Biology> {
         Some(&mut self.biology)
+    }
+
+    fn inventory(&self) -> Option<&Inventory> {
+        Some(&self.inventory)
+    }
+
+    fn inventory_mut(&mut self) -> Option<&mut Inventory> {
+        Some(&mut self.inventory)
     }
 
     fn current_goal(&self) -> Option<GoalId> {
@@ -171,10 +193,7 @@ impl GameEntity for Human {
             ("goal", self.brain.top_goal().name().to_string()),
         ];
         fields.extend(self.walk.debug_fields());
-        fields.push((
-            "holding",
-            self.carried.map_or("nothing", ItemKind::name).to_string(),
-        ));
+        fields.extend(self.inventory.debug_fields());
         fields.extend(self.biology.debug_fields());
         fields
     }

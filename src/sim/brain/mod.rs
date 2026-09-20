@@ -72,7 +72,7 @@ pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
 use super::biology::Biology;
 use super::entity::Think;
-use super::item::ItemKind;
+use super::inventory::Inventory;
 use super::uid::Uid;
 use super::walker::Walker;
 use super::MoveOutcome;
@@ -171,15 +171,15 @@ impl Brain {
 
     /// **The pipeline.** See the module docs for the steps and their order.
     ///
-    /// `walk` is the body being driven; `biology` and `carried` are `None` for
-    /// a kind that has no needs or no hands.
+    /// `walk` is the body being driven; `biology` and `inventory` are `None`
+    /// for a kind that has no needs or carries nothing.
     pub fn react(
         &mut self,
         ctx: &Think<'_>,
         outcome: MoveOutcome,
         walk: &mut Walker,
         mut biology: Option<&mut Biology>,
-        mut carried: Option<&mut Option<ItemKind>>,
+        mut inventory: Option<&mut Inventory>,
     ) {
         // Disjoint field borrows, so the compiler is what checks the steps
         // below do not overlap — the same trick `process_pass` uses.
@@ -217,7 +217,8 @@ impl Brain {
 
         let changed = goals.settle();
         {
-            // Goals read the body and hands; only tasks, below, change them.
+            // Goals read the body and what it carries; only tasks, below,
+            // change them.
             let mut goal_ctx = GoalCtx {
                 think: ctx,
                 body: &body,
@@ -225,7 +226,7 @@ impl Brain {
                 biology: biology.as_deref(),
                 memory,
                 tasks,
-                carried: carried.as_deref(),
+                inventory: inventory.as_deref(),
                 blocked_by: *blocked_by,
                 finished: *finished,
             };
@@ -289,7 +290,7 @@ impl Brain {
                 walk: &mut *walk,
                 action: &mut *action,
                 biology: biology.as_deref_mut(),
-                carried: carried.as_deref_mut(),
+                inventory: inventory.as_deref_mut(),
             });
             tasks.set_result(result);
             if result.is_finished() {

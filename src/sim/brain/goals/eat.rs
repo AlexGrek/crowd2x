@@ -15,6 +15,7 @@
 use crate::map::Point;
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
+use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
@@ -147,7 +148,7 @@ impl EatGoal {
 }
 
 fn held(ctx: &GoalCtx<'_>) -> Option<ItemKind> {
-    ctx.carried.copied().flatten()
+    ctx.inventory.and_then(Inventory::hand)
 }
 
 /// Whether `finished` is the last step of a meal — food eaten, not whatever
@@ -184,7 +185,7 @@ impl GoalExecutor for EatGoal {
     }
 
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
-        if ctx.biology.is_none() || ctx.carried.is_none() {
+        if ctx.biology.is_none() || ctx.inventory.is_none() {
             // A kind with no appetite, or no hands to eat with.
             return GoalProgress::Blocked;
         }
@@ -398,6 +399,35 @@ mod tests {
         assert!(world.log_contains("ate at the fridge"), "brain: {:?}", human.brain_fields());
         assert_eq!(human.carried(), None);
         assert!(human.stats().thirst() < 40.0 - 20.0, "the water was drunk on the way");
+    }
+
+    /// The reason [`Inventory`] never refuses a hand: a unit loaded to both
+    /// its limits must still be able to pick food up and eat it. If the limits
+    /// governed the hand as well, a full unit would fail every `TakeItem`
+    /// forever and starve standing next to a fridge, with nothing in the brain
+    /// able to say why.
+    #[test]
+    fn a_human_loaded_to_its_limits_can_still_pick_food_up_and_eat_it() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        prop_at(&mut map, "fridge", Point::new(5, 5));
+        let mut world = World::new(map);
+        let mut human = hungry_human(Point::new(2, 2), 90.0);
+        while human.inventory_mut().stow(ItemKind::Food) {}
+        let laden = human.inventory().count(ItemKind::Food);
+        assert!(laden > 0 && !human.inventory().room_for(ItemKind::Food), "should be full");
+
+        for _ in 0..3000 {
+            world.step(&mut human);
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1, "brain: {:?}", human.brain_fields());
+        // It fetched a fresh one rather than eating out of its own pockets:
+        // no goal knows how to unstow anything yet, and the hand is the only
+        // slot the brain uses. The stowed food is untouched.
+        assert_eq!(human.inventory().count(ItemKind::Food), laden);
+        assert_eq!(human.carried(), None, "the one it fetched was eaten");
     }
 
     #[test]

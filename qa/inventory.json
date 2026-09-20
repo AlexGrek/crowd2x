@@ -1,0 +1,55 @@
+{
+  "name": "inventory: what a unit carries, what it weighs, and where it runs out",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a human, paused so nothing it does changes what it is holding while this test reads it" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": 7, "y": 4 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+
+    { "note": "it starts with nothing: empty hand, nothing stowed, no weight" },
+    { "press": "items" },
+    { "expect_carrying": { "item": "food", "count": 0 } },
+    { "shot": "an empty inventory" },
+
+    { "note": "giving goes on the simulation's own command queue - the spawn pass carries it out, and that pass runs every fixed step even while the world is paused" },
+    { "give": { "item": "water", "count": 3 } },
+    { "tick": 1 },
+    { "expect_carrying": { "item": "water", "count": 3 } },
+    { "expect_log": "gave water" },
+
+    { "note": "two kinds at once, each counted on its own" },
+    { "give": { "item": "food", "count": 2 } },
+    { "tick": 1 },
+    { "expect_carrying": { "item": "food", "count": 2 } },
+    { "expect_carrying": { "item": "water", "count": 3 } },
+    { "shot": "2 food and 3 water, with the two totals under them" },
+
+    { "note": "food is bulky for its weight, so it is SPACE that runs out: 12 litres, less the 1.5 the three waters take, leaves room for 8 more food and no more - 10 in all, and the other 12 asked for are refused" },
+    { "give": { "item": "food", "count": 20 } },
+    { "tick": 1 },
+    { "expect_carrying": { "item": "food", "count": 10 } },
+    { "expect_log": "has no room for food" },
+    { "shot": "full: space ran out before weight did" },
+
+    { "note": "and a refusal is not a reset - what would not fit is simply not there, and everything else is where it was" },
+    { "expect_carrying": { "item": "water", "count": 3 } },
+
+    { "note": "the debug menu shows the same facts from the simulation's own side" },
+    { "press": "debug" },
+    { "shot": "holding, carrying and load in the debug menu" },
+
+    { "note": "nobody selected, nobody to give to: the step says so rather than guessing" },
+    { "press": "close" },
+    { "expect_selected": null }
+  ]
+}

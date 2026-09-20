@@ -28,11 +28,11 @@ impl TaskExecutor for TakeItem {
         if ctx.here().manhattan_distance(self.from) > 1 {
             return TaskResult::Failed;
         }
-        let Some(hand) = ctx.carried.as_deref() else {
+        let Some(inventory) = ctx.inventory.as_deref() else {
             return TaskResult::Failed;
         };
         if ctx.action.is_none() {
-            if hand.is_some() {
+            if inventory.hand().is_some() {
                 return TaskResult::Failed;
             }
             *ctx.action = Action::interact(self.from, self.seconds);
@@ -40,8 +40,11 @@ impl TaskExecutor for TakeItem {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
-                if let Some(hand) = ctx.carried.as_deref_mut() {
-                    *hand = Some(self.item);
+                if let Some(inventory) = ctx.inventory.as_deref_mut() {
+                    // Into the hand, which is never refused however laden the
+                    // unit is — see `Inventory`. Nothing was in it: that was
+                    // checked before the action started and every tick since.
+                    let _ = inventory.set_hand(Some(self.item));
                 }
                 TaskResult::Success
             }
@@ -72,7 +75,7 @@ mod tests {
 
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert!(rig.action.is_none());
-        assert_eq!(rig.carried, None);
+        assert_eq!(rig.hand(), None);
     }
 
     #[test]
@@ -81,15 +84,15 @@ mod tests {
         let mut task = Task::take(Point::new(5, 5), ItemKind::Food, 0.5);
 
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
-        assert_eq!(rig.carried, None, "not yet: the fridge is still being opened");
+        assert_eq!(rig.hand(), None, "not yet: the fridge is still being opened");
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
-        assert_eq!(rig.carried, Some(ItemKind::Food));
+        assert_eq!(rig.hand(), Some(ItemKind::Food));
     }
 
     #[test]
     fn taking_with_full_hands_fails() {
         let mut rig = rig_at(Point::new(4, 5));
-        rig.carried = Some(ItemKind::Food);
+        rig.set_hand(Some(ItemKind::Food));
         let mut task = Task::take(Point::new(5, 5), ItemKind::Food, 0.5);
 
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
@@ -103,6 +106,6 @@ mod tests {
 
         rig.walk.body_mut().set_position((1.5, 1.5));
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
-        assert_eq!(rig.carried, None);
+        assert_eq!(rig.hand(), None);
     }
 }

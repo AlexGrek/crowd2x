@@ -19,6 +19,7 @@
 use crate::map::Point;
 use crate::sim::biology::Biology;
 use crate::sim::entity::Think;
+use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 use crate::sim::walker::Walker;
 use crate::sim::MoveOutcome;
@@ -39,8 +40,14 @@ pub struct TaskCtx<'a> {
     /// ([`Biology::handle`]) and the body's processes decide what that means.
     /// `None` for a kind that has no needs.
     pub biology: Option<&'a mut Biology>,
-    /// What is in its hand. `None` for a kind that has no hands.
-    pub carried: Option<&'a mut Option<ItemKind>>,
+    /// What it is carrying: the hand a task takes into and consumes from, and
+    /// what it has stowed. `None` for a kind that carries nothing.
+    ///
+    /// The one part of a unit a task may put things into and take things out
+    /// of — a goal only gets to read it ([`super::goal::GoalCtx`]), which is
+    /// what makes food arrive in a hand when a `TakeItem` *finishes* rather
+    /// than when a goal hears that it did.
+    pub inventory: Option<&'a mut Inventory>,
 }
 
 impl TaskCtx<'_> {

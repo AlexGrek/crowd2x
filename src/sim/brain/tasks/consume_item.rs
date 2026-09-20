@@ -1,6 +1,7 @@
 //! [`ConsumeItem`]: use up what is in hand.
 
 use crate::sim::biology::Event;
+use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 
 use super::super::action::{Action, ActionState};
@@ -15,7 +16,7 @@ pub struct ConsumeItem {
 
 impl ConsumeItem {
     fn holding_it(&self, ctx: &TaskCtx<'_>) -> bool {
-        ctx.carried.as_deref() == Some(&Some(self.item))
+        ctx.inventory.as_deref().and_then(Inventory::hand) == Some(self.item)
     }
 }
 
@@ -34,8 +35,8 @@ impl TaskExecutor for ConsumeItem {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
-                if let Some(hand) = ctx.carried.as_deref_mut() {
-                    *hand = None;
+                if let Some(inventory) = ctx.inventory.as_deref_mut() {
+                    let _ = inventory.set_hand(None);
                 }
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Ingested(self.item));
@@ -66,26 +67,26 @@ mod tests {
     #[test]
     fn consuming_food_empties_the_hand_and_takes_hunger_away() {
         let mut rig = rig();
-        rig.carried = Some(ItemKind::Food);
+        rig.set_hand(Some(ItemKind::Food));
         rig.biology.edit(|stats| stats.with_hunger(90.0));
         let mut task = Task::consume(ItemKind::Food, 0.5);
 
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.biology.stats().hunger(), 90.0, "nothing eaten until the meal is over");
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
-        assert_eq!(rig.carried, None);
+        assert_eq!(rig.hand(), None);
         assert_eq!(rig.biology.stats().hunger(), 90.0 - MEAL);
     }
 
     #[test]
     fn consuming_water_takes_thirst_away_and_leaves_hunger_alone() {
         let mut rig = rig();
-        rig.carried = Some(ItemKind::Water);
+        rig.set_hand(Some(ItemKind::Water));
         rig.biology.edit(|stats| stats.with_hunger(90.0).with_thirst(90.0));
         let mut task = Task::consume(ItemKind::Water, 0.5);
 
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
-        assert_eq!(rig.carried, None);
+        assert_eq!(rig.hand(), None);
         assert_eq!(rig.biology.stats().thirst(), 90.0 - DRINK);
         assert_eq!(rig.biology.stats().hunger(), 90.0);
         assert!(rig.biology.debug_fields().iter().any(|(n, v)| *n == "bladder on its way" && v != "0.0"));
@@ -94,10 +95,10 @@ mod tests {
     #[test]
     fn consuming_something_other_than_what_is_in_hand_fails() {
         let mut rig = rig();
-        rig.carried = Some(ItemKind::Food);
+        rig.set_hand(Some(ItemKind::Food));
         let mut task = Task::consume(ItemKind::Water, 0.5);
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
-        assert_eq!(rig.carried, Some(ItemKind::Food));
+        assert_eq!(rig.hand(), Some(ItemKind::Food));
     }
 
     #[test]

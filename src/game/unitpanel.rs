@@ -6,7 +6,7 @@
 //! | [despawn] [freeze]                |
 //! +-----------------------------------+
 //! | [##] human                        |
-//! | [##] [life][debug][stats][brains][close]
+//! | [##] [life][debug][stats][brains][items][close]
 //! +-----------------------------------+
 //! ```
 //!
@@ -50,7 +50,7 @@
 use bevy::prelude::*;
 
 use crate::characters::{dog, human};
-use crate::sim::{EntityType, GameEntity, MoveOutcome, Uid};
+use crate::sim::{EntityType, GameEntity, ItemKind, MoveOutcome, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -73,7 +73,7 @@ const PORTRAIT: f32 = 32.0;
 #[derive(Resource, Default, PartialEq, Eq)]
 struct OpenMenu(Option<Menu>);
 
-/// The four things there are to know about a unit.
+/// The five things there are to know about a unit.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     /// What can be done to it: despawn, freeze.
@@ -86,6 +86,10 @@ enum Menu {
     /// What its mind is doing: the goal in charge, the priority list, the task
     /// and the action carrying it out — live, like the debug menu.
     Brains,
+    /// What it is carrying: its hand, what it has stowed, and how close that
+    /// is to the two limits — live, like the debug menu, because a unit picks
+    /// things up and eats them while you are reading.
+    Items,
 }
 
 impl Menu {
@@ -97,6 +101,7 @@ impl Menu {
             Menu::Debug => "debug",
             Menu::Stats => "stats",
             Menu::Brains => "brains",
+            Menu::Items => "items",
         }
     }
 }
@@ -126,6 +131,8 @@ enum Readout {
     Debug,
     /// Every field of the brains menu, rewritten as a block.
     Brains,
+    /// Every field of the items menu, rewritten as a block.
+    Items,
     /// The freeze button's own label, which flips to `unfreeze`.
     Freeze,
     /// The line by the portrait: what it is, and whether it is held.
@@ -327,6 +334,7 @@ fn rebuild(
                                 (Action::Open(Menu::Debug), plain_button("debug", px(26))),
                                 (Action::Open(Menu::Stats), plain_button("stats", px(24))),
                                 (Action::Open(Menu::Brains), plain_button("brains", px(28))),
+                                (Action::Open(Menu::Items), plain_button("items", px(24))),
                                 (Action::Close, plain_button("close", px(24))),
                             ],
                         ),
@@ -384,14 +392,20 @@ fn menu_contents(
                 label(debug_block(sim, entity), FONT_BODY, TEXT),
             ));
         }
-        // Deliberately empty, and saying so: a menu that opened onto nothing
-        // at all would read as a menu that failed to load.
         Menu::Brains => {
             parent.spawn((
                 Readout::Brains,
                 label(brains_block(entity), FONT_BODY, TEXT),
             ));
         }
+        Menu::Items => {
+            parent.spawn((
+                Readout::Items,
+                label(items_block(entity), FONT_BODY, TEXT),
+            ));
+        }
+        // Deliberately empty, and saying so: a menu that opened onto nothing
+        // at all would read as a menu that failed to load.
         Menu::Stats => {
             parent.spawn(label("empty", FONT_BODY, TEXT_DIM));
         }
@@ -485,6 +499,7 @@ fn update_readouts(
         let wanted = match readout {
             Readout::Debug => debug_block(&sim, entity),
             Readout::Brains => brains_block(entity),
+            Readout::Items => items_block(entity),
             Readout::Freeze => freeze_label(entity).to_string(),
             Readout::Title => title(entity),
         };
@@ -580,6 +595,42 @@ fn debug_block(sim: &Sim, entity: &dyn GameEntity) -> String {
     field_block(fields)
 }
 
+/// What the unit is carrying, as a block of lines.
+///
+/// The hand first, because it is the slot the simulation actually uses, then
+/// one line per kind stowed, then the two totals against the two limits. The
+/// hand is in the mass line and not in the space line — `Inventory` says why —
+/// and showing both totals side by side is what makes that legible: put
+/// something in a hand and `kg` moves while `L` does not.
+///
+/// A kind that carries nothing at all says so rather than showing a set of
+/// zeroes it can never move off.
+fn items_block(entity: &dyn GameEntity) -> String {
+    let Some(inventory) = entity.inventory() else {
+        return "carries nothing".to_string();
+    };
+    let mut fields: Vec<(&'static str, String)> = vec![(
+        "hand",
+        inventory.hand().map_or("empty", ItemKind::name).to_string(),
+    )];
+    if inventory.stowed_items() == 0 {
+        fields.push(("stowed", "nothing".to_string()));
+    } else {
+        fields.extend(
+            inventory
+                .stowed()
+                .map(|(kind, count)| (kind.name(), count.to_string())),
+        );
+    }
+    let capacity = inventory.capacity();
+    fields.push(("mass", format!("{:.1} / {:.1} kg", inventory.mass(), capacity.mass)));
+    fields.push((
+        "space",
+        format!("{:.1} / {:.1} L", inventory.volume(), capacity.volume),
+    ));
+    field_block(fields)
+}
+
 /// What the unit's mind is doing, as a block of lines — or a plain `empty` for
 /// a kind with no brain, which is more honest than a blank menu.
 fn brains_block(entity: &dyn GameEntity) -> String {
@@ -642,6 +693,72 @@ fn name_of(kind: Option<EntityType>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::Point;
+    use crate::sim::Human;
+    use rand::rngs::SmallRng;
+    use rand::SeedableRng;
+
+    fn human() -> Human {
+        let mut rng = SmallRng::seed_from_u64(1);
+        Human::new(Uid::new(EntityType::Human, 5), Point::new(1, 1), &mut rng)
+    }
+
+    /// What a block says for one field. The names are padded to align, and by
+    /// how much depends on the longest name in the block, so a test reads the
+    /// value rather than counting spaces.
+    fn field(block: &str, name: &str) -> String {
+        block
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .unwrap_or_else(|| panic!("no {name:?} line in:\n{block}"))
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn the_items_menu_says_what_is_carried_and_how_close_the_limits_are() {
+        let mut person = human();
+        let empty = items_block(&person);
+        assert_eq!(field(&empty, "hand"), "empty");
+        assert_eq!(field(&empty, "stowed"), "nothing");
+        assert_eq!(field(&empty, "mass"), "0.0 / 10.0 kg");
+
+        person.set_carried(Some(ItemKind::Water));
+        let inventory = person.inventory_mut();
+        assert!(inventory.stow(ItemKind::Food));
+        assert!(inventory.stow(ItemKind::Food));
+
+        let block = items_block(&person);
+        assert_eq!(field(&block, "hand"), "water");
+        assert_eq!(field(&block, "food"), "2");
+        // The water in its hand is in the kilos and not in the litres: 0.5 of
+        // water plus 1.0 of food by weight, and 2.0 of food alone by volume.
+        assert_eq!(field(&block, "mass"), "1.5 / 10.0 kg");
+        assert_eq!(field(&block, "space"), "2.0 / 12.0 L");
+    }
+
+    #[test]
+    fn a_kind_that_carries_nothing_says_so_rather_than_showing_empty_limits() {
+        // A dog has no inventory at all, and a row of zeroes it can never move
+        // off would read as a bug rather than as a fact about dogs.
+        struct Nobody(crate::sim::Body);
+        impl GameEntity for Nobody {
+            fn body(&self) -> &crate::sim::Body {
+                &self.0
+            }
+            fn body_mut(&mut self) -> &mut crate::sim::Body {
+                &mut self.0
+            }
+            fn think(&self, _: &crate::sim::Think<'_>) -> crate::sim::Intent {
+                crate::sim::Intent::Idle
+            }
+        }
+        let nobody = Nobody(crate::sim::Body::at_cell(
+            Uid::new(EntityType::Dog, 1),
+            Point::new(0, 0),
+        ));
+        assert_eq!(items_block(&nobody), "carries nothing");
+    }
 
     #[test]
     fn every_value_in_a_block_starts_in_the_same_column_after_a_space() {

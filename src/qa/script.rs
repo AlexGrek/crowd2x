@@ -220,6 +220,29 @@ pub enum Step {
         x: i32,
         y: i32,
     },
+    /// Put items into the **selected** unit's inventory.
+    ///
+    /// Nothing in the game stows anything yet — the brain takes things into a
+    /// hand and eats them from there — so this is how a test gets a unit to a
+    /// state worth looking at, the way `spawn` is how it gets a crowd. It goes
+    /// on the same command queue, so like `spawn` it is applied by the next
+    /// `tick` and not by being asked for.
+    ///
+    /// `count` items are given one at a time, and the ones that do not fit are
+    /// refused with a line in the log — which is how a test asserts on a limit
+    /// rather than on the arithmetic behind it.
+    Give {
+        /// `food` or `water`.
+        item: String,
+        #[serde(default = "default_count")]
+        count: u32,
+    },
+    /// How many of `item` the **selected** unit has stowed.
+    ///
+    /// What is in its hand is not stowed and is not counted here, which is the
+    /// distinction the whole inventory is built on.
+    ExpectCarrying { item: String, count: u8 },
+
     /// Advance the simulation by this many fixed steps, immediately.
     ///
     /// Called directly rather than waited for: `FixedUpdate` runs at whatever
@@ -396,6 +419,10 @@ pub enum Step {
 
 fn default_tap() -> f32 {
     DEFAULT_TAP
+}
+
+fn default_count() -> u32 {
+    1
 }
 
 #[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]

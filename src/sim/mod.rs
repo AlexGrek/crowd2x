@@ -128,6 +128,7 @@ pub mod entities;
 pub mod entity;
 pub mod feature;
 pub mod identity;
+pub mod inventory;
 pub mod item;
 pub mod kinds;
 pub mod log;
@@ -151,6 +152,7 @@ pub use clock::Clock;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
+pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
 pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
@@ -239,6 +241,16 @@ pub enum Command {
     /// [`biology`] for what off means. From outside the world for the same
     /// reasons a freeze is, and applied at the same point in the tick.
     SetProcess { uid: Uid, process: ProcessId, running: bool },
+    /// Put an item into an entity's [`Inventory`], if it will fit.
+    ///
+    /// From outside the world like the two above, and the only way anything
+    /// gets stowed today: the brain takes things into a *hand* and consumes
+    /// them from there, and no goal yet has a reason to pack something away.
+    /// So this is what a debug harness or a QA script uses to put a unit in a
+    /// state the game cannot reach on its own — the same footing
+    /// [`Command::SetProcess`] is on, and it will stop being the only route
+    /// the moment a goal wants to fetch something.
+    GiveItem { uid: Uid, item: ItemKind },
 }
 
 /// One frame's worth of input to the simulation.
@@ -276,6 +288,11 @@ impl Input {
 
     pub fn set_process(&mut self, uid: Uid, process: ProcessId, running: bool) -> &mut Input {
         self.commands.push(Command::SetProcess { uid, process, running });
+        self
+    }
+
+    pub fn give_item(&mut self, uid: Uid, item: ItemKind) -> &mut Input {
+        self.commands.push(Command::GiveItem { uid, item });
         self
     }
 
@@ -503,6 +520,32 @@ impl GameState {
         true
     }
 
+    /// Stow an item in an entity's inventory. `false`, and a line in the log
+    /// saying why, for an entity that is not there, has nothing to carry
+    /// things in, or has no room left for this one.
+    ///
+    /// A refusal is the inventory's own ([`Inventory::stow`]): giving
+    /// something to a unit that cannot take it has to fail visibly, or a limit
+    /// is only a limit until somebody hands you one more.
+    pub fn give_item(&mut self, uid: Uid, item: ItemKind) -> bool {
+        let name = item.name();
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("give {name}: no such entity {uid}"));
+            return false;
+        };
+        let Some(inventory) = entity.inventory_mut() else {
+            self.log.push(format!("give {name}: {uid} carries nothing"));
+            return false;
+        };
+        if !inventory.stow(item) {
+            let load = inventory.describe_load();
+            self.log.push(format!("{uid} has no room for {name}: {load}"));
+            return false;
+        }
+        self.log.push(format!("gave {name} to {uid}"));
+        true
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -539,10 +582,11 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
-/// [`Command::Freeze`] and [`Command::SetProcess`] are drained here too. They
-/// change nothing structural, but they arrive on the same queue and want the
-/// same timing: a freeze asked for this tick is in force before anything
-/// thinks, rather than one tick after the button was pressed.
+/// [`Command::Freeze`], [`Command::SetProcess`] and [`Command::GiveItem`] are
+/// drained here too. They change nothing structural, but they arrive on the
+/// same queue and want the same timing: a freeze asked for this tick is in
+/// force before anything thinks, rather than one tick after the button was
+/// pressed.
 ///
 /// This is also the only pass that may resize the entity table, and therefore
 /// the only one that may allocate. [`GameState::spawn`] keeps the intent
@@ -566,6 +610,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::SetProcess { uid, process, running } => {
                 state.set_process(*uid, *process, *running);
+            }
+            Command::GiveItem { uid, item } => {
+                state.give_item(*uid, *item);
             }
         }
     }
@@ -1274,8 +1321,10 @@ mod tests {
         //
         // The wall is a number of cache lines, and it moves by one when a need
         // is added on purpose: a need is a stat and a goal slot, about thirty
-        // bytes. A Human is 496 bytes with hunger, thirst and bladder. What this
-        // is here to catch is a jump nobody meant, not a need somebody did.
+        // bytes. A Human is 504 bytes with hunger, thirst, bladder and an
+        // inventory — which is twelve of them, a count per item kind plus the
+        // two limits, and no `Vec`. What this is here to catch is a jump
+        // nobody meant, not a need somebody did.
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
         assert!(human <= 576, "a Human is {human} bytes, {brain} of them brain");

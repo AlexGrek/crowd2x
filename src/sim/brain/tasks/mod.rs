@@ -26,6 +26,7 @@ pub(crate) mod rig {
     use crate::sim::biology::{Biology, Stats};
     use crate::sim::brain::action::Action;
     use crate::sim::brain::task::{Task, TaskCtx, TaskResult};
+    use crate::sim::inventory::Inventory;
     use crate::sim::item::ItemKind;
     use crate::sim::testing::World;
     use crate::sim::uid::{EntityType, Uid};
@@ -37,7 +38,7 @@ pub(crate) mod rig {
         pub walk: Walker,
         pub action: Action,
         pub biology: Biology,
-        pub carried: Option<ItemKind>,
+        pub inventory: Inventory,
     }
 
     impl Rig {
@@ -47,8 +48,19 @@ pub(crate) mod rig {
                 walk: Walker::new(Uid::new(EntityType::Human, 9), cell, 2.0),
                 action: Action::None,
                 biology: Biology::new(Stats::calm()),
-                carried: None,
+                inventory: Inventory::human(),
             }
+        }
+
+        /// What is in the rig's hand, which is what the tasks that take and
+        /// consume things work on.
+        pub fn hand(&self) -> Option<ItemKind> {
+            self.inventory.hand()
+        }
+
+        /// Put something in it, or empty it.
+        pub fn set_hand(&mut self, item: Option<ItemKind>) {
+            let _ = self.inventory.set_hand(item);
         }
 
         /// One tick: walk whatever route there is (on open floor, nothing
@@ -59,7 +71,7 @@ pub(crate) mod rig {
                 walk,
                 action,
                 biology,
-                carried,
+                inventory,
             } = self;
             world.tick += 1;
             let think = world.ctx();
@@ -75,7 +87,7 @@ pub(crate) mod rig {
                 walk,
                 action,
                 biology: Some(biology),
-                carried: Some(carried),
+                inventory: Some(inventory),
             })
         }
 

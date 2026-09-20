@@ -12,6 +12,7 @@
 use crate::map::Point;
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
+use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
@@ -135,7 +136,7 @@ impl DrinkGoal {
 }
 
 fn held(ctx: &GoalCtx<'_>) -> Option<ItemKind> {
-    ctx.carried.copied().flatten()
+    ctx.inventory.and_then(Inventory::hand)
 }
 
 /// Whether `finished` is the last step of a drink — water drunk, not whatever
@@ -172,7 +173,7 @@ impl GoalExecutor for DrinkGoal {
     }
 
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
-        if ctx.biology.is_none() || ctx.carried.is_none() {
+        if ctx.biology.is_none() || ctx.inventory.is_none() {
             // A kind with no thirst, or no hands to drink with.
             return GoalProgress::Blocked;
         }

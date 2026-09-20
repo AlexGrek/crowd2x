@@ -14,7 +14,7 @@
 
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
-use crate::sim::item::ItemKind;
+use crate::sim::inventory::Inventory;
 use crate::sim::uid::Uid;
 
 use super::memory::Memory;
@@ -258,8 +258,9 @@ pub struct GoalCtx<'a> {
     pub biology: Option<&'a Biology>,
     pub memory: &'a mut Memory,
     pub tasks: &'a mut Tasks,
-    /// What is in its hand. `None` for a kind that has no hands.
-    pub carried: Option<&'a Option<ItemKind>>,
+    /// What it is carrying, **read-only**: its hand, and what it has stowed.
+    /// `None` for a kind that carries nothing.
+    pub inventory: Option<&'a Inventory>,
     /// Who refused the move that ended the last task, when a body did.
     ///
     /// A failed walk is two different things — somebody is in the way, and

@@ -202,6 +202,18 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// What this kind is carrying — its hand and what it has stowed — or
+    /// `None` for a kind that carries nothing at all. On the trait for the
+    /// reason [`GameEntity::biology`] is: the unit panel, a test and
+    /// `Command::GiveItem` all reach a unit through `dyn GameEntity`.
+    fn inventory(&self) -> Option<&super::inventory::Inventory> {
+        None
+    }
+
+    fn inventory_mut(&mut self) -> Option<&mut super::inventory::Inventory> {
+        None
+    }
+
     /// What this kind would tell a debugger about itself, beyond the body.
     ///
     /// Name and value, in the order they should be read. The universal facts —

@@ -276,10 +276,12 @@ directly instead of listening for the `Cancelled` it would otherwise fire on eve
 #### Selecting somebody (`game/selection.rs`, `game/unitpanel.rs`)
 
 A left click on the map picks whoever is standing in that cell, a green frame
-(`selection.png`) says who, and a panel along the bottom shows their portrait and four
-menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty) and `brains` (the
-goal in charge, the priority list, the task, its result and action — live, like `debug`).
-Clicking empty ground, or `close`, selects nobody and the panel goes with them.
+(`selection.png`) says who, and a panel along the bottom shows their portrait and five
+menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains` (the
+goal in charge, the priority list, the task, its result and action — live, like `debug`)
+and `items` (the hand, what is stowed, and both totals against both limits — live too,
+since a unit picks things up while you are reading). Clicking empty ground, or `close`,
+selects nobody and the panel goes with them.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
   position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the
@@ -459,6 +461,42 @@ carry out; no time passes for it, its biology included. It keeps its cell and it
 letting it go again carries on rather than starting over. `GameEntity::debug_fields` is the
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
+
+#### What a unit carries (`sim/inventory.rs`, `sim/item.rs`)
+
+An `ItemKind` says **what it is made of** — `nutrition`, `hydration`, and a `mass` in
+kilograms and a `volume` in litres — and never what that does to a body or to whoever is
+carrying it. `Inventory` is a unit's **hand plus what it has stowed**, inline and `Copy` on
+`Human`, and the two slots are counted differently on purpose:
+
+|  | the hand | stowed |
+| --- | --- | --- |
+| **mass** (kg) | counted | counted |
+| **volume** (litres) | **not** counted | counted |
+
+**Weight is carried wherever it is**, so a full hand leaves less that can be stowed;
+**space is about packing things away**, and a hand is not a shelf. Both limits genuinely
+bind, which is why there are two of them: food is bulky for its weight and water is dense,
+so a person runs out of *space* at twelve meals and out of *strength* at twenty glasses
+(`Capacity::HUMAN` is 10kg and 12L, per unit, so a bag or a build can differ later).
+
+Two rules hold the rest together:
+
+- **The limits govern stowing and never the hand.** `stow` refuses what will not fit;
+  `set_hand` refuses nothing. A hand that could be refused would deadlock a hungry unit
+  whose pockets were full, and nothing in the brain could say why —
+  `a_human_loaded_to_its_limits_can_still_pick_food_up_and_eat_it` is that guarantee.
+- **It is a count per kind, not a list of things.** `ItemKind` is fieldless, so two
+  portions of food are the same item in every way the simulation can tell apart: one `u8`
+  per kind, no allocation in a tick, and no slot count imposing a third limit nobody asked
+  for. An item that needs state of its own is a change to `ItemKind` first.
+
+A task is the only thing that writes it (`TaskCtx::inventory`); a goal only reads it
+(`GoalCtx::inventory`), which is what keeps food arriving in a hand when a `TakeItem`
+*finishes* rather than when a goal hears that it did. **Nothing stows anything yet** — the
+brain takes into a hand and consumes from it, so a unit walks past a fridge with food in
+its pockets, and `Command::GiveItem` (a QA script's `give`) is the only way in. A goal that
+fetches and puts away is what closes that, and it needs a task that unstows.
 
 #### What a second is (`sim/clock.rs`)
 
@@ -688,11 +726,13 @@ gamepad is spawned and connected through `RawGamepadEvent`, so `bevy_input` buil
 real `Gamepad` component; the pointer moves by setting the window's cursor position, the
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
-The simulation gets three steps of its own, all intent-level: `{"spawn": {"kind": "human",
+The simulation gets four steps of its own, all intent-level: `{"spawn": {"kind": "human",
 "x": 3, "y": 2}}` puts a command on the same queue the game uses, `{"select": 0}` selects
 the unit that arrived first (arrival order, not slot order, because a despawn leaves a hole
 the next spawn fills — and because a `Uid` is random and a test cannot know one in
-advance), and `{"tick": 200}` runs
+advance), `{"give": {"item": "food", "count": 3}}` stows items in the selected unit on that
+same queue (the only way anything is stowed today, since no goal puts things away), and
+`{"tick": 200}` runs
 one spawn pass and then exactly that many processing passes, *immediately* — so pending
 spawns are applied once however many ticks were asked for. Ticking rather than waiting is
 the point — `FixedUpdate` runs at whatever rate the frame allows, so a test that waited a
@@ -728,13 +768,15 @@ are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_selected`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_selected`, `expect_carrying`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
 the readout shows (`x1`, `x0.25`, `paused`) rather than a number and a flag, since
 `paused` and `x1` are the same multiplier and a different game. `expect_selected` names the kind (`"human"`, or `null` for nobody) rather
-than an id, for the same reason `select` takes an index. `expect_entities` and
+than an id, for the same reason `select` takes an index, and `expect_carrying` counts what
+the selected unit has **stowed** — what is in its hand is not stowed, which is the
+distinction the whole inventory is built on. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
 catches a renderer that has quietly stopped keeping up.
@@ -793,6 +835,8 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         walker.rs is the movement action; feature.rs what props are for
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action
                         item.rs is what can be held and what it is made of
+                        inventory.rs is what a unit carries: a hand that costs
+                        mass only, stowage that costs mass and space, and limits
                         biology/ is the body: Stats, and the processes that alone
                         change them (hunger, thirst, bladder), each switchable
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it

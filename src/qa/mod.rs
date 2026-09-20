@@ -71,7 +71,7 @@ use crate::game::actors::{Actor, Sim, SimInput};
 use crate::game::logview::LogView;
 use crate::game::selection::Selected;
 use crate::game::speed::GameSpeed;
-use crate::sim::{process_pass, spawn_pass, EntityType};
+use crate::sim::{process_pass, spawn_pass, EntityType, ItemKind};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
 use perf::{Measured, Measurement};
@@ -835,6 +835,47 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::Give { item, count } => {
+            let item = item_kind(item)?;
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `give` gives to the selected unit".to_string())?;
+            // One command each rather than one for the lot: the inventory
+            // refuses what will not fit, and a test that asks for twenty and
+            // gets twelve wants to see the twelve.
+            for _ in 0..*count {
+                intents.sim_input.0.give_item(uid, item);
+            }
+            Ok(Next::Now)
+        }
+
+        Step::ExpectCarrying { item, count } => {
+            let item = item_kind(item)?;
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `expect_carrying` is about the selected unit".to_string())?;
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?;
+            let entity = sim
+                .0
+                .entities()
+                .get(uid)
+                .ok_or(format!("the selected unit {uid} is not in the world"))?;
+            let inventory = entity
+                .inventory()
+                .ok_or(format!("{uid} carries nothing at all"))?;
+            let actual = inventory.count(item);
+            (actual == *count).then_some(Next::Now).ok_or(format!(
+                "expected {count} {} stowed, found {actual} ({})",
+                item.name(),
+                inventory.describe_load()
+            ))
+        }
+
         Step::Populate { kind, count } => {
             let kind = entity_kind(kind)?;
             let sim = intents
@@ -1197,6 +1238,19 @@ fn finish(run: &mut Run, exit: &mut MessageWriter<AppExit>) {
 
 /// An entity kind by name, saying what this build has when it does not have
 /// the one asked for.
+/// The item kind a script named, or a message listing the ones there are.
+fn item_kind(name: &str) -> Result<ItemKind, String> {
+    ItemKind::ALL
+        .into_iter()
+        .find(|kind| kind.name() == name)
+        .ok_or_else(|| {
+            format!(
+                "no item called {name:?}; this build has: {}",
+                ItemKind::ALL.map(|kind| kind.name()).join(", ")
+            )
+        })
+}
+
 fn entity_kind(name: &str) -> Result<EntityType, String> {
     EntityType::from_name(name).ok_or_else(|| {
         format!(

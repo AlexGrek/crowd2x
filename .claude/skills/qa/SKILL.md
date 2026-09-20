@@ -108,6 +108,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"cursor": {"x": 168, "y": 120}}` | ...or at a world position, in pixels. |
 | `{"spawn": {"kind": "human", "x": 3, "y": 2}}` | Put an entity in the world: `human` or `dog`. |
 | `{"select": 0}` | Select the unit that arrived first; `1` is the next, and so on. |
+| `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -180,6 +181,7 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
+| `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
@@ -203,6 +205,13 @@ time scale would be an hour short of it, not a minute.
 `expect_log` reads the log *panel*'s lines, not the queue. The queue is drained as it is
 displayed, so asking it directly would be a race with the system emptying it — and the
 panel only keeps the last handful, so assert on something recent.
+
+`give` and `expect_carrying` are both about the **selected** unit, so a `select` (or a real
+click) comes first. `give` goes on the same command queue `spawn` does, so it lands on the
+next pass rather than at once; what does not fit is refused with a line in the log, which is
+how a test asserts on a limit. What is in a unit's *hand* is not stowed and `expect_carrying`
+does not count it — the hand costs mass but no space, and that distinction is the whole of
+`sim/inventory.rs`.
 
 `expect_selected` names the *kind* and not the id, for the reason `select` takes an index:
 ids are random. It is the assertion for the click that picks somebody out of the crowd —

@@ -8,6 +8,7 @@ Contents:
 
 - [A stat, and the process that moves it](#a-stat-and-the-process-that-moves-it)
 - [An item](#an-item)
+- [An inventory](#an-inventory)
 - [A feature (what a prop is for)](#a-feature-what-a-prop-is-for)
 - [An action](#an-action)
 - [A task executor](#a-task-executor)
@@ -95,12 +96,16 @@ A frozen unit's `react` is skipped, so its processes do not run. That is intende
 
 ## An item
 
-`item.rs`. One hand, one item: `carried: Option<ItemKind>` on `Human`. An item says **what it is
-made of**, not what it does to a body. Add a variant and an arm in each of `name`,
-`consume_seconds`, `nutrition` and `hydration`:
+`item.rs`. An item says **what it is made of**, not what it does to a body or to whoever
+carries it. Add a variant, bump `ItemKind::COUNT` and `ALL` (they size the inventory's count
+array), and add an arm in each of `name`, `consume_seconds`, `nutrition`, `hydration`, `mass`
+and `volume`:
 
 ```rust
 pub enum ItemKind { Food, Water, Coffee }
+
+pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water, ItemKind::Coffee];
+pub const COUNT: usize = 3;
 
 pub const fn hydration(self) -> f32 {
     match self {
@@ -109,12 +114,43 @@ pub const fn hydration(self) -> f32 {
         ItemKind::Coffee => 30.0,
     }
 }
+
+/// Kilograms, counted wherever it is — a hand or stowed.
+pub const fn mass(self) -> f32 { /* ... */ }
+
+/// Litres, counted only when stowed.
+pub const fn volume(self) -> f32 { /* ... */ }
 ```
 
 `TakeItem` and `ConsumeItem` already work for any `ItemKind`, and `ConsumeItem` reports
 `Event::Ingested(item)`, so the processes pick up the new numbers without further changes.
 `consume_seconds` lives on the item so a goal that finds somebody else's item in its hand can
 finish it without knowing what it is.
+
+**Mass and volume must both be above zero** (`everything_that_can_be_carried_weighs_and_measures_something`):
+a free item is a limit that does not limit.
+
+## An inventory
+
+`inventory.rs`. `Inventory` is a unit's **hand plus what it has stowed**, inline and `Copy` on
+`Human`. You almost never change this file to add a behaviour; what matters is which slot your
+task touches and which limit counts it:
+
+|  | the hand | stowed |
+| --- | --- | --- |
+| **mass** | counted | counted |
+| **volume** | **not** counted | counted |
+
+- **A task writes it** (`ctx.inventory`, `&mut`); **a goal only reads it**
+  (`ctx.inventory`, `&`). `held(ctx)` in `eat.rs`/`drink.rs` is
+  `ctx.inventory.and_then(Inventory::hand)`.
+- `set_hand` is **never refused**, whatever the limits say — a unit that could not pick food
+  up because its pockets were full would starve beside a fridge. `stow` *is* refused, and
+  returns `false` (`#[must_use]`); check `room_for` first if you want to plan around it.
+- Nothing stows anything yet. A goal that fetches and puts away needs a new task that calls
+  `stow`, and one that unstows before consuming — until then the hand is the only slot the
+  brain uses, and stowed food is carried past a fridge rather than eaten.
+- `Command::GiveItem` (QA's `give`) is how a test puts a unit in a laden state.
 
 ## A feature (what a prop is for)
 
@@ -240,12 +276,13 @@ Register it in three places:
   exhaustive `Stage::of` (`EatGoal`, `DrinkGoal`) need an arm for it too.
 
 `TaskCtx` gives you: `think`, `outcome` (this tick's move), `walk`, `action`,
-`biology: Option<&mut Biology>`, `carried: Option<&mut Option<ItemKind>>`, `here()`,
+`biology: Option<&mut Biology>`, `inventory: Option<&mut Inventory>`, `here()`,
 `advance_action()`. A task that walks is `MoveTo` and nothing else.
 
 Tests use `tasks::rig::Rig`, whose `biology` changes only through events (time does not
 advance it), so the effect of a task is exact. Set stats with
-`rig.biology.edit(|stats| stats.with_bladder(90.0))`. Minimum set, from `use_toilet.rs`:
+`rig.biology.edit(|stats| stats.with_bladder(90.0))`, and hands with `rig.set_hand(..)` /
+`rig.hand()`. Minimum set, from `use_toilet.rs`:
 
 - `using_a_toilet_from_across_the_room_fails_without_starting`
 - `the_bladder_is_emptied_only_once_the_toilet_has_been_used`
@@ -313,7 +350,7 @@ whatever else is in hand (see `EatGoal::plan`). Otherwise `TakeItem` fails forev
 
 - `think` — map, occupancy, log, features, `dt` (watched) and `game_dt()` (world), `tick`;
 - `body` (a copy), `perception`;
-- `biology: Option<&Biology>` and `carried: Option<&Option<ItemKind>>`, both **read-only**;
+- `biology: Option<&Biology>` and `inventory: Option<&Inventory>`, both **read-only**;
 - `memory: &mut Memory`, `tasks: &mut Tasks`;
 - `blocked_by: Option<Uid>`, `finished: Option<Task>`.
 
