@@ -775,7 +775,7 @@ gamepad is spawned and connected through `RawGamepadEvent`, so `bevy_input` buil
 real `Gamepad` component; the pointer moves by setting the window's cursor position, the
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
-The simulation gets five steps of its own, all intent-level: `{"spawn": {"kind": "human",
+The simulation gets six steps of its own, all intent-level: `{"spawn": {"kind": "human",
 "x": 3, "y": 2}}` puts a command on the same queue the game uses, `{"select": 0}` selects
 the unit that arrived first (arrival order, not slot order, because a despawn leaves a hole
 the next spawn fills — and because a `Uid` is random and a test cannot know one in
