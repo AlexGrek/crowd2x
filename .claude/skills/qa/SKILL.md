@@ -109,6 +109,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"spawn": {"kind": "human", "x": 3, "y": 2}}` | Put an entity in the world: `human` or `dog`. |
 | `{"select": 0}` | Select the unit that arrived first; `1` is the next, and so on. |
 | `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
+| `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -180,6 +181,7 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
+| `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
@@ -189,6 +191,15 @@ system reads — so a click goes through genuine hover-and-click.
 
 A failed assertion stops the test — the steps after it were written for a state the app is
 no longer in — and the run exits non-zero.
+
+`hold` and `expect_held` are the hand's half of `give` and `expect_carrying`: a hand is only
+full for the length of a meal, so a test that wants to look at one puts something there.
+Keep the ticks after a `hold` few — a unit that is hungry when handed food eats it where it
+stands, and a thirsty one drinks its water in about a second of watching. `expect_held`
+counts the *sprites* drawing an item, by kind, so a picture never drawn or drawn for the
+wrong item fails it. It cannot say where the picture is: **pause the game** (`p`) and put
+the unit on the middle cell of an odd-sized map, so it stays in a zoomed-in frame and clear
+of every panel, then photograph it — `qa/held_items.json` is the example.
 
 `expect_entities` and `expect_sprites` are two assertions on purpose. The simulation
 holding three entities and the screen showing three actors are separate claims, and the

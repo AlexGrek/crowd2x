@@ -242,6 +242,28 @@ pub enum Step {
     /// What is in its hand is not stowed and is not counted here, which is the
     /// distinction the whole inventory is built on.
     ExpectCarrying { item: String, count: u8 },
+    /// Put an item in the **selected** unit's hand — `food` or `water` — or
+    /// empty it with `null`.
+    ///
+    /// The other half of `give`, for the slot the brain really uses. A hand is
+    /// only full for the length of a meal, so a test that wants to look at one
+    /// cannot wait for the brain to oblige. It goes on the same command queue,
+    /// so like `give` it is applied by the next `tick`.
+    ///
+    /// Mind what the brain does with it meanwhile: a unit that is hungry when
+    /// it is handed food eats it where it stands, and one that is thirsty
+    /// drinks its water in about a second of watching. Keep the ticks after a
+    /// `hold` few.
+    Hold(Option<String>),
+    /// How many sprites are drawing a held item of this kind — in anybody's
+    /// hand, not only the selected unit's.
+    ///
+    /// The renderer's half of the contract, as `expect_sprites` is for actors:
+    /// a hand holding food and the screen showing it are different claims.
+    /// Counted from the sprites themselves, so a picture that was never drawn,
+    /// or was drawn for the wrong item, fails here and not in a screenshot
+    /// nobody looked at.
+    ExpectHeld { item: String, count: usize },
 
     /// Advance the simulation by this many fixed steps, immediately.
     ///

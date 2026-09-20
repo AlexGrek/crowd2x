@@ -135,6 +135,19 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
   texels, not screen pixels (`FrameAnimation`, `src/animation.rs`), with a
   *separate* mirrored sheet for left-facing rather than `flip_x`, so left-facing art can
   be hand-tuned independently (`dog::apply_facing` swaps `sprite.image` on `Changed<Facing>`).
+- **Items** (`item.rs`): every `ItemKind` has art — a pixel-art texture or an emoji
+  (`ItemArt`) — and `item::art` is a `match` with no wildcard arm, so a new item does not
+  compile until it says which. It lives here and not on `ItemKind` because `sim/` does not
+  know what anything looks like. A **texture can be any size** and is drawn at `ART_SCALE`
+  like every other sprite, so its pixels match its carrier's (which also makes the file's
+  size the item's: a 16x16 one is as big as a person). What makes any size safe is
+  `centring_nudge`: a sprite is centred on its position, so one an odd number of canvas
+  pixels wide has its edges between two pixels and its texels come out uneven — measured, a
+  5-texel texture at zoom 4 drew its texels 12/12/16/8/12 screen pixels wide instead of 12 —
+  and an odd axis is moved half a pixel. Its size is only known once it has loaded, so
+  `game::held` applies it then. An emoji is one codepoint, drawn as `Text2d` in the bundled
+  Twemoji font, as the goal label over a unit's head is. No item is drawn from a texture
+  yet: food and water are emoji.
 
 ### Screens and interface
 
@@ -266,6 +279,16 @@ here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the br
   outside them, so flying off into the void is getting lost rather than navigating; an
   axis with less map than view is centred, since there is nothing there to scroll to.
   Pan speed scales with the zoom so crossing the window always takes the same time.
+
+**What a hand holds is drawn in front of whoever holds it** (`game/held.rs`, art from
+`characters::item`). A unit whose `Inventory::hand` is full gets one sprite of its own, in
+front of every layer of its paperdoll and at the hands, that follows it and is gone the
+frame the hand is empty or holds something else. Only the **hand** — what is stowed is put
+away and shows nothing, which is the split the inventory is built on. It is a sprite beside
+the character, like the action bar and the goal label, and not a child of it: the paperdoll
+root carries the 3x upscale, which an emoji would inherit. Its depth is the carrier's own
+plus `0.005`, between the selection frame and the action bar, so it stays inside the band
+`depth_for` leaves for one character.
 
 Move with `WASD`, the arrows, the d-pad or the left stick; zoom with `q`/`e` or `A`/`B`;
 change speed with `+`/`-` or the bumpers and pause with `p` or `Y`; `esc` or `start` goes
@@ -496,7 +519,10 @@ A task is the only thing that writes it (`TaskCtx::inventory`); a goal only read
 *finishes* rather than when a goal hears that it did. **Nothing stows anything yet** — the
 brain takes into a hand and consumes from it, so a unit walks past a fridge with food in
 its pockets, and `Command::GiveItem` (a QA script's `give`) is the only way in. A goal that
-fetches and puts away is what closes that, and it needs a task that unstows.
+fetches and puts away is what closes that, and it needs a task that unstows. The hand is
+the half a viewer can see — `game/held.rs` draws what is in it — and `Command::Hold` (a QA
+script's `hold`) fills or empties it from outside, since the brain only ever fills it for
+the length of a meal.
 
 #### What a second is (`sim/clock.rs`)
 
@@ -726,12 +752,16 @@ gamepad is spawned and connected through `RawGamepadEvent`, so `bevy_input` buil
 real `Gamepad` component; the pointer moves by setting the window's cursor position, the
 same field `bevy_ui`'s focus system reads, so a click goes through real hover-and-click.
 
-The simulation gets four steps of its own, all intent-level: `{"spawn": {"kind": "human",
+The simulation gets five steps of its own, all intent-level: `{"spawn": {"kind": "human",
 "x": 3, "y": 2}}` puts a command on the same queue the game uses, `{"select": 0}` selects
 the unit that arrived first (arrival order, not slot order, because a despawn leaves a hole
 the next spawn fills — and because a `Uid` is random and a test cannot know one in
 advance), `{"give": {"item": "food", "count": 3}}` stows items in the selected unit on that
-same queue (the only way anything is stowed today, since no goal puts things away), and
+same queue (the only way anything is stowed today, since no goal puts things away),
+`{"hold": "food"}` puts one in its **hand** (`null` empties it) — a hand is only ever full
+for the length of a meal, so a test cannot wait for the brain to oblige, and it should tick
+few times afterwards, since a hungry unit eats what it is handed and a thirsty one drinks
+it in about a second of watching — and
 `{"tick": 200}` runs
 one spawn pass and then exactly that many processing passes, *immediately* — so pending
 spawns are applied once however many ticks were asked for. Ticking rather than waiting is
@@ -768,7 +798,7 @@ are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_selected`, `expect_carrying`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_held`, `expect_selected`, `expect_carrying`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -779,7 +809,11 @@ the selected unit has **stowed** — what is in its hand is not stowed, which is
 distinction the whole inventory is built on. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
-catches a renderer that has quietly stopped keeping up.
+catches a renderer that has quietly stopped keeping up. `expect_held` is the same split for
+what is carried: it counts the sprites drawing an item, per kind, in anybody's hand, so a
+hand that is full and a picture that was never drawn — or was drawn for the wrong item —
+are told apart. Placement is not something a count can say, so `qa/held_items.json` also
+photographs it; pause first, or the unit wanders out of a zoomed-in frame between steps.
 
 **Screenshots are named, not pathed.** `{"shot": "the file list"}` writes
 `qa-screenshots/<test>/01-the-file-list.png`, numbered in the order the shots were taken,
@@ -827,6 +861,7 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
                         speed.rs is how fast the world runs; hud.rs the two corners
                         selection.rs is who was clicked; unitpanel.rs the bar about them
+                        held.rs draws what a hand holds, in front of its carrier
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
@@ -843,6 +878,7 @@ src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replay
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed
 src/characters/         how a character is drawn: CELL/ART/upscale, depth_for
+                        item.rs is what an item looks like: a texture or an emoji, per kind
 src/animation.rs        FrameAnimation, atlas frame stepping
 src/debug.rs            screenshot/smoke-run harness, env-var driven
 tools/check_pixel_grid.py  verifies a frame is an exact integer upscale

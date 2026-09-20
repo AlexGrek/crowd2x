@@ -449,7 +449,7 @@ fn spawn_action_bar(commands: &mut Commands) -> (Entity, Entity) {
 /// of its own rather than reusing Bevy's built-in default: a COLRv0 table is
 /// what `swash` (which `bevy_text` rasterizes glyphs through) knows how to
 /// turn into a colored glyph rather than a blank one.
-const EMOJI_FONT: &str = "fonts/Twemoji.Mozilla.ttf";
+pub(super) const EMOJI_FONT: &str = "fonts/Twemoji.Mozilla.ttf";
 
 /// Canvas pixels tall the goal emoji is drawn at — the world camera's own
 /// unit, the same one [`BAR_WIDTH`] is in. Large enough to read as a status

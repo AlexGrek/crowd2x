@@ -4,9 +4,11 @@
 //! canvas, which is the rule for all art here:
 //!   * humans - a layered paperdoll (body, clothes, eyes, hair)
 //!   * dogs   - a single 4-frame idle animation with a mirrored left-facing sheet
+//!   * items  - what a hand holds: a small texture or an emoji, per kind
 
 pub mod dog;
 pub mod human;
+pub mod item;
 
 use bevy::prelude::*;
 

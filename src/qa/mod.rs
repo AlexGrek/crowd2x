@@ -68,6 +68,7 @@ use crate::render::{PixelZoom, PIXEL_SCALE};
 use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
 use crate::game::actors::{Actor, Sim, SimInput};
+use crate::game::held::HeldItem;
 use crate::game::logview::LogView;
 use crate::game::selection::Selected;
 use crate::game::speed::GameSpeed;
@@ -479,6 +480,8 @@ struct Checks<'w, 's> {
     /// from the bookkeeping would pass while nothing had actually reached the
     /// world, which is the failure this assertion exists to catch.
     sprites: Query<'w, 's, &'static Actor>,
+    /// Likewise the pictures of what is held, counted off the world.
+    held: Query<'w, 's, &'static HeldItem>,
     log: Res<'w, LogView>,
     /// So a scripted tick is the same size as one the game takes, read rather
     /// than written down twice.
@@ -848,6 +851,25 @@ fn perform(
                 intents.sim_input.0.give_item(uid, item);
             }
             Ok(Next::Now)
+        }
+
+        Step::Hold(item) => {
+            let item = item.as_deref().map(item_kind).transpose()?;
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `hold` puts things in the selected unit's hand".to_string())?;
+            intents.sim_input.0.hold(uid, item);
+            Ok(Next::Now)
+        }
+
+        Step::ExpectHeld { item, count } => {
+            let item = item_kind(item)?;
+            let actual = checks.held.iter().filter(|held| held.0 == item).count();
+            (actual == *count).then_some(Next::Now).ok_or(format!(
+                "expected {count} sprites holding {}, found {actual}",
+                item.name()
+            ))
         }
 
         Step::ExpectCarrying { item, count } => {
