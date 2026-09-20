@@ -6,7 +6,8 @@
 //! builds a `GameState` from the open map, steps it as fast as [`speed`] says
 //! to, and keeps a sprite alongside each entity. [`hud`] is the two corners of
 //! controls over the map, and [`logview`] drains what the simulation had to
-//! say into the panel under them.
+//! say into the panel under them. [`held`] draws what a unit's hand holds, in
+//! front of it.
 //!
 //! One thing on this screen is about a single member of the crowd rather than
 //! about the whole world: [`selection`] is the click that picks somebody and
@@ -50,6 +51,7 @@
 //! for a cancel it would otherwise fire on every zoom.
 
 pub mod actors;
+pub mod held;
 pub mod hud;
 pub mod logview;
 pub mod props;
@@ -81,6 +83,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             actors::ActorsPlugin,
+            held::HeldPlugin,
             props::PropsPlugin,
             speed::SpeedPlugin,
             hud::HudPlugin,

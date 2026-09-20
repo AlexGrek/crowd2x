@@ -251,6 +251,15 @@ pub enum Command {
     /// [`Command::SetProcess`] is on, and it will stop being the only route
     /// the moment a goal wants to fetch something.
     GiveItem { uid: Uid, item: ItemKind },
+    /// Put an item in an entity's **hand**, or empty it with `None`.
+    ///
+    /// The other half of [`Command::GiveItem`], for the slot the brain really
+    /// uses. A hand is only ever full for the length of a meal, so a QA script
+    /// that wants to look at one — or a debug harness that wants to know what
+    /// a unit carrying something looks like — cannot wait for the brain to
+    /// oblige. Like [`Inventory::set_hand`] it refuses nothing, and what was in
+    /// the hand is gone.
+    Hold { uid: Uid, item: Option<ItemKind> },
 }
 
 /// One frame's worth of input to the simulation.
@@ -293,6 +302,11 @@ impl Input {
 
     pub fn give_item(&mut self, uid: Uid, item: ItemKind) -> &mut Input {
         self.commands.push(Command::GiveItem { uid, item });
+        self
+    }
+
+    pub fn hold(&mut self, uid: Uid, item: Option<ItemKind>) -> &mut Input {
+        self.commands.push(Command::Hold { uid, item });
         self
     }
 
@@ -546,6 +560,25 @@ impl GameState {
         true
     }
 
+    /// Put an item in an entity's hand, or empty it. `false`, and a line in
+    /// the log saying why, for an entity that is not there or has no hands.
+    pub fn hold_item(&mut self, uid: Uid, item: Option<ItemKind>) -> bool {
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("hold: no such entity {uid}"));
+            return false;
+        };
+        let Some(inventory) = entity.inventory_mut() else {
+            self.log.push(format!("hold: {uid} carries nothing"));
+            return false;
+        };
+        let _ = inventory.set_hand(item);
+        self.log.push(match item {
+            Some(item) => format!("{uid} is holding {}", item.name()),
+            None => format!("{uid} is holding nothing"),
+        });
+        true
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -582,8 +615,8 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
-/// [`Command::Freeze`], [`Command::SetProcess`] and [`Command::GiveItem`] are
-/// drained here too. They change nothing structural, but they arrive on the
+/// [`Command::Freeze`], [`Command::SetProcess`], [`Command::GiveItem`] and
+/// [`Command::Hold`] are drained here too. They change nothing structural, but they arrive on the
 /// same queue and want the same timing: a freeze asked for this tick is in
 /// force before anything thinks, rather than one tick after the button was
 /// pressed.
@@ -613,6 +646,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::GiveItem { uid, item } => {
                 state.give_item(*uid, *item);
+            }
+            Command::Hold { uid, item } => {
+                state.hold_item(*uid, *item);
             }
         }
     }
@@ -925,6 +961,46 @@ mod tests {
             assert_eq!(uid.kind(), Some(kind));
         }
         assert_eq!(state.len(), 10_000);
+    }
+
+    #[test]
+    fn a_hold_command_fills_and_empties_a_hand_and_nothing_else() {
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(3, 3));
+        let hand = |state: &GameState| state.entities().get(uid).unwrap().inventory().unwrap().hand();
+
+        let mut input = Input::new();
+        input.hold(uid, Some(ItemKind::Water));
+        spawn_pass(&mut state, &input);
+        assert_eq!(hand(&state), Some(ItemKind::Water));
+        // The hand, and not the pockets: stowing is `GiveItem`'s business.
+        let entity = state.entities().get(uid).unwrap();
+        assert_eq!(entity.inventory().unwrap().count(ItemKind::Water), 0);
+
+        // Whatever was there is replaced rather than refused, and `None` empties it.
+        let mut input = Input::new();
+        input.hold(uid, Some(ItemKind::Food));
+        spawn_pass(&mut state, &input);
+        assert_eq!(hand(&state), Some(ItemKind::Food));
+
+        let mut input = Input::new();
+        input.hold(uid, None);
+        spawn_pass(&mut state, &input);
+        assert_eq!(hand(&state), None);
+    }
+
+    #[test]
+    fn holding_something_is_refused_with_a_reason_when_there_are_no_hands() {
+        let mut state = world();
+        let dog = state.spawn(EntityType::Dog, Point::new(3, 3));
+        let gone = state.spawn(EntityType::Human, Point::new(4, 4));
+        state.despawn(gone);
+
+        assert!(!state.hold_item(dog, Some(ItemKind::Food)));
+        assert!(!state.hold_item(gone, Some(ItemKind::Food)));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("carries nothing")), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("no such entity")), "{lines:?}");
     }
 
     #[test]

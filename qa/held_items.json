@@ -1,0 +1,94 @@
+{
+  "name": "a unit holding an item is drawn with it in front of them, and it goes when the hand is empty",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "room",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 5 },
+          "terrain": {
+            "palette": ["void", "floor white", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": { "props": [], "spawners": [] }
+        }
+      }
+    ]
+  },
+  "open": "room",
+  "steps": [
+    { "note": "no fridge on this map, so nobody goes anywhere to fetch anything: what is in a hand is what the test put there" },
+    { "note": "zoomed right in so the item can be told apart from the body it is in front of" },
+    { "key": "e" },
+    { "key": "e" },
+    { "key": "e" },
+    { "key": "e" },
+    { "expect_zoom": 8 },
+
+    { "note": "paused, so the world only moves when a tick says so: at this zoom a unit that wandered off would be out of frame" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "an odd-sized map has a middle cell, and the middle cell is the middle of the screen: clear of every panel" },
+    { "spawn": { "kind": "human", "x": 4, "y": 2 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "select": 0 },
+    { "expect_held": { "item": "food", "count": 0 } },
+    { "expect_held": { "item": "water", "count": 0 } },
+    { "shot": "empty handed" },
+
+    { "note": "a hand goes full, and the screen shows it: one picture, of food and not of water" },
+    { "hold": "food" },
+    { "tick": 1 },
+    { "expect_held": { "item": "food", "count": 1 } },
+    { "expect_held": { "item": "water", "count": 0 } },
+    { "shot": "holding food" },
+
+    { "note": "another item in the same hand replaces the picture rather than adding to it" },
+    { "note": "few ticks: a thirsty unit drinks what it is handed in about a second of watching" },
+    { "hold": "water" },
+    { "tick": 1 },
+    { "expect_held": { "item": "water", "count": 1 } },
+    { "expect_held": { "item": "food", "count": 0 } },
+    { "shot": "holding water" },
+
+    { "note": "and an empty hand takes the picture away" },
+    { "hold": null },
+    { "tick": 1 },
+    { "expect_held": { "item": "water", "count": 0 } },
+    { "expect_held": { "item": "food", "count": 0 } },
+    { "shot": "empty handed again" },
+
+    { "note": "the picture is only ever in the hand: what is stowed is put away, and shows nothing" },
+    { "give": { "item": "food", "count": 3 } },
+    { "tick": 1 },
+    { "expect_carrying": { "item": "food", "count": 3 } },
+    { "expect_held": { "item": "food", "count": 0 } },
+
+    { "note": "it goes where its carrier goes; zoomed out so a walk stays in view" },
+    { "hold": "food" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 4 },
+    { "tick": 60 },
+    { "expect_entities": 1 },
+    { "expect_held": { "item": "food", "count": 1 } },
+    { "shot": "carrying it about" }
+  ]
+}

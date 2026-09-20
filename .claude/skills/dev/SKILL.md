@@ -85,6 +85,7 @@ src/game/             GamePlugin - playing a map
   mod.rs              camera, zoom, clamp, HUD
   actors.rs           the sim-to-sprite bridge: Sim, SimInput, tick, sync
   logview.rs          drains the simulation's log onto the screen
+  held.rs             draws what a unit's hand holds, in front of it
 src/map/              the map + coordinates - PLAIN RUST, no bevy
 src/sim/              GameState + process_game_state - PLAIN RUST, no bevy
   uid.rs              Uid (type byte + 56 random bits), EntityType
@@ -96,6 +97,7 @@ src/characters/       how humans and dogs are drawn
   mod.rs              CharacterPlugin, CELL, depth_for()
   human.rs            layered paperdoll
   dog.rs              animated sprite + facing sheets
+  item.rs             what an item looks like: a texture or an emoji, per kind
 src/animation.rs      FrameAnimation (atlas frames), StripAnimation (Sprite::rect)
 src/qa/               scripted QA (see the `qa` skill)
 src/awake.rs          macOS: hold the display awake for a capture

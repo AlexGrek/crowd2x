@@ -66,7 +66,7 @@ This order has consequences:
 | do a new kind of single step ("sit", "open door") | a **task executor** |
 | show a new kind of body activity (animation) | an **action** variant |
 | use a prop on the map | a **feature** entry (+ palette entry if the prop is new) |
-| carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`, `mass`, `volume`) |
+| carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`, `mass`, `volume`), **and its art** in `characters/item.rs` — a texture or an emoji; `item::art` has no wildcard arm, so it will not compile without one |
 | change *when* something is chosen | the routine's priority curve, not the goal |
 | change *how* something is done | the goal executor, not the routine |
 
