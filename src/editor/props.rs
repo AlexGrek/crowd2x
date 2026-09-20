@@ -17,6 +17,7 @@
 use bevy::prelude::*;
 
 use super::PaletteItem;
+use crate::animation::StripAnimation;
 use crate::characters::{depth_for, upscale, CELL};
 use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point};
 use crate::render::WORLD_LAYER;
@@ -24,6 +25,10 @@ use crate::state::AppState;
 
 /// How close the cursor has to be to a prop's centre to delete it.
 const ERASE_RADIUS: f32 = CELL as f32 / 2.0;
+
+/// How fast a prop's art cycles, for the ones that move. Fast enough that a
+/// screen reads as flickering rather than as stepping through pictures.
+const SECONDS_PER_FRAME: f32 = 0.12;
 
 pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::new("bed 1", "bed01.png"),
@@ -40,6 +45,10 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::new("crate tall", "untitledtallhd.png"),
     // Something to eat from: a brain finds it by this name (`sim::feature`).
     PaletteItem::upscaled("fridge", "fridge.png"),
+    // Something to do. Two strips: the screen dark and idling, and the screen
+    // on for as long as somebody is sitting at it — `game::props` is what
+    // swaps between them, from what the simulation says that unit is doing.
+    PaletteItem::animated("computer", "computer_idle.png", 10).used("computer.png", 11),
 ];
 
 /// A placed prop, carrying the object it stands for so erasing it can take
@@ -56,6 +65,57 @@ impl Prop {
             at: self.at,
             kind: ObjectKind::new(self.kind),
         }
+    }
+
+    /// The palette entry it was placed from, which is the name a map file
+    /// stores it under.
+    pub fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The cell it blocks and is addressed by — the one its centre falls in,
+    /// [`Object::cell`]'s rule, which is the same cell the simulation indexes
+    /// it under (`sim::feature::Features`).
+    pub fn cell(&self) -> Point {
+        self.object().cell()
+    }
+}
+
+/// A prop that looks different while somebody is using it: both strips, and
+/// which of them is on screen.
+///
+/// Spawned by the editor with every other prop, because the two pictures are
+/// one palette entry ([`PaletteItem::in_use`]) — but only the game screen ever
+/// turns it on, since only there is anybody using anything. Holding the
+/// handles rather than the paths means the swap is a clone and not an asset
+/// lookup by string, on a component that is asked about every frame.
+#[derive(Component)]
+pub struct Usable {
+    idle: Handle<Image>,
+    idle_frames: u32,
+    busy: Handle<Image>,
+    busy_frames: u32,
+    in_use: bool,
+}
+
+impl Usable {
+    /// Show the strip for `in_use`, and say what changed: the image to put on
+    /// the sprite and how many frames it has, or `None` when it is already
+    /// the one showing.
+    pub fn show(&mut self, in_use: bool) -> Option<(Handle<Image>, u32)> {
+        if in_use == self.in_use {
+            return None;
+        }
+        self.in_use = in_use;
+        Some(if in_use {
+            (self.busy.clone(), self.busy_frames)
+        } else {
+            (self.idle.clone(), self.idle_frames)
+        })
+    }
+
+    pub fn is_in_use(&self) -> bool {
+        self.in_use
     }
 }
 
@@ -127,6 +187,9 @@ pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, map: &Map, state
     }
 }
 
+/// One prop: its sprite, whatever animation its art asks for, and — for a
+/// prop whose picture says whether it is being used — the second strip the
+/// game screen swaps in.
 fn spawn_prop(
     commands: &mut Commands,
     assets: &AssetServer,
@@ -134,18 +197,43 @@ fn spawn_prop(
     item: usize,
     state: AppState,
 ) {
+    let item = &PALETTE[item];
     let y = at.y as f32;
-    commands.spawn((
-        Name::new("prop"),
-        Prop {
-            at,
-            kind: PALETTE[item].name,
-        },
-        Sprite::from_image(assets.load(PALETTE[item].path)),
-        Transform::from_xyz(at.x as f32, y, depth_for(y)).with_scale(upscale(PALETTE[item].scale)),
-        WORLD_LAYER,
-        DespawnOnExit(state),
-    ));
+    let prop = commands
+        .spawn((
+            Name::new("prop"),
+            Prop {
+                at,
+                kind: item.name,
+            },
+            Sprite {
+                image: assets.load(item.art.path),
+                // One frame of a strip; the whole PNG for a still picture.
+                rect: item.first_frame(),
+                ..default()
+            },
+            Transform::from_xyz(at.x as f32, y, depth_for(y)).with_scale(upscale(item.scale)),
+            WORLD_LAYER,
+            DespawnOnExit(state),
+        ))
+        .id();
+
+    if item.art.frames > 1 {
+        commands.entity(prop).insert(StripAnimation::new(
+            item.frame(),
+            item.art.frames,
+            SECONDS_PER_FRAME,
+        ));
+    }
+    if let Some(busy) = item.in_use {
+        commands.entity(prop).insert(Usable {
+            idle: assets.load(item.art.path),
+            idle_frames: item.art.frames,
+            busy: assets.load(busy.path),
+            busy_frames: busy.frames,
+            in_use: false,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -195,6 +283,39 @@ mod tests {
     fn every_catalogue_prop_can_be_placed() {
         for prop in crate::map::PROPS {
             assert!(item_of(&ObjectKind::new(prop.name)).is_some(), "no palette entry for {:?}", prop.name);
+        }
+    }
+
+    /// The two strips of a prop that shows whether it is in use are two
+    /// pictures of the same thing, so they are drawn at the same size and
+    /// swapping one for the other cannot resize the sprite.
+    #[test]
+    fn a_prop_that_lights_up_has_one_art_size_for_both_its_strips() {
+        let computer = &PALETTE[item_of(&ObjectKind::new("computer")).expect("in the palette")];
+        let busy = computer.in_use.expect("a computer has a screen-on strip");
+        assert!(computer.art.frames > 1, "and both of them move");
+        assert!(busy.frames > 1);
+        // The sizes themselves are checked against the PNGs by
+        // `every_palette_item_is_one_cell_wide_once_scaled`.
+        assert_ne!(busy.path, computer.art.path, "two strips, not one");
+    }
+
+    /// Anything the simulation can be *using* has to be a prop that says so
+    /// on screen, or there is no way to tell a computer somebody is sitting
+    /// at from one nobody is. Every feature, since the ones used from beside
+    /// them are exactly the ones a body does not visibly occupy.
+    #[test]
+    fn a_prop_that_shows_it_is_in_use_shows_it_with_its_own_art() {
+        for item in PALETTE {
+            let Some(busy) = item.in_use else {
+                continue;
+            };
+            assert!(
+                crate::sim::feature::kinds_of(item.name).next().is_some(),
+                "{:?} has in-use art but nothing can use it",
+                item.name
+            );
+            assert!(!busy.path.is_empty());
         }
     }
 

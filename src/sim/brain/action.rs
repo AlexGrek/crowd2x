@@ -109,6 +109,21 @@ impl Action {
         matches!(self, Action::None)
     }
 
+    /// The cell of the thing being used right now, for a prop that shows
+    /// whether somebody is using it — a computer's screen. `None` for every
+    /// action but [`Action::Interact`], walking to a fridge included: being
+    /// on the way to something is not using it.
+    ///
+    /// Cheap, allocation-free and asked about every actor every frame
+    /// (`game::props`), which is why it is here rather than read off a
+    /// description.
+    pub const fn interacting_with(&self) -> Option<Point> {
+        match self {
+            Action::Interact { cell, .. } => Some(*cell),
+            Action::None | Action::Move { .. } | Action::Consume { .. } | Action::Wait { .. } => None,
+        }
+    }
+
     /// Fraction complete, for an action worth drawing a reverse progress bar
     /// over. `None` for [`Action::None`]; for a walk, which has no notion of
     /// "done in n seconds" — only of having arrived or not; and for
@@ -227,6 +242,21 @@ mod tests {
             consuming.advance(&world.ctx(), MoveOutcome::Idle, &mut walk);
         }
         assert_eq!(consuming.progress(), Some(1.0), "never past done, however long it ran");
+    }
+
+    #[test]
+    fn only_an_interaction_says_what_is_being_used() {
+        let cell = Point::new(2, 1);
+        assert_eq!(Action::interact(cell, 1.0).interacting_with(), Some(cell));
+        assert_eq!(Action::None.interacting_with(), None);
+        assert_eq!(Action::consume(1.0).interacting_with(), None);
+        assert_eq!(Action::wait(1.0).interacting_with(), None);
+
+        // On the way to the fridge is not using the fridge.
+        let world = World::new(Map::new(Size::new(9, 9), FLOOR));
+        let mut walk = walker();
+        let walking = Action::walk_to(&mut walk, &world.ctx(), cell).expect("open floor");
+        assert_eq!(walking.interacting_with(), None);
     }
 
     #[test]

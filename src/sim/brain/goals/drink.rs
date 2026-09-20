@@ -49,7 +49,7 @@ impl Stage {
             // A wait is only ever queued in front of a walk.
             Some(Task::MoveTo(_) | Task::Wait(_)) => Stage::Walking,
             Some(Task::TakeItem(_)) => Stage::Taking,
-            None | Some(Task::UseToilet(_)) => Stage::Finding,
+            None | Some(Task::UseToilet(_) | Task::UseComputer(_)) => Stage::Finding,
         }
     }
 

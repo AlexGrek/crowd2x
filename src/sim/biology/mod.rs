@@ -56,11 +56,13 @@
 //! stop lining up.
 
 pub mod bladder;
+pub mod fun;
 pub mod hunger;
 pub mod stats;
 pub mod thirst;
 
 pub use bladder::Bladder;
+pub use fun::Fun;
 pub use hunger::Hunger;
 pub use stats::Stats;
 pub use thirst::Thirst;
@@ -77,17 +79,20 @@ pub enum ProcessId {
     Hunger = 0,
     Thirst = 1,
     Bladder = 2,
+    Fun = 3,
 }
 
 impl ProcessId {
-    pub const COUNT: usize = 3;
-    pub const ALL: [ProcessId; ProcessId::COUNT] = [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder];
+    pub const COUNT: usize = 4;
+    pub const ALL: [ProcessId; ProcessId::COUNT] =
+        [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun];
 
     pub const fn name(self) -> &'static str {
         match self {
             ProcessId::Hunger => "hunger",
             ProcessId::Thirst => "thirst",
             ProcessId::Bladder => "bladder",
+            ProcessId::Fun => "fun",
         }
     }
 
@@ -134,6 +139,8 @@ pub enum Event {
     Ingested(ItemKind),
     /// A toilet was used.
     Relieved,
+    /// Something entertaining was done — a go on a computer.
+    Entertained,
 }
 
 /// One thing a body does by itself.
@@ -170,6 +177,7 @@ pub struct Biology {
     hunger: Hunger,
     thirst: Thirst,
     bladder: Bladder,
+    fun: Fun,
 }
 
 impl Biology {
@@ -181,6 +189,7 @@ impl Biology {
             hunger: Hunger,
             thirst: Thirst,
             bladder: Bladder::default(),
+            fun: Fun,
         }
     }
 
@@ -235,13 +244,14 @@ impl Biology {
             hunger,
             thirst,
             bladder,
+            fun,
         } = self;
-        (stats, *switches, [hunger, thirst, bladder])
+        (stats, *switches, [hunger, thirst, bladder, fun])
     }
 
     /// Every process, read-only. Slot `i` is `ProcessId` `i`.
     fn processes(&self) -> [&dyn Process; ProcessId::COUNT] {
-        [&self.hunger, &self.thirst, &self.bladder]
+        [&self.hunger, &self.thirst, &self.bladder, &self.fun]
     }
 
     /// The stats, which processes are running, and what each running process
@@ -315,6 +325,7 @@ mod tests {
         assert!(!switches.is_on(ProcessId::Thirst));
         assert!(switches.is_on(ProcessId::Hunger));
         assert!(switches.is_on(ProcessId::Bladder));
+        assert!(switches.is_on(ProcessId::Fun));
         assert_eq!(switches.with(ProcessId::Thirst, true), Switches::ALL);
         assert_eq!(
             ProcessId::ALL.iter().fold(Switches::ALL, |s, &p| s.with(p, false)),
@@ -328,6 +339,7 @@ mod tests {
         biology.advance(HOUR);
         let stats = biology.stats();
         assert!(stats.hunger() > 50.0 && stats.thirst() > 50.0 && stats.bladder() > 50.0, "{stats:?}");
+        assert!(stats.fun() < 50.0, "and the one that drains instead: {stats:?}");
     }
 
     #[test]
@@ -358,10 +370,11 @@ mod tests {
                 .find(|(name, _)| *name == "processes")
                 .map(|(_, value)| value)
         };
-        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder"));
+        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun"));
 
         biology.set_running(ProcessId::Hunger, false);
         biology.set_running(ProcessId::Bladder, false);
+        biology.set_running(ProcessId::Fun, false);
         assert_eq!(processes(&biology).as_deref(), Some("thirst"));
         assert_eq!(names(&biology), before, "the unit panel lays these out once");
     }

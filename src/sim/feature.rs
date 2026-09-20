@@ -8,8 +8,8 @@
 //! none of the editor's.
 //!
 //! A prop with no entry here is scenery, which today is every prop but the
-//! fridge and the toilet. A prop with two entries is two things at once: a
-//! fridge is food and water.
+//! fridge, the toilet and the computer. A prop with two entries is two things
+//! at once: a fridge is food and water.
 
 use crate::map::{Map, ObjectLayer, Point};
 
@@ -19,6 +19,8 @@ pub enum FeatureKind {
     Food,
     Water,
     Toilet,
+    /// Something to do: a computer, used from the chair beside it.
+    Entertainment,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -46,7 +48,7 @@ pub enum Access {
 impl FeatureKind {
     pub const fn access(self) -> Access {
         match self {
-            FeatureKind::Food | FeatureKind::Water => Access::Beside,
+            FeatureKind::Food | FeatureKind::Water | FeatureKind::Entertainment => Access::Beside,
             FeatureKind::Toilet => Access::Entered,
         }
     }
@@ -79,6 +81,10 @@ pub const FEATURES: &[Feature] = &[
         name: "toilet",
         kind: FeatureKind::Toilet,
     },
+    Feature {
+        name: "computer",
+        kind: FeatureKind::Entertainment,
+    },
 ];
 
 /// Everything a prop name is for — nothing, for scenery.
@@ -99,6 +105,7 @@ pub struct Features {
     food: Vec<Point>,
     water: Vec<Point>,
     toilet: Vec<Point>,
+    entertainment: Vec<Point>,
     /// Cells whose kind is [`Access::Entered`] — gathered once, across every
     /// kind, so the move step can ask "can anyone at all step in here"
     /// without knowing what the feature is for. A handful of cells on any
@@ -116,6 +123,7 @@ impl Features {
                     FeatureKind::Food => features.food.push(cell),
                     FeatureKind::Water => features.water.push(cell),
                     FeatureKind::Toilet => features.toilet.push(cell),
+                    FeatureKind::Entertainment => features.entertainment.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
@@ -138,6 +146,7 @@ impl Features {
             FeatureKind::Food => &self.food,
             FeatureKind::Water => &self.water,
             FeatureKind::Toilet => &self.toilet,
+            FeatureKind::Entertainment => &self.entertainment,
         }
     }
 
@@ -239,6 +248,23 @@ mod tests {
         assert_eq!(FeatureKind::Toilet.access(), Access::Entered);
         assert_eq!(FeatureKind::Food.access(), Access::Beside);
         assert_eq!(FeatureKind::Water.access(), Access::Beside);
+    }
+
+    /// A computer is furniture with a chair in front of it, not a cubicle:
+    /// it is used from beside it, and its own cell stays walled off like any
+    /// other prop's.
+    #[test]
+    fn a_computer_on_the_map_is_somewhere_to_have_a_go_at_something_and_is_used_from_beside_it() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let computer = Point::new(4, 8);
+        map.add_object(ObjectLayer::Props, prop("computer", computer));
+
+        let features = Features::from_map(&map);
+        assert_eq!(features.count(FeatureKind::Entertainment), 1);
+        assert_eq!(features.nearest(FeatureKind::Entertainment, Point::new(0, 0)), Some(computer));
+        assert_eq!(FeatureKind::Entertainment.access(), Access::Beside);
+        assert!(!features.is_enterable(computer));
+        assert_eq!(features.count(FeatureKind::Food), 0, "a computer is not lunch");
     }
 
     #[test]

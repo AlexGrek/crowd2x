@@ -21,8 +21,8 @@ use rand::RngExt;
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Hunger, thirst and bladder are the stats that move so far — the rest are
-/// rolled at spawn and stay put until a process wants them to.
+/// Hunger, thirst, bladder and fun are the stats that move so far — the rest
+/// are rolled at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
     health: f32,
@@ -69,6 +69,10 @@ impl Stats {
         self.bladder = need(self.bladder + by);
     }
 
+    pub(super) fn change_fun(&mut self, by: f32) {
+        self.fun = need(self.fun + by);
+    }
+
     /// Every stat at the middle of its range — a person with nothing unusual
     /// about them, for a test that wants to set one stat and know the rest.
     #[cfg(test)]
@@ -103,6 +107,12 @@ impl Stats {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_fun(mut self, fun: f32) -> Stats {
+        self.fun = fun;
+        self
+    }
+
     /// 0 (dead) to 100 (uninjured).
     pub fn health(&self) -> f32 {
         self.health
@@ -131,6 +141,19 @@ impl Stats {
     /// 0 (empty) to 100 (desperate).
     pub fn bladder(&self) -> f32 {
         self.bladder
+    }
+
+    /// 0 (having a great time) to 100 (bored): [`Stats::fun`] read as a need.
+    ///
+    /// Every other need *rises* towards the thing that has to be done about
+    /// it — hunger, thirst, a bladder — and fun is the one stat that drains
+    /// instead. Turning it over here rather than in the routine that watches
+    /// it is what keeps every need on one scale, so how badly somebody wants
+    /// a go on the computer can be compared with how badly they want a meal
+    /// (`NeedRoutine`). Derived, so it cannot disagree with the stat it is
+    /// the other side of.
+    pub fn boredom(&self) -> f32 {
+        100.0 - self.fun
     }
 
     /// 0 (in crisis) to 100 (thriving).
@@ -196,7 +219,20 @@ mod tests {
         stats.change_hunger(1000.0);
         stats.change_thirst(-1000.0);
         stats.change_bladder(1000.0);
+        stats.change_fun(-1000.0);
         assert_eq!((stats.hunger(), stats.thirst(), stats.bladder()), (100.0, 0.0, 100.0));
+        assert_eq!(stats.fun(), 0.0);
+    }
+
+    #[test]
+    fn boredom_is_fun_the_other_way_up() {
+        assert_eq!(
+            Stats::calm().with_fun(100.0).boredom(),
+            0.0,
+            "having a great time is not being bored"
+        );
+        assert_eq!(Stats::calm().with_fun(0.0).boredom(), 100.0);
+        assert_eq!(Stats::calm().with_fun(30.0).boredom(), 70.0);
     }
 
     #[test]

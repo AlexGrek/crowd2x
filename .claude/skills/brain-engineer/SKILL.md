@@ -166,6 +166,7 @@ Priorities are unitless `f32`s compared only against each other.
 | `NeedRoutine(HUNGER)` → eat | `hunger / 50`: 1.2 at `PECKISH` (60), released at `SATED` (25) |
 | `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
+| `NeedRoutine(BOREDOM)` → play | `boredom / 50`: 1.2 at `BORED` (60), released at `AMUSED` (20). `Stats::boredom` is `fun` turned over — the one stat that falls on its own, read the same way up as every other need |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 
 Put a new need on the same 0–2 scale so that urgency is comparable across needs. Give a
@@ -186,10 +187,14 @@ halfway there.
    (or a sibling) so the new goal actually runs in it.
 5. **Prove a new guard test fails** by breaking what it guards, run it, then restore. Tests in
    this repo have passed vacuously before.
-6. **Add a QA test** if the behaviour is visible, copying `qa/eating.json`:
+6. **Add a QA test** if the behaviour is visible, copying `qa/eating.json` (or
+   `qa/computer.json`, which watches one need in isolation):
    - an inline map with the props;
    - `spawn`, `tick`, `expect_log`;
-   - a `shot` of the brains menu.
+   - a `shot` of the brains menu;
+   - `{"process": {"name": "hunger", "on": false}}` on the selected unit to switch the
+     other needs off, and `{"key": "p"}` to pause, when the test needs an exact moment
+     rather than "something happened eventually".
 7. **Run `uv run tools/qa.py`, then `qa/perf_simulation.json`.** Compare the 4000-humans median
    with the previous run on the same machine. The perf test runs only 200 ticks, so a behaviour
    that triggers later is not measured there; add a `measure` step to a test that reaches it if
@@ -201,9 +206,10 @@ halfway there.
 
 - **`crate::sim::testing::World`** — one unit, the real think / move-rules / react sequence.
   `World::new(map)`, `step(&mut entity)`, `log_contains(..)`, `lines()`, `meals()`, `drinks()`,
-  `reliefs()`, `ctx()`, pub `dt`, `tick`, `occupancy` (claim cells to put bodies in the way).
+  `reliefs()`, `plays()`, `ctx()`, pub `dt`, `tick`, `occupancy` (claim cells to put bodies in the way).
 - **`crate::sim::testing::{needy_human, prop_at}`** — `needy_human(cell, hunger, thirst,
-  bladder)` so a test decides which needs press; `prop_at(&mut map, "toilet", cell)` puts a prop
+  bladder)` so a test decides which needs press (it also sets fun to the top, so a test about
+  hunger is not interrupted by boredom; `Human::set_fun` is how a test about boredom lowers it); `prop_at(&mut map, "toilet", cell)` puts a prop
   in the middle of a cell (object positions are **pixels**, and this does the conversion).
 - **Switching a process off in a test:** `human.biology_mut().unwrap().set_running(ProcessId::Hunger, false)`
   isolates one need from the others without a hook — the same switch `Command::SetProcess` uses.
@@ -217,7 +223,7 @@ halfway there.
   - `dial(goal, level)` — a `Routine::Dial` (test-only variant, struct in `routines.rs`) whose
     priority a test turns up and down;
   - `Recorder` / `Listener` — executors that journal every call.
-- **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_carried`/`inventory_mut`,
+- **Test hooks:** `Human::set_hunger`/`set_thirst`/`set_bladder`/`set_fun`/`set_carried`/`inventory_mut`,
   `Biology::edit(|stats| stats.with_thirst(..))`, and `Stats::calm().with_hunger(..)`.
   Add `#[cfg(test)] pub(crate)` hooks the same way rather than widening visibility.
 - **`crate::sim::walker::ROUTES_ASKED`** — a thread-local count of far routes. Assert it stays

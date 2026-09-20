@@ -109,6 +109,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"spawn": {"kind": "human", "x": 3, "y": 2}}` | Put an entity in the world: `human` or `dog`. |
 | `{"select": 0}` | Select the unit that arrived first; `1` is the next, and so on. |
 | `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
+| `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -182,6 +183,7 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
+| `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
@@ -212,6 +214,28 @@ next pass rather than at once; what does not fit is refused with a line in the l
 how a test asserts on a limit. What is in a unit's *hand* is not stowed and `expect_carrying`
 does not count it — the hand costs mass but no space, and that distinction is the whole of
 `sim/inventory.rs`.
+
+`process` is the only handle a script has on what a unit *wants*. Stats are rolled at spawn
+and nothing outside the simulation may write one, so the way to watch one need is to stop
+the others happening at all: switch `hunger`, `thirst` and `bladder` off and what is left
+is a human that gets bored and goes to the computer, on a timeline nothing else can
+interrupt. Off means the stat holds still **and** the routine behind it stops wanting
+anything (`sim/biology`, "Switching a process off"). Like `give`, it is about the selected
+unit and rides the command queue, so it lands on the next pass.
+
+`expect_prop_in_use` is to a prop what `expect_sprites` is to the crowd: the renderer's
+half of a claim the simulation makes. A unit can be mid-session at a computer while the
+screen on screen is still dark, and that is the bug it catches. Two things make a test
+about it stable:
+
+- **Pause the game first** (`{"key": "p"}`). `FixedUpdate` keeps running between a
+  script's steps, so an unpaused world is however much further along as this machine
+  managed — fine for a floor like `expect_world_time`, useless for "is the screen on at
+  tick 5900". Paused, `tick` is the only thing that moves the world, and the same tick
+  count is the same moment on every machine.
+- **Aim at the middle of the session**, and say in a `note` how the number was arrived at.
+  A go on a computer is 960 ticks, so a count 480 either side of the middle still lands
+  inside it.
 
 `expect_selected` names the *kind* and not the id, for the reason `select` takes an index:
 ids are random. It is the assertion for the click that picks somebody out of the crowd —

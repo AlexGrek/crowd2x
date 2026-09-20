@@ -123,6 +123,11 @@ impl Human {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_fun(&mut self, fun: f32) {
+        self.biology.edit(|stats| stats.with_fun(fun));
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_carried(&mut self, item: Option<ItemKind>) {
         let _ = self.inventory.set_hand(item);
     }
@@ -208,6 +213,10 @@ impl GameEntity for Human {
 
     fn action_progress(&self) -> Option<f32> {
         self.brain.action().progress()
+    }
+
+    fn interacting_with(&self) -> Option<Point> {
+        self.brain.action().interacting_with()
     }
 
     fn display_name(&self) -> Option<String> {
@@ -312,6 +321,10 @@ impl GameEntity for Dog {
         self.brain.action().progress()
     }
 
+    fn interacting_with(&self) -> Option<Point> {
+        self.brain.action().interacting_with()
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
@@ -358,6 +371,7 @@ mod tests {
         human.set_hunger(0.0);
         human.set_thirst(0.0);
         human.set_bladder(0.0);
+        human.set_fun(100.0);
         human
     }
 
@@ -479,6 +493,8 @@ mod tests {
                 human.set_hunger(0.0);
                 human.set_thirst(0.0);
                 human.set_bladder(0.0);
+                human.set_fun(100.0);
+        human.set_fun(100.0);
             }
             w1.step(&mut one);
             w2.step(&mut two);

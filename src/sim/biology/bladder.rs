@@ -74,6 +74,9 @@ impl Process for Bladder {
         match event {
             Event::Ingested(item) => self.on_its_way += item.hydration() * BLADDER_PER_HYDRATION,
             Event::Relieved => stats.change_bladder(-stats.bladder()),
+            // Sitting at a computer does nothing to a bladder — which is the
+            // sort of thing that only stays true while it is written down.
+            Event::Entertained => {}
         }
     }
 

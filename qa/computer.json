@@ -1,0 +1,90 @@
+{
+  "name": "a human gets bored, has a go on the computer, and the screen says so",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "office",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 168, "y": 168 }, "kind": "computer" },
+              { "at": { "x": 456, "y": 264 }, "kind": "fridge" },
+              { "at": { "x": 456, "y": 72 }, "kind": "toilet" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "office",
+  "steps": [
+    { "note": "the computer sits in cell (3, 3), the fridge in (9, 5) and the toilet in (9, 1)" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+
+    { "note": "paused, so the only ticks this world takes are the ones asked for below —" },
+    { "note": "otherwise the frames between two steps would advance it by however many" },
+    { "note": "this machine managed, and the moments photographed here are exact ones" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "spawn": { "kind": "human", "x": 2, "y": 3 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "expect_prop_in_use": { "kind": "computer", "in_use": false } },
+    { "shot": "an office, and a computer nobody is using" },
+
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "hunger, thirst and a bladder switched off, so this is a test about being" },
+    { "note": "bored rather than a race between four needs. Fun is left running: it is" },
+    { "note": "the one that drains here, and its level was rolled at spawn like the rest" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+
+    { "note": "fun drains over ten world hours; this one was rolled part way down it and" },
+    { "note": "crosses 60 boredom at about tick 5400, a step from the desk. Half an hour" },
+    { "note": "of world at the computer is 960 ticks, so 5900 is the middle of the go" },
+    { "tick": 5900 },
+    { "expect_prop_in_use": { "kind": "computer", "in_use": true } },
+    { "press": "brains" },
+    { "shot": "the screen is on while somebody is sitting at it" },
+
+    { "note": "...and a thousand ticks later the go is over and the screen is dark again" },
+    { "tick": 1000 },
+    { "expect_log": "had a go on the computer at 3, 3" },
+    { "expect_prop_in_use": { "kind": "computer", "in_use": false } },
+    { "expect_entities": 1 },
+    { "shot": "the go is over, and what its mind is doing now" },
+
+    { "press": "debug" },
+    { "shot": "the debug menu: fun, and the processes still running" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "office" }
+  ]
+}

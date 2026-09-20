@@ -50,6 +50,7 @@ pub const PROPS: &[Prop] = &[
     Prop::blocking("crate"),
     Prop::blocking("crate tall"),
     Prop::blocking("fridge"),
+    Prop::blocking("computer"),
 ];
 
 impl ObjectKind {

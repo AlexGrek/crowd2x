@@ -112,6 +112,11 @@ impl World {
         self.count("used the toilet")
     }
 
+    /// How many goes on a computer have been had here.
+    pub fn plays(&self) -> usize {
+        self.count("had a go on the computer")
+    }
+
     fn count(&self, needle: &str) -> usize {
         self.lines.iter().filter(|line| line.contains(needle)).count()
     }
@@ -134,11 +139,17 @@ pub fn prop_at(map: &mut Map, name: &str, cell: Point) {
 
 /// A human standing in `cell` with exactly these needs, so a test decides
 /// which of them are pressing rather than the spawn roll.
+///
+/// Fun is set to the top as well, though it is not an argument: a rolled one
+/// would leave every test about hunger with a human that might wander off
+/// looking for something to do halfway through. A test about boredom sets it
+/// itself (`Human::set_fun`).
 pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human {
     let mut rng = SmallRng::seed_from_u64(3);
     let mut human = Human::new(Uid::new(EntityType::Human, 77), cell, &mut rng);
     human.set_hunger(hunger);
     human.set_thirst(thirst);
     human.set_bladder(bladder);
+    human.set_fun(100.0);
     human
 }

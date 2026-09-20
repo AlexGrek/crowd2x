@@ -263,6 +263,20 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// The cell of whatever this entity is using right now — the computer it
+    /// is sitting at, the fridge it is reaching into — and `None` for one
+    /// that is walking, waiting or idle. See
+    /// [`super::brain::Action::interacting_with`].
+    ///
+    /// What a prop that shows whether it is in use reads (`game::props`): the
+    /// fact belongs to the *unit*, since a feature has no state of its own —
+    /// which is what lets the feature index be built once and read from every
+    /// thread. On the trait, and cheap, for the reason
+    /// [`GameEntity::current_goal`] is.
+    fn interacting_with(&self) -> Option<Point> {
+        None
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,

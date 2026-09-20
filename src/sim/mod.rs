@@ -1213,8 +1213,8 @@ mod tests {
         assert_eq!(positions(&a), positions(&b));
     }
 
-    /// A map with fridges and toilets in it, so a crowd has every goal to
-    /// take turns between rather than one.
+    /// A map with fridges, toilets and computers in it, so a crowd has every
+    /// goal to take turns between rather than one.
     fn kitchen(size: i32, seed: u64) -> GameState {
         let mut map = Map::new(Size::new(size, size), FLOOR);
         let props = [
@@ -1222,6 +1222,8 @@ mod tests {
             (Point::new(size - 3, size - 3), "fridge"),
             (Point::new(size - 3, 2), "toilet"),
             (Point::new(2, size - 3), "toilet"),
+            (Point::new(size / 2, 2), "computer"),
+            (Point::new(size / 2, size - 3), "computer"),
         ];
         for (cell, kind) in props {
             map.add_object(
@@ -1241,7 +1243,8 @@ mod tests {
     #[test]
     fn determinism_survives_brains_and_biology_in_the_parallel_rounds() {
         // The same check as above with every part of the brain running: goals
-        // handing over, eating, drinking and the toilet competing for the top,
+        // handing over, eating, drinking, the toilet and the computer
+        // competing for the top,
         // routes to fridges and toilets, a queue built and resumed — across
         // the threshold where react goes onto rayon. Iteration order, routine
         // order and tie-breaking are all properties of the types; this is the
@@ -1260,9 +1263,10 @@ mod tests {
                 count(lines, "ate at the fridge"),
                 count(lines, "drank at the fridge"),
                 count(lines, "used the toilet"),
+                count(lines, "had a go on the computer"),
             ]
         };
-        let (mut done_a, mut done_b) = ([0; 3], [0; 3]);
+        let (mut done_a, mut done_b) = ([0; 4], [0; 4]);
         for _ in 0..1500 {
             run(&mut a, 1);
             run(&mut b, 1);
@@ -1281,10 +1285,11 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        let [meals, drinks, reliefs] = done_a;
+        let [meals, drinks, reliefs, plays] = done_a;
         assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
         assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
+        assert!(plays > 0, "nobody had a go on a computer, so that part of the brain never ran");
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
     }

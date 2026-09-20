@@ -20,7 +20,10 @@
 //! * **It does not own the map's art.** Terrain and props are drawn through
 //!   [`editor::draw_map`], from the same palettes the editor paints with, so
 //!   there is one catalogue binding a tile's name to its PNG rather than two
-//!   that can drift apart.
+//!   that can drift apart. [`props`] is the exception that proves it: a
+//!   computer's screen comes on while somebody is sitting at it, and which of
+//!   its two pictures that is is the one thing about a prop's art only a
+//!   running simulation can answer.
 //! * **It does not edit anything.** The map is read and never written — the
 //!   simulation gets a clone — which is why leaving is instant and there is
 //!   nothing to save.
@@ -49,6 +52,7 @@
 pub mod actors;
 pub mod hud;
 pub mod logview;
+pub mod props;
 pub mod selection;
 pub mod speed;
 pub mod unitpanel;
@@ -77,6 +81,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             actors::ActorsPlugin,
+            props::PropsPlugin,
             speed::SpeedPlugin,
             hud::HudPlugin,
             logview::LogViewPlugin,

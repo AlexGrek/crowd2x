@@ -67,10 +67,12 @@ use crate::map::{Map, MapStore, Size, TerrainId, VOID};
 use crate::render::{PixelZoom, PIXEL_SCALE};
 use crate::state::AppState;
 use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
+use crate::editor::props::{Prop, Usable};
 use crate::game::actors::{Actor, Sim, SimInput};
 use crate::game::logview::LogView;
 use crate::game::selection::Selected;
 use crate::game::speed::GameSpeed;
+use crate::sim::biology::ProcessId;
 use crate::sim::{process_pass, spawn_pass, EntityType, ItemKind};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
@@ -479,6 +481,10 @@ struct Checks<'w, 's> {
     /// from the bookkeeping would pass while nothing had actually reached the
     /// world, which is the failure this assertion exists to catch.
     sprites: Query<'w, 's, &'static Actor>,
+    /// The props that show whether they are being used, for
+    /// [`Step::ExpectPropInUse`] — read off the sprites on screen, not off
+    /// the map they were drawn from.
+    props: Query<'w, 's, (&'static Prop, &'static Usable)>,
     log: Res<'w, LogView>,
     /// So a scripted tick is the same size as one the game takes, read rather
     /// than written down twice.
@@ -850,6 +856,16 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::Process { name, on } => {
+            let process = process_id(name)?;
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `process` switches a process in the selected unit".to_string())?;
+            intents.sim_input.0.set_process(uid, process, *on);
+            Ok(Next::Now)
+        }
+
         Step::ExpectCarrying { item, count } => {
             let item = item_kind(item)?;
             let uid = intents
@@ -1067,6 +1083,24 @@ fn perform(
             ))
         }
 
+        Step::ExpectPropInUse { kind, in_use } => {
+            let mut props = checks
+                .props
+                .iter()
+                .filter(|(prop, _)| prop.kind() == kind)
+                .map(|(_, usable)| usable.is_in_use())
+                .peekable();
+            if props.peek().is_none() {
+                return Err(format!("there is no {kind} on screen that could be in use"));
+            }
+            let lit = props.filter(|in_use| *in_use).count();
+            ((lit > 0) == *in_use).then_some(Next::Now).ok_or(if *in_use {
+                format!("expected a {kind} in use, found none")
+            } else {
+                format!("expected no {kind} in use, found {lit}")
+            })
+        }
+
         Step::ExpectSprites(wanted) => {
             let actual = checks.sprites.iter().count();
             (actual == *wanted)
@@ -1247,6 +1281,18 @@ fn item_kind(name: &str) -> Result<ItemKind, String> {
             format!(
                 "no item called {name:?}; this build has: {}",
                 ItemKind::ALL.map(|kind| kind.name()).join(", ")
+            )
+        })
+}
+
+fn process_id(name: &str) -> Result<ProcessId, String> {
+    ProcessId::ALL
+        .into_iter()
+        .find(|process| process.name() == name)
+        .ok_or_else(|| {
+            format!(
+                "no process called {name:?}; this build has: {}",
+                ProcessId::ALL.map(|process| process.name()).join(", ")
             )
         })
 }

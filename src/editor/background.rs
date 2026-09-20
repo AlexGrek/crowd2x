@@ -212,7 +212,7 @@ fn spawn_tile(
         .spawn((
             Name::new("tile"),
             BackgroundTile,
-            Sprite::from_image(assets.load(PALETTE[item].path)),
+            Sprite::from_image(assets.load(PALETTE[item].art.path)),
             Transform::from_xyz(centre.x, centre.y, BACKGROUND_Z)
                 .with_scale(upscale(PALETTE[item].scale)),
             WORLD_LAYER,

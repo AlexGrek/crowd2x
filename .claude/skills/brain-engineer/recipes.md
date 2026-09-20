@@ -475,3 +475,34 @@ Built, so read the real files. As a checklist for the next need:
    - `qa/perf_simulation.json` compared with the last run;
    - open **brains** on a unit and watch `relieve` climb, take over, and hand back.
 10. **Docs.** CLAUDE.md "The brain" and "Biology".
+
+---
+
+## Worked example: a go on the computer
+
+Built, and the one to copy when the *prop* should show what is happening. The brain half is
+the toilet's checklist with a `Beside` feature; what is new is everything after step 6.
+
+1. **Stat + process.** `fun` existed and nothing moved it; `biology/fun.rs` drains it
+   (`FUN_PER_SECOND`, ten world hours) and puts `AMUSEMENT` back on `Event::Entertained`.
+   It is the one stat that falls, so `Stats::boredom` (`100 - fun`) is what the routine
+   reads — turning it over in the stat rather than in the routine is what keeps every need
+   on one scale.
+2. **Feature.** `FeatureKind::Entertainment` ↔ `"computer"`, `Access::Beside`, plus the
+   `map::PROPS` and `editor::props::PALETTE` entries the cross-checking tests demand.
+3. **Task.** `tasks/use_computer.rs` — `Action::interact` and nothing else, since a
+   `Beside` feature needs no entering.
+4. **Goal.** `GoalId::Play` (🎮) and `goals/play.rs`.
+5. **Routine.** The `BOREDOM` need, commit 60, release 20.
+6. **Register** on `Brain::human()`, and add the prop to `kitchen()` in `sim/mod.rs` tests
+   so `determinism_survives_brains_and_biology_in_the_parallel_rounds` runs the new goal.
+7. **Art.** A 16x16 strip per state — `computer_idle.png` (screen dark) and `computer.png`
+   (screen on) — declared as one palette entry:
+   `PaletteItem::animated("computer", "computer_idle.png", 10).used("computer.png", 11)`.
+   `tools/art_scale.py shrink` is what reduces art that arrived pre-upscaled.
+8. **The screen.** `game/props.rs` asks every entity `interacting_with()` and lights the
+   props standing in those cells. Nothing is added to the simulation for this: a feature
+   has no state of its own, and "in use" is a fact about the unit using it.
+9. **QA.** `qa/computer.json` — pauses the game so only scripted ticks move the world,
+   switches the other three processes off on the selected unit, then photographs the exact
+   tick the screen is on and asserts `expect_prop_in_use`.

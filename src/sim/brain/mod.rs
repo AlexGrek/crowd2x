@@ -77,8 +77,8 @@ use super::uid::Uid;
 use super::walker::Walker;
 use super::MoveOutcome;
 
-use goals::{DrinkGoal, EatGoal, RelieveGoal, WanderGoal};
-use routines::{BLADDER, HUNGER, THIRST};
+use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, WanderGoal};
+use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
     perception: Perception,
@@ -142,14 +142,15 @@ impl Brain {
         brain
     }
 
-    /// A person: keeps fed, hydrated and comfortable, stays busy; wanders,
-    /// eats, drinks, uses the toilet.
+    /// A person: keeps fed, hydrated, comfortable and entertained, stays
+    /// busy; wanders, eats, drinks, uses the toilet, has a go on a computer.
     pub fn human() -> Brain {
         Brain::new(
             [
                 Routine::need(&HUNGER),
                 Routine::need(&THIRST),
                 Routine::need(&BLADDER),
+                Routine::need(&BOREDOM),
                 Routine::stay_busy(),
             ],
             [
@@ -157,6 +158,7 @@ impl Brain {
                 Box::new(EatGoal::new()),
                 Box::new(DrinkGoal::new()),
                 Box::new(RelieveGoal::new()),
+                Box::new(PlayGoal::new()),
             ],
         )
     }
@@ -921,6 +923,6 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, stay busy"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, stay busy"));
     }
 }

@@ -237,6 +237,21 @@ pub enum Step {
         #[serde(default = "default_count")]
         count: u32,
     },
+    /// Switch one of the **selected** unit's biological processes on or off,
+    /// on the same queue a spawn rides.
+    ///
+    /// A body's switches are the only handle a script has on what a unit
+    /// *wants*: stats are rolled at spawn and nothing outside the simulation
+    /// may write one, so the way to watch one need in isolation is to stop
+    /// the others happening at all (`sim::biology`, "Switching a process
+    /// off"). Off means the stat holds still and the routine behind it stops
+    /// wanting anything, which is what makes a test about being bored a test
+    /// about being bored rather than a race between four needs.
+    Process {
+        /// `hunger`, `thirst`, `bladder` or `fun`.
+        name: String,
+        on: bool,
+    },
     /// How many of `item` the **selected** unit has stowed.
     ///
     /// What is in its hand is not stowed and is not counted here, which is the
@@ -371,6 +386,16 @@ pub enum Step {
     },
     /// How many entities are alive in the simulation.
     ExpectEntities(usize),
+    /// Whether a prop that shows whether it is being used is showing that
+    /// right now — a computer with its screen on.
+    ///
+    /// The renderer's half of "somebody is using the computer", the way
+    /// `expect_sprites` is the renderer's half of `expect_entities`: the
+    /// simulation can have a unit mid-session while the prop on screen is
+    /// still dark, and that is exactly the bug this catches. `in_use` is
+    /// true when **any** prop of that kind is in use, since a test that
+    /// cares which one can put one computer on the map.
+    ExpectPropInUse { kind: String, in_use: bool },
     /// That at least this many hours have gone by on the **world's** clock —
     /// a hundred and twenty times as fast as the one the test is watched on
     /// (`sim::clock`).

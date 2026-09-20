@@ -10,9 +10,11 @@ What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-l
 editor backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
-actions. What those brains do so far is wander, eat and drink at a fridge, and use a toilet
-— driven by biological processes (hunger, thirst, a bladder that a drink fills) that can be
-switched off per unit.
+actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet, and
+have a go on a computer — driven by biological processes (hunger, thirst, a bladder that a
+drink fills, fun that drains away) that can be switched off per unit. The computer is also
+the first prop that is *watched* being used: its screen is on for as long as somebody is
+sitting at it.
 
 ## Commands
 
@@ -219,6 +221,12 @@ different, and new placeable content should respect that split:
   are the map's `Props` object layer, positioned in whole *pixels* rather than cells.
   **A prop blocks the cell its centre is in** (below); a new palette entry needs a
   matching `map::PROPS` entry, and two tests fail if the lists stop lining up.
+  **A prop's art may be a strip** — `PaletteItem::animated(name, path, frames)`, frames of
+  16x16 side by side in one PNG, stepped by `StripAnimation` (`Sprite::rect`, not a
+  texture atlas: a prop is spawned in four places, one of which runs before every
+  `Startup` system, and a rect needs nothing but the image). `.used(path, frames)` adds a
+  **second** strip for what it looks like while somebody is using it, which only the game
+  screen ever shows (`game/props.rs`).
 
 **Art and data are linked by name, never by index.** A palette entry is called after the
 terrain it paints (`"wall brown"`) or the prop it places (`"bed 1"`), and that name is
@@ -352,7 +360,8 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   is impassable rather than a panic.
 - **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
   `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
-  through, and today nothing can — beds, the fridge, the toilet, crates, fire. A blocking
+  through, and today nothing can — beds, the fridge, the toilet, the computer, crates, fire.
+  A blocking
   prop takes **the cell its centre falls in** (`Object::cell`) and no other: passability is
   a whole-cell fact, the rule bodies follow too, so tall art overhanging the cell above does
   not wall it off. A prop name this build does not know blocks, as unknown terrain does.
@@ -536,7 +545,7 @@ talking only to the one below:
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
-  `BLADDER` ("stay comfortable") — with hysteresis between a commit and a release
+  `BLADDER` ("stay comfortable"), `BOREDOM` ("keep entertained") — with hysteresis between a commit and a release
   threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
   process behind the need is switched off. **There is no cap on how many a brain has**:
   `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
@@ -546,7 +555,7 @@ talking only to the one below:
   chase per routine per unit per tick, which is what a human with dozens of routines in a
   crowd of thousands cannot afford.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
-  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`) is a `Box` owned for
+  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
   picked up. It reads the body, hands and memory, and manages the task queue; it never
   changes the world itself. **One goal per need, each in its own file**, even where two
@@ -556,7 +565,7 @@ talking only to the one below:
   taking needs an empty hand; without that, food taken just before thirst took over makes
   every drink fail forever.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `Wait`), `match`-dispatched so
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Wait`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a
@@ -591,14 +600,24 @@ cell the search vetted.
 
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
 a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
-A name may appear more than once — `"fridge"` is both `Food` and `Water` — and `"toilet"` is
-`Toilet`. A fridge never runs out, and is used from one of the four cells beside it — it
-blocks its own. Adding a use for a prop is an entry there, a palette entry in
-`editor/props.rs` and a `map::PROPS` entry (tests fail without them), and a goal that
-queues the tasks.
+A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
+`Toilet` and `"computer"` is `Entertainment`. A fridge never runs out, and is used from one
+of the four cells beside it — it blocks its own. Adding a use for a prop is an entry there,
+a palette entry in `editor/props.rs` and a `map::PROPS` entry (tests fail without them), and
+a goal that queues the tasks.
 
-Every `FeatureKind` also has an `Access`: `Beside` (the fridge, touched from next to it) or
-`Entered` (the toilet, used by walking *into* it). An `Entered` cell stays impassable in
+**A prop can show that it is being used.** A computer's screen is on for as long as
+somebody is sitting at it, and dark otherwise — `game/props.rs` swaps the two strips of
+its palette entry. **In use is a fact about the unit, not about the prop**: a feature has
+no state of its own, which is what lets the feature index be built once and read from
+every thread, so the question is asked of the crowd instead —
+`GameEntity::interacting_with` names the cell whoever is mid-`Action::Interact` is using,
+and a prop standing in one of those cells is in use. That is one pass over the entities a
+frame, skipped entirely on a map with no prop that could light up.
+
+Every `FeatureKind` also has an `Access`: `Beside` (the fridge and the computer, touched
+from next to them — a computer is a desk with chairs on four sides, so nobody queues for
+one) or `Entered` (the toilet, used by walking *into* it). An `Entered` cell stays impassable in
 `map::PassabilityMap` — nobody routes through it, and an ordinary walk refuses it exactly
 like a wall — but `sim::move_step` lets a `Move` straight onto it through to `Occupancy`,
 which is the taken/free state: whoever is standing there holds the claim, and the cell is
@@ -646,16 +665,20 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
 
 **The rates are in world time, and they are a person's**, which is what the time scale
 above is for: full to starving in 8 hours, quenched to parched in 5, an untouched bladder
-full in 6 — plus `0.5` of a bladder per point of hydration drunk, arriving over the half
-hour after the drink. So a human eats three or four times a day, drinks rather more often,
-and goes to the toilet after a drink; at 1x that is a meal every couple of minutes of
+full in 6, and fun draining from a great time to thoroughly bored in 10 — plus `0.5` of a
+bladder per point of hydration drunk, arriving over the half hour after the drink. So a
+human eats three or four times a day, drinks rather more often, goes to the toilet after a
+drink, and looks for something to do about once a day; at 1x that is a meal every couple of minutes of
 watching, and the speed control is for watching a day go by. Every rate is written as
 `100.0 / (hours * HOUR)` in the file that owns it, so the number in the source is the
 number of hours.
 
 The doing is in world time too, converted at the point it is defined: 2 minutes to take
 food out of a fridge and 15 to eat it, 1 to pour a drink and 2 to drink it, 5 on the
-toilet. Eating and drinking commit at 60 and release at 25, the toilet at 70 and 10.
+toilet, 30 at the computer — the longest thing anybody does, since having a go at something
+is what a person does when nothing else is pressing. Eating and drinking commit at 60 and
+release at 25, the toilet at 70 and 10, boredom at 60 and 20; one go is worth 60 points of
+fun, so a thoroughly bored person has a second one the way a starving one eats twice.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -731,8 +754,11 @@ The simulation gets four steps of its own, all intent-level: `{"spawn": {"kind":
 the unit that arrived first (arrival order, not slot order, because a despawn leaves a hole
 the next spawn fills — and because a `Uid` is random and a test cannot know one in
 advance), `{"give": {"item": "food", "count": 3}}` stows items in the selected unit on that
-same queue (the only way anything is stowed today, since no goal puts things away), and
-`{"tick": 200}` runs
+same queue (the only way anything is stowed today, since no goal puts things away),
+`{"process": {"name": "hunger", "on": false}}` switches one of the selected unit's
+biological processes off on that queue too — the only handle a script has on what a unit
+*wants*, since stats are rolled at spawn and only a process may write one, so watching one
+need means stopping the others happening — and `{"tick": 200}` runs
 one spawn pass and then exactly that many processing passes, *immediately* — so pending
 spawns are applied once however many ticks were asked for. Ticking rather than waiting is
 the point — `FixedUpdate` runs at whatever rate the frame allows, so a test that waited a
@@ -768,7 +794,8 @@ are the two that exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_selected`, `expect_carrying`, `expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_selected`, `expect_carrying`, `expect_prop_in_use`, `expect_log`,
+`expect_world_time` — and `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -779,7 +806,11 @@ the selected unit has **stowed** — what is in its hand is not stowed, which is
 distinction the whole inventory is built on. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
-catches a renderer that has quietly stopped keeping up.
+catches a renderer that has quietly stopped keeping up. `expect_prop_in_use` is that same
+split for a prop whose picture says whether somebody is using it — a computer's screen —
+and a test that photographs one should **pause the game first** (`{"key": "p"}`), since
+`FixedUpdate` keeps running between steps and the moment a shot catches would otherwise
+depend on how fast the machine is.
 
 **Screenshots are named, not pathed.** `{"shot": "the file list"}` writes
 `qa-screenshots/<test>/01-the-file-list.png`, numbered in the order the shots were taken,
@@ -827,6 +858,7 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
                         speed.rs is how fast the world runs; hud.rs the two corners
                         selection.rs is who was clicked; unitpanel.rs the bar about them
+                        props.rs lights up a prop while somebody is using it
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
@@ -834,16 +866,18 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         occupancy.rs is who stands where: passability's dynamic half
                         walker.rs is the movement action; feature.rs what props are for
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action
+                        feature.rs is what a prop is for; a computer is somewhere
+                        to have a go at something, used from beside it
                         item.rs is what can be held and what it is made of
                         inventory.rs is what a unit carries: a hand that costs
                         mass only, stowage that costs mass and space, and limits
                         biology/ is the body: Stats, and the processes that alone
-                        change them (hunger, thirst, bladder), each switchable
+                        change them (hunger, thirst, bladder, fun), each switchable
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed
 src/characters/         how a character is drawn: CELL/ART/upscale, depth_for
-src/animation.rs        FrameAnimation, atlas frame stepping
+src/animation.rs        FrameAnimation (atlas frames) and StripAnimation (Sprite::rect)
 src/debug.rs            screenshot/smoke-run harness, env-var driven
 tools/check_pixel_grid.py  verifies a frame is an exact integer upscale
 tools/art_scale.py         finds/reduces art that is stored pre-upscaled

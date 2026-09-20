@@ -96,7 +96,7 @@ src/characters/       how humans and dogs are drawn
   mod.rs              CharacterPlugin, CELL, depth_for()
   human.rs            layered paperdoll
   dog.rs              animated sprite + facing sheets
-src/animation.rs      FrameAnimation, atlas frame stepping
+src/animation.rs      FrameAnimation (atlas frames), StripAnimation (Sprite::rect)
 src/qa/               scripted QA (see the `qa` skill)
 src/awake.rs          macOS: hold the display awake for a capture
 src/debug.rs          screenshot/smoke harness (see the `debugger` skill)
@@ -179,6 +179,22 @@ Share one `TextureAtlasLayout` handle across every sprite using the same grid �
 `dog::DogSheets`. Directional art uses a second sheet (`dog_idle_reversed.png`) rather
 than `flip_x`, so left-facing frames can be hand-tuned later; `dog::apply_facing` swaps
 `sprite.image` on `Changed<Facing>`.
+
+**An animated prop goes the other way:** `StripAnimation::new(frame, frames,
+seconds_per_frame)` steps `Sprite::rect` along the strip and needs no
+`TextureAtlasLayout`, and so no `Assets<..>` at spawn time. That is what a prop wants —
+it is spawned from a palette entry in four places, one of them a screen's `OnEnter`,
+which runs before every `Startup` system and so before any resource a `Startup` system
+would have built. Declare it on the palette entry
+(`PaletteItem::animated("computer", "computer_idle.png", 10)`) and `editor::props` does
+the rest.
+
+**A prop that shows it is being used** adds a second strip with `.used(path, frames)`,
+and `game/props.rs` swaps them: it asks each entity `interacting_with()` — the cell of
+whatever it is mid-`Action::Interact` on — and lights the props standing in those cells.
+The simulation is not asked whether a prop is busy, because a feature has no state of its
+own; "in use" is a fact about the unit. Both animations run on real `Time`, so art keeps
+moving at the same rate whatever `GameSpeed` the world is on.
 
 ## The pixel pipeline
 

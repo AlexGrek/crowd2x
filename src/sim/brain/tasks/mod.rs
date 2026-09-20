@@ -8,12 +8,14 @@
 pub mod consume_item;
 pub mod move_to;
 pub mod take_item;
+pub mod use_computer;
 pub mod use_toilet;
 pub mod wait;
 
 pub use consume_item::ConsumeItem;
 pub use move_to::MoveTo;
 pub use take_item::TakeItem;
+pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;
 pub use wait::Wait;
 

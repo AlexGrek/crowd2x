@@ -30,6 +30,19 @@ pub const BURSTING: f32 = 70.0;
 /// straight back.
 pub const RELIEVED: f32 = 10.0;
 
+/// Boredom at which a human decides it is time to find something to do.
+///
+/// The same line as [`PECKISH`] — every need commits on the same scale — but
+/// it takes far longer to get here: fun drains over
+/// [`HOURS_TO_BORED`](crate::sim::biology::fun::HOURS_TO_BORED), twice what an
+/// empty stomach takes.
+pub const BORED: f32 = 60.0;
+
+/// Boredom a human has to be brought down to before it stops looking for
+/// something to do. One go at something is worth more than the gap between
+/// the two, so a session ends the wanting rather than taking the edge off it.
+pub const AMUSED: f32 = 20.0;
+
 /// Points of a need per point of priority. Every need is 0-100 and the floor
 /// under everything ([`StayBusyRoutine`]) is 0.1, so a human who has only just
 /// committed to eating (hunger 25-ish) already outranks wandering five times
@@ -88,6 +101,21 @@ pub const BLADDER: Need = Need {
     goal: GoalId::Relieve,
     commit_at: BURSTING,
     release_at: RELIEVED,
+};
+
+/// Keep entertained: boredom, met by having a go at something.
+///
+/// The stat behind it is [`Stats::fun`], which falls where every other need
+/// rises — [`Stats::boredom`] is that number turned over, so this need
+/// commits and releases on the same scale as the rest.
+pub const BOREDOM: Need = Need {
+    routine: "keep entertained",
+    feeling: "bored",
+    stat: Stats::boredom,
+    process: ProcessId::Fun,
+    goal: GoalId::Play,
+    commit_at: BORED,
+    release_at: AMUSED,
 };
 
 /// Maps a need onto how badly the goal that meets it is wanted.
@@ -289,6 +317,42 @@ mod tests {
 
         // Only the one switched off.
         assert!(priority_in(&mut NeedRoutine::new(&THIRST), &Biology::new(Stats::calm().with_thirst(90.0))) > BUSY);
+    }
+
+    #[test]
+    fn boredom_hovering_at_the_threshold_does_not_flip_the_decision() {
+        let boredom = |routine: &mut NeedRoutine, level: f32| {
+            priority(routine, Stats::calm().with_fun(100.0 - level))
+        };
+        let mut routine = NeedRoutine::new(&BOREDOM);
+        assert_eq!(boredom(&mut routine, BORED - 1.0), 0.0);
+        assert!(boredom(&mut routine, BORED) > BUSY);
+        assert!(boredom(&mut routine, AMUSED + 1.0) > BUSY);
+        assert_eq!(boredom(&mut routine, AMUSED), 0.0);
+        assert_eq!(boredom(&mut routine, BORED - 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_bored_human_wants_something_to_do_more_than_it_wants_to_wander() {
+        let bored = Stats::calm().with_fun(100.0 - BORED);
+        assert!(priority(&mut NeedRoutine::new(&BOREDOM), bored) > BUSY);
+        assert_eq!(
+            priority(&mut NeedRoutine::new(&BOREDOM), Stats::calm().with_fun(100.0)),
+            0.0,
+            "somebody having a great time is not looking for something to do"
+        );
+    }
+
+    /// Being as bored as you are hungry is being equally in need of seeing to
+    /// — which is only true because boredom is fun read the same way up as
+    /// every other need.
+    #[test]
+    fn boredom_and_hunger_that_are_equally_bad_are_equally_urgent() {
+        let stats = Stats::calm().with_hunger(80.0).with_fun(20.0);
+        assert_eq!(
+            priority(&mut NeedRoutine::new(&HUNGER), stats),
+            priority(&mut NeedRoutine::new(&BOREDOM), stats)
+        );
     }
 
     #[test]

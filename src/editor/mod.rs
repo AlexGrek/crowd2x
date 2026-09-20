@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
 
 use crate::browser::Maps;
-use crate::characters::{upscale, ART_SCALE};
+use crate::characters::{upscale, ART_SCALE, CELL};
 use crate::map::{Map, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
@@ -65,6 +65,17 @@ const SELECTION_FRAME: &str = "selection.png";
 /// The about-to-be-placed sprite is drawn washed out under the frame.
 const GHOST_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.55);
 
+/// One strip of art: a PNG holding `frames` square frames side by side.
+///
+/// One frame is a still picture, which is what most of the palette is.
+#[derive(Clone, Copy)]
+pub struct Strip {
+    /// Path under `assets/`.
+    pub path: &'static str,
+    /// How many frames are in it, left to right.
+    pub frames: u32,
+}
+
 /// One placeable entry in a layer's palette.
 ///
 /// Art is drawn at [`characters::ART`] and upscaled by the game, so all but a
@@ -78,10 +89,20 @@ const GHOST_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.55);
 pub struct PaletteItem {
     /// Shown in the HUD.
     pub name: &'static str,
-    /// Path under `assets/`.
-    pub path: &'static str,
+    /// The art, and how many frames of it there are — see [`Strip`].
+    pub art: Strip,
     /// Canvas pixels per source texel.
     pub scale: f32,
+    /// What it looks like while somebody is *using* it — a computer with its
+    /// screen on. `None` for everything that looks the same either way, which
+    /// is every entry but one.
+    ///
+    /// Here rather than in the game screen that shows it, because a prop's
+    /// pictures are all one catalogue: two lists keyed by the same name are
+    /// two lists that can drift apart, and the editor's is the one the map
+    /// file's names come from. The editor simply never has a use for it —
+    /// nothing is in use where nothing is simulated.
+    pub in_use: Option<Strip>,
 }
 
 impl PaletteItem {
@@ -89,8 +110,9 @@ impl PaletteItem {
     pub const fn new(name: &'static str, path: &'static str) -> Self {
         Self {
             name,
-            path,
+            art: Strip { path, frames: 1 },
             scale: 1.0,
+            in_use: None,
         }
     }
 
@@ -98,9 +120,46 @@ impl PaletteItem {
     pub const fn upscaled(name: &'static str, path: &'static str) -> Self {
         Self {
             name,
-            path,
+            art: Strip { path, frames: 1 },
             scale: ART_SCALE,
+            in_use: None,
         }
+    }
+
+    /// Art that moves: `frames` frames of [`characters::ART`] side by side in
+    /// one PNG, upscaled to fill a cell like every other piece of new art.
+    pub const fn animated(name: &'static str, path: &'static str, frames: u32) -> Self {
+        Self {
+            name,
+            art: Strip { path, frames },
+            scale: ART_SCALE,
+            in_use: None,
+        }
+    }
+
+    /// ...and what it looks like while it is being used. See
+    /// [`PaletteItem::in_use`].
+    pub const fn used(mut self, path: &'static str, frames: u32) -> Self {
+        self.in_use = Some(Strip { path, frames });
+        self
+    }
+
+    /// The side of one frame of this item's art, in source texels: 16 for art
+    /// the game upscales, 48 for art already drawn at cell resolution.
+    ///
+    /// Derived from the scale rather than stored, since a palette entry that
+    /// is one cell wide once scaled is what
+    /// `every_palette_item_is_one_cell_wide_once_scaled` already insists on.
+    pub fn frame(&self) -> f32 {
+        CELL as f32 / self.scale
+    }
+
+    /// The region of the art a still preview of this item should show:
+    /// `None` for a still picture — the whole PNG — and the first frame for a
+    /// strip, which drawn whole would be every frame of the animation side by
+    /// side, ten cells wide.
+    pub fn first_frame(&self) -> Option<Rect> {
+        (self.art.frames > 1).then(|| Rect::new(0.0, 0.0, self.frame(), self.frame()))
     }
 }
 
@@ -368,7 +427,8 @@ impl RectangleDrag {
                 let item = &background::PALETTE[self.item];
                 commands.spawn((
                     Sprite {
-                        image: assets.load(item.path),
+                        image: assets.load(item.art.path),
+                        rect: item.first_frame(),
                         color: GHOST_TINT,
                         ..default()
                     },
@@ -565,7 +625,8 @@ fn spawn_overlay(mut commands: Commands, assets: Res<AssetServer>, tool: Res<Too
             parent.spawn((
                 Ghost,
                 Sprite {
-                    image: assets.load(tool.item().path),
+                    image: assets.load(tool.item().art.path),
+                    rect: tool.item().first_frame(),
                     color: GHOST_TINT,
                     ..default()
                 },
@@ -878,7 +939,10 @@ fn update_cursor(
 ) {
     if tool.is_changed() {
         for (mut sprite, mut transform) in &mut ghosts {
-            sprite.image = assets.load(tool.item().path);
+            sprite.image = assets.load(tool.item().art.path);
+            // One frame of it, for an item whose art is a strip: the ghost
+            // says what will be placed, not how it moves once it is.
+            sprite.rect = tool.item().first_frame();
             // Switching between a 16px and a 48px item changes the scale too.
             transform.scale = upscale(tool.item().scale);
         }
@@ -934,18 +998,48 @@ mod tests {
     /// Every palette entry declares whether its art is cell-sized or drawn at
     /// the smaller art resolution, and nothing in the running game re-checks
     /// it — a wrong flag just draws the sprite at a third or triple its size.
+    ///
+    /// For a strip the same thing is asked of **one frame**: the PNG is as
+    /// many frames wide as it has, and what has to come out a cell wide is
+    /// each of them.
     #[test]
     fn every_palette_item_is_one_cell_wide_once_scaled() {
-        for item in background::PALETTE.iter().chain(props::PALETTE) {
-            let (width, _) = png_size(&format!("assets/{}", item.path));
+        let strips = background::PALETTE
+            .iter()
+            .chain(props::PALETTE)
+            .flat_map(|item| {
+                [Some((item, item.art)), item.in_use.map(|strip| (item, strip))]
+            })
+            .flatten();
+        for (item, strip) in strips {
+            let (width, height) = png_size(&format!("assets/{}", strip.path));
             assert_eq!(
-                width as f32 * item.scale,
-                CELL as f32,
-                "{}: {} is {width}px at scale {}",
+                width % strip.frames,
+                0,
+                "{}: {} is {width}px, which is not {} whole frames",
                 item.name,
-                item.path,
+                strip.path,
+                strip.frames,
+            );
+            let frame = width / strip.frames;
+            assert_eq!(
+                frame as f32 * item.scale,
+                CELL as f32,
+                "{}: a frame of {} is {frame}px at scale {}",
+                item.name,
+                strip.path,
                 item.scale,
             );
+            // Height is only pinned for a strip, where the frames have to be
+            // cut out of it: a still prop may be taller than a cell on
+            // purpose (`crate tall` is 48x64, and overhangs the cell above).
+            if strip.frames > 1 {
+                assert_eq!(
+                    height, frame,
+                    "{}: {} is {height}px tall and {frame}px to a frame; a strip is one row of squares",
+                    item.name, strip.path,
+                );
+            }
         }
     }
 
