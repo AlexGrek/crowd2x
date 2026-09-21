@@ -4,10 +4,10 @@
 //!
 //! ```text
 //! perception   what it can see                  (a stub, for now)
-//! memory       what it remembers                (empty, for now)
-//! routines     arrange the priority list        Need (fed, hydrated, comfortable), StayBusy
-//! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve
-//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, UseToilet, Wait
+//! memory       what it remembers                (its own bed, so far)
+//! routines     arrange the priority list        Need (fed, hydrated, ...), Sleep, StayBusy
+//! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve, Play, Sleep
+//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, UseToilet, ..., Wait
 //! action       what a task is doing with body   pathfinding and timing only
 //! ```
 //!
@@ -70,6 +70,8 @@ pub use perception::Perception;
 pub use routine::{Routine, RoutineCtx, RoutineExecutor};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
+use crate::map::Point;
+
 use super::biology::Biology;
 use super::entity::Think;
 use super::inventory::Inventory;
@@ -77,7 +79,7 @@ use super::uid::Uid;
 use super::walker::Walker;
 use super::MoveOutcome;
 
-use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, WanderGoal};
+use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SleepGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -142,8 +144,9 @@ impl Brain {
         brain
     }
 
-    /// A person: keeps fed, hydrated, comfortable and entertained, stays
-    /// busy; wanders, eats, drinks, uses the toilet, has a go on a computer.
+    /// A person: keeps fed, hydrated, comfortable, entertained and rested,
+    /// stays busy; wanders, eats, drinks, uses the toilet, has a go on a
+    /// computer, sleeps in a bed.
     pub fn human() -> Brain {
         Brain::new(
             [
@@ -151,6 +154,7 @@ impl Brain {
                 Routine::need(&THIRST),
                 Routine::need(&BLADDER),
                 Routine::need(&BOREDOM),
+                Routine::sleep(),
                 Routine::stay_busy(),
             ],
             [
@@ -159,6 +163,7 @@ impl Brain {
                 Box::new(DrinkGoal::new()),
                 Box::new(RelieveGoal::new()),
                 Box::new(PlayGoal::new()),
+                Box::new(SleepGoal::new()),
             ],
         )
     }
@@ -334,6 +339,13 @@ impl Brain {
 
     pub fn memory(&self) -> &Memory {
         &self.memory
+    }
+
+    /// Remember `bed` as this unit's own. What a goal that puts it to bed
+    /// reads ([`memory::HOME_BED`]); handed out by the spawn pass and by
+    /// nothing else, so two units are never given the same one.
+    pub fn set_home(&mut self, bed: Point) {
+        self.memory.remember(memory::HOME_BED, Recall::Cell(bed));
     }
 
     /// What a brain would tell a debugger, for the brains menu.
@@ -923,6 +935,6 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, stay busy"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, stay busy"));
     }
 }

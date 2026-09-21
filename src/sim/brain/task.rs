@@ -25,7 +25,7 @@ use crate::sim::walker::Walker;
 use crate::sim::MoveOutcome;
 
 use super::action::{Action, ActionState};
-use super::tasks::{ConsumeItem, MoveTo, TakeItem, UseComputer, UseToilet, Wait};
+use super::tasks::{ConsumeItem, MoveTo, Sleep, TakeItem, UseComputer, UseToilet, Wait};
 
 /// What a task may touch while it runs: the world to read, the body it moves,
 /// the action it drives, and the parts of its unit a task can change.
@@ -85,6 +85,7 @@ pub enum Task {
     ConsumeItem(ConsumeItem),
     UseToilet(UseToilet),
     UseComputer(UseComputer),
+    Sleep(Sleep),
     Wait(Wait),
 }
 
@@ -118,6 +119,11 @@ impl Task {
         Task::UseComputer(UseComputer { computer, seconds })
     }
 
+    /// Sleep in the bed in `bed`, from a cell beside it, for `seconds`.
+    pub const fn sleep(bed: Point, seconds: f32) -> Task {
+        Task::Sleep(Sleep { bed, seconds })
+    }
+
     /// Stand still for a while.
     pub const fn wait(seconds: f32) -> Task {
         Task::Wait(Wait { seconds })
@@ -131,6 +137,7 @@ impl Task {
             Task::ConsumeItem(task) => task.execute(ctx),
             Task::UseToilet(task) => task.execute(ctx),
             Task::UseComputer(task) => task.execute(ctx),
+            Task::Sleep(task) => task.execute(ctx),
             Task::Wait(task) => task.execute(ctx),
         }
     }
@@ -142,6 +149,7 @@ impl Task {
             Task::ConsumeItem(task) => task.describe(),
             Task::UseToilet(task) => task.describe(),
             Task::UseComputer(task) => task.describe(),
+            Task::Sleep(task) => task.describe(),
             Task::Wait(task) => task.describe(),
         }
     }

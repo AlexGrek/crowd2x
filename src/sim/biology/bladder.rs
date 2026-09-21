@@ -77,6 +77,9 @@ impl Process for Bladder {
             // Sitting at a computer does nothing to a bladder — which is the
             // sort of thing that only stays true while it is written down.
             Event::Entertained => {}
+            // Nor does sleeping, to a process that fills and empties on its
+            // own clock.
+            Event::Slept { .. } => {}
         }
     }
 

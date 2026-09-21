@@ -60,7 +60,7 @@ This order has consequences:
 | I want units to... | Add |
 | --- | --- |
 | care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
-| care about a time of day, a threat | a **routine** |
+| care about a time of day, a threat | a **routine** (file map and test list: the `add-routine` skill) |
 | have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
 | do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |
 | do a new kind of single step ("sit", "open door") | a **task executor** |
@@ -167,6 +167,7 @@ Priorities are unitless `f32`s compared only against each other.
 | `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
 | `NeedRoutine(BOREDOM)` → play | `boredom / 50`: 1.2 at `BORED` (60), released at `AMUSED` (20). `Stats::boredom` is `fun` turned over — the one stat that falls on its own, read the same way up as every other need |
+| `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90) |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 
 Put a new need on the same 0–2 scale so that urgency is comparable across needs. Give a

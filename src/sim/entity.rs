@@ -277,6 +277,17 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Make `bed` this entity's own, and say whether it took it.
+    ///
+    /// Called by the spawn pass, the only place a bed is handed out, for an
+    /// entity that has just arrived. `false` — the default — for a kind that
+    /// does not sleep: a dog has no use for a bed, and must not be holding one
+    /// that a person could have had.
+    fn set_home(&mut self, bed: Point) -> bool {
+        let _ = bed;
+        false
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,
@@ -349,6 +360,11 @@ pub struct Think<'a> {
     /// Which tick this is. Deterministic, so it is usable as an RNG seed
     /// alongside an entity's own id.
     pub tick: u64,
+    /// What time it is in the world, as of this tick: what a routine asks to
+    /// know whether it is night. A reading of the one world clock
+    /// ([`crate::sim::GameState::clock`]), taken once per pass and shared by
+    /// every entity, so the whole crowd agrees what time it is.
+    pub clock: super::clock::Clock,
 }
 
 impl Think<'_> {

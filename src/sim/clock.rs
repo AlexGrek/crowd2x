@@ -65,6 +65,13 @@ pub const DAY: f32 = 24.0 * HOUR;
 /// starts where a person's does rather than in the middle of the night.
 pub const OPENING_TIME: f64 = 8.0 * HOUR as f64;
 
+/// The hour of the evening at which it becomes night: ten o'clock, when a
+/// household goes to bed.
+pub const BEDTIME: u32 = 22;
+
+/// The hour of the morning at which night ends: six o'clock.
+pub const GETTING_UP: u32 = 6;
+
 /// How long `world_seconds` of world takes to watch, in watched seconds.
 ///
 /// For the durations that are *measured* on the watched clock because they are
@@ -110,6 +117,14 @@ impl Clock {
     /// The hour of the day, 0 to 23.
     pub fn hour(&self) -> u32 {
         (self.seconds_today() / HOUR as f64) as u32
+    }
+
+    /// Whether it is night: from [`BEDTIME`] round to [`GETTING_UP`], across
+    /// midnight. The one thing about the time of day a brain needs to know so
+    /// far, which is what gets somebody into bed and keeps them there.
+    pub fn is_night(&self) -> bool {
+        let hour = self.hour();
+        hour >= BEDTIME || hour < GETTING_UP
     }
 
     /// The minute of the hour, 0 to 59. Two of these a second.
@@ -195,6 +210,30 @@ mod tests {
         for seconds in [0.0, 0.5, 7.0, 61.0, 800.0, 12345.0] {
             assert_eq!(Clock::after_watching(seconds).time().len(), 8, "{seconds}");
         }
+    }
+
+    /// Opening time is eight in the morning, so a fresh world starts in the day.
+    #[test]
+    fn a_world_opens_in_the_day_and_night_falls_at_ten() {
+        assert!(!Clock::after_watching(0.0).is_night());
+        // Fourteen world hours after opening is ten o'clock.
+        let before = Clock::after_watching(((14.0 * HOUR) / TIME_SCALE) as f64 - 1.0);
+        let after = Clock::after_watching(((14.0 * HOUR) / TIME_SCALE) as f64 + 1.0);
+        assert_eq!(before.hour(), BEDTIME - 1);
+        assert!(!before.is_night());
+        assert_eq!(after.hour(), BEDTIME);
+        assert!(after.is_night());
+    }
+
+    /// Night runs across midnight, which is the case a single comparison
+    /// gets wrong.
+    #[test]
+    fn night_is_still_night_after_midnight_and_ends_at_six() {
+        let at = |hours_after_opening: f32| Clock::after_watching((hours_after_opening * HOUR / TIME_SCALE) as f64);
+        assert!(at(16.5).is_night(), "half past midnight");
+        assert!(at(21.5).is_night(), "half past five");
+        assert!(!at(22.5).is_night(), "half past six in the morning");
+        assert_eq!(at(22.5).hour(), GETTING_UP);
     }
 
     /// The conversion both ways round, since every duration in the brain is

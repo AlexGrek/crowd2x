@@ -171,6 +171,85 @@ impl RoutineExecutor for NeedRoutine {
     }
 }
 
+/// Tiredness at which a human decides to go to bed **in the daytime**. High:
+/// somebody has to be properly worn out to give up an afternoon.
+///
+/// A waking day is sixteen world hours
+/// ([`HOURS_TO_EXHAUSTED`](crate::sim::biology::energy::HOURS_TO_EXHAUSTED)),
+/// so this is about twelve of them.
+pub const EXHAUSTED: f32 = 75.0;
+
+/// Tiredness at which a human goes to bed **at night**: from
+/// [`BEDTIME`](crate::sim::clock::BEDTIME) to
+/// [`GETTING_UP`](crate::sim::clock::GETTING_UP), when there is nothing better
+/// on and a little tiredness is reason enough.
+pub const SLEEPY: f32 = 30.0;
+
+/// Tiredness a human has to be brought down to before it gets up — which
+/// still waits for morning if it is night, see [`SleepRoutine`].
+pub const RESTED: f32 = 10.0;
+
+/// Tiredness at which a human will sleep in **any** free bed rather than only
+/// its own. A unit goes to its own bed by default; it takes one at random only
+/// when it cannot go on, which is a long way past [`EXHAUSTED`] — by day, two
+/// and a half more world hours awake.
+pub const CRITICALLY_TIRED: f32 = 90.0;
+
+/// Sleep: tiredness and the time of day, met by going to bed.
+///
+/// A routine type of its own rather than a [`Need`], because a need reads a
+/// stat and this reads the clock too. Otherwise the same decision, and with
+/// the same hysteresis — commit at one level, let go at a lower.
+///
+/// * **By day** it commits at [`EXHAUSTED`] and lets go at [`RESTED`]: a nap
+///   when somebody cannot go on.
+/// * **By night** it commits at [`SLEEPY`], and **does not let go until it is
+///   day** — somebody rested at one in the morning stays in bed, so the
+///   priority has a floor while it is night. That floor is what holds them
+///   there against wandering, and it is below every need that can be met
+///   without a bed: a bursting bladder or a hungry stomach gets somebody up,
+///   and they come back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SleepRoutine {
+    committed: bool,
+}
+
+impl SleepRoutine {
+    pub const fn new() -> SleepRoutine {
+        SleepRoutine { committed: false }
+    }
+}
+
+impl RoutineExecutor for SleepRoutine {
+    fn name(&self) -> &'static str {
+        "get some sleep"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        // Nothing to rest: no body, or no tiring in it.
+        let Some(biology) = ctx.biology.filter(|biology| biology.is_running(ProcessId::Energy)) else {
+            self.committed = false;
+            return;
+        };
+        let tiredness = biology.stats().tiredness();
+        let night = ctx.think.clock.is_night();
+
+        if tiredness >= if night { SLEEPY } else { EXHAUSTED } {
+            self.committed = true;
+        } else if tiredness <= RESTED && !night {
+            self.committed = false;
+        }
+        if self.committed {
+            let floor = if night { SLEEPY } else { 0.0 };
+            goals.raise_to(GoalId::Sleep, tiredness.max(floor) / NEED_PER_PRIORITY);
+        }
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        vec![("sleepy", if self.committed { "yes" } else { "no" }.to_string())]
+    }
+}
+
 /// How much [`StayBusyRoutine`] wants a unit wandering.
 pub const BUSY: f32 = 0.1;
 
@@ -219,6 +298,7 @@ mod tests {
     use crate::sim::log::Log;
     use crate::sim::occupancy::Occupancy;
     use crate::sim::biology::Biology;
+    use crate::sim::clock::Clock;
     use crate::sim::uid::{EntityType, Uid};
 
     /// The priority `routine` gives its goal for a human whose `stats` these are.
@@ -236,6 +316,7 @@ mod tests {
             features: &features,
             dt: 1.0 / 60.0,
             tick: 0,
+            clock: crate::sim::clock::Clock::after_watching(0.0),
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut goals = Goals::new();
@@ -374,5 +455,115 @@ mod tests {
             priority(&mut NeedRoutine::new(&HUNGER), stats),
             priority(&mut NeedRoutine::new(&THIRST), stats)
         );
+    }
+
+    /// Eight in the morning, which is when a world opens.
+    fn day() -> Clock {
+        Clock::after_watching(0.0)
+    }
+
+    /// Half past midnight.
+    fn night() -> Clock {
+        Clock::after_watching((16.5 * crate::sim::clock::HOUR / crate::sim::clock::TIME_SCALE) as f64)
+    }
+
+    /// The priority `routine` gives sleep for `biology`, at `clock`.
+    fn sleep_priority(routine: &mut SleepRoutine, biology: &Biology, clock: Clock) -> f32 {
+        let map = Map::new(Size::new(2, 2), FLOOR);
+        let (occupancy, log, features) = (Occupancy::new(map.size()), Log::new(), Features::default());
+        let think = Think {
+            map: &map,
+            occupancy: &occupancy,
+            log: &log,
+            features: &features,
+            dt: 1.0 / 60.0,
+            tick: 0,
+            clock,
+        };
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+        let mut goals = Goals::new();
+        routine.arrange(
+            &RoutineCtx {
+                think: &think,
+                body: &body,
+                biology: Some(biology),
+            },
+            &mut goals,
+        );
+        goals.priority(GoalId::Sleep)
+    }
+
+    fn tired(tiredness: f32) -> Biology {
+        Biology::new(Stats::calm().with_stamina(100.0 - tiredness))
+    }
+
+    #[test]
+    fn somebody_who_is_not_very_tired_does_not_go_to_bed_in_the_afternoon() {
+        assert_eq!(sleep_priority(&mut SleepRoutine::new(), &tired(SLEEPY + 10.0), day()), 0.0);
+    }
+
+    #[test]
+    fn the_same_tiredness_is_reason_enough_to_go_to_bed_at_night() {
+        assert!(sleep_priority(&mut SleepRoutine::new(), &tired(SLEEPY + 10.0), night()) > BUSY);
+    }
+
+    #[test]
+    fn somebody_exhausted_goes_to_bed_whatever_time_it_is() {
+        assert!(sleep_priority(&mut SleepRoutine::new(), &tired(EXHAUSTED), day()) > BUSY);
+    }
+
+    #[test]
+    fn tiredness_hovering_at_the_threshold_does_not_flip_the_decision() {
+        let mut routine = SleepRoutine::new();
+        assert_eq!(sleep_priority(&mut routine, &tired(EXHAUSTED - 1.0), day()), 0.0);
+        assert!(sleep_priority(&mut routine, &tired(EXHAUSTED), day()) > BUSY);
+        // Dipping back under the line is not enough to get up...
+        assert!(sleep_priority(&mut routine, &tired(EXHAUSTED - 1.0), day()) > BUSY);
+        assert!(sleep_priority(&mut routine, &tired(RESTED + 1.0), day()) > BUSY);
+        // ...being rested is.
+        assert_eq!(sleep_priority(&mut routine, &tired(RESTED), day()), 0.0);
+        assert_eq!(sleep_priority(&mut routine, &tired(EXHAUSTED - 1.0), day()), 0.0);
+    }
+
+    /// The whole point of the night: a rested sleeper stays where they are
+    /// until it is light, rather than getting up at one in the morning and
+    /// wandering off.
+    #[test]
+    fn somebody_rested_at_night_stays_in_bed_until_morning() {
+        let mut routine = SleepRoutine::new();
+        assert!(sleep_priority(&mut routine, &tired(SLEEPY + 5.0), night()) > BUSY);
+        let rested = sleep_priority(&mut routine, &tired(0.0), night());
+        assert!(rested > BUSY, "{rested}");
+        assert_eq!(sleep_priority(&mut routine, &tired(0.0), day()), 0.0, "and gets up when it is day");
+    }
+
+    /// Committed at night and still tired at six: they sleep in until they are
+    /// rested, rather than being turned out by the clock.
+    #[test]
+    fn somebody_still_tired_when_the_morning_comes_sleeps_on_until_rested() {
+        let mut routine = SleepRoutine::new();
+        assert!(sleep_priority(&mut routine, &tired(60.0), night()) > BUSY);
+        assert!(sleep_priority(&mut routine, &tired(40.0), day()) > BUSY);
+        assert_eq!(sleep_priority(&mut routine, &tired(RESTED), day()), 0.0);
+    }
+
+    /// The ordering that gets somebody up for the toilet and back into bed.
+    #[test]
+    fn a_sleeper_at_night_wants_bed_less_than_a_full_bladder_or_an_empty_stomach() {
+        let asleep = sleep_priority(&mut SleepRoutine::new(), &tired(SLEEPY + 5.0), night());
+        let bladder = BURSTING / NEED_PER_PRIORITY;
+        let hunger = PECKISH / NEED_PER_PRIORITY;
+        assert!(asleep < bladder && asleep < hunger, "{asleep} vs {bladder}, {hunger}");
+    }
+
+    #[test]
+    fn a_body_whose_tiring_is_switched_off_does_not_sleep_and_lets_go_of_a_commitment() {
+        let mut biology = tired(90.0);
+        let mut routine = SleepRoutine::new();
+        assert!(sleep_priority(&mut routine, &biology, night()) > BUSY);
+
+        biology.set_running(ProcessId::Energy, false);
+        assert_eq!(sleep_priority(&mut routine, &biology, night()), 0.0);
+        assert_eq!(routine.debug_fields(), [("sleepy", "no".to_string())]);
     }
 }

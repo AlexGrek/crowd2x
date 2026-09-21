@@ -399,6 +399,7 @@ mod tests {
                 features: &self.features,
                 dt: 1.0 / 60.0,
                 tick,
+                clock: crate::sim::clock::Clock::after_watching(0.0),
             }
         }
     }

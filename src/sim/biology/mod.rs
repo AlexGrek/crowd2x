@@ -2,9 +2,9 @@
 //! the [`Process`]es that change them.
 //!
 //! Plain Rust, like the rest of `sim`. Everything a body does *by itself* is a
-//! process here: getting hungry, getting thirsty, a bladder filling. What a
-//! unit decides to do about it is the brain's; what that then does to the
-//! body comes back in here as an [`Event`].
+//! process here: getting hungry, getting thirsty, a bladder filling, getting
+//! tired. What a unit decides to do about it is the brain's; what that then
+//! does to the body comes back in here as an [`Event`].
 //!
 //! # One writer
 //!
@@ -56,12 +56,14 @@
 //! stop lining up.
 
 pub mod bladder;
+pub mod energy;
 pub mod fun;
 pub mod hunger;
 pub mod stats;
 pub mod thirst;
 
 pub use bladder::Bladder;
+pub use energy::Energy;
 pub use fun::Fun;
 pub use hunger::Hunger;
 pub use stats::Stats;
@@ -80,12 +82,18 @@ pub enum ProcessId {
     Thirst = 1,
     Bladder = 2,
     Fun = 3,
+    Energy = 4,
 }
 
 impl ProcessId {
-    pub const COUNT: usize = 4;
-    pub const ALL: [ProcessId; ProcessId::COUNT] =
-        [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun];
+    pub const COUNT: usize = 5;
+    pub const ALL: [ProcessId; ProcessId::COUNT] = [
+        ProcessId::Hunger,
+        ProcessId::Thirst,
+        ProcessId::Bladder,
+        ProcessId::Fun,
+        ProcessId::Energy,
+    ];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -93,6 +101,7 @@ impl ProcessId {
             ProcessId::Thirst => "thirst",
             ProcessId::Bladder => "bladder",
             ProcessId::Fun => "fun",
+            ProcessId::Energy => "energy",
         }
     }
 
@@ -133,7 +142,10 @@ impl Default for Switches {
 }
 
 /// Something that happened to a body, for its processes to hear.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// `PartialEq` only: [`Event::Slept`] carries a duration, and an `f32` is not
+/// `Eq`.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Event {
     /// Something was eaten or drunk and is gone.
     Ingested(ItemKind),
@@ -141,6 +153,9 @@ pub enum Event {
     Relieved,
     /// Something entertaining was done — a go on a computer.
     Entertained,
+    /// Time was spent asleep. **How long**, in world seconds — not how much
+    /// rest that is, which is for [`Energy`] to say.
+    Slept { world_seconds: f32 },
 }
 
 /// One thing a body does by itself.
@@ -178,6 +193,7 @@ pub struct Biology {
     thirst: Thirst,
     bladder: Bladder,
     fun: Fun,
+    energy: Energy,
 }
 
 impl Biology {
@@ -190,6 +206,7 @@ impl Biology {
             thirst: Thirst,
             bladder: Bladder::default(),
             fun: Fun,
+            energy: Energy,
         }
     }
 
@@ -245,13 +262,14 @@ impl Biology {
             thirst,
             bladder,
             fun,
+            energy,
         } = self;
-        (stats, *switches, [hunger, thirst, bladder, fun])
+        (stats, *switches, [hunger, thirst, bladder, fun, energy])
     }
 
     /// Every process, read-only. Slot `i` is `ProcessId` `i`.
     fn processes(&self) -> [&dyn Process; ProcessId::COUNT] {
-        [&self.hunger, &self.thirst, &self.bladder, &self.fun]
+        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy]
     }
 
     /// The stats, which processes are running, and what each running process
@@ -326,6 +344,7 @@ mod tests {
         assert!(switches.is_on(ProcessId::Hunger));
         assert!(switches.is_on(ProcessId::Bladder));
         assert!(switches.is_on(ProcessId::Fun));
+        assert!(switches.is_on(ProcessId::Energy));
         assert_eq!(switches.with(ProcessId::Thirst, true), Switches::ALL);
         assert_eq!(
             ProcessId::ALL.iter().fold(Switches::ALL, |s, &p| s.with(p, false)),
@@ -340,6 +359,7 @@ mod tests {
         let stats = biology.stats();
         assert!(stats.hunger() > 50.0 && stats.thirst() > 50.0 && stats.bladder() > 50.0, "{stats:?}");
         assert!(stats.fun() < 50.0, "and the one that drains instead: {stats:?}");
+        assert!(stats.stamina() < 50.0, "and so does the one that tires: {stats:?}");
     }
 
     #[test]
@@ -370,11 +390,12 @@ mod tests {
                 .find(|(name, _)| *name == "processes")
                 .map(|(_, value)| value)
         };
-        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun"));
+        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy"));
 
         biology.set_running(ProcessId::Hunger, false);
         biology.set_running(ProcessId::Bladder, false);
         biology.set_running(ProcessId::Fun, false);
+        biology.set_running(ProcessId::Energy, false);
         assert_eq!(processes(&biology).as_deref(), Some("thirst"));
         assert_eq!(names(&biology), before, "the unit panel lays these out once");
     }

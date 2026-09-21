@@ -21,8 +21,8 @@ use rand::RngExt;
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Hunger, thirst, bladder and fun are the stats that move so far — the rest
-/// are rolled at spawn and stay put until a process wants them to.
+/// Hunger, thirst, bladder, fun and stamina are the stats that move so far —
+/// the rest are rolled at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
     health: f32,
@@ -40,17 +40,35 @@ fn need(value: f32) -> f32 {
     value.clamp(0.0, 100.0)
 }
 
+/// How satisfied a new body's needs are at the lowest, as a percentage.
+///
+/// A person arrives in the world 70 to 100 percent satisfied in **every**
+/// need — fed, watered, comfortable, entertained and rested — and the world
+/// wears that down. Rolling a need anywhere in its range instead meant a
+/// quarter of a crowd was born past the line where it goes looking for a meal,
+/// or for a bed, and spent its first minutes in a stampede for whatever the map
+/// happened to have.
+pub const BORN_AT_LEAST_SATISFIED: f32 = 70.0;
+
 impl Stats {
-    /// Every stat at a random value inside its allowed range — nobody is born
-    /// fully rested, fed and content, and nobody is born at zero either.
+    /// A new body: every need 70 to 100 percent satisfied
+    /// ([`BORN_AT_LEAST_SATISFIED`]), everything else anywhere in its range.
+    ///
+    /// Satisfaction is what is rolled, and each need turns it the way up it
+    /// reads: hunger, thirst and the bladder *rise* towards the thing that has
+    /// to be done about them, so satisfied is low; fun and stamina *drain*, so
+    /// satisfied is high.
     pub fn random(rng: &mut SmallRng) -> Stats {
+        let mut satisfied = || rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0);
+        let (stamina, fun) = (satisfied(), satisfied());
+        let (hunger, thirst, bladder) = (100.0 - satisfied(), 100.0 - satisfied(), 100.0 - satisfied());
         Stats {
             health: rng.random_range(0.0..=100.0),
-            stamina: rng.random_range(0.0..=100.0),
-            fun: rng.random_range(0.0..=100.0),
-            hunger: rng.random_range(0.0..=100.0),
-            thirst: rng.random_range(0.0..=100.0),
-            bladder: rng.random_range(0.0..=100.0),
+            stamina,
+            fun,
+            hunger,
+            thirst,
+            bladder,
             mental_health: rng.random_range(0.0..=100.0),
             attention: rng.random_range(0.0..=1.0),
         }
@@ -71,6 +89,10 @@ impl Stats {
 
     pub(super) fn change_fun(&mut self, by: f32) {
         self.fun = need(self.fun + by);
+    }
+
+    pub(super) fn change_stamina(&mut self, by: f32) {
+        self.stamina = need(self.stamina + by);
     }
 
     /// Every stat at the middle of its range — a person with nothing unusual
@@ -113,6 +135,12 @@ impl Stats {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_stamina(mut self, stamina: f32) -> Stats {
+        self.stamina = stamina;
+        self
+    }
+
     /// 0 (dead) to 100 (uninjured).
     pub fn health(&self) -> f32 {
         self.health
@@ -121,6 +149,15 @@ impl Stats {
     /// 0 (exhausted) to 100 (fully rested).
     pub fn stamina(&self) -> f32 {
         self.stamina
+    }
+
+    /// 0 (fully rested) to 100 (exhausted): [`Stats::stamina`] read as a need.
+    ///
+    /// Stamina drains where hunger rises, so it is turned over here for the
+    /// same reason [`Stats::boredom`] is — one scale for every need, and
+    /// derived so it cannot disagree with the stat it is the other side of.
+    pub fn tiredness(&self) -> f32 {
+        100.0 - self.stamina
     }
 
     /// 0 (bored) to 100 (having a great time).
@@ -202,6 +239,43 @@ mod tests {
             assert!((0.0..=100.0).contains(&stats.bladder()));
             assert!((0.0..=100.0).contains(&stats.mental_health()));
             assert!((0.0..=1.0).contains(&stats.attention()));
+        }
+    }
+
+    /// Every need, both ways up: the ones that rise and the ones that drain.
+    #[test]
+    fn a_new_person_is_at_least_seventy_percent_satisfied_in_every_need() {
+        let least = 100.0 - BORN_AT_LEAST_SATISFIED;
+        let mut rng = SmallRng::seed_from_u64(4);
+        for _ in 0..2000 {
+            let stats = Stats::random(&mut rng);
+            assert!(stats.hunger() <= least, "hunger {}", stats.hunger());
+            assert!(stats.thirst() <= least, "thirst {}", stats.thirst());
+            assert!(stats.bladder() <= least, "bladder {}", stats.bladder());
+            assert!(stats.boredom() <= least, "boredom {}", stats.boredom());
+            assert!(stats.tiredness() <= least, "tiredness {}", stats.tiredness());
+        }
+    }
+
+    /// Satisfied is a range and not a single value: the whole of it is used,
+    /// so two people are not the same person.
+    #[test]
+    fn a_new_persons_needs_are_spread_across_the_whole_satisfied_range() {
+        let mut rng = SmallRng::seed_from_u64(5);
+        let people: Vec<Stats> = (0..2000).map(|_| Stats::random(&mut rng)).collect();
+        let spread = |read: fn(&Stats) -> f32| {
+            let values = people.iter().map(read);
+            let (low, high) = values.fold((f32::MAX, f32::MIN), |(low, high), v| (low.min(v), high.max(v)));
+            high - low
+        };
+        for (name, read) in [
+            ("hunger", Stats::hunger as fn(&Stats) -> f32),
+            ("thirst", Stats::thirst),
+            ("bladder", Stats::bladder),
+            ("boredom", Stats::boredom),
+            ("tiredness", Stats::tiredness),
+        ] {
+            assert!(spread(read) > 25.0, "{name} only varies by {}", spread(read));
         }
     }
 

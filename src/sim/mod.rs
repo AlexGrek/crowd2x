@@ -127,6 +127,7 @@ pub mod clock;
 pub mod entities;
 pub mod entity;
 pub mod feature;
+pub mod homes;
 pub mod identity;
 pub mod inventory;
 pub mod item;
@@ -152,6 +153,7 @@ pub use clock::Clock;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
+pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
 pub use kinds::{Dog, Facing, Human};
@@ -339,6 +341,9 @@ pub struct GameState {
     /// Where the props a brain can use are. Derived from `map` once, here,
     /// and never again: the simulation's map does not change.
     features: Features,
+    /// Which beds have been given to whom. Written by the spawn pass and read
+    /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
+    homes: Homes,
     /// Mints ids and seeds new entities. Seeded, so a run replays.
     rng: SmallRng,
     tick: u64,
@@ -362,6 +367,7 @@ impl GameState {
         GameState {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map),
+            homes: Homes::new(),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -380,6 +386,11 @@ impl GameState {
     /// What the map's props are for, and where. See [`feature`].
     pub fn features(&self) -> &Features {
         &self.features
+    }
+
+    /// Which beds belong to whom. See [`homes`].
+    pub fn homes(&self) -> &Homes {
+        &self.homes
     }
 
     /// Who is standing where. Read-only from outside the tick: the two places
@@ -479,7 +490,32 @@ impl GameState {
         let _ = self.occupancy.claim(at, uid);
 
         self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
+        self.give_a_bed(uid, at);
         uid
+    }
+
+    /// Hand somebody who has just arrived the nearest bed nobody owns, if it
+    /// is the kind that sleeps and there is one. **A bed is only given away
+    /// while it is free**: an arrival that finds every bed owned has none, and
+    /// will sleep in one only when it is critically tired.
+    ///
+    /// One scan of the beds per arrival — a once-per-spawn cost, and the spawn
+    /// pass is the one place that is allowed to have those.
+    fn give_a_bed(&mut self, uid: Uid, near: Point) {
+        let homes = &self.homes;
+        let Some(bed) = self
+            .features
+            .nearest_where(FeatureKind::Bed, near, |cell| !homes.is_owned(cell))
+        else {
+            return;
+        };
+        let Some(entity) = self.entities.get_mut(uid) else {
+            return;
+        };
+        if entity.set_home(bed) {
+            self.homes.claim(bed, uid);
+            self.log.push(format!("{uid} was given the bed at {}, {}", bed.x, bed.y));
+        }
     }
 
     /// Remove an entity. Returns whether there was one.
@@ -490,6 +526,8 @@ impl GameState {
                 // spawned on top of somebody else must not free their cell on
                 // its way out.
                 self.occupancy.release(gone.center_position(), uid);
+                // Its bed goes back to be given to the next arrival.
+                self.homes.release(uid);
                 self.log.push(format!("despawned {uid}"));
                 true
             }
@@ -676,6 +714,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
 pub fn process_pass(state: &mut GameState, dt: f32) {
     state.tick += 1;
     state.elapsed += dt as f64;
+    // Read once, and shared by both rounds: the clock does not move inside a
+    // tick, and every entity should see the same time.
+    let clock = state.clock();
 
     // Disjoint field borrows, so the borrow checker is what proves the steps
     // below do not overlap: think reads the world and writes `intents`, move
@@ -715,6 +756,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             features,
             dt,
             tick: *tick,
+            clock,
         },
         intents,
     );
@@ -732,6 +774,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             features,
             dt,
             tick: *tick,
+            clock,
         },
         moves,
     );
@@ -1343,7 +1386,11 @@ mod tests {
             ]
         };
         let (mut done_a, mut done_b) = ([0; 4], [0; 4]);
-        for _ in 0..1500 {
+        // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
+        // parched, bursting or bored for hours: the slowest need to come round
+        // is boredom, ten world hours from a great time to bored. `run` ticks
+        // at 60Hz, so a world hour is 1800 of them, and this is six.
+        for _ in 0..(6 * 1800) {
             run(&mut a, 1);
             run(&mut b, 1);
             for (total, now) in done_a.iter_mut().zip(tally(&a.log.drain())) {
@@ -1367,6 +1414,140 @@ mod tests {
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
         assert!(plays > 0, "nobody had a go on a computer, so that part of the brain never ran");
         assert_eq!(done_a, done_b);
+        assert_eq!(positions(&a), positions(&b));
+    }
+
+    /// A world with a bed in each of `beds` and nothing else in it.
+    fn with_beds(beds: &[Point], seed: u64) -> GameState {
+        let mut map = Map::new(Size::new(24, 17), FLOOR);
+        for (i, cell) in beds.iter().enumerate() {
+            map.add_object(
+                crate::map::ObjectLayer::Props,
+                crate::map::Object {
+                    at: Point::new(
+                        cell.x * crate::map::PIXELS_PER_CELL + 24,
+                        cell.y * crate::map::PIXELS_PER_CELL + 24,
+                    ),
+                    kind: crate::map::ObjectKind::new(&format!("bed {}", 1 + i % 6)),
+                },
+            );
+        }
+        GameState::new(map, seed)
+    }
+
+    /// A dormitory: fewer beds than people, so most of a crowd has no bed of
+    /// its own.
+    fn dormitory(seed: u64) -> GameState {
+        let beds: Vec<Point> = (0..12)
+            .map(|i| Point::new(2 + (i % 6) * 3, if i < 6 { 2 } else { 14 }))
+            .collect();
+        with_beds(&beds, seed)
+    }
+
+    #[test]
+    fn a_human_who_arrives_is_given_the_nearest_bed_nobody_owns() {
+        let (near, far) = (Point::new(2, 2), Point::new(20, 14));
+        let mut state = with_beds(&[near, far], 5);
+
+        let first = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.homes().owner(near), Some(first), "the nearer of the two");
+        assert!(state.log.drain().iter().any(|line| line.contains("was given the bed at 2, 2")));
+
+        // Arriving in the same place, the nearer bed is taken: **only a bed
+        // that is free is given away**, so the second one gets the other.
+        let second = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.homes().owner(far), Some(second));
+        assert_eq!(state.homes().owner(near), Some(first), "and the first keeps theirs");
+
+        // Every bed is somebody's now, and a third arrival has none.
+        state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.homes().len(), 2);
+    }
+
+    #[test]
+    fn what_a_human_remembers_is_which_bed_is_its_own() {
+        let mut state = with_beds(&[Point::new(6, 9)], 5);
+        let human = state.spawn(EntityType::Human, Point::new(1, 1));
+        let fields = state.entities().get(human).expect("just spawned").brain_fields();
+        let memory = fields.iter().find(|(name, _)| *name == "memory").expect("a human has one");
+        assert!(memory.1.contains("home bed 6, 9"), "memory says {:?}", memory.1);
+    }
+
+    #[test]
+    fn a_dog_is_not_given_a_bed_and_does_not_use_one_up() {
+        let bed = Point::new(2, 2);
+        let mut state = with_beds(&[bed], 5);
+        state.spawn(EntityType::Dog, Point::new(3, 3));
+        assert!(state.homes().is_empty());
+
+        let human = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert_eq!(state.homes().owner(bed), Some(human), "still there for the person");
+    }
+
+    #[test]
+    fn a_world_with_no_beds_gives_nobody_one() {
+        let mut state = with_beds(&[], 5);
+        state.spawn(EntityType::Human, Point::new(3, 3));
+        assert!(state.homes().is_empty());
+    }
+
+    #[test]
+    fn leaving_gives_the_bed_back_to_be_given_to_the_next_arrival() {
+        let bed = Point::new(2, 2);
+        let mut state = with_beds(&[bed], 5);
+        let first = state.spawn(EntityType::Human, Point::new(3, 3));
+        let stranger = state.spawn(EntityType::Human, Point::new(4, 3));
+        assert_eq!(state.homes().owner(bed), Some(first));
+        assert!(state.despawn(stranger), "one who owned nothing changes nothing");
+        assert_eq!(state.homes().owner(bed), Some(first));
+
+        assert!(state.despawn(first));
+        assert!(!state.homes().is_owned(bed));
+        let next = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert_eq!(state.homes().owner(bed), Some(next));
+    }
+
+    #[test]
+    fn determinism_survives_a_crowd_going_to_bed_in_the_parallel_rounds() {
+        // The kitchen test above never puts anybody in a bed. This one starts
+        // at ten at night, with more people than beds and more people than the
+        // parallel threshold: twelve owners heading for their own, and
+        // everybody else held off (and, as the night wears on, critical and
+        // picking at random from whatever is free). All of it has to come out
+        // the same twice.
+        let build = || {
+            let mut state = dormitory(23);
+            state.elapsed = 14.0 * crate::sim::clock::HOUR as f64 / crate::sim::clock::TIME_SCALE as f64;
+            for i in 0..(PARALLEL_AT as i32 + 20) {
+                state.spawn(EntityType::Human, Point::new(i % 24, 5 + (i / 24) % 8));
+            }
+            state
+        };
+        assert!(build().clock().is_night());
+        assert!(build().len() > PARALLEL_AT, "should actually cross the line");
+        assert_eq!(build().homes().len(), 12, "every bed has an owner, and the rest have none");
+
+        let (mut a, mut b) = (build(), build());
+        let (mut slept_a, mut slept_b) = (0, 0);
+        let count = |lines: Vec<String>| lines.iter().filter(|l| l.contains("slept in the bed")).count();
+        // Ten world hours at 60Hz is 18000 ticks: the whole of the night, and
+        // long enough for the unowned to get critical.
+        for _ in 0..(10 * 1800) {
+            run(&mut a, 1);
+            run(&mut b, 1);
+            slept_a += count(a.log.drain());
+            slept_b += count(b.log.drain());
+        }
+
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state
+                .entities()
+                .iter()
+                .map(|e| (e.uid().raw(), e.position()))
+                .collect()
+        };
+        assert!(slept_a > 0, "nobody slept, so the sleeping part of the brain never ran");
+        assert_eq!(slept_a, slept_b);
         assert_eq!(positions(&a), positions(&b));
     }
 

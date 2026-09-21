@@ -8,8 +8,11 @@
 //! none of the editor's.
 //!
 //! A prop with no entry here is scenery, which today is every prop but the
-//! fridge, the toilet and the computer. A prop with two entries is two things
-//! at once: a fridge is food and water.
+//! fridge, the toilet, the computer and the beds. A prop with two entries is
+//! two things at once: a fridge is food and water.
+
+use rand::rngs::SmallRng;
+use rand::RngExt;
 
 use crate::map::{Map, ObjectLayer, Point};
 
@@ -21,6 +24,8 @@ pub enum FeatureKind {
     Toilet,
     /// Something to do: a computer, used from the chair beside it.
     Entertainment,
+    /// Somewhere to sleep: a bed, slept *in* rather than beside.
+    Bed,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -49,7 +54,9 @@ impl FeatureKind {
     pub const fn access(self) -> Access {
         match self {
             FeatureKind::Food | FeatureKind::Water | FeatureKind::Entertainment => Access::Beside,
-            FeatureKind::Toilet => Access::Entered,
+            // A bed is lain in, not stood next to, and one sleeper to a bed:
+            // the toilet's arrangement, and for the same reason.
+            FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
         }
     }
 }
@@ -85,6 +92,33 @@ pub const FEATURES: &[Feature] = &[
         name: "computer",
         kind: FeatureKind::Entertainment,
     },
+    // The six beds the editor can place. Their art is 48x48 and has no
+    // "somebody is in it" strip yet, so a bed does not show that it is being
+    // slept in (see `game::props`); the sleeper is what shows it.
+    Feature {
+        name: "bed 1",
+        kind: FeatureKind::Bed,
+    },
+    Feature {
+        name: "bed 2",
+        kind: FeatureKind::Bed,
+    },
+    Feature {
+        name: "bed 3",
+        kind: FeatureKind::Bed,
+    },
+    Feature {
+        name: "bed 4",
+        kind: FeatureKind::Bed,
+    },
+    Feature {
+        name: "bed 5",
+        kind: FeatureKind::Bed,
+    },
+    Feature {
+        name: "bed 6",
+        kind: FeatureKind::Bed,
+    },
 ];
 
 /// Everything a prop name is for — nothing, for scenery.
@@ -106,6 +140,7 @@ pub struct Features {
     water: Vec<Point>,
     toilet: Vec<Point>,
     entertainment: Vec<Point>,
+    bed: Vec<Point>,
     /// Cells whose kind is [`Access::Entered`] — gathered once, across every
     /// kind, so the move step can ask "can anyone at all step in here"
     /// without knowing what the feature is for. A handful of cells on any
@@ -124,11 +159,17 @@ impl Features {
                     FeatureKind::Water => features.water.push(cell),
                     FeatureKind::Toilet => features.toilet.push(cell),
                     FeatureKind::Entertainment => features.entertainment.push(cell),
+                    FeatureKind::Bed => features.bed.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
                 }
             }
+        }
+        // Sorted, so nothing that picks among them depends on the order the
+        // props were painted in.
+        for cells in [&mut features.food, &mut features.water, &mut features.toilet, &mut features.entertainment, &mut features.bed] {
+            cells.sort_unstable();
         }
         features
     }
@@ -147,6 +188,7 @@ impl Features {
             FeatureKind::Water => &self.water,
             FeatureKind::Toilet => &self.toilet,
             FeatureKind::Entertainment => &self.entertainment,
+            FeatureKind::Bed => &self.bed,
         }
     }
 
@@ -168,6 +210,40 @@ impl Features {
             .copied()
             .min_by_key(|&cell| (from.manhattan_distance(cell), cell))
     }
+
+    /// Whether there is a feature of `kind` in `cell`.
+    pub fn has(&self, kind: FeatureKind, cell: Point) -> bool {
+        self.cells(kind).contains(&cell)
+    }
+
+    /// Like [`Features::nearest`], but only among the features `keep` says yes
+    /// to — the nearest bed that is not owned, say. `None` when there are none
+    /// left, rather than falling back to one that was refused. The caller says
+    /// what it is asking for, so this knows nothing about the crowd.
+    pub fn nearest_where(&self, kind: FeatureKind, from: Point, keep: impl Fn(Point) -> bool) -> Option<Point> {
+        self.cells(kind)
+            .iter()
+            .copied()
+            .filter(|&cell| keep(cell))
+            .min_by_key(|&cell| (from.manhattan_distance(cell), cell))
+    }
+
+    /// One of the features `keep` says yes to, chosen at random from `rng`.
+    ///
+    /// **Uniform over the ones kept, and independent of the order props were
+    /// placed in** — the cells are kept sorted (see [`Features::from_map`]), so
+    /// the same dice pick the same bed however the map was painted. Two passes
+    /// over a handful of cells and no allocation, since a goal asks it in a
+    /// tick.
+    pub fn pick_where(&self, kind: FeatureKind, rng: &mut SmallRng, keep: impl Fn(Point) -> bool) -> Option<Point> {
+        let cells = self.cells(kind);
+        let count = cells.iter().filter(|&&cell| keep(cell)).count();
+        if count == 0 {
+            return None;
+        }
+        let nth = rng.random_range(0..count);
+        cells.iter().copied().filter(|&cell| keep(cell)).nth(nth)
+    }
 }
 
 #[cfg(test)]
@@ -187,10 +263,10 @@ mod tests {
     }
 
     #[test]
-    fn a_fridge_on_the_map_is_food_and_water_in_the_index_and_a_bed_is_nothing() {
+    fn a_fridge_on_the_map_is_food_and_water_in_the_index_and_is_not_a_bed() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         map.add_object(ObjectLayer::Props, prop("fridge", Point::new(3, 4)));
-        map.add_object(ObjectLayer::Props, prop("bed 1", Point::new(6, 6)));
+        map.add_object(ObjectLayer::Props, prop("crate", Point::new(6, 6)));
 
         let features = Features::from_map(&map);
         for kind in [FeatureKind::Food, FeatureKind::Water] {
@@ -198,6 +274,79 @@ mod tests {
             assert_eq!(features.nearest(kind, Point::new(0, 0)), Some(Point::new(3, 4)), "{kind:?}");
         }
         assert_eq!(features.count(FeatureKind::Toilet), 0, "a fridge is not a toilet");
+        assert_eq!(features.count(FeatureKind::Bed), 0, "nor a bed, and a crate is scenery");
+    }
+
+    #[test]
+    fn every_bed_the_editor_can_place_is_somewhere_to_sleep_and_is_slept_in() {
+        for number in 1..=6 {
+            let name = format!("bed {number}");
+            assert_eq!(kinds_of(&name).collect::<Vec<_>>(), [FeatureKind::Bed], "{name}");
+
+            let mut map = Map::new(Size::new(10, 10), FLOOR);
+            let cell = Point::new(5, 5);
+            map.add_object(ObjectLayer::Props, prop(&name, cell));
+            let features = Features::from_map(&map);
+            assert_eq!(features.nearest(FeatureKind::Bed, Point::new(0, 0)), Some(cell), "{name}");
+            assert!(features.is_enterable(cell), "{name} is slept in, so it is entered");
+        }
+        assert_eq!(FeatureKind::Bed.access(), Access::Entered);
+    }
+
+    #[test]
+    fn nearest_where_skips_what_it_is_told_to_and_says_none_when_nothing_is_left() {
+        let mut map = Map::new(Size::new(20, 20), FLOOR);
+        let (near, far) = (Point::new(2, 2), Point::new(15, 15));
+        map.add_object(ObjectLayer::Props, prop("bed 1", near));
+        map.add_object(ObjectLayer::Props, prop("bed 2", far));
+        let features = Features::from_map(&map);
+        let from = Point::new(0, 0);
+
+        assert_eq!(features.nearest_where(FeatureKind::Bed, from, |_| true), Some(near));
+        assert_eq!(features.nearest_where(FeatureKind::Bed, from, |cell| cell != near), Some(far));
+        assert_eq!(features.nearest_where(FeatureKind::Bed, from, |_| false), None, "not a refused one instead");
+        assert_eq!(features.nearest_where(FeatureKind::Toilet, from, |_| true), None);
+    }
+
+    #[test]
+    fn pick_where_only_picks_what_it_is_allowed_and_reaches_all_of_it() {
+        use rand::SeedableRng;
+        let mut map = Map::new(Size::new(20, 20), FLOOR);
+        let beds = [Point::new(2, 2), Point::new(8, 2), Point::new(14, 2)];
+        for (i, bed) in beds.iter().enumerate() {
+            map.add_object(ObjectLayer::Props, prop(&format!("bed {}", i + 1), *bed));
+        }
+        let features = Features::from_map(&map);
+        let mut rng = SmallRng::seed_from_u64(1);
+
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..200 {
+            let bed = features.pick_where(FeatureKind::Bed, &mut rng, |cell| cell != beds[1]);
+            seen.insert(bed.expect("two are allowed"));
+        }
+        assert_eq!(seen, [beds[0], beds[2]].into(), "both allowed ones, and never the refused one");
+        assert_eq!(features.pick_where(FeatureKind::Bed, &mut rng, |_| false), None);
+        assert_eq!(features.pick_where(FeatureKind::Toilet, &mut rng, |_| true), None);
+    }
+
+    #[test]
+    fn the_same_dice_pick_the_same_bed_whatever_order_the_beds_were_painted_in() {
+        use rand::SeedableRng;
+        let beds = [Point::new(2, 2), Point::new(8, 5), Point::new(14, 3), Point::new(5, 9)];
+        let build = |order: &[usize]| {
+            let mut map = Map::new(Size::new(20, 20), FLOOR);
+            for &i in order {
+                map.add_object(ObjectLayer::Props, prop(&format!("bed {}", i + 1), beds[i]));
+            }
+            Features::from_map(&map)
+        };
+        let (forwards, backwards) = (build(&[0, 1, 2, 3]), build(&[3, 2, 1, 0]));
+        for seed in 0..50 {
+            let pick = |features: &Features| {
+                features.pick_where(FeatureKind::Bed, &mut SmallRng::seed_from_u64(seed), |_| true)
+            };
+            assert_eq!(pick(&forwards), pick(&backwards), "seed {seed}");
+        }
     }
 
     #[test]

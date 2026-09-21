@@ -248,7 +248,7 @@ pub enum Step {
     /// wanting anything, which is what makes a test about being bored a test
     /// about being bored rather than a race between four needs.
     Process {
-        /// `hunger`, `thirst`, `bladder` or `fun`.
+        /// `hunger`, `thirst`, `bladder`, `fun` or `energy`.
         name: String,
         on: bool,
     },

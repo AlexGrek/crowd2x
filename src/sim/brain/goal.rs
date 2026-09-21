@@ -39,10 +39,11 @@ pub enum GoalId {
     Drink = 3,
     Relieve = 4,
     Play = 5,
+    Sleep = 6,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -50,6 +51,7 @@ impl GoalId {
         GoalId::Drink,
         GoalId::Relieve,
         GoalId::Play,
+        GoalId::Sleep,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -60,6 +62,7 @@ impl GoalId {
             GoalId::Drink => "drink",
             GoalId::Relieve => "relieve",
             GoalId::Play => "play",
+            GoalId::Sleep => "sleep",
         }
     }
 
@@ -76,6 +79,7 @@ impl GoalId {
             GoalId::Drink => "💧",
             GoalId::Relieve => "🚽",
             GoalId::Play => "🎮",
+            GoalId::Sleep => "😴",
         }
     }
 
@@ -474,7 +478,8 @@ mod tests {
                 (GoalId::Drink, 0.1),
                 (GoalId::Relieve, 0.1),
                 (GoalId::Idle, 0.0),
-                (GoalId::Play, 0.0)
+                (GoalId::Play, 0.0),
+                (GoalId::Sleep, 0.0)
             ]
         );
     }

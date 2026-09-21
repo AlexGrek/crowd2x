@@ -5,7 +5,13 @@ use std::collections::BTreeMap;
 use crate::map::Point;
 use crate::sim::uid::Uid;
 
-/// What a brain remembers. **Empty on purpose: nothing writes to it yet.**
+/// The key a unit remembers its own bed under: a [`Recall::Cell`]. Written once,
+/// when the unit arrives to find a bed free (`GameState::spawn`), and read by
+/// the goal that puts it to bed.
+pub const HOME_BED: &str = "home bed";
+
+/// What a brain remembers. **Nearly empty on purpose: the one thing written so
+/// far is which bed is its own** ([`HOME_BED`]).
 ///
 /// A `BTreeMap` rather than a `HashMap`, and that is the only liberty taken
 /// with the shape: iteration order has to be a declaration of the keys and not

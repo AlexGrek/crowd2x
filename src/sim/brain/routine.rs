@@ -27,13 +27,14 @@
 //! Adding a routine type is a struct, a [`RoutineExecutor`] impl, a variant
 //! here, and its arm in each of [`Routine`]'s three methods. A new *need* is
 //! not a new type: it is a [`Need`](super::routines::Need) for the
-//! [`NeedRoutine`] that exists.
+//! [`NeedRoutine`] that exists — unless it depends on something a stat is not,
+//! like the time of day, which is what [`SleepRoutine`] is.
 
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 
 use super::goal::Goals;
-use super::routines::{Need, NeedRoutine, StayBusyRoutine};
+use super::routines::{Need, NeedRoutine, SleepRoutine, StayBusyRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -69,6 +70,7 @@ pub trait RoutineExecutor {
 #[derive(Debug)]
 pub enum Routine {
     Need(NeedRoutine),
+    Sleep(SleepRoutine),
     StayBusy(StayBusyRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
@@ -81,6 +83,11 @@ impl Routine {
         Routine::Need(NeedRoutine::new(need))
     }
 
+    /// Go to bed when tired enough, and stay there through the night.
+    pub const fn sleep() -> Routine {
+        Routine::Sleep(SleepRoutine::new())
+    }
+
     /// Wander, a little, always.
     pub const fn stay_busy() -> Routine {
         Routine::StayBusy(StayBusyRoutine)
@@ -89,6 +96,7 @@ impl Routine {
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
+            Routine::Sleep(routine) => routine.name(),
             Routine::StayBusy(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
@@ -99,6 +107,7 @@ impl Routine {
     pub fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         match self {
             Routine::Need(routine) => routine.arrange(ctx, goals),
+            Routine::Sleep(routine) => routine.arrange(ctx, goals),
             Routine::StayBusy(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
@@ -108,6 +117,7 @@ impl Routine {
     pub fn debug_fields(&self) -> Vec<(&'static str, String)> {
         match self {
             Routine::Need(routine) => routine.debug_fields(),
+            Routine::Sleep(routine) => routine.debug_fields(),
             Routine::StayBusy(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),

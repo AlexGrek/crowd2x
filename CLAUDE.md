@@ -10,11 +10,12 @@ What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-l
 editor backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
-actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet, and
-have a go on a computer — driven by biological processes (hunger, thirst, a bladder that a
-drink fills, fun that drains away) that can be switched off per unit. The computer is also
-the first prop that is *watched* being used: its screen is on for as long as somebody is
-sitting at it.
+actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet,
+have a go on a computer, and sleep in a bed at night — driven by biological processes
+(hunger, thirst, a bladder that a drink fills, fun that drains away, energy that a night in
+bed restores) that can be switched off per unit. The computer is also the first prop that
+is *watched* being used: its screen is on for as long as somebody is sitting at it. (A bed
+does not yet show that it is slept in: it has no second strip of art to swap to.)
 
 ## Commands
 
@@ -59,10 +60,13 @@ A pure black capture almost always means the frame was grabbed before the first 
 presented, not that rendering broke — raise `CROWD2X_SHOT_DELAY`, and check the display is
 not asleep, before debugging.
 
-Three skills go deeper than the summary below and should be read before the work they
-cover: `qa` for the scripted test framework, `debugger` for the capture workflow, and
-`dev` for Bevy API specifics, asset and animation conventions, and simulation-scaling
-architecture.
+Five skills go deeper than the summary below and should be read before the work they
+cover: `qa` for the scripted test framework, `debugger` for the capture workflow, `dev` for
+Bevy API specifics, asset and animation conventions, and simulation-scaling architecture,
+`brain-engineer` for anything a unit decides or its body does (goals, tasks, features, items,
+stats, processes), and **`add-routine` for adding or changing a routine** — it names the exact
+files to edit, which existing routine to copy, how to test, and which parts of the repository
+not to read.
 
 ## Architecture
 
@@ -389,8 +393,8 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   a whole-cell fact, the rule bodies follow too, so tall art overhanging the cell above does
   not wall it off. A prop name this build does not know blocks, as unknown terrain does.
   Spawners never block. The consequence for the brain is that a feature is normally used
-  *from beside it*, never from its own cell (`goals::stand_beside`) — the toilet is the one
-  exception, used by entering, and "The brain" below says how a cell can stay impassable
+  *from beside it*, never from its own cell (`goals::stand_beside`) — the toilet and the beds are the
+  exceptions, used by entering, and "The brain" below says how a cell can stay impassable
   here and still be walked into by exactly one unit.
 - **Passability is derived, never authored.** `PassabilityMap` is one bit per cell: a cell
   is passable when its terrain is and no blocking prop stands in it. Kept in sync by
@@ -556,6 +560,10 @@ watching it — so even those say what the world thinks is going on. The game sp
 multiplies how many *ticks* happen, so it moves both clocks together and 4x is the same
 world watched faster.
 
+`Think` also carries the time of day, `Think::clock` — one reading of the world's clock per
+pass, shared by the whole crowd — and `Clock::is_night` (22:00 to 06:00, across midnight) is
+the one question a routine asks of it so far.
+
 #### The brain (`sim/brain/`)
 
 What an entity does with all this is decided by a `Brain`, which runs entirely in
@@ -565,15 +573,21 @@ talking only to the one below:
 
 - **perception** — a named stub. What it wants is a spatial index on `Think`, never a
   per-unit scan of the crowd.
-- **memory** — a `BTreeMap<String, Recall>`, empty; a `BTreeMap` so iterating it can never
-  be a hash order.
-- **routines** (`NeedRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
+- **memory** — a `BTreeMap<String, Recall>`, nearly empty: the one thing in it so far is which
+  bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
+  can never be a hash order.
+- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
   `BLADDER` ("stay comfortable"), `BOREDOM` ("keep entertained") — with hysteresis between a commit and a release
   threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
-  process behind the need is switched off. **There is no cap on how many a brain has**:
+  process behind the need is switched off. **Sleep is the routine that is not a `Need`**,
+  because it reads the clock as well as a stat: by day it commits at 75 tired and lets go at
+  10; by night it commits at 30 and *does not let go until morning*, holding a priority
+  floor of 0.6 so somebody rested at one o'clock stays in bed — above wandering, below any
+  committed hunger, thirst, bladder or boredom, so a sleeper gets up for the toilet and
+  comes back. **There is no cap on how many a brain has**:
   `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
   and a brain holds them in a `Box<[Routine]>` built once at spawn — one allocation per
   unit however many routines, state inline and contiguous, no `push` so the order cannot
@@ -581,7 +595,7 @@ talking only to the one below:
   chase per routine per unit per tick, which is what a human with dozens of routines in a
   crowd of thousands cannot afford.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
-  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`) is a `Box` owned for
+  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
   picked up. It reads the body, hands and memory, and manages the task queue; it never
   changes the world itself. **One goal per need, each in its own file**, even where two
@@ -589,14 +603,23 @@ talking only to the one below:
   alike. What they share — `stand_beside`, `PATIENCE`, `WAIT_FOR_A_GAP` — is in
   `goals/mod.rs`. A goal whose hand holds somebody else's item finishes it first, since
   taking needs an empty hand; without that, food taken just before thirst took over makes
-  every drink fail forever.
+  every drink fail forever. `SleepGoal` queues **one hour** in bed and reports `Achieved`; if
+  the routine still wants sleep it stays on top and the next hour starts from where the unit
+  lies, so how long a night is belongs to the routine, and an interruption costs the hour in
+  progress rather than the night. **Which bed:** a human has one of its own, handed out at spawn
+  (`GameState::give_a_bed`: the nearest bed nobody owns, *only while one is free* — a `Homes`
+  registry on `GameState`, written by the spawn pass alone and released on despawn) and
+  remembered in its `Memory`. By default that is the one it goes to, and the only one. It takes
+  **any other free bed, at random, only when critically tired** (`CRITICALLY_TIRED`, 90), and
+  once lying in a bed stays in it. A human that arrives to find every bed owned has none, and
+  stays up until it is critical. Nothing in a tick reads `Homes`: the unit remembers.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Wait`), `match`-dispatched so
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a
   `TakeItem` ends, not when a goal hears that it did. A task never writes a stat — it tells
-  the body what happened (`Event::Ingested`, `Event::Relieved`), below.
+  the body what happened (`Event::Ingested`, `Event::Relieved`, `Event::Slept`), below.
 - **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
   is asked for.
 
@@ -627,7 +650,7 @@ cell the search vetted.
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
 a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
-`Toilet` and `"computer"` is `Entertainment`. A fridge never runs out, and is used from one
+`Toilet`, `"computer"` is `Entertainment` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never runs out, and is used from one
 of the four cells beside it — it blocks its own. Adding a use for a prop is an entry there,
 a palette entry in `editor/props.rs` and a `map::PROPS` entry (tests fail without them), and
 a goal that queues the tasks.
@@ -643,7 +666,7 @@ frame, skipped entirely on a map with no prop that could light up.
 
 Every `FeatureKind` also has an `Access`: `Beside` (the fridge and the computer, touched
 from next to them — a computer is a desk with chairs on four sides, so nobody queues for
-one) or `Entered` (the toilet, used by walking *into* it). An `Entered` cell stays impassable in
+one) or `Entered` (the toilet and the beds, used by walking *into* them). An `Entered` cell stays impassable in
 `map::PassabilityMap` — nobody routes through it, and an ordinary walk refuses it exactly
 like a wall — but `sim::move_step` lets a `Move` straight onto it through to `Occupancy`,
 which is the taken/free state: whoever is standing there holds the claim, and the cell is
@@ -653,6 +676,7 @@ route directly rather than asking for one — the one cell it targets is exactly
 search would refuse, and by the time it is asked for it is always a single step away.
 `UseToilet` is the pattern for a task built on `Entered` access: it starts by entering, and
 once `ctx.here()` is the feature's own cell, carries on exactly as a `Beside` task would.
+`Sleep` is the second, and is that shape with a bed for a toilet.
 
 When `UseToilet` fails because the cell was already taken, `blocked_by` names the occupant —
 the same signal a `MoveTo` refused by a body in the way carries — so `RelieveGoal` treats the
@@ -691,20 +715,28 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
 
 **The rates are in world time, and they are a person's**, which is what the time scale
 above is for: full to starving in 8 hours, quenched to parched in 5, an untouched bladder
-full in 6, and fun draining from a great time to thoroughly bored in 10 — plus `0.5` of a
+full in 6, fun draining from a great time to thoroughly bored in 10 and stamina from fully
+rested to exhausted in 16 (a waking day, undone by 8 hours in bed) — plus `0.5` of a
 bladder per point of hydration drunk, arriving over the half hour after the drink. So a
 human eats three or four times a day, drinks rather more often, goes to the toilet after a
-drink, and looks for something to do about once a day; at 1x that is a meal every couple of minutes of
-watching, and the speed control is for watching a day go by. Every rate is written as
+drink, looks for something to do about once a day and goes to bed at night; at 1x that is a meal
+every couple of minutes of watching, and the speed control is for watching a day go by. Every rate is written as
 `100.0 / (hours * HOUR)` in the file that owns it, so the number in the source is the
 number of hours.
 
 The doing is in world time too, converted at the point it is defined: 2 minutes to take
 food out of a fridge and 15 to eat it, 1 to pour a drink and 2 to drink it, 5 on the
-toilet, 30 at the computer — the longest thing anybody does, since having a go at something
-is what a person does when nothing else is pressing. Eating and drinking commit at 60 and
+toilet, 30 at the computer, an hour at a time in bed (thirty seconds of watching, and eight of
+them are a night) — the longest a go at anything lasts, since having a go at something is
+what a person does when nothing else is pressing. Eating and drinking commit at 60 and
 release at 25, the toilet at 70 and 10, boredom at 60 and 20; one go is worth 60 points of
 fun, so a thoroughly bored person has a second one the way a starving one eats twice.
+
+**Everybody is born 70 to 100 percent satisfied in every need** (`Stats::random`,
+`BORN_AT_LEAST_SATISFIED`): fed, watered, comfortable, entertained and rested, worn down by
+the world from there. Rolling a need anywhere in its range put a quarter of every crowd
+past the line where it goes looking for a meal or a bed on its first tick. It also means
+the first hunger is hours of world away, which a test that waits for one has to allow.
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and
 sized once, in the spawn pass; a `Vec` that grows mid-tick moves its contents and
@@ -787,7 +819,7 @@ few times afterwards, since a hungry unit eats what it is handed and a thirsty o
 it in about a second of watching —
 `{"process": {"name": "hunger", "on": false}}` switches one of the selected unit's
 biological processes off on that queue too — the only handle a script has on what a unit
-*wants*, since stats are rolled at spawn and only a process may write one, so watching one
+*wants*, since stats are rolled at spawn (70 to 100 percent satisfied) and only a process may write one, so watching one
 need means stopping the others happening — and `{"tick": 200}` runs
 one spawn pass and then exactly that many processing passes, *immediately* — so pending
 spawns are applied once however many ticks were asked for. Ticking rather than waiting is
@@ -907,7 +939,7 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         inventory.rs is what a unit carries: a hand that costs
                         mass only, stowage that costs mass and space, and limits
                         biology/ is the body: Stats, and the processes that alone
-                        change them (hunger, thirst, bladder, fun), each switchable
+                        change them (hunger, thirst, bladder, fun, energy), each switchable
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed

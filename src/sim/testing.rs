@@ -11,6 +11,7 @@ use rand::SeedableRng;
 
 use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 
+use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
 use super::kinds::Human;
@@ -26,6 +27,9 @@ pub struct World {
     pub features: Features,
     pub tick: u64,
     pub dt: f32,
+    /// What time it is. Opening time, until a test sets it: a test about
+    /// sleeping at night puts it there.
+    pub clock: Clock,
     /// Everything the log has said, kept: the log itself is drained.
     lines: Vec<String>,
 }
@@ -39,6 +43,7 @@ impl World {
             log: Log::new(),
             tick: 0,
             dt: 1.0 / 64.0,
+            clock: Clock::after_watching(0.0),
             lines: Vec::new(),
         }
     }
@@ -51,6 +56,7 @@ impl World {
             features: &self.features,
             dt: self.dt,
             tick: self.tick,
+            clock: self.clock,
         }
     }
 
@@ -117,6 +123,11 @@ impl World {
         self.count("had a go on the computer")
     }
 
+    /// How many hours have been slept in a bed here.
+    pub fn sleeps(&self) -> usize {
+        self.count("slept in the bed")
+    }
+
     fn count(&self, needle: &str) -> usize {
         self.lines.iter().filter(|line| line.contains(needle)).count()
     }
@@ -140,10 +151,11 @@ pub fn prop_at(map: &mut Map, name: &str, cell: Point) {
 /// A human standing in `cell` with exactly these needs, so a test decides
 /// which of them are pressing rather than the spawn roll.
 ///
-/// Fun is set to the top as well, though it is not an argument: a rolled one
-/// would leave every test about hunger with a human that might wander off
-/// looking for something to do halfway through. A test about boredom sets it
-/// itself (`Human::set_fun`).
+/// Fun and stamina are set to the top as well, though they are not arguments:
+/// a rolled one would leave every test about hunger with a human that might
+/// wander off looking for something to do, or go to bed, halfway through. A
+/// test about boredom sets fun itself (`Human::set_fun`), and one about
+/// sleeping sets stamina (`Human::set_stamina`).
 pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human {
     let mut rng = SmallRng::seed_from_u64(3);
     let mut human = Human::new(Uid::new(EntityType::Human, 77), cell, &mut rng);
@@ -151,5 +163,6 @@ pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human
     human.set_thirst(thirst);
     human.set_bladder(bladder);
     human.set_fun(100.0);
+    human.set_stamina(100.0);
     human
 }

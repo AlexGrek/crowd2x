@@ -110,7 +110,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"select": 0}` | Select the unit that arrived first; `1` is the next, and so on. |
 | `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
-| `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`. |
+| `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -230,9 +230,16 @@ does not count it — the hand costs mass but no space, and that distinction is 
 and nothing outside the simulation may write one, so the way to watch one need is to stop
 the others happening at all: switch `hunger`, `thirst` and `bladder` off and what is left
 is a human that gets bored and goes to the computer, on a timeline nothing else can
-interrupt. Off means the stat holds still **and** the routine behind it stops wanting
+interrupt. Switch `energy` off too for a test that is not about sleep: a unit that gets tired
+on a map with no bed goes looking for one, and every such attempt takes it off whatever it
+was doing. Everybody is born 70 to 100 percent satisfied, so no need comes round for
+hours of world — 1920 ticks to the hour. Off means the stat holds still **and** the routine behind it stops wanting
 anything (`sim/biology`, "Switching a process off"). Like `give`, it is about the selected
 unit and rides the command queue, so it lands on the next pass.
+
+A `spawn` on a map with beds hands the new human the nearest bed nobody owns, exactly as the
+game does, and a human goes to that one by default: a sleeping test needs a bed near where
+it spawns, and a second human on a one-bed map has none and will only take it when critical.
 
 `expect_prop_in_use` is to a prop what `expect_sprites` is to the crowd: the renderer's
 half of a claim the simulation makes. A unit can be mid-session at a computer while the

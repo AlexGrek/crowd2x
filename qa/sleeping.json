@@ -1,0 +1,91 @@
+{
+  "name": "a human gets tired, sleeps through the night in a bed, and is up in the morning",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "bedroom",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 168, "y": 168 }, "kind": "bed 1" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "bedroom",
+  "steps": [
+    { "note": "the bed sits in cell (3, 3): x 3*48+24, y 3*48+24" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+
+    { "note": "paused, so the only ticks this world takes are the ones asked for below" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "shot": "a bedroom with nobody in it" },
+
+    { "spawn": { "kind": "human", "x": 2, "y": 3 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+
+    { "note": "hunger, thirst, a bladder and boredom switched off, so this is a test about" },
+    { "note": "being tired rather than a race between five needs on a map with a bed and" },
+    { "note": "nothing else in it. Energy is the one left running, and its level was rolled" },
+    { "note": "at spawn like the rest" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "debug" },
+    { "shot": "the debug menu at eight in the morning: stamina, and energy among the processes" },
+
+    { "note": "a world opens at eight in the morning. A waking day is sixteen hours of world" },
+    { "note": "and the night starts at ten, so 19 hours in is three in the morning: 1920 ticks" },
+    { "note": "to the hour. Whenever this one was going to get tired it has been to bed by now" },
+    { "tick": 36480 },
+    { "expect_world_time": { "hours": 19.0 } },
+    { "expect_log": "slept in the bed at 3, 3" },
+    { "press": "brains" },
+    { "shot": "three in the morning: in bed, and what its mind is doing" },
+
+    { "note": "night ends at six and eight in the morning is 24 hours in. Whoever was in bed" },
+    { "note": "by three has had five hours or more of it, which is a night's worth of rest" },
+    { "tick": 9600 },
+    { "expect_world_time": { "hours": 24.0 } },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "shot": "eight the next morning: up, and what its mind is doing" },
+
+    { "press": "debug" },
+    { "shot": "the debug menu: rested again" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "bedroom" }
+  ]
+}

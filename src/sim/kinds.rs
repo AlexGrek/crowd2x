@@ -128,6 +128,11 @@ impl Human {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_stamina(&mut self, stamina: f32) {
+        self.biology.edit(|stats| stats.with_stamina(stamina));
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_carried(&mut self, item: Option<ItemKind>) {
         let _ = self.inventory.set_hand(item);
     }
@@ -217,6 +222,11 @@ impl GameEntity for Human {
 
     fn interacting_with(&self) -> Option<Point> {
         self.brain.action().interacting_with()
+    }
+
+    fn set_home(&mut self, bed: Point) -> bool {
+        self.brain.set_home(bed);
+        true
     }
 
     fn display_name(&self) -> Option<String> {
@@ -372,6 +382,7 @@ mod tests {
         human.set_thirst(0.0);
         human.set_bladder(0.0);
         human.set_fun(100.0);
+        human.set_stamina(100.0);
         human
     }
 
@@ -494,7 +505,7 @@ mod tests {
                 human.set_thirst(0.0);
                 human.set_bladder(0.0);
                 human.set_fun(100.0);
-        human.set_fun(100.0);
+                human.set_stamina(100.0);
             }
             w1.step(&mut one);
             w2.step(&mut two);
