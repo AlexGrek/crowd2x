@@ -52,7 +52,7 @@ impl DogSheets {
         )
     }
 
-    fn image_for(&self, facing: Facing) -> Handle<Image> {
+    pub(crate) fn image_for(&self, facing: Facing) -> Handle<Image> {
         match facing {
             Facing::Right => self.right.clone(),
             Facing::Left => self.left.clone(),
@@ -87,6 +87,35 @@ pub fn spawn(commands: &mut Commands, sheets: &DogSheets, pos: Vec2, facing: Fac
             WORLD_LAYER,
         ))
         .id()
+}
+
+/// Point an existing body at another dog — the pool's half of [`spawn`].
+///
+/// One entity, so there are no children to redress; what has to be reset is
+/// the sheet, the atlas index and the animation timer, or a recycled dog picks
+/// up mid-stride from whoever had the body last. Position first and visibility
+/// last, for the reason [`super::human::redress`] gives.
+pub fn redress(
+    commands: &mut Commands,
+    sheets: &DogSheets,
+    root: Entity,
+    pos: Vec2,
+    facing: Facing,
+) {
+    let pos = snap_to_texel(pos);
+    commands.entity(root).insert((
+        facing,
+        Sprite::from_atlas_image(
+            sheets.image_for(facing),
+            TextureAtlas {
+                layout: sheets.layout.clone(),
+                index: 0,
+            },
+        ),
+        FrameAnimation::new(0, IDLE_FRAMES as usize - 1, SECONDS_PER_FRAME),
+        Transform::from_xyz(pos.x, pos.y, depth_for(pos.y)).with_scale(upscale(ART_SCALE)),
+        Visibility::Inherited,
+    ));
 }
 
 /// Swap to the matching sheet when a dog turns around.

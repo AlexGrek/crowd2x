@@ -1,0 +1,198 @@
+{
+  "name": "terrain is drawn a canvas at a time, in both screens that draw a map",
+  "state": "editor",
+  "given": {
+    "maps": [
+      {
+        "name": "huge",
+        "file": "qa/fixtures/huge.json"
+      }
+    ]
+  },
+  "open": "huge",
+  "timeout": 240,
+  "steps": [
+    {
+      "note": "huge is 256x256 = 65,536 cells. Entering used to spawn a sprite for every"
+    },
+    {
+      "note": "one of them in a single OnEnter; the canvas shows about eighty."
+    },
+    {
+      "wait": 0.5
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "the editor, a canvas of a 256x256 map"
+    },
+    {
+      "note": "painting still writes the map first and draws from it second, which is what"
+    },
+    {
+      "note": "keeps the screen from showing a tile no saved file contains"
+    },
+    {
+      "tool": "wall brown"
+    },
+    {
+      "cursor_cell": {
+        "x": 128,
+        "y": 128
+      }
+    },
+    {
+      "click": {}
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "a wall painted in the middle of a huge map"
+    },
+    {
+      "note": "and it is in the saved file, not merely on screen"
+    },
+    {
+      "key": "escape"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_tile": {
+        "map": "huge",
+        "x": 128,
+        "y": 128,
+        "terrain": "wall brown"
+      }
+    },
+    {
+      "note": "the same map in the game screen, from the same palette and the same window"
+    },
+    {
+      "press": "huge"
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "wait": 0.5
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "note": "panning a long way re-points the same sprites rather than accumulating them:"
+    },
+    {
+      "note": "if the window leaked one per cell crossed, this would be hundreds by now"
+    },
+    {
+      "hold_key": {
+        "key": "d",
+        "seconds": 2.0
+      }
+    },
+    {
+      "hold_key": {
+        "key": "w",
+        "seconds": 2.0
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "somewhere else on the same huge map"
+    },
+    {
+      "note": "zooming out grows the canvas, so the window grows with it and stays bounded"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 1
+    },
+    {
+      "wait": 0.5
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 1200
+      }
+    },
+    {
+      "shot": "zoomed out on a huge map"
+    },
+    {
+      "note": "leaving and coming straight back: the sprites went with DespawnOnExit, so a"
+    },
+    {
+      "note": "window still holding them would re-point entities that no longer exist and"
+    },
+    {
+      "note": "draw an empty map - which every ceiling in this file would happily accept"
+    },
+    {
+      "key": "escape"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "press": "huge"
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "wait": 0.8
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "the same map, entered a second time"
+    },
+    {
+      "key": "escape"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_sprites": 0
+    }
+  ]
+}

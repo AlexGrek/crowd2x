@@ -55,6 +55,23 @@ pub fn snap_to_texel(pos: Vec2) -> Vec2 {
     (pos / ART_SCALE).round() * ART_SCALE
 }
 
+/// How far what is drawn *about* a character reaches from its position, per
+/// edge — what [`crate::view`] grows the canvas by before asking who is on it.
+///
+/// A character is centred on its position, so half a cell of it hangs off each
+/// side. Above, the overlays reach further than the art does: `game::actors`
+/// puts a reverse progress bar and then a goal emoji over a unit's head, and a
+/// unit whose own position is off the top of the canvas can still have a label
+/// on it. Asymmetric for exactly that reason — inflating a rect equally would
+/// either clip the labels or draw a band of units nobody can see.
+///
+/// `game::actors` asserts that its own overlays fit inside these, so adding a
+/// taller one fails a test instead of clipping on screen.
+pub const OVERHANG_SIDE: f32 = CELL as f32 / 2.0;
+pub const OVERHANG_BELOW: f32 = CELL as f32 / 2.0;
+/// Half a cell of art, plus `GOAL_EMOJI_LIFT` over that, plus the glyph.
+pub const OVERHANG_ABOVE: f32 = CELL as f32 / 2.0 + 20.0 + 22.0;
+
 /// Pixel size of a PNG, read straight out of its IHDR.
 ///
 /// Only the tests need this, and only to check that a file on disk is the

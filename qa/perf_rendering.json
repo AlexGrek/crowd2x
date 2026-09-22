@@ -3,7 +3,10 @@
   "state": "game",
   "given": {
     "maps": [
-      { "name": "plaza", "file": "qa/fixtures/plaza.json" }
+      {
+        "name": "plaza",
+        "file": "qa/fixtures/plaza.json"
+      }
     ]
   },
   "open": "plaza",
@@ -11,50 +14,201 @@
   "settle": 2.0,
   "timeout": 300,
   "steps": [
-    { "note": "frames, not ticks: the sim on its fixed step, the sprite sync, the UI and the render" },
-    { "note": "an empty map first - the map's own tiles, the HUD and the pipeline" },
-    { "expect_sprites": 0 },
-    { "measure_frames": { "name": "an empty map", "seconds": 2.0 } },
-
-    { "note": "200 actors, one sprite each, spawned by the renderer as they appear" },
-    { "populate": { "kind": "human", "count": 200 } },
-    { "tick": 1 },
-    { "expect_entities": 200 },
-    { "expect_sprites": 200 },
-    { "measure_frames": { "name": "200 actors", "seconds": 2.0 } },
-    { "shot": "200 actors on the plaza" },
-
-    { "note": "a thousand: far more than fit on a 320x180 canvas, and all of them still drawn" },
-    { "populate": { "kind": "human", "count": 800 } },
-    { "tick": 1 },
-    { "expect_entities": 1000 },
-    { "expect_sprites": 1000 },
-    { "measure_frames": { "name": "1000 actors", "seconds": 2.0 } },
-    { "shot": "a thousand actors" },
-
-    { "note": "dogs draw from an atlas and step their animation every frame" },
-    { "populate": { "kind": "dog", "count": 500 } },
-    { "tick": 1 },
-    { "expect_sprites": 1500 },
-    { "measure_frames": { "name": "1000 actors and 500 dogs", "seconds": 2.0 } },
-    { "shot": "a thousand actors and five hundred dogs" },
-
-    { "note": "the frame cost per actor must not grow as the crowd does" },
-    { "expect_scaling": { "from": "200 actors", "to": "1000 actors", "slack": 1.2 } },
-
-    { "note": "and a wall: 1500 actors is a 1.1ms frame on an M3 in a debug build," },
-    { "note": "so this one also says there is still room inside a 60Hz frame" },
-    { "expect_under": { "measure": "1000 actors and 500 dogs", "ms": 8.0 } },
-
-    { "note": "zooming rebuilds the canvas; the crowd is still there afterwards" },
-    { "key": "e" },
-    { "expect_zoom": 5 },
-    { "expect_sprites": 1500 },
-    { "shot": "zoomed in on the crowd" },
-
-    { "note": "and leaving takes every one of those sprites away" },
-    { "key": "esc" },
-    { "expect_state": "maps" },
-    { "expect_sprites": 0 }
+    {
+      "note": "frames, not ticks: the sim on its fixed step, the sprite sync, the UI and the render"
+    },
+    {
+      "note": "sprites are culled to the canvas, so what is drawn is a fact about the view"
+    },
+    {
+      "note": "and not about the crowd - the claims below are phrased accordingly"
+    },
+    {
+      "note": "paused first, so the crowd cannot wander between a step and the step after it"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "note": "an empty map first - the map's own tiles, the HUD and the pipeline"
+    },
+    {
+      "expect_sprites": 0
+    },
+    {
+      "measure_frames": {
+        "name": "an empty map",
+        "seconds": 2.0
+      }
+    },
+    {
+      "note": "200 actors, spread over a 48x32 plaza; the canvas shows about 7x4 cells of it"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 200
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 200
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "measure_frames": {
+        "name": "200 actors",
+        "seconds": 2.0
+      }
+    },
+    {
+      "shot": "200 actors on the plaza"
+    },
+    {
+      "note": "a thousand: far more than fit on the canvas, and only the ones on it are drawn"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 800
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 1000
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "measure_frames": {
+        "name": "1000 actors",
+        "seconds": 2.0
+      }
+    },
+    {
+      "shot": "a thousand actors"
+    },
+    {
+      "note": "dogs draw from an atlas and step their animation every frame"
+    },
+    {
+      "populate": {
+        "kind": "dog",
+        "count": 500
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 1500
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "measure_frames": {
+        "name": "1000 actors and 500 dogs",
+        "seconds": 2.0
+      }
+    },
+    {
+      "shot": "a thousand actors and five hundred dogs"
+    },
+    {
+      "note": "1500 units and a 48x32 map, and the world holds a couple of hundred sprites:"
+    },
+    {
+      "note": "the tiles under the canvas, the few dozen units standing on them, their"
+    },
+    {
+      "note": "overlays, and the sprites parked for reuse. Everything here is a function of"
+    },
+    {
+      "note": "the canvas. Unculled this was 1536 tiles plus some 6000 sprites of crowd."
+    },
+    {
+      "note": "It is also the only assertion that notices a pool growing with the crowd:"
+    },
+    {
+      "note": "a parked body carries no Actor, so expect_sprites cannot see one."
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "note": "the frame cost per actor must not grow as the crowd does. Culling makes this"
+    },
+    {
+      "note": "a demand for sublinearity rather than for flatness: five times the crowd"
+    },
+    {
+      "note": "draws the same few dozen sprites, so the cost per entity should fall."
+    },
+    {
+      "expect_scaling": {
+        "from": "200 actors",
+        "to": "1000 actors",
+        "slack": 0.5
+      }
+    },
+    {
+      "note": "and a wall, set well above what this machine does - see qa-perf/ for the number"
+    },
+    {
+      "expect_under": {
+        "measure": "1000 actors and 500 dogs",
+        "ms": 8.0
+      }
+    },
+    {
+      "note": "zooming in rebuilds the canvas smaller, so it shows less world and draws less:"
+    },
+    {
+      "note": "the same assertions hold, against a view that has changed underneath them"
+    },
+    {
+      "key": "e"
+    },
+    {
+      "expect_zoom": 5
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "zoomed in on the crowd"
+    },
+    {
+      "note": "and leaving takes every one of those sprites away, parked ones included"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_sprites": 0
+    }
   ]
 }

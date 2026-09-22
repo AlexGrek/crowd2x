@@ -18,10 +18,13 @@
 //!
 //! Three things this screen deliberately does *not* do:
 //!
-//! * **It does not own the map's art.** Terrain and props are drawn through
-//!   [`editor::draw_map`], from the same palettes the editor paints with, so
-//!   there is one catalogue binding a tile's name to its PNG rather than two
-//!   that can drift apart. [`props`] is the exception that proves it: a
+//! * **It does not own the map's art.** Terrain and props are drawn by the
+//!   editor's own windowed renderers, from the same palettes the editor
+//!   paints with, so there is one catalogue binding a tile's name to its PNG
+//!   rather than two that can drift apart. Those run on this screen too and
+//!   need nothing from it: a map is up to 65,536 cells and a canvas holds
+//!   about eighty, so there is no scene for an `OnEnter` to build.
+//!   [`props`] is the exception that proves it: a
 //!   computer's screen comes on while somebody is sitting at it, and which of
 //!   its two pictures that is is the one thing about a prop's art only a
 //!   running simulation can answer.
@@ -52,6 +55,7 @@
 
 pub mod actors;
 pub mod held;
+pub mod pool;
 pub mod hud;
 pub mod logview;
 pub mod props;
@@ -62,10 +66,11 @@ pub mod unitpanel;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::editor::{background, draw_map, map_centre, CurrentMap};
+use crate::editor::{background, map_centre, CurrentMap};
 use crate::render::{half_view, CameraPan, CameraTarget, PixelZoom, PIXEL_SCALE, WorldCamera};
 use crate::state::AppState;
 use crate::ui::nav::{NavSystems, Scope};
+use crate::view::ViewSystems;
 
 /// Camera speed at the default zoom, in canvas pixels per second.
 ///
@@ -76,6 +81,19 @@ const PAN_SPEED: f32 = 140.0;
 
 /// How far a stick must be pushed before it counts as pushed at all.
 const STICK_DEADZONE: f32 = 0.2;
+
+/// Resolves who is on the canvas ([`actors::VisibleCrowd`]).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CrowdSystems;
+
+/// Everything that draws something about a unit, from that one list.
+///
+/// Ordered after [`CrowdSystems`], which is itself after the view is known.
+/// These five used to be unordered, which was fine while each walked the whole
+/// crowd for itself; now they share an answer, and sharing it means agreeing
+/// when it was computed.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SpriteSync;
 
 pub struct GamePlugin;
 
@@ -91,7 +109,11 @@ impl Plugin for GamePlugin {
             selection::SelectionPlugin,
             unitpanel::UnitPanelPlugin,
         ))
-            .add_systems(OnEnter(AppState::Game), (build_scene, aim_camera_at_map))
+            .configure_sets(
+                Update,
+                (CrowdSystems, SpriteSync).chain().after(ViewSystems),
+            )
+            .add_systems(OnEnter(AppState::Game), aim_camera_at_map)
             .add_systems(OnExit(AppState::Game), restore_zoom)
             .add_systems(
                 Update,
@@ -111,14 +133,6 @@ impl Plugin for GamePlugin {
 /// boot straight into a chosen zoom (`CROWD2X_ZOOM`) and still photograph it.
 fn restore_zoom(mut zoom: ResMut<PixelZoom>) {
     zoom.reset();
-}
-
-/// Draw the open map. What goes over it is [`hud`]'s.
-///
-/// The scene is built on entry and despawned by `DespawnOnExit` on the way
-/// out, exactly as the editor's is: the map persists, its entities do not.
-fn build_scene(mut commands: Commands, assets: Res<AssetServer>, current: Res<CurrentMap>) {
-    draw_map(&mut commands, &assets, &current.map, AppState::Game);
 }
 
 /// Start looking at the middle of the map rather than at its bottom-left

@@ -23,21 +23,34 @@
 //! nothing: the tick is already the one place the world changes. Anything that
 //! wants to *ask* for something takes [`SimInput`] instead.
 //!
-//! # What this does not do yet
+//! # Only what is on the canvas, and from a pool
 //!
-//! One sprite per entity, spawned when the entity is, with no culling and no
-//! pooling. That is honest for a screen whose worlds are built by hand, and it
-//! is *not* what a crowd needs: the canvas is 320x180, so the visible set stays
-//! small however big the simulation gets, and the next step here is to spawn
-//! sprites only for entities on the canvas and to reuse them from a pool
-//! rather than despawning. See the `dev` skill's "Rendering cost".
+//! A sprite exists for a unit **that is on the canvas**, and for no other. The
+//! canvas is 320x180 world units at the default zoom — under seven cells by
+//! four — so the drawn crowd is bounded by the size of the view and not by the
+//! size of the simulation: twenty thousand humans on a big map draw a few
+//! dozen sprites, and the number does not move when the crowd grows.
 //!
-//! There is a second, quieter cost in [`sync_sprites`]: finding what *arrived*
-//! means asking the sprite map about every entity, every frame — one hash
-//! lookup per entity per frame that almost always answers "already drawn". The
-//! fix is not a faster map, it is for the simulation to hand over a list of
-//! what spawned this tick, so the renderer stops rediscovering it. Worth doing
-//! at the same time as the culling, and not before: both want the same list.
+//! [`crate::view::VisibleArea`] is the rect, [`collect_visible_crowd`] resolves
+//! it into [`VisibleCrowd`] once per frame, and everything that draws something
+//! about a unit — the bodies here, the action bars, the goal labels,
+//! [`super::held`] — reads that one list rather than each walking the whole
+//! crowd again.
+//!
+//! A body that leaves the canvas is **parked**, not despawned: hidden, with
+//! `Actor` taken off it, on [`super::pool::ActorPool`] for the next unit that
+//! needs one. The pool is bounded by the view, because a hidden sprite is
+//! cheaper than a spawn and is *not* free — Bevy walks every sprite entity in
+//! the world each frame before it looks at visibility.
+//!
+//! This module's header used to ask for one more thing: a list from the
+//! simulation of what spawned each tick, so that finding arrivals stopped
+//! costing a hash probe per entity per frame. It turned out not to be needed.
+//! Once the renderer only asks about what it can see, that probe runs over the
+//! forty units on the canvas rather than over the whole crowd, and a list of
+//! new arrivals would save nothing worth the coupling. The old note was right
+//! that culling and arrivals wanted the same list, and wrong about what the
+//! list would be.
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -49,11 +62,13 @@ use crate::characters::{depth_for, dog, human, snap_to_texel, CELL};
 use crate::editor::{background, CurrentMap};
 use crate::render::WORLD_LAYER;
 use crate::sim::{
-    self, process_pass, spawn_pass, EntityType, GameEntity, GameState, GoalId, Input, Uid,
+    self, process_pass, spawn_pass, EntityType, GameEntity, GameState, GoalId, Input, Slot, Uid,
 };
 use crate::state::AppState;
 use crate::ui::{MODAL, TEXT_ACCENT};
+use crate::view::VisibleArea;
 
+use super::pool::{park_budget, ActorPool};
 use super::speed::GameSpeed;
 
 /// How the world is seeded when the game screen opens.
@@ -97,8 +112,38 @@ impl ActorSprites {
 /// The link runs this way as well as through [`ActorSprites`] so the sync
 /// system can walk the sprites it already has in one query rather than looking
 /// each one up by id.
+///
+/// **It means "drawing a live unit right now", and nothing weaker.** A body
+/// parked on [`ActorPool`] has this taken off it, which is what lets a query
+/// for `Actor` be the honest answer to "how many actors are on screen" — for
+/// the sync below, and for the QA assertion that checks the renderer is
+/// keeping up.
 #[derive(Component, Clone, Copy)]
 pub struct Actor(pub Uid);
+
+/// Who is on the canvas this frame.
+///
+/// Slots rather than [`Uid`]s: `FixedUpdate` finishes before `Update` begins,
+/// so the entity table cannot change under a frame, and a slot is a direct
+/// index into the arena where a `Uid` is a hash lookup. Valid only within the
+/// `Update` that built it.
+///
+/// In slot order, which is the simulation's own order, so what is drawn first
+/// does not depend on a hash.
+#[derive(Resource, Default)]
+pub struct VisibleCrowd {
+    on_canvas: Vec<Slot>,
+}
+
+impl VisibleCrowd {
+    pub fn slots(&self) -> &[Slot] {
+        &self.on_canvas
+    }
+
+    fn clear(&mut self) {
+        self.on_canvas.clear();
+    }
+}
 
 /// Which pair of plain-colour sprites (track, then fill) draws the reverse
 /// progress bar over an entity mid-way through a timed action.
@@ -121,6 +166,13 @@ impl ActionBarSprites {
 
 /// One entity's goal-change notification: the emoji for whichever
 /// [`GoalId`] was last seen in charge, and how long it has left to show.
+///
+/// Kept only for units on the canvas, so this map is the size of the view and
+/// not of the crowd. A unit that walks off screen loses its entry and gets a
+/// fresh one when it comes back, seeded with the goal it has *now* — so a
+/// handover that happened while it was out of sight does not flash when it
+/// returns. That is the same rule as a unit's very first goal, below: **a
+/// handover you could not have seen is not a notification you are owed.**
 struct GoalLabel {
     /// `None` until the goal has changed at least once. There is nothing to
     /// show for a unit's very first goal — it did not change from
@@ -160,6 +212,8 @@ impl Plugin for ActorsPlugin {
             .init_resource::<ActorSprites>()
             .init_resource::<ActionBarSprites>()
             .init_resource::<GoalLabelSprites>()
+            .init_resource::<VisibleCrowd>()
+            .init_resource::<ActorPool>()
             .add_systems(OnEnter(AppState::Game), build_world)
             .add_systems(OnExit(AppState::Game), tear_down_world)
             // Fixed, not per-frame: the simulation advances in equal steps
@@ -172,7 +226,17 @@ impl Plugin for ActorsPlugin {
             )
             .add_systems(
                 Update,
+                collect_visible_crowd
+                    .in_set(super::CrowdSystems)
+                    .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
+            )
+            // In `SpriteSync`, which `game` orders after `CrowdSystems`: all
+            // three read the one visible list rather than each deciding for
+            // itself who is on screen.
+            .add_systems(
+                Update,
                 (sync_sprites, sync_action_bars, sync_goal_labels)
+                    .in_set(super::SpriteSync)
                     .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
     }
@@ -219,12 +283,19 @@ fn tear_down_world(
     mut sprites: ResMut<ActorSprites>,
     mut bars: ResMut<ActionBarSprites>,
     mut labels: ResMut<GoalLabelSprites>,
+    mut crowd: ResMut<VisibleCrowd>,
+    mut pool: ResMut<ActorPool>,
     mut input: ResMut<SimInput>,
 ) {
     commands.remove_resource::<Sim>();
     sprites.clear();
     bars.clear();
     labels.clear();
+    crowd.clear();
+    // Forgets the parked bodies without despawning them: they carry
+    // `DespawnOnExit` like every other sprite, and a second command against an
+    // entity Bevy is already removing is a command against nothing.
+    pool.clear();
     input.0.clear();
 }
 
@@ -261,7 +332,53 @@ fn tick_sim(
     }
 }
 
-/// Make the sprites match the entities.
+/// Work out who is on the canvas, once, for everything that draws.
+///
+/// A linear scan of the entity arena testing each position against the view.
+/// Deliberately *not* a region query on `sim::Occupancy`, even though that is
+/// a dense grid and would be crowd-independent: occupancy holds one unit per
+/// cell and `GameState::spawn` places a unit where it was asked for whether or
+/// not the cell was taken, so a stack of units reports as one and the rest
+/// would silently never be drawn. `qa::perf::spread` stacks exactly that way
+/// once a crowd outgrows the passable cells.
+///
+/// The scan is also not where the cost was. What it replaces is five separate
+/// walks of the whole crowd, each with a hash probe per entity, and Bevy's own
+/// three passes over every sprite entity plus their transform propagation.
+/// Going from those to one cheap read pass is the win; going from one pass to
+/// zero is worth an order of magnitude less and costs a second structure in
+/// `sim/` that the move step would have to keep true.
+fn collect_visible_crowd(
+    sim: Res<Sim>,
+    area: Res<VisibleArea>,
+    sprites: Res<ActorSprites>,
+    mut crowd: ResMut<VisibleCrowd>,
+) {
+    // Cleared rather than rebuilt: a `Vec` keeps its capacity, so after the
+    // first few frames this allocates nothing.
+    crowd.clear();
+    if !area.ready {
+        return;
+    }
+
+    for (slot, entity) in sim.0.entities().iter_slots() {
+        let pos = world_pos(entity.position());
+        // Already drawn units are judged against the wider rect — see
+        // `view::HYSTERESIS`. Without the split, a unit standing on the
+        // boundary would be taken from and returned to the pool every frame,
+        // and each of those moves it between archetypes.
+        let wanted = if sprites.by_uid.contains_key(&entity.uid()) {
+            area.should_keep(pos)
+        } else {
+            area.should_draw(pos)
+        };
+        if wanted {
+            crowd.on_canvas.push(slot);
+        }
+    }
+}
+
+/// Make the sprites match the *visible* entities.
 ///
 /// Three passes, because they are three different jobs against two collections
 /// — doing them in one loop would mean spawning into a map that is being
@@ -271,13 +388,21 @@ fn sync_sprites(
     assets: Res<AssetServer>,
     sheets: Option<Res<dog::DogSheets>>,
     sim: Res<Sim>,
+    area: Res<VisibleArea>,
+    crowd: Res<VisibleCrowd>,
     mut sprites: ResMut<ActorSprites>,
+    mut pool: ResMut<ActorPool>,
+    dolls: Query<&human::Paperdoll>,
     mut actors: Query<(&Actor, &mut Transform, Option<&mut dog::Facing>)>,
 ) {
     let state = &sim.0;
+    let budget = park_budget(area.tiles.area());
 
-    // 1. Anything that arrived.
-    for entity in state.entities().iter() {
+    // 1. Anything that came into view — newly spawned or newly on screen.
+    for &slot in crowd.slots() {
+        let Some(entity) = state.entities().slot(slot) else {
+            continue;
+        };
         let uid = entity.uid();
         if sprites.by_uid.contains_key(&uid) {
             continue;
@@ -285,7 +410,24 @@ fn sync_sprites(
         let pos = world_pos(entity.position());
         let sprite = match entity.kind() {
             Some(EntityType::Human) => {
-                human::spawn(&mut commands, &assets, pos, look_from(entity))
+                let look = look_from(entity);
+                match pool.take_human() {
+                    // Dressed as whoever needs it, positioned, and only then
+                    // made visible — see `human::redress`.
+                    Some(body) => match dolls.get(body) {
+                        Ok(doll) => {
+                            human::redress(&mut commands, &assets, body, doll, pos, look);
+                            body
+                        }
+                        // A parked body without its own layer index is not a
+                        // paperdoll any more. Drop it rather than dress it.
+                        Err(_) => {
+                            commands.entity(body).despawn();
+                            human::spawn(&mut commands, &assets, pos, look)
+                        }
+                    },
+                    None => human::spawn(&mut commands, &assets, pos, look),
+                }
             }
             Some(EntityType::Dog) => {
                 let Some(sheets) = sheets.as_deref() else {
@@ -295,7 +437,14 @@ fn sync_sprites(
                     // would need a handle that does not exist.
                     continue;
                 };
-                dog::spawn(&mut commands, sheets, pos, facing_of(entity))
+                let facing = facing_of(entity);
+                match pool.take_dog() {
+                    Some(body) => {
+                        dog::redress(&mut commands, sheets, body, pos, facing);
+                        body
+                    }
+                    None => dog::spawn(&mut commands, sheets, pos, facing),
+                }
             }
             // An id tagged with a type this build has no art for. Refusing to
             // draw it is better than guessing which sprite it meant.
@@ -307,16 +456,20 @@ fn sync_sprites(
         sprites.by_uid.insert(uid, sprite);
     }
 
-    // 2. Anything that left.
+    // 2. Anything that left the world, or left the canvas.
     //
     // Asked per sprite rather than by collecting every live id into a set
     // first: the set was an allocation and one hash insert per *entity* every
     // frame, to answer a question that is almost always "nobody left".
     sprites.by_uid.retain(|uid, sprite| {
-        if state.entities().contains(*uid) {
+        let still_here = state
+            .entities()
+            .get(*uid)
+            .is_some_and(|entity| area.should_keep(world_pos(entity.position())));
+        if still_here {
             return true;
         }
-        commands.entity(*sprite).despawn();
+        park_or_despawn(&mut commands, &mut pool, *sprite, uid.kind(), budget);
         false
     });
 
@@ -354,6 +507,36 @@ fn sync_sprites(
     }
 }
 
+/// Put a body that has left the canvas on the pool, or despawn it if the pool
+/// is full.
+///
+/// Parking takes [`Actor`] off it — so it stops being counted as drawing
+/// anybody — and hides it. It is deliberately **not moved**: writing a
+/// `Transform` marks it changed and pushes it and its three children through
+/// propagation, which is the exact cost the movement pass below already
+/// refuses to pay. A hidden body is not drawn wherever it happens to be.
+fn park_or_despawn(
+    commands: &mut Commands,
+    pool: &mut ActorPool,
+    body: Entity,
+    kind: Option<EntityType>,
+    budget: usize,
+) {
+    let parked = match kind {
+        Some(EntityType::Human) => pool.park_human(body, budget),
+        Some(EntityType::Dog) => pool.park_dog(body, budget),
+        None => false,
+    };
+    if parked {
+        commands
+            .entity(body)
+            .remove::<Actor>()
+            .insert(Visibility::Hidden);
+    } else {
+        commands.entity(body).despawn();
+    }
+}
+
 /// Reverse progress bar dimensions and placement, all in canvas pixels — the
 /// world camera's own unit. A plain colour has no texture to keep from
 /// splitting across a texel, only a canvas pixel to land on whole, which
@@ -375,17 +558,18 @@ const BAR_DEPTH: f32 = 0.006;
 fn sync_action_bars(
     mut commands: Commands,
     sim: Res<Sim>,
+    area: Res<VisibleArea>,
+    crowd: Res<VisibleCrowd>,
     mut bars: ResMut<ActionBarSprites>,
     mut parts: Query<(&mut Transform, &mut Sprite)>,
 ) {
     let state = &sim.0;
 
-    // Anyone who finished, or left.
+    // Anyone who finished, left the world, or left the canvas.
     bars.by_uid.retain(|uid, &mut (track, fill)| {
-        let still_running = state
-            .entities()
-            .get(*uid)
-            .is_some_and(|entity| entity.action_progress().is_some());
+        let still_running = state.entities().get(*uid).is_some_and(|entity| {
+            entity.action_progress().is_some() && area.should_keep(world_pos(entity.position()))
+        });
         if still_running {
             return true;
         }
@@ -394,8 +578,11 @@ fn sync_action_bars(
         false
     });
 
-    // Anyone running one, new or continuing.
-    for entity in state.entities().iter() {
+    // Anyone visible running one, new or continuing.
+    for &slot in crowd.slots() {
+        let Some(entity) = state.entities().slot(slot) else {
+            continue;
+        };
         let Some(progress) = entity.action_progress() else {
             continue;
         };
@@ -479,15 +666,25 @@ fn sync_goal_labels(
     assets: Res<AssetServer>,
     time: Res<Time>,
     sim: Res<Sim>,
+    area: Res<VisibleArea>,
+    crowd: Res<VisibleCrowd>,
     mut labels: ResMut<GoalLabelSprites>,
     mut texts: Query<(&mut Transform, &mut TextColor, &mut Text2d, &mut Visibility)>,
 ) {
     let state = &sim.0;
     let dt = time.delta_secs();
 
-    // Anyone who left.
+    // Anyone who left the world, or left the canvas.
+    //
+    // Dropped rather than kept, so this map stays the size of the visible
+    // crowd instead of the size of the simulation — a per-frame `retain` over
+    // twenty thousand entries is one of the walks the culling exists to
+    // delete. What it costs is handled where a label is created, below.
     labels.by_uid.retain(|uid, label| {
-        let keep = state.entities().contains(*uid);
+        let keep = state
+            .entities()
+            .get(*uid)
+            .is_some_and(|entity| area.should_keep(world_pos(entity.position())));
         if !keep {
             if let Some(sprite) = label.sprite {
                 commands.entity(sprite).despawn();
@@ -496,7 +693,10 @@ fn sync_goal_labels(
         keep
     });
 
-    for entity in state.entities().iter() {
+    for &slot in crowd.slots() {
+        let Some(entity) = state.entities().slot(slot) else {
+            continue;
+        };
         let Some(goal) = entity.current_goal() else {
             continue;
         };
@@ -639,6 +839,32 @@ mod tests {
         // If a cell ever stops being a whole number of texels, snapping to a
         // texel would put actors off the tiles they stand on.
         assert_eq!(ART as f32 * ART_SCALE, background::TILE);
+    }
+
+    /// Everything drawn *about* a unit has to fit inside the margin
+    /// `view::VisibleArea` grows the canvas by, or it is clipped the moment
+    /// its unit's own position leaves the screen. Adding a taller overlay
+    /// should fail here rather than show up as a label cut in half.
+    #[test]
+    fn every_overlay_fits_inside_the_culling_margin() {
+        use crate::characters::{OVERHANG_ABOVE, OVERHANG_BELOW, OVERHANG_SIDE};
+
+        assert!(
+            GOAL_EMOJI_LIFT + GOAL_EMOJI_SIZE / 2.0 <= OVERHANG_ABOVE,
+            "the goal label reaches above the margin"
+        );
+        assert!(
+            BAR_LIFT + BAR_HEIGHT / 2.0 <= OVERHANG_ABOVE,
+            "the action bar reaches above the margin"
+        );
+        assert!(
+            BAR_WIDTH / 2.0 <= OVERHANG_SIDE,
+            "the action bar reaches past the sides of the margin"
+        );
+        // The art itself is centred on the position, so half a cell of it
+        // hangs off every edge.
+        assert!(CELL as f32 / 2.0 <= OVERHANG_BELOW);
+        assert!(CELL as f32 / 2.0 <= OVERHANG_SIDE);
     }
 
     #[test]

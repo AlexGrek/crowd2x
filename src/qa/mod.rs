@@ -53,6 +53,8 @@ use bevy::input::gamepad::{
     GamepadConnection, GamepadConnectionEvent, RawGamepadAxisChangedEvent,
     RawGamepadButtonChangedEvent, RawGamepadEvent,
 };
+use bevy::camera::visibility::RenderLayers;
+use bevy::platform::collections::HashSet;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::{MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::ecs::system::SystemParam;
@@ -64,11 +66,11 @@ use bevy::window::PrimaryWindow;
 
 use crate::browser::Maps;
 use crate::map::{Map, MapStore, Size, TerrainId, VOID};
-use crate::render::{PixelZoom, PIXEL_SCALE};
+use crate::render::{CameraTarget, PixelZoom, PIXEL_SCALE, WORLD_LAYER};
 use crate::state::AppState;
-use crate::editor::{CurrentMap, Cursor as EditorCursor, Tool};
+use crate::editor::{background, CurrentMap, Cursor as EditorCursor, Tool};
 use crate::editor::props::{Prop, Usable};
-use crate::game::actors::{Actor, Sim, SimInput};
+use crate::game::actors::{world_pos, Actor, Sim, SimInput};
 use crate::game::held::HeldItem;
 use crate::game::logview::LogView;
 use crate::game::selection::Selected;
@@ -77,6 +79,8 @@ use crate::sim::biology::ProcessId;
 use crate::sim::{process_pass, spawn_pass, EntityType, ItemKind};
 use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
+use crate::characters::{OVERHANG_ABOVE, OVERHANG_BELOW, OVERHANG_SIDE};
+use crate::view::{VisibleArea, HYSTERESIS};
 use perf::{Measured, Measurement};
 use script::{gamepad_button, key_char, key_code, GivenMap, Script, Side, Step};
 
@@ -481,7 +485,17 @@ struct Checks<'w, 's> {
     /// The sprites themselves, not the map that tracks them: a count taken
     /// from the bookkeeping would pass while nothing had actually reached the
     /// world, which is the failure this assertion exists to catch.
+    ///
+    /// A body parked for reuse has had its `Actor` taken off, so this counts
+    /// what is drawing somebody and never what is merely waiting to.
     sprites: Query<'w, 's, &'static Actor>,
+    /// Everything drawn into the world, of any kind, for
+    /// [`Step::ExpectWorldSpritesUnder`] — the bound that says what is on
+    /// screen is a function of the canvas. `Text2d` as well as `Sprite`,
+    /// because the goal labels and the emoji items are text.
+    world_sprites: Query<'w, 's, &'static RenderLayers, Or<(With<Sprite>, With<Text2d>)>>,
+    /// What is on the canvas, for the two assertions about culling.
+    area: Res<'w, VisibleArea>,
     /// The props that show whether they are being used, for
     /// [`Step::ExpectPropInUse`] — read off the sprites on screen, not off
     /// the map they were drawn from.
@@ -521,6 +535,10 @@ struct Intents<'w> {
     /// `sim` is: `select` writes it, and one system cannot take the same
     /// resource twice.
     selected: ResMut<'w, Selected>,
+    /// Where `look_at` points the camera. Asked for rather than written
+    /// straight onto the transform, so the map clamp applies exactly as it
+    /// does to panning there by hand.
+    camera: ResMut<'w, CameraTarget>,
 }
 
 /// What the driver should do once a step has been performed.
@@ -1130,6 +1148,26 @@ fn perform(
                 .ok_or(format!("expected {wanted} actor sprites, found {actual}"))
         }
 
+        Step::LookAt { x, y } => {
+            intents.camera.0 = Some(background::cell_centre(IVec2::new(*x, *y)));
+            Ok(Next::Now)
+        }
+
+        Step::ExpectWorldSprites { min, max } => {
+            let actual = checks
+                .world_sprites
+                .iter()
+                .filter(|layers| **layers == WORLD_LAYER)
+                .count();
+            (actual >= *min && actual <= *max)
+                .then_some(Next::Now)
+                .ok_or(format!(
+                    "expected between {min} and {max} sprites in the world, found {actual}"
+                ))
+        }
+
+        Step::ExpectDrawn {} => expect_drawn(intents, checks),
+
         Step::ExpectSelected(wanted) => {
             let actual = intents.selected.get().map(|uid| match uid.kind() {
                 Some(kind) => kind.name().to_string(),
@@ -1333,6 +1371,95 @@ fn entity_kind(name: &str) -> Result<EntityType, String> {
 /// Read from the passability map rather than from the terrain, so a crowd goes
 /// where the simulation would let one walk and a perf test is not quietly
 /// measuring a thousand entities stuck inside a wall.
+/// Check the culling contract in both directions.
+///
+/// The renderer answers "who is on screen" quickly, off one list built once a
+/// frame; this answers it the slow, obviously-correct way — a plain scan of
+/// every entity — and insists the two agree. That is what makes it worth
+/// having as well as `expect_sprites`: a count can be made to match by
+/// accident, but a sprite drawing somebody who walked away and a unit standing
+/// in plain view with nothing drawn for it are both failures of the thing
+/// itself, whatever the number happens to be.
+///
+/// Two rects, not one, because the renderer deliberately has hysteresis: a
+/// unit is *given* a sprite inside `actors` and *keeps* it until it leaves the
+/// wider `actors_keep`. Asserting a single boundary would fail on a unit
+/// legitimately sitting in the band between them.
+fn expect_drawn(intents: &Intents, checks: &Checks) -> Result<Next, String> {
+    let Some(sim) = intents.sim.as_deref() else {
+        return Err("expect_drawn only means anything on the game screen".into());
+    };
+    let area = &*checks.area;
+    if !area.ready {
+        return Err("expect_drawn ran before there was a canvas to be on".into());
+    }
+
+    // The furthest a sprite may legitimately be from the canvas: the overhang
+    // of what is drawn about a unit, plus the hysteresis band a unit keeps its
+    // sprite across.
+    //
+    // Rebuilt here from `canvas` — which comes from the size of the canvas
+    // image and the camera's transform — rather than read off `actors_keep`.
+    // That is the whole point of a reference implementation: `actors_keep` is
+    // the thing under test, and an assertion phrased in terms of it can only
+    // ever ask whether the renderer agrees with itself.
+    let limit = Rect::from_corners(
+        area.canvas.min - Vec2::new(OVERHANG_SIDE + HYSTERESIS, OVERHANG_BELOW + HYSTERESIS),
+        area.canvas.max + Vec2::new(OVERHANG_SIDE + HYSTERESIS, OVERHANG_ABOVE + HYSTERESIS),
+    );
+
+    // 1. Nothing is drawn for somebody who is not there to be drawn.
+    let mut drawn = HashSet::new();
+    for actor in &checks.sprites {
+        let Some(entity) = sim.0.entities().get(actor.0) else {
+            return Err(format!(
+                "a sprite is still drawing {:?}, which has left the world",
+                actor.0
+            ));
+        };
+        let pos = world_pos(entity.position());
+        if !limit.contains(pos) {
+            return Err(format!(
+                "{:?} is drawn at {:?} (cell {:?}), outside everything the canvas {:?} can reach",
+                actor.0,
+                pos,
+                entity.center_position(),
+                area.canvas
+            ));
+        }
+        drawn.insert(actor.0);
+    }
+
+    // 2. Nobody on the canvas is missing a sprite.
+    //
+    // Judged against `canvas` — what is actually rendered — and **not**
+    // against `actors`, which is the predicate the renderer itself culls by.
+    // Asking whether the renderer drew everything it decided to draw is a
+    // question it cannot fail; asking whether it drew everything that is on
+    // screen is the claim worth making, and it is what fails when the culling
+    // rect itself is wrong. It is the weaker of the two rects, so a unit
+    // legitimately sitting in the overhang or the hysteresis band is not
+    // demanded here.
+    for entity in sim.0.entities().iter() {
+        // A kind this build has no art for is legitimately undrawn.
+        if entity.kind().is_none() {
+            continue;
+        }
+        let pos = world_pos(entity.position());
+        if area.canvas.contains(pos) && !drawn.contains(&entity.uid()) {
+            return Err(format!(
+                "{:?} is at {:?} (cell {:?}), on the canvas {:?}, and nothing is drawing it",
+                entity.uid(),
+                pos,
+                entity.center_position(),
+                area.canvas
+            ));
+        }
+    }
+
+    Ok(Next::Now)
+}
+
 fn standing_room(map: &Map) -> Vec<crate::map::Point> {
     let size = map.size();
     (0..size.height)

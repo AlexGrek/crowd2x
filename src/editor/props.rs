@@ -14,14 +14,17 @@
 //! entry, so re-ordering the palette cannot turn every saved bed into a
 //! toilet.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 
-use super::PaletteItem;
+use super::{CurrentMap, PaletteItem};
 use crate::animation::StripAnimation;
 use crate::characters::{depth_for, upscale, CELL};
 use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point};
 use crate::render::WORLD_LAYER;
 use crate::state::AppState;
+use crate::view::{CellRect, VisibleArea};
 
 /// How close the cursor has to be to a prop's centre to delete it.
 const ERASE_RADIUS: f32 = CELL as f32 / 2.0;
@@ -125,7 +128,9 @@ pub fn item_of(kind: &ObjectKind) -> Option<usize> {
     PALETTE.iter().position(|item| item.name == kind.as_str())
 }
 
-pub fn place(commands: &mut Commands, assets: &AssetServer, map: &mut Map, pos: Vec2, item: usize) {
+/// Put a prop in the map. What draws it is [`sync_prop_window`], from the map,
+/// so this cannot show a prop the saved file does not contain.
+pub fn place(map: &mut Map, pos: Vec2, item: usize) {
     // Whole pixels only: a sprite on a fractional coordinate samples between
     // texels and puts a seam through the pixel grid. It is also what lets a
     // position be an exact key when the prop is erased again.
@@ -139,7 +144,6 @@ pub fn place(commands: &mut Commands, assets: &AssetServer, map: &mut Map, pos: 
             kind: ObjectKind::new(PALETTE[item].name),
         },
     );
-    spawn_prop(commands, assets, at, item, AppState::Editor);
 }
 
 /// Delete the prop nearest the cursor, if one is close enough.
@@ -148,7 +152,6 @@ pub fn place(commands: &mut Commands, assets: &AssetServer, map: &mut Map, pos: 
 /// — so this matches on distance to the centre rather than pretending every
 /// prop has the same bounding box.
 pub fn erase_nearest(
-    commands: &mut Commands,
     map: &mut Map,
     props: &Query<(Entity, &Prop, &Transform)>,
     pos: Vec2,
@@ -165,26 +168,109 @@ pub fn erase_nearest(
         .filter(|(_, _, distance)| *distance <= ERASE_RADIUS * ERASE_RADIUS)
         .min_by(|a, b| a.2.total_cmp(&b.2));
 
-    if let Some((entity, prop, _)) = nearest {
+    if let Some((_, prop, _)) = nearest {
         // One object per sprite, so a stack of props erases one at a time.
+        // The sprite goes when the window notices the map changed, which is
+        // the same route placing one takes.
         map.remove_object(ObjectLayer::Props, &prop.object());
-        commands.entity(entity).despawn();
     }
 }
 
-/// Draw a map's props, for entering a screen with a map already loaded.
+/// The props on the canvas.
 ///
-/// `state` is the screen they belong to — the editor and the game draw the
-/// same props and each despawns its own on the way out.
-pub fn spawn_map(commands: &mut Commands, assets: &AssetServer, map: &Map, state: AppState) {
-    for object in map.objects(ObjectLayer::Props) {
+/// Culled to the view like everything else, but **not** pooled, and that is a
+/// decision rather than an omission: a prop carries a `StripAnimation` only if
+/// its art moves and a [`Usable`] only if it has a second strip, so recycling
+/// one means inserting and removing components — an archetype move — where a
+/// tile needs three writes. Props are also few. The largest fixture in the
+/// repo, a generated 256x256 map, carries 256 of them against 65,536 tiles, so
+/// the handful entering and leaving on a cell crossing are cheap to spawn
+/// outright. Revisit when a map carries thousands; the prerequisite is a real
+/// art-size field on [`PaletteItem`], since prop art has no uniform height
+/// (`crate tall` is 48x64) and a pool would need an honest margin.
+#[derive(Resource, Default)]
+pub struct PropWindow {
+    /// Index into the map's `Props` layer, and the sprite drawing it.
+    drawn: HashMap<usize, Entity>,
+    /// What `drawn` covers, so a camera that has not crossed a cell boundary
+    /// does no work.
+    rect: CellRect,
+}
+
+impl PropWindow {
+    /// Forget everything without despawning it — the sprites carry
+    /// `DespawnOnExit`, as [`background::TileWindow::clear`] explains.
+    pub fn clear(&mut self) {
+        self.drawn.clear();
+        self.rect = CellRect::EMPTY;
+    }
+}
+
+/// Keep the drawn props equal to the ones whose cell is under the canvas.
+///
+/// Scanned straight out of the map's object layer rather than through an index
+/// of its own: props are a `Vec` of a few hundred at most, and this runs only
+/// when the view moved by a whole cell or the map changed.
+pub fn sync_prop_window(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    area: Res<VisibleArea>,
+    current: Res<CurrentMap>,
+    state: Res<State<AppState>>,
+    mut window: ResMut<PropWindow>,
+) {
+    if !area.ready {
+        return;
+    }
+    let edited = current.is_changed();
+    if area.tiles == window.rect && !edited {
+        return;
+    }
+
+    // Placing or erasing renumbers the layer, so an index is only meaningful
+    // within one version of the map. Rather than track that, a map that
+    // changed rebuilds the window outright — a few hundred objects, and only
+    // on the frame an edit landed.
+    if edited {
+        for (_, entity) in window.drawn.drain() {
+            commands.entity(entity).despawn();
+        }
+        window.rect = CellRect::EMPTY;
+    }
+
+    let objects = current.map.objects(ObjectLayer::Props);
+    let wanted = area.tiles;
+    let on_canvas = |object: &Object| {
+        let cell = object.cell();
+        wanted.contains(IVec2::new(cell.x, cell.y))
+    };
+
+    window.drawn.retain(|index, entity| {
+        if objects.get(*index).is_some_and(on_canvas) {
+            return true;
+        }
+        commands.entity(*entity).despawn();
+        false
+    });
+
+    for (index, object) in objects.iter().enumerate() {
+        if !on_canvas(object) || window.drawn.contains_key(&index) {
+            continue;
+        }
         match item_of(&object.kind) {
-            Some(item) => spawn_prop(commands, assets, object.at, item, state),
+            Some(item) => {
+                let prop = spawn_prop(&mut commands, &assets, object.at, item, *state.get());
+                window.drawn.insert(index, prop);
+            }
             // Left in the map, so saving does not delete a prop this build
-            // merely has no picture for.
-            None => warn!("no art for prop {:?}, not drawn", object.kind.as_str()),
+            // merely has no picture for. Not warned here: this runs every time
+            // the view moves, and a map with one unknown prop would fill the
+            // log with it.
+            None => {}
         }
     }
+
+    window.rect = wanted;
 }
 
 /// One prop: its sprite, whatever animation its art asks for, and — for a
@@ -196,7 +282,7 @@ fn spawn_prop(
     at: Point,
     item: usize,
     state: AppState,
-) {
+) -> Entity {
     let item = &PALETTE[item];
     let y = at.y as f32;
     let prop = commands
@@ -234,6 +320,7 @@ fn spawn_prop(
             in_use: false,
         });
     }
+    prop
 }
 
 #[cfg(test)]

@@ -3,7 +3,10 @@
   "state": "game",
   "given": {
     "maps": [
-      { "name": "huge", "file": "qa/fixtures/huge.json" }
+      {
+        "name": "huge",
+        "file": "qa/fixtures/huge.json"
+      }
     ]
   },
   "open": "huge",
@@ -11,40 +14,185 @@
   "settle": 2.0,
   "timeout": 600,
   "steps": [
-    { "note": "256x256 of rooms joined by doorways, a fridge in each (tools/gen_huge_map.py)" },
-    { "note": "hunger starts random, so a good part of every crowd is routing to a fridge at once" },
-    { "expect_entities": 0 },
-    { "measure": { "name": "an empty huge map", "ticks": 100 } },
-    { "measure_frames": { "name": "an empty huge map (frames)", "seconds": 2.0 } },
-
-    { "populate": { "kind": "human", "count": 1000 } },
-    { "measure": { "name": "1000 humans", "ticks": 200 } },
-    { "expect_entities": 1000 },
-    { "measure_frames": { "name": "1000 actors", "seconds": 2.0 } },
-    { "shot": "1000 humans" },
-
-    { "populate": { "kind": "human", "count": 9000 } },
-    { "measure": { "name": "10000 humans", "ticks": 200 } },
-    { "expect_entities": 10000 },
-    { "measure_frames": { "name": "10000 actors", "seconds": 3.0 } },
-    { "shot": "10000 humans" },
-
-    { "populate": { "kind": "human", "count": 10000 } },
-    { "measure": { "name": "20000 humans", "ticks": 200 } },
-    { "expect_entities": 20000 },
-    { "measure_frames": { "name": "20000 actors", "seconds": 3.0 } },
-    { "shot": "20000 humans" },
-
-    { "note": "a long run, so the meals and the wandering in between are in the numbers too" },
-    { "measure": { "name": "20000 humans, settled", "ticks": 1000 } },
-
-    { "expect_scaling": { "from": "1000 humans", "to": "10000 humans", "slack": 2.0 } },
-    { "expect_scaling": { "from": "10000 humans", "to": "20000 humans", "slack": 1.5 } },
-
-    { "expect_state": "game" },
-    { "expect_entities": 20000 },
-    { "key": "esc" },
-    { "expect_state": "maps" },
-    { "expect_sprites": 0 }
+    {
+      "note": "256x256 of rooms joined by doorways, a fridge in each (tools/gen_huge_map.py)"
+    },
+    {
+      "note": "hunger starts random, so a good part of every crowd is routing to a fridge at once"
+    },
+    {
+      "expect_entities": 0
+    },
+    {
+      "measure": {
+        "name": "an empty huge map",
+        "ticks": 100
+      }
+    },
+    {
+      "measure_frames": {
+        "name": "an empty huge map (frames)",
+        "seconds": 2.0
+      }
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 1000
+      }
+    },
+    {
+      "measure": {
+        "name": "1000 humans",
+        "ticks": 200
+      }
+    },
+    {
+      "expect_entities": 1000
+    },
+    {
+      "measure_frames": {
+        "name": "1000 actors",
+        "seconds": 2.0
+      }
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "1000 humans"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 9000
+      }
+    },
+    {
+      "measure": {
+        "name": "10000 humans",
+        "ticks": 200
+      }
+    },
+    {
+      "expect_entities": 10000
+    },
+    {
+      "measure_frames": {
+        "name": "10000 actors",
+        "seconds": 3.0
+      }
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "10000 humans"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 10000
+      }
+    },
+    {
+      "measure": {
+        "name": "20000 humans",
+        "ticks": 200
+      }
+    },
+    {
+      "expect_entities": 20000
+    },
+    {
+      "measure_frames": {
+        "name": "20000 actors",
+        "seconds": 3.0
+      }
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "20000 humans"
+    },
+    {
+      "note": "a long run, so the meals and the wandering in between are in the numbers too"
+    },
+    {
+      "measure": {
+        "name": "20000 humans, settled",
+        "ticks": 1000
+      }
+    },
+    {
+      "expect_scaling": {
+        "from": "1000 humans",
+        "to": "10000 humans",
+        "slack": 2.0
+      }
+    },
+    {
+      "expect_scaling": {
+        "from": "10000 humans",
+        "to": "20000 humans",
+        "slack": 1.5
+      }
+    },
+    {
+      "note": "the frames are the claim this test exists for. A 256x256 map is 65,536 cells"
+    },
+    {
+      "note": "and the canvas shows about eighty of them, so twenty thousand units draw the"
+    },
+    {
+      "note": "same few dozen sprites a thousand do: the cost per entity has to *fall*, and"
+    },
+    {
+      "note": "a slack below 1.0 is a demand for that rather than for mere flatness."
+    },
+    {
+      "note": "If culling silently stopped working this ratio would go back to about 1.0."
+    },
+    {
+      "expect_scaling": {
+        "from": "1000 actors",
+        "to": "20000 actors",
+        "slack": 0.25
+      }
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "expect_entities": 20000
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_sprites": 0
+    }
   ]
 }

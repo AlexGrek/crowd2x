@@ -39,6 +39,7 @@ use crate::characters::{upscale, ART_SCALE, CELL};
 use crate::map::{Map, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
+use crate::view::ViewSystems;
 use crate::ui::nav::{Cancelled, NavSystems};
 use crate::ui::{FONT_BODY, PANEL, TEXT, TEXT_DIM};
 
@@ -471,14 +472,35 @@ impl Plugin for EditorPlugin {
         app.init_resource::<Tool>()
             .init_resource::<Cursor>()
             .init_resource::<RectangleDrag>()
-            .init_resource::<background::Tiles>()
+            .init_resource::<background::TileWindow>()
+            .init_resource::<props::PropWindow>()
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
+            // The terrain window runs on both screens that draw a map, after
+            // the view it follows is known. Registered here because this is
+            // where the palettes live; the game screen is a consumer of it,
+            // exactly as it is of `draw_map`.
+            .add_systems(
+                Update,
+                (background::sync_tile_window, props::sync_prop_window)
+                    .after(ViewSystems)
+                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
+            )
             .add_systems(
                 OnEnter(AppState::Editor),
-                (spawn_overlay, build_scene, aim_camera_at_map),
+                (spawn_overlay, aim_camera_at_map),
             )
+            // On entering *either* screen that draws a map, and not only on
+            // leaving one: the sprites a window holds go with `DespawnOnExit`,
+            // and closing the window skips `OnExit` entirely, so a window that
+            // remembered them would come back pointing at entities that no
+            // longer exist — and re-point them, silently, drawing nothing.
+            .add_systems(
+                OnEnter(AppState::Editor),
+                reset_map_windows,
+            )
+            .add_systems(OnEnter(AppState::Game), reset_map_windows)
             .add_systems(OnExit(AppState::Editor), leave_editor)
             // Saving has to survive the window being closed, which ends the
             // app without ever running `OnExit`.
@@ -503,37 +525,19 @@ impl Plugin for EditorPlugin {
     }
 }
 
-/// Draw a map's terrain and props into the world, for any screen that shows
-/// one.
+/// Start both map windows empty.
 ///
-/// The art catalogue is the two palettes in this module: a tile's name is
-/// bound to its PNG next to the code that paints it. The game screen draws the
-/// same map from the same catalogue, so it comes through here rather than
-/// growing a second one that could drift out of step. `state` is whose sprites
-/// these are, so each screen takes its own away on the way out.
-pub fn draw_map(commands: &mut Commands, assets: &AssetServer, map: &Map, state: AppState) {
-    background::spawn_map(commands, assets, map, state, None);
-    props::spawn_map(commands, assets, map, state);
-}
-
-/// Draw the open map. The scene is rebuilt on every entry and thrown away on
-/// every exit, so the map — not the entities — is the thing that persists.
-fn build_scene(
-    mut commands: Commands,
-    assets: Res<AssetServer>,
-    mut tiles: ResMut<background::Tiles>,
-    current: Res<CurrentMap>,
+/// They hold entities, and those entities are despawned by `DespawnOnExit`
+/// every time a map screen is left — including by routes that never run
+/// `OnExit` at all, such as closing the window. A window that came back
+/// remembering them would find every cell already drawn by an entity that is
+/// gone, quietly draw nothing, and show an empty map.
+fn reset_map_windows(
+    mut tiles: ResMut<background::TileWindow>,
+    mut props_window: ResMut<props::PropWindow>,
 ) {
-    // The editor keeps the tile index the game has no use for: painting has to
-    // find the sprite already in a cell to replace it.
-    background::spawn_map(
-        &mut commands,
-        &assets,
-        &current.map,
-        AppState::Editor,
-        Some(&mut tiles),
-    );
-    props::spawn_map(&mut commands, &assets, &current.map, AppState::Editor);
+    tiles.clear();
+    props_window.clear();
 }
 
 /// Aim at the middle of the map rather than at its bottom-left corner, which
@@ -556,14 +560,10 @@ pub fn map_centre(map: &Map) -> Vec2 {
 fn leave_editor(
     maps: Res<Maps>,
     current: Res<CurrentMap>,
-    mut tiles: ResMut<background::Tiles>,
     mut cursor: ResMut<Cursor>,
     mut rect: ResMut<RectangleDrag>,
 ) {
     save(&maps, &current);
-    // The sprites go with `DespawnOnExit`; the index of them must not outlive
-    // them or the next entry would think cells are already painted.
-    tiles.clear();
     cursor.world = None;
     // Its preview sprites went with `DespawnOnExit` too — this just forgets
     // the entities so nothing here tries to despawn them a second time.
@@ -808,7 +808,7 @@ fn edit(
     gamepads: Query<&Gamepad>,
     tool: Res<Tool>,
     cursor: Res<Cursor>,
-    mut tiles: ResMut<background::Tiles>,
+    mut window: ResMut<background::TileWindow>,
     mut current: ResMut<CurrentMap>,
     mut rect: ResMut<RectangleDrag>,
     placed: Query<(Entity, &props::Prop, &Transform)>,
@@ -851,15 +851,13 @@ fn edit(
                     }
                     if place_held {
                         background::paint(
-                            &mut commands,
-                            &assets,
-                            &mut tiles,
+                            &mut window,
                             &mut current.map,
                             cell,
                             tool.background,
                         );
                     } else if erase_held {
-                        background::erase(&mut commands, &mut tiles, &mut current.map, cell);
+                        background::erase(&mut window, &mut current.map, cell);
                     }
                 }
                 // Corner to corner: nothing is painted until release, so the
@@ -894,17 +892,10 @@ fn edit(
                             let item = rect.item;
                             for cell in std::mem::take(&mut rect.cells) {
                                 if erasing {
-                                    background::erase(
-                                        &mut commands,
-                                        &mut tiles,
-                                        &mut current.map,
-                                        cell,
-                                    );
+                                    background::erase(&mut window, &mut current.map, cell);
                                 } else {
                                     background::paint(
-                                        &mut commands,
-                                        &assets,
-                                        &mut tiles,
+                                        &mut window,
                                         &mut current.map,
                                         cell,
                                         item,
@@ -920,9 +911,9 @@ fn edit(
         // One press, one prop.
         Layer::Props => {
             if place_once {
-                props::place(&mut commands, &assets, &mut current.map, world, tool.props);
+                props::place(&mut current.map, world, tool.props);
             } else if erase_once {
-                props::erase_nearest(&mut commands, &mut current.map, &placed, world);
+                props::erase_nearest(&mut current.map, &placed, world);
             }
         }
     }

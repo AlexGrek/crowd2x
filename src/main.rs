@@ -14,6 +14,7 @@ mod render;
 mod sim;
 mod state;
 mod ui;
+mod view;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
@@ -50,6 +51,7 @@ fn main() -> AppExit {
         .insert_state(initial_state)
         .add_plugins((
             render::PixelRenderPlugin,
+            view::ViewPlugin,
             ui::UiPlugin,
             animation::AnimationPlugin,
             characters::CharacterPlugin,

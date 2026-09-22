@@ -461,7 +461,55 @@ pub enum Step {
     /// nothing is on screen at all, which is exactly the bug this catches.
     /// Counted from the entities themselves rather than from the map that
     /// tracks them, so bookkeeping that has drifted from reality fails here.
+    ///
+    /// **Sprites are culled to the canvas**, so this counts who is *drawn*,
+    /// not who exists — a unit off the edge of the view is supposed to have no
+    /// sprite. That makes it a claim about the view as much as about the
+    /// renderer, so a test asserting a number here has to say where the camera
+    /// is: pause with `{"key": "p"}` and aim with [`Step::LookAt`], or the
+    /// number is whatever the crowd happened to be doing. Use
+    /// [`Step::ExpectDrawn`] for the invariant that holds wherever the camera
+    /// is pointing.
     ExpectSprites(usize),
+    /// Point the camera at a cell, so what is on screen is a decision the test
+    /// made rather than an accident of where the map's middle is.
+    ///
+    /// Cell units, like `spawn`, and addressed through `CameraTarget` so the
+    /// map clamp applies exactly as it would to panning there by hand — a
+    /// `look_at` near an edge lands where the camera is allowed to be.
+    ///
+    /// Takes effect on the next frame, because the camera is moved by a
+    /// system and not by this step: follow it with a `wait` or a `tick` before
+    /// asserting on what is drawn.
+    LookAt { x: i32, y: i32 },
+    /// Every unit on the canvas is drawn, and nothing drawn is off it.
+    ///
+    /// The contract `expect_sprites` can no longer carry alone, checked in
+    /// both directions against a plain scan of every entity — the slow,
+    /// obviously-correct version of the question the renderer answers quickly.
+    /// A sprite left behind by a unit that walked away fails the first half; a
+    /// unit standing in plain view with nothing drawn for it fails the second.
+    ///
+    /// Unlike `expect_sprites` it names no number, so it holds wherever the
+    /// camera is and whatever the crowd is doing, and it cannot pass
+    /// vacuously: drawing nothing at all fails it as loudly as drawing
+    /// everything.
+    ExpectDrawn {},
+    /// How many sprites are in the world, of any kind, as a range.
+    ///
+    /// Tiles, props, actors, the overlays, the bodies parked for reuse and the
+    /// selection frame — everything on the world layer.
+    ///
+    /// **Both ends carry a claim, which is why this is a range and not a
+    /// ceiling.** `max` is the structural form of "what is drawn is bounded by
+    /// the canvas and not by the map or the crowd", and it is the only
+    /// assertion that notices a pool quietly growing to the size of the crowd,
+    /// since a parked body carries no `Actor` and so is invisible to
+    /// `expect_sprites`. `min` is what stops the whole thing passing by
+    /// drawing nothing at all — a windowed renderer holding entities that were
+    /// despawned under it shows an empty map, and an empty map satisfies every
+    /// ceiling there is.
+    ExpectWorldSprites { min: usize, max: usize },
 }
 
 fn default_tap() -> f32 {

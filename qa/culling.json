@@ -1,0 +1,228 @@
+{
+  "name": "sprites exist for what is on the canvas, and for nothing else",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "yard",
+        "file": "qa/fixtures/yard.json"
+      }
+    ]
+  },
+  "open": "yard",
+  "timeout": 120,
+  "steps": [
+    {
+      "note": "yard is 12x9 = 576x432 world units; the canvas at the default zoom is"
+    },
+    {
+      "note": "320x180 of that, so most of the map is off screen at any moment."
+    },
+    {
+      "note": "Paused first: the canvas is small and a wanderer would leave it between steps."
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 9,
+        "y": 6
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 2
+    },
+    {
+      "note": "one corner: the near human is drawn and the far one is not"
+    },
+    {
+      "look_at": {
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_sprites": 1
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "shot": "looking at the near corner"
+    },
+    {
+      "note": "and the other corner, the other way round - the same two units, one sprite"
+    },
+    {
+      "look_at": {
+        "x": 9,
+        "y": 6
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_sprites": 1
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "shot": "looking at the far corner"
+    },
+    {
+      "note": "a selected unit stays selected when it is culled: Selected is a Uid and"
+    },
+    {
+      "note": "picking goes through the simulation's occupancy grid, not through sprites."
+    },
+    {
+      "note": "looking at (9,6) clamps the camera to world (416, 312), so the canvas spans"
+    },
+    {
+      "note": "x 256..576 and y 222..402, and the unit at world (456, 312) is at canvas"
+    },
+    {
+      "note": "(200, 90) - the middle, clear of the corner panels, which absorb clicks."
+    },
+    {
+      "mouse": {
+        "x": 200,
+        "y": 90
+      }
+    },
+    {
+      "click": {}
+    },
+    {
+      "expect_selected": "human"
+    },
+    {
+      "look_at": {
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_sprites": 1
+    },
+    {
+      "expect_selected": "human"
+    },
+    {
+      "press": "debug"
+    },
+    {
+      "expect_selected": "human"
+    },
+    {
+      "shot": "still selected from across the map"
+    },
+    {
+      "note": "what a hand holds is drawn beside its carrier rather than as a child of it,"
+    },
+    {
+      "note": "so it has to be culled by the same rule or it floats where nobody is"
+    },
+    {
+      "hold": "food"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_held": {
+        "item": "food",
+        "count": 0
+      }
+    },
+    {
+      "look_at": {
+        "x": 9,
+        "y": 6
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_held": {
+        "item": "food",
+        "count": 1
+      }
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "note": "zooming out makes the canvas bigger, so it shows more world and draws more:"
+    },
+    {
+      "note": "at zoom 1 the whole 576x432 yard is inside a 1280x720 canvas and both are drawn"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 1
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_sprites": 2
+    },
+    {
+      "expect_drawn": {}
+    },
+    {
+      "expect_world_sprites": {
+        "min": 40,
+        "max": 400
+      }
+    },
+    {
+      "shot": "the whole yard at zoom 1"
+    },
+    {
+      "note": "and leaving takes every sprite away, the ones parked for reuse included"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_sprites": 0
+    }
+  ]
+}

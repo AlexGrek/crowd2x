@@ -43,6 +43,17 @@ const UPSCALE_LAYER: RenderLayers = RenderLayers::layer(1);
 /// Colour the low-res canvas is cleared to each frame.
 const CANVAS_CLEAR: Color = Color::srgb(0.10, 0.11, 0.14);
 
+/// Everything that decides where the camera is and how big the canvas is.
+///
+/// Named rather than anonymous because something now runs *after* it:
+/// [`crate::view`] works out what is on the canvas, and it has to read the
+/// canvas this frame's size and the camera this frame's snapped position. A
+/// view computed before `resize_canvas` would be a zoom step behind, and one
+/// computed before `snap_camera_to_pixels` would be half a pixel out — both of
+/// which show up as an unpainted strip at the leading edge of a fast pan.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PixelSystems;
+
 pub struct PixelRenderPlugin;
 
 impl Plugin for PixelRenderPlugin {
@@ -60,7 +71,8 @@ impl Plugin for PixelRenderPlugin {
                     apply_camera_target,
                     snap_camera_to_pixels,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(PixelSystems),
             );
     }
 }

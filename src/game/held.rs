@@ -25,8 +25,9 @@ use crate::characters::{depth_for, upscale, ART_SCALE};
 use crate::render::WORLD_LAYER;
 use crate::sim::{ItemKind, Uid};
 use crate::state::AppState;
+use crate::view::VisibleArea;
 
-use super::actors::{world_pos, Sim, EMOJI_FONT};
+use super::actors::{world_pos, Sim, VisibleCrowd, EMOJI_FONT};
 
 /// Where the item sits relative to the middle of its carrier's cell, in canvas
 /// pixels — whole ones, because the carrier is on the art's grid and the item
@@ -72,7 +73,9 @@ impl Plugin for HeldPlugin {
             .add_systems(OnExit(AppState::Game), forget_the_sprites)
             .add_systems(
                 Update,
-                sync_held_items.run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
+                sync_held_items
+                    .in_set(super::SpriteSync)
+                    .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
     }
 }
@@ -89,27 +92,36 @@ fn sync_held_items(
     assets: Res<AssetServer>,
     images: Res<Assets<Image>>,
     sim: Res<Sim>,
+    area: Res<VisibleArea>,
+    crowd: Res<VisibleCrowd>,
     mut held: ResMut<HeldSprites>,
     mut parts: Query<(&mut Transform, Option<&Sprite>), With<HeldItem>>,
 ) {
     let state = &sim.0;
 
-    // Anyone who put it down, swapped it for something else, or left.
+    // Anyone who put it down, swapped it for something else, left the world,
+    // or left the canvas. That last one matters: an item is drawn beside its
+    // carrier rather than as a child of it, so a culled carrier would
+    // otherwise leave a burger floating where it used to be.
     held.by_uid.retain(|uid, &mut (sprite, kind)| {
-        let still = state
-            .entities()
-            .get(*uid)
-            .and_then(|entity| entity.inventory())
-            .and_then(|inventory| inventory.hand())
-            == Some(kind);
+        let still = state.entities().get(*uid).is_some_and(|entity| {
+            entity
+                .inventory()
+                .and_then(|inventory| inventory.hand())
+                == Some(kind)
+                && area.should_keep(world_pos(entity.position()))
+        });
         if !still {
             commands.entity(sprite).despawn();
         }
         still
     });
 
-    // Anyone holding something, new or continuing.
-    for entity in state.entities().iter() {
+    // Anyone visible holding something, new or continuing.
+    for &slot in crowd.slots() {
+        let Some(entity) = state.entities().slot(slot) else {
+            continue;
+        };
         let Some(kind) = entity.inventory().and_then(|inventory| inventory.hand()) else {
             continue;
         };
