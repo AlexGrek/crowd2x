@@ -16,13 +16,20 @@
 //! they are using ([`GameEntity::interacting_with`]), and a prop standing in
 //! one of those cells is in use.
 //!
-//! That is a pass over the entities per frame, which is what [`sync_sprites`]
-//! and the action bars already cost — and it is skipped entirely on a map
-//! with no prop that could light up, which is every map so far but the ones
-//! with a computer on them.
+//! Only the units on the canvas are asked ([`VisibleCrowd`]), not the whole
+//! crowd, because only the props on the canvas are drawn: `editor::props`
+//! culls them to the view, so a prop with a sprite is one on screen, and
+//! whoever is using it is beside it or standing in it. It is skipped entirely
+//! on a view with no prop that could light up.
+//!
+//! One seam is left, at the very edge of the canvas. A unit not already drawn
+//! is collected only once its position is within half a cell of the canvas,
+//! so a computer showing at most half of itself at the edge, used from the
+//! cell beyond it, stays dark until the camera has moved another half cell.
+//! Closing it means collecting a wider ring of units than the ones drawn,
+//! which is a second list on [`VisibleCrowd`] for the sake of one consumer.
 //!
 //! [`Action::Interact`]: crate::sim::brain::Action
-//! [`sync_sprites`]: super::actors
 
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -32,15 +39,21 @@ use crate::editor::props::{Prop, Usable};
 use crate::map::Point;
 use crate::state::AppState;
 
-use super::actors::Sim;
+use super::actors::{Sim, VisibleCrowd};
 
 pub struct PropsPlugin;
 
 impl Plugin for PropsPlugin {
     fn build(&self, app: &mut App) {
+        // After the prop window as well as the visible crowd: a prop that has
+        // just scrolled into view is spawned showing its idle strip, and is
+        // put right on the frame it appears rather than the one after.
         app.add_systems(
             Update,
-            light_up_props_in_use.run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
+            light_up_props_in_use
+                .in_set(super::SpriteSync)
+                .after(crate::editor::props::sync_prop_window)
+                .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
         );
     }
 }
@@ -54,16 +67,20 @@ impl Plugin for PropsPlugin {
 /// frames this allocates nothing.
 fn light_up_props_in_use(
     sim: Res<Sim>,
+    crowd: Res<VisibleCrowd>,
     mut busy: Local<HashSet<Point>>,
     mut props: Query<(&Prop, &mut Usable, &mut Sprite, Option<&mut StripAnimation>)>,
 ) {
     if props.is_empty() {
-        // No prop on this map cares, so the crowd need not be asked.
+        // No prop on screen cares, so the crowd need not be asked.
         return;
     }
 
     busy.clear();
-    for entity in sim.0.entities().iter() {
+    for &slot in crowd.slots() {
+        let Some(entity) = sim.0.entities().slot(slot) else {
+            continue;
+        };
         if let Some(cell) = entity.interacting_with() {
             busy.insert(cell);
         }

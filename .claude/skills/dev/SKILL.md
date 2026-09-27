@@ -72,18 +72,20 @@ systems.
 src/main.rs           app + window setup, plugin registration
 src/state.rs          AppState - MainMenu / Maps / Editor / Game
 src/render.rs         PixelRenderPlugin - the pixel-perfect pipeline, PixelZoom
+src/view.rs           VisibleArea - what is on the canvas; everything that culls reads it
 src/ui/               UiPlugin (UiScale), shared widgets
   nav.rs              Focus/Focusable/Scope - one highlight, three devices
   keyboard.rs         the on-screen keyboard and TextEntry
 src/menu.rs           MainMenuPlugin
 src/editor/           the map editor
-  mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD, draw_map
-  background.rs       grid-snapped tile layer
-  props.rs            free-placed, Y-sorted object layer
+  mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD
+  background.rs       grid-snapped tile layer; TileWindow draws it a canvas at a time
+  props.rs            free-placed, Y-sorted object layer; PropWindow, likewise
 src/browser.rs        BrowserPlugin - the saved-maps screen
 src/game/             GamePlugin - playing a map
   mod.rs              camera, zoom, clamp, HUD
-  actors.rs           the sim-to-sprite bridge: Sim, SimInput, tick, sync
+  actors.rs           the sim-to-sprite bridge: Sim, SimInput, tick, VisibleCrowd, sync
+  pool.rs             bodies parked when they leave the view, bounded by the view
   logview.rs          drains the simulation's log onto the screen
   held.rs             draws what a unit's hand holds, in front of it
 src/map/              the map + coordinates - PLAIN RUST, no bevy
@@ -395,8 +397,8 @@ it, and the breakage is a bug that reproduces once and never again.
 
 64 bits: top byte `EntityType`, low 56 random and unique-by-retry. Bevy's `Entity` is an
 index into a `World` — it cannot be written to a save file, quoted in a log, or compared
-across a reload, and most actors will not have one at all once sprites are culled to the
-canvas. `Uid::kind()` reads the type straight off the id, so a log line says what something
+across a reload, and most actors do not have one at all: sprites are culled to the canvas,
+so an `Entity` exists only for the few dozen units on screen. `Uid::kind()` reads the type straight off the id, so a log line says what something
 is with no lookup into a state that may already have dropped it. An unknown top byte is
 `None`, not a panic, for the same reason an unknown `TerrainId` is.
 
@@ -513,27 +515,55 @@ the world state is what killed the earlier prototype.
 
 ### Rendering cost
 
-Sprites batch **by texture**. A thousand actors drawn from one atlas is a handful of draw
-calls; the same thousand drawn from separate PNGs is a thousand. This matters here right
-now: each paperdoll layer currently loads its own PNG, so every human costs up to four
-texture switches. Before the crowd grows, pack the character layers into a single atlas
-and address them by index.
+**Culling and pooling are done.** Only what is on the canvas gets a sprite — the canvas is
+320x180 at the default zoom, so the visible set is small however big the simulation gets —
+and that goes for terrain and props as much as for actors:
 
-Also: pool and reuse sprite entities instead of spawning and despawning as agents enter
-and leave view, and only spawn sprites for agents actually on the canvas — the canvas is
-320x180, so the visible set is small no matter how big the simulation gets.
+- `src/view.rs` works out `VisibleArea` once a frame; `game::actors::collect_visible_crowd`
+  resolves it into `VisibleCrowd` in one pass over the arena, and every overlay (action
+  bars, goal labels, held items, props lighting up) reads that list rather than walking
+  the crowd for itself. There used to be five such walks.
+- A body that leaves the view is parked on `game::pool::ActorPool`, not despawned, and the
+  pool is **bounded by the view** (`park_budget`). Bevy's `extract_sprites`,
+  `calculate_bounds_2d` and the visibility check walk every sprite entity before they look
+  at visibility, so a hidden sprite is cheaper than a spawn and is *not* free: a pool that
+  grew to the size of the crowd would give back what culling won. `Visibility::Hidden` on
+  a full-size set of sprites is not culling, for the same reason.
+- `editor::background::TileWindow` does the same for terrain, re-pointing the sprites of
+  the row or column that left the view; `editor::props::PropWindow` culls props and does
+  not pool them (few, and their components vary with their art). Neither listens to
+  `CurrentMap`'s change flag — an edit calls `touch()` — because the brush borrows the map
+  mutably every frame it is held.
 
-**Neither is done yet.** `game/actors.rs` spawns one sprite per entity, for every entity,
-and despawns it when the entity goes. That is fine for the hand-built worlds the game
-screen has today and is the first thing to fix before the crowd arrives; the module says
-so in its own docs, so the gap is recorded rather than forgotten.
+Release, vsync off, median frame time, median of three runs (2026-09-27; this machine):
+
+| | before culling | now |
+| --- | --- | --- |
+| empty 256x256 map | 1.23 ms | 0.92 ms |
+| 1000 actors on it | | 1.02 ms |
+| 10000 actors on it | | 1.37 ms |
+| 20000 actors on it | 8.48 ms | 1.95 ms |
+| 1000 actors + 500 dogs, small map | | 1.09 ms |
+
+The simulation alone is about 1.1 ms of the 20000-actor frame (`20000 humans` in
+`perf_huge_map`), so the renderer's share is under a millisecond and roughly flat in the
+crowd. On Windows, a run whose frames all sit at ~16.6 ms is DWM forcing vsync on a window
+that lost the foreground, not the code: rerun it rather than quoting it.
+
+**Atlas packing is not done.** Sprites batch **by texture**. A thousand actors drawn from one
+atlas is a handful of draw calls; the same thousand drawn from separate PNGs is a thousand.
+Each paperdoll layer still loads its own PNG, so every human costs up to four texture
+switches. Culling caps how many humans that applies to at the few dozen on screen, which is
+why it has not mattered yet; a zoomed-out view of a dense crowd is where it will. Pack the
+character layers into a single atlas and address them by index.
 
 ### Measure before optimising
 
 **There is a harness for this**: `qa/perf_simulation.json` times processing passes from an
-empty world up to 5000 actors, and `qa/perf_rendering.json` times whole frames with up to
-1500 of them on screen. Both write their distributions to `qa-perf/<test>.json`, and both
-assert on *scaling* — cost per entity must not grow with the crowd — rather than on
+empty world up to 5000 actors, `qa/perf_rendering.json` times whole frames with up to
+1500 of them, and `qa/perf_huge_map.json` puts up to 20000 on a 256x256 map. All three
+write their distributions to `qa-perf/<test>.json`, and all assert on *scaling* — cost
+per entity must not grow with the crowd — rather than on
 milliseconds, because that is the check the earlier prototype's O(parts x workers) loop
 would have failed and a wall-clock budget would not. Add a `measure` step to them before
 optimising anything here, and read the `qa` skill's "Performance tests" section first:

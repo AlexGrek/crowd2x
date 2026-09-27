@@ -166,9 +166,9 @@ pub fn redress(
     look: Look,
 ) {
     let paths = slot_paths(&look);
-    for slot in 0..SLOTS {
-        let mut layer = commands.entity(doll.layers[slot]);
-        match paths[slot] {
+    for (&layer, path) in doll.layers.iter().zip(paths) {
+        let mut layer = commands.entity(layer);
+        match path {
             Some(path) => {
                 layer.insert((Sprite::from_image(assets.load(path)), Visibility::Inherited));
             }

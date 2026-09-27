@@ -112,6 +112,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
+| `{"look_at": {"x": 128, "y": 128}}` | Point the game camera at the middle of a cell, through the map clamp. Takes effect next frame. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
 `press` **refuses an ambiguous label** rather than guessing — every row of the file list
@@ -170,6 +171,15 @@ through `RawGamepadEvent`, so `bevy_input` builds the real `Gamepad` component. 
 pointer moves by setting the window's cursor position — the same field `bevy_ui`'s focus
 system reads — so a click goes through genuine hover-and-click.
 
+**`mouse` is easy to aim wrong.** Its coordinates are window pixels divided by
+`PIXEL_SCALE` (4) — the UI's pixels, 320x180 on the default window, **y down from the top**.
+That is the canvas only at the default zoom: the step does not follow `PixelZoom`, so after
+a `q` or `e` the same `mouse` lands on a different part of the world. Nor is it world
+units or cells — world Y points up, and the camera decides where cell (0, 0) is. To hit a
+cell in the game, pin the camera first (`look_at` the cell, which puts it in the middle of
+the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
+`cursor_cell` instead, which is what it is for.
+
 ### Assertions
 
 | Step | Checks |
@@ -181,7 +191,9 @@ system reads — so a click goes through genuine hover-and-click.
 | `{"expect_map": "office"}` / `{"expect_no_map": "office"}` | A saved map exists, or does not. |
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
-| `{"expect_sprites": 3}` | How many actor sprites actually exist in the world. |
+| `{"expect_sprites": 3}` | How many actor sprites are drawn **right now** — culled to the view, so pin the camera. |
+| `{"expect_drawn": {}}` | Every unit on the canvas has a sprite, and no sprite draws somebody off it or gone. |
+| `{"expect_world_sprites": {"min": 40, "max": 400}}` | How many sprites of any kind are on the world layer, as a range. |
 | `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
@@ -208,6 +220,28 @@ holding three entities and the screen showing three actors are separate claims, 
 second is the one that catches a renderer that has quietly stopped keeping up — which is
 the failure a screenshot is worst at showing, because a missing sprite looks like an
 actor that walked off the edge of the view.
+
+**Sprites are culled to the canvas** (`src/view.rs`), so `expect_sprites` counts who is
+*drawn*, not who exists, and a number asserted there is a claim about where the camera is.
+Pin it: pause with `{"key": "p"}`, `look_at` a cell, and `wait` or `tick` before asserting,
+since the camera moves on the next frame. Two assertions hold the culling contract without
+naming a count of actors:
+
+- **`expect_drawn`** checks both directions against a plain scan of every entity: a sprite
+  left behind by a unit that walked away fails it, and so does a unit standing in plain view
+  with nothing drawn. The rect it allows is rebuilt from the canvas image and the camera,
+  not read off `VisibleArea`, because the thing under test cannot also be the reference.
+  It holds wherever the camera points, so it is the one to scatter through a test that
+  pans. Actors only, and the game screen only.
+- **`expect_world_sprites`** counts everything on the world layer — tiles, props, actors,
+  overlays, parked bodies, the selection frame, and in the editor the cursor frame and
+  ghost (an empty editor is 2). Hidden sprites count, since Bevy pays for them too. `max` is
+  what notices a pool growing to the size of the crowd, since a parked body carries no
+  `Actor`. **`min` is not decoration**: an empty map satisfies every ceiling there is, and a
+  map window holding entities despawned under it — the blank-map-on-re-entry bug that
+  `reset_map_windows` fixed — draws exactly nothing. The floor caught it before the fix did.
+  In the editor it is also the only way to see a prop placed or erased
+  (`qa/place_props.json`).
 
 `expect_world_time` is a **floor**, not an equality, and that is not slack: a second of
 watching is two minutes of world (`sim/clock.rs`), and the game runs its own fixed steps
@@ -336,11 +370,14 @@ set against.
   quoting one. The profile and the vsync setting are recorded in the report for exactly
   this reason.
 
-### What the two that exist measure
+### What the three that exist measure
 
 `qa/perf_simulation.json` times ticks from an empty world up to 5000 actors on
 `qa/fixtures/plaza.json` (48x32, walls and pillars). `qa/perf_rendering.json` times frames
-with up to 1500 actors on screen, and photographs the crowd.
+with up to 1500 actors on it, and photographs the crowd. `qa/perf_huge_map.json` does both
+on `qa/fixtures/huge.json` (256x256) with up to 20000, which is where culling shows: the
+frame should barely move with the crowd, and `expect_world_sprites` holds the sprite count
+to the canvas at every size.
 
 Where they stood on an M3 when they were written:
 
@@ -349,12 +386,24 @@ Where they stood on an M3 when they were written:
 | a tick, 4000 wandering humans | 0.04ms | 0.04ms |
 | a frame, 1500 drawn actors | 1.1ms | 0.9ms |
 
-Two things worth knowing from that. The tick barely moves between profiles — the wander is
-trivial enough that `opt-level = 1` already handles it, which will stop being true as soon
-as there is pathfinding, so re-measure rather than assuming. And a frame costs about 0.6ms
-before any actor exists at all: at 1500 actors the crowd is a fifth of the frame, and every
-one of them has a sprite whether or not it is on the canvas, which is the culling and
-pooling gap `game/actors.rs` documents in its own header.
+The tick barely moved between profiles then — the wander was trivial enough that
+`opt-level = 1` handled it; there is pathfinding and biology now, so re-measure rather than
+assuming.
+
+Release on the Windows desktop, 2026-09-27, median frame of three runs, once culling and
+pooling had landed:
+
+| | before culling | now |
+| --- | --- | --- |
+| a frame, empty 256x256 map | 1.23ms | 0.92ms |
+| a frame, 20000 humans on it | 8.48ms | 1.95ms |
+| a frame, 1500 actors on plaza | | 1.09ms |
+| 20000 humans, simulation alone | | 1.08ms |
+
+**On Windows, a run pinned at ~16.6ms a frame is the compositor, not the code**: DWM
+forces vsync on a window that is not in the foreground, whatever `"vsync"` says. Leave the
+game window in front, and rerun rather than quote a run where every frame sits on the
+refresh interval.
 
 ## Screenshots
 

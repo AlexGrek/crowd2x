@@ -383,6 +383,9 @@ fn collect_visible_crowd(
 /// Three passes, because they are three different jobs against two collections
 /// — doing them in one loop would mean spawning into a map that is being
 /// walked and despawning out of it at the same time.
+// A system takes its dependencies as parameters; the lint counts a Bevy
+// signature as if it were a call site.
+#[allow(clippy::too_many_arguments)]
 fn sync_sprites(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -661,6 +664,9 @@ const GOAL_EMOJI_FADE: f32 = 3.0;
 /// Real time, [`Time`] rather than [`Time::<Fixed>`]: the fade is a reading
 /// aid, not a fact about the simulation, so it runs at the same rate whatever
 /// [`GameSpeed`] the world itself is ticking at.
+// A system takes its dependencies as parameters; the lint counts a Bevy
+// signature as if it were a call site.
+#[allow(clippy::too_many_arguments)]
 fn sync_goal_labels(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -685,10 +691,8 @@ fn sync_goal_labels(
             .entities()
             .get(*uid)
             .is_some_and(|entity| area.should_keep(world_pos(entity.position())));
-        if !keep {
-            if let Some(sprite) = label.sprite {
-                commands.entity(sprite).despawn();
-            }
+        if !keep && let Some(sprite) = label.sprite {
+            commands.entity(sprite).despawn();
         }
         keep
     });

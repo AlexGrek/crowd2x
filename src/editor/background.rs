@@ -7,8 +7,9 @@
 //! actor no matter where it is painted.
 //!
 //! This layer is the drawn face of [`Map`]'s terrain: painting writes the tile
-//! into the map first and only spawns a sprite if the map accepted it, so the
-//! screen cannot show a floor that no saved map contains. The two are linked
+//! into the map and nothing else, and what is on screen is drawn from the map
+//! (below), so the screen cannot show a floor that no saved map contains. The
+//! two are linked
 //! by **name** — a palette entry is called after the terrain it paints — which
 //! keeps the art here and the passability in `map::terrain` without either
 //! needing an index into the other.
@@ -262,7 +263,12 @@ pub fn sync_tile_window(
     if !area.ready {
         return;
     }
-    if area.tiles == window.rect && !window.dirty && !current.is_changed() {
+    // Not `current.is_changed()`: painting borrows the map mutably on every
+    // frame a brush is held, changed or not, so that flag would rescan the
+    // window for the whole of a drag. A paint that changed a cell says so
+    // with `touch`, and a map that was loaded arrived with a change of screen,
+    // which empties the window (`reset_map_windows`).
+    if area.tiles == window.rect && !window.dirty {
         return;
     }
 
@@ -381,10 +387,10 @@ fn release(
         commands.entity(entity).despawn();
         return;
     }
-    if let Ok((_, _, mut visibility)) = tiles.get_mut(entity) {
-        if *visibility != Visibility::Hidden {
-            *visibility = Visibility::Hidden;
-        }
+    if let Ok((_, _, mut visibility)) = tiles.get_mut(entity)
+        && *visibility != Visibility::Hidden
+    {
+        *visibility = Visibility::Hidden;
     }
     free.push(entity);
 }

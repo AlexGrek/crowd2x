@@ -217,16 +217,29 @@ somewhere else, which is what keeps a QA run from deleting real maps.
 ### The map editor
 
 The editor edits the open `CurrentMap`, not the screen: a click writes the tile or prop
-into the map and *then* spawns a sprite, so what is drawn cannot be something the saved
-file does not contain. Entering rebuilds the scene from the map; leaving despawns it and
-writes the map back (`F5` saves too, and so does closing the window — that path never runs
-`OnExit`). Painting outside the map's dimensions is refused rather than growing it.
+into the map **and nothing else**. What is on screen is drawn *from* the map, a canvas at a
+time, by two windows that follow the camera — `background::TileWindow` for terrain,
+`props::PropWindow` for props — so what is drawn cannot be something the saved file does
+not contain. Both run on the game screen too, which is why they are registered here, where
+the palettes live. Leaving writes the map back (`F5` saves too, and so does closing the
+window — that path never runs `OnExit`). Painting outside the map's dimensions is refused
+rather than growing it.
+
+**A window redraws when it is told to, never on `CurrentMap`'s change flag.** An edit that
+changed the map calls the window's `touch()`; loading a map needs no signal, because every
+load is a change of screen and `reset_map_windows` empties both windows on the way into
+either one. The change flag cannot be trusted to mean anything: the brush borrows the map
+mutably on every frame it is held, whether or not a cell changed, and a prop window that
+listened to it respawned every prop on screen — restarting every animation — 181 times in
+a second and a half of dragging. `qa/place_props.json` covers placing and erasing.
 
 `Tool` holds the active layer and a per-layer palette index. The two layers exist to be
 different, and new placeable content should respect that split:
 
 - `editor/background.rs` — one tile per grid cell at a single depth behind everything,
-  indexed by cell in the `Tiles` resource so painting can replace in place. Drag to paint.
+  drawn only for the cells under the canvas: `TileWindow` re-points the sprites of the row
+  or column that left the view at the one that arrived, and keeps a free list bounded by
+  the view (`pool::park_budget`) for the rest. Drag to paint.
   It is the drawn face of the map's terrain layer. `"block"` and anything named
   `"wall..."` are instruments rather than plain tiles (`Instrument`, in `editor/mod.rs`):
   a drag is a rectangle from corner to corner, held as a ghost preview and committed only
@@ -236,12 +249,16 @@ different, and new placeable content should respect that split:
 - `editor/props.rs` — free placement, depth from `characters::depth_for`, so props
   interleave with characters. One click, one prop; erase hits the nearest centre. These
   are the map's `Props` object layer, positioned in whole *pixels* rather than cells.
+  `PropWindow` draws the ones whose cell is under the canvas; it culls and does **not**
+  pool, since a prop's components depend on its art and recycling one would be an
+  archetype move, and props are few (the header of `props.rs` says when to revisit).
   **A prop blocks the cell its centre is in** (below); a new palette entry needs a
   matching `map::PROPS` entry, and two tests fail if the lists stop lining up.
   **A prop's art may be a strip** — `PaletteItem::animated(name, path, frames)`, frames of
   16x16 side by side in one PNG, stepped by `StripAnimation` (`Sprite::rect`, not a
-  texture atlas: a prop is spawned in four places, one of which runs before every
-  `Startup` system, and a rect needs nothing but the image). `.used(path, frames)` adds a
+  texture atlas: prop art is drawn by the window and by the cursor's ghost, which swaps
+  picture whenever the palette moves, and a rect needs nothing but the image).
+  `.used(path, frames)` adds a
   **second** strip for what it looks like while somebody is using it, which only the game
   screen ever shows (`game/props.rs`).
 
@@ -261,9 +278,9 @@ button on both.
 Playing a map: it is loaded, drawn, simulated and looked at. The simulation itself is not
 here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the bridge.
 
-- **It does not own the map's art.** Terrain and props go through `editor::draw_map`,
-  from the palettes the editor paints with, so one catalogue binds a tile's name to its
-  PNG instead of two that can drift apart.
+- **It does not own the map's art.** Terrain and props are drawn by the editor's two map
+  windows (`TileWindow`, `PropWindow`), from the palettes the editor paints with, so one
+  catalogue binds a tile's name to its PNG instead of two that can drift apart.
 - **It does not decide anything.** `actors.rs` builds a `GameState` from the open map,
   ticks it on `FixedUpdate`, and keeps one sprite alongside each entity — spawning for
   ids that appeared, despawning for ids that went, moving the rest to
@@ -274,7 +291,25 @@ here — it is `src/sim/`, below — and `game/actors.rs` is the whole of the br
   the difference is that on the canvas grid a character's pixels sit a third of a texel
   off the grid they are drawn on, and crossing a cell reads as being nudged between
   sub-positions rather than walking.
-  Sprites are not yet culled or pooled; the `dev` skill says why that is the next thing.
+- **It only draws what is on the canvas.** `src/view.rs` works out `VisibleArea` once a
+  frame, after the camera is snapped: `canvas` (exactly what is rendered), `actors`
+  (`canvas` grown by `characters::OVERHANG_*`, so a unit whose bar or goal label reaches
+  the canvas counts), `actors_keep` (`actors` grown by `HYSTERESIS`, one cell) and
+  `tiles` (the cells under the canvas, padded by one). `actors::collect_visible_crowd`
+  resolves it into `VisibleCrowd`, a list of slots, in one pass over the arena, and
+  everything that draws something about a unit — bodies, action bars, goal labels, held
+  items, props lighting up — reads that list instead of walking the crowd for itself.
+  A unit gets a sprite on entering `actors` and keeps it until it leaves `actors_keep`;
+  without that band a unit pacing the edge would swap archetypes every frame. A body
+  that leaves is **parked**, not despawned (`game/pool.rs`): hidden, `Actor` taken off,
+  redressed for whoever needs one next. The pool is bounded by the view
+  (`park_budget`: a quarter of the cells on screen, 16 to 256), because Bevy walks every
+  sprite entity each frame before it looks at visibility, so a hidden body is cheaper
+  than a spawn and is *not* free. The result is that the number of sprite entities is a
+  function of the canvas, not of the map or the crowd: twenty thousand humans on a
+  256x256 map draw a few dozen. **A culled unit can still be selected**: `Selected` holds
+  a `Uid`, picking asks `sim::Occupancy`, and the frame follows the simulated position,
+  so none of it depends on a sprite existing.
 - **It does not edit anything**, so leaving is instant and there is nothing to save. The
   simulation gets a *clone* of the map, so the editor's copy cannot move under it.
 - **It does not zoom the camera** — zooming is `PixelZoom`, above.
@@ -661,8 +696,11 @@ its palette entry. **In use is a fact about the unit, not about the prop**: a fe
 no state of its own, which is what lets the feature index be built once and read from
 every thread, so the question is asked of the crowd instead —
 `GameEntity::interacting_with` names the cell whoever is mid-`Action::Interact` is using,
-and a prop standing in one of those cells is in use. That is one pass over the entities a
-frame, skipped entirely on a map with no prop that could light up.
+and a prop standing in one of those cells is in use. Only the units on the canvas are asked
+(`VisibleCrowd`), since props are culled to the view too and whoever uses one is beside it
+or in it, and nothing is asked at all when no prop on screen could light up. One seam is
+left at the very edge: a computer at most half on screen, used from the cell beyond it by
+somebody not yet drawn, stays dark until the camera moves another half cell.
 
 Every `FeatureKind` also has an `Access`: `Beside` (the fridge and the computer, touched
 from next to them — a computer is a desk with chairs on four sides, so nobody queues for
@@ -851,13 +889,15 @@ Two things stop the numbers being lies: a test that measures frames must set `"v
 false`, or every frame is capped at the refresh rate and a regression only shows once the
 game is already below 60Hz; and a debug timing (this crate is `opt-level = 1` there) is
 good for a *ratio* and worthless as a speed, which is why the profile and the vsync
-setting are recorded in the report. `qa/perf_simulation.json` and `qa/perf_rendering.json`
-are the two that exist.
+setting are recorded in the report. `qa/perf_simulation.json`, `qa/perf_rendering.json`
+and `qa/perf_huge_map.json` (twenty thousand humans on a 256x256 map) are the three that
+exist.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
-`expect_sprites`, `expect_held`, `expect_selected`, `expect_carrying`, `expect_prop_in_use`,
-`expect_log`, `expect_world_time` — and `expect_tile` reads the **saved** map,
+`expect_sprites`, `expect_drawn`, `expect_world_sprites`, `expect_held`, `expect_selected`,
+`expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time` — and
+`expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -868,7 +908,30 @@ the selected unit has **stowed** — what is in its hand is not stowed, which is
 distinction the whole inventory is built on. `expect_entities` and
 `expect_sprites` are deliberately two assertions: the simulation having three entities and
 the screen showing three actors are different claims, and the second is the one that
-catches a renderer that has quietly stopped keeping up. `expect_held` is the same split for
+catches a renderer that has quietly stopped keeping up.
+
+**Since sprites are culled, `expect_sprites` means "drawn right now"**, not "exists": a unit
+off the edge of the view is supposed to have none. A number asserted there is a claim about
+where the camera is, so pin it — pause with `{"key": "p"}` and aim with `{"look_at": {"x":
+3, "y": 2}}` (cell units, through the same map clamp as panning, taking effect next frame,
+so `wait` or `tick` before asserting). Two assertions carry the culling contract without
+naming a number:
+
+- `{"expect_drawn": {}}` — every unit on the canvas has a sprite and no sprite draws
+  somebody off it or gone. It is checked against a rect rebuilt from the canvas image and
+  the camera rather than read off `VisibleArea`, because an assertion phrased in terms of
+  the thing under test can only ask whether the renderer agrees with itself. Holds wherever
+  the camera is pointing; actors only.
+- `{"expect_world_sprites": {"min": 40, "max": 400}}` — everything on the world layer:
+  tiles, props, actors, overlays, parked bodies, the selection frame. `max` is the
+  structural form of "what is drawn is bounded by the canvas", and the only check that
+  sees a pool growing to the size of the crowd, since a parked body carries no `Actor`.
+  **The `min` matters as much**: an empty map satisfies every ceiling there is, and a map
+  window still holding entities despawned under it — which is what showed a blank map on
+  re-entering a screen, until `reset_map_windows` — draws exactly that. The floor caught
+  it before the fix did.
+
+`expect_held` is the same split for
 what is carried: it counts the sprites drawing an item, per kind, in anybody's hand, so a
 hand that is full and a picture that was never drawn — or was drawn for the wrong item —
 are told apart. Placement is not something a count can say, so `qa/held_items.json` also
@@ -916,12 +979,16 @@ delete maps somebody meant to keep; `tools/qa.py` gives each test its own.
 src/main.rs             app + window setup, plugin registration
 src/state.rs            AppState
 src/render.rs           PixelRenderPlugin - the pixel-perfect pipeline
+src/view.rs             VisibleArea - what is on the canvas, and near enough to it to
+                        matter; everything that culls reads it
 src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (typing)
 src/menu.rs             MainMenuPlugin
-src/editor/             EditorPlugin, background.rs + props.rs
+src/editor/             EditorPlugin, background.rs + props.rs; TileWindow and
+                        PropWindow draw the map a canvas at a time, on both screens
 src/browser.rs          BrowserPlugin - the saved-maps screen
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
+                        pool.rs parks bodies that left the view, bounded by the view
                         speed.rs is how fast the world runs; hud.rs the two corners
                         selection.rs is who was clicked; unitpanel.rs the bar about them
                         props.rs lights up a prop while somebody is using it

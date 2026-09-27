@@ -130,7 +130,7 @@ pub fn item_of(kind: &ObjectKind) -> Option<usize> {
 
 /// Put a prop in the map. What draws it is [`sync_prop_window`], from the map,
 /// so this cannot show a prop the saved file does not contain.
-pub fn place(map: &mut Map, pos: Vec2, item: usize) {
+pub fn place(window: &mut PropWindow, map: &mut Map, pos: Vec2, item: usize) {
     // Whole pixels only: a sprite on a fractional coordinate samples between
     // texels and puts a seam through the pixel grid. It is also what lets a
     // position be an exact key when the prop is erased again.
@@ -144,6 +144,7 @@ pub fn place(map: &mut Map, pos: Vec2, item: usize) {
             kind: ObjectKind::new(PALETTE[item].name),
         },
     );
+    window.touch();
 }
 
 /// Delete the prop nearest the cursor, if one is close enough.
@@ -152,6 +153,7 @@ pub fn place(map: &mut Map, pos: Vec2, item: usize) {
 /// — so this matches on distance to the centre rather than pretending every
 /// prop has the same bounding box.
 pub fn erase_nearest(
+    window: &mut PropWindow,
     map: &mut Map,
     props: &Query<(Entity, &Prop, &Transform)>,
     pos: Vec2,
@@ -170,9 +172,11 @@ pub fn erase_nearest(
 
     if let Some((_, prop, _)) = nearest {
         // One object per sprite, so a stack of props erases one at a time.
-        // The sprite goes when the window notices the map changed, which is
+        // The sprite goes when the window is told the map changed, which is
         // the same route placing one takes.
-        map.remove_object(ObjectLayer::Props, &prop.object());
+        if map.remove_object(ObjectLayer::Props, &prop.object()) {
+            window.touch();
+        }
     }
 }
 
@@ -195,6 +199,8 @@ pub struct PropWindow {
     /// What `drawn` covers, so a camera that has not crossed a cell boundary
     /// does no work.
     rect: CellRect,
+    /// Set when a prop was placed or erased, so the next run rebuilds.
+    dirty: bool,
 }
 
 impl PropWindow {
@@ -203,6 +209,19 @@ impl PropWindow {
     pub fn clear(&mut self) {
         self.drawn.clear();
         self.rect = CellRect::EMPTY;
+        self.dirty = false;
+    }
+
+    /// Say the layer changed, as [`background::TileWindow::touch`] does and
+    /// for the same reason: `CurrentMap`'s change flag cannot be trusted to
+    /// mean it. The editor borrows the map mutably on every frame a brush is
+    /// held, whether or not a cell changed, and a window that rebuilt on that
+    /// flag respawned every prop on screen — restarting every animation — for
+    /// the whole of a drag. A map *loaded* needs no flag at all: every load is
+    /// a change of screen, and `reset_map_windows` empties the window on the
+    /// way in.
+    pub fn touch(&mut self) {
+        self.dirty = true;
     }
 }
 
@@ -210,7 +229,7 @@ impl PropWindow {
 ///
 /// Scanned straight out of the map's object layer rather than through an index
 /// of its own: props are a `Vec` of a few hundred at most, and this runs only
-/// when the view moved by a whole cell or the map changed.
+/// when the view moved by a whole cell or a prop was placed or erased.
 pub fn sync_prop_window(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -222,20 +241,20 @@ pub fn sync_prop_window(
     if !area.ready {
         return;
     }
-    let edited = current.is_changed();
-    if area.tiles == window.rect && !edited {
+    if area.tiles == window.rect && !window.dirty {
         return;
     }
 
     // Placing or erasing renumbers the layer, so an index is only meaningful
-    // within one version of the map. Rather than track that, a map that
-    // changed rebuilds the window outright — a few hundred objects, and only
-    // on the frame an edit landed.
-    if edited {
+    // within one version of the map. Rather than track that, an edit rebuilds
+    // the window outright — a few hundred objects, and only on the frame an
+    // edit landed.
+    if window.dirty {
         for (_, entity) in window.drawn.drain() {
             commands.entity(entity).despawn();
         }
         window.rect = CellRect::EMPTY;
+        window.dirty = false;
     }
 
     let objects = current.map.objects(ObjectLayer::Props);
@@ -257,16 +276,13 @@ pub fn sync_prop_window(
         if !on_canvas(object) || window.drawn.contains_key(&index) {
             continue;
         }
-        match item_of(&object.kind) {
-            Some(item) => {
-                let prop = spawn_prop(&mut commands, &assets, object.at, item, *state.get());
-                window.drawn.insert(index, prop);
-            }
-            // Left in the map, so saving does not delete a prop this build
-            // merely has no picture for. Not warned here: this runs every time
-            // the view moves, and a map with one unknown prop would fill the
-            // log with it.
-            None => {}
+        // One this build has no art for is left in the map, so saving does
+        // not delete a prop it merely has no picture for. Not warned here:
+        // this runs every time the view moves, and a map with one unknown prop
+        // would fill the log with it.
+        if let Some(item) = item_of(&object.kind) {
+            let prop = spawn_prop(&mut commands, &assets, object.at, item, *state.get());
+            window.drawn.insert(index, prop);
         }
     }
 

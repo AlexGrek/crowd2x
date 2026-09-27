@@ -87,6 +87,9 @@ fn forget_the_sprites(mut held: ResMut<HeldSprites>) {
 }
 
 /// Make the pictures match the hands.
+// A system takes its dependencies as parameters; the lint counts a Bevy
+// signature as if it were a call site.
+#[allow(clippy::too_many_arguments)]
 fn sync_held_items(
     mut commands: Commands,
     assets: Res<AssetServer>,

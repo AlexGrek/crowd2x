@@ -81,6 +81,7 @@ impl ActorPool {
 
     /// How many bodies are parked, for the assertion that the pool stayed
     /// bounded.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.humans.len() + self.dogs.len()
     }

@@ -477,10 +477,9 @@ impl Plugin for EditorPlugin {
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
-            // The terrain window runs on both screens that draw a map, after
-            // the view it follows is known. Registered here because this is
-            // where the palettes live; the game screen is a consumer of it,
-            // exactly as it is of `draw_map`.
+            // Both map windows run on both screens that draw a map, after the
+            // view they follow is known. Registered here because this is where
+            // the palettes live; the game screen is a consumer of them.
             .add_systems(
                 Update,
                 (background::sync_tile_window, props::sync_prop_window)
@@ -809,6 +808,7 @@ fn edit(
     tool: Res<Tool>,
     cursor: Res<Cursor>,
     mut window: ResMut<background::TileWindow>,
+    mut prop_window: ResMut<props::PropWindow>,
     mut current: ResMut<CurrentMap>,
     mut rect: ResMut<RectangleDrag>,
     placed: Query<(Entity, &props::Prop, &Transform)>,
@@ -911,9 +911,9 @@ fn edit(
         // One press, one prop.
         Layer::Props => {
             if place_once {
-                props::place(&mut current.map, world, tool.props);
+                props::place(&mut prop_window, &mut current.map, world, tool.props);
             } else if erase_once {
-                props::erase_nearest(&mut current.map, &placed, world);
+                props::erase_nearest(&mut prop_window, &mut current.map, &placed, world);
             }
         }
     }

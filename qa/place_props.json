@@ -1,0 +1,41 @@
+{
+  "name": "a prop placed or erased in the editor appears and goes, and dragging a brush beside it leaves it alone",
+  "state": "editor",
+  "given": { "maps": ["studio"] },
+  "open": "studio",
+  "steps": [
+    { "note": "props are drawn by editor::props::PropWindow from the map, and it only redraws when told the map changed" },
+    { "note": "two world sprites before anything is placed: the cursor frame and the ghost" },
+    { "tool": "computer" },
+    { "cursor_cell": { "x": 3, "y": 2 } },
+    { "wait": 0.2 },
+    { "expect_world_sprites": { "min": 2, "max": 2 } },
+
+    { "note": "placing one draws it, which is PropWindow::touch doing its job" },
+    { "click": {} },
+    { "wait": 0.2 },
+    { "expect_world_sprites": { "min": 3, "max": 3 } },
+    { "shot": "a computer placed" },
+
+    { "note": "a plain brush held beside it paints one tile. It also borrows the map mutably every frame it is held," },
+    { "note": "which used to respawn every prop on screen every frame; that is not countable from here, and 181 spawns" },
+    { "note": "in 1.5s against 1 was measured by hand. What this does hold is that the drag ends with the prop still drawn" },
+    { "tool": "floor" },
+    { "cursor_cell": { "x": 5, "y": 2 } },
+    { "click": { "seconds": 1.0 } },
+    { "wait": 0.2 },
+    { "expect_world_sprites": { "min": 4, "max": 4 } },
+
+    { "note": "erasing it takes the sprite away again, by the same route" },
+    { "tool": "computer" },
+    { "cursor_cell": { "x": 3, "y": 2 } },
+    { "click": { "button": "right" } },
+    { "wait": 0.2 },
+    { "expect_world_sprites": { "min": 3, "max": 3 } },
+    { "shot": "the computer erased, the floor tile left" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_tile": { "map": "studio", "x": 5, "y": 2, "terrain": "floor" } }
+  ]
+}

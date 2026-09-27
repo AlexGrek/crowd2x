@@ -461,6 +461,9 @@ struct Devices<'w> {
     pad_input: MessageWriter<'w, RawGamepadEvent>,
 }
 
+/// A sprite or a piece of text: anything that can put pixels in the world.
+type DrawnInTheWorld = Or<(With<Sprite>, With<Text2d>)>;
+
 /// Everything a check might look at, and everything an intent step reaches
 /// for: the labels a widget is addressed by, and the two resources the editor
 /// is aimed with.
@@ -490,10 +493,10 @@ struct Checks<'w, 's> {
     /// what is drawing somebody and never what is merely waiting to.
     sprites: Query<'w, 's, &'static Actor>,
     /// Everything drawn into the world, of any kind, for
-    /// [`Step::ExpectWorldSpritesUnder`] — the bound that says what is on
-    /// screen is a function of the canvas. `Text2d` as well as `Sprite`,
-    /// because the goal labels and the emoji items are text.
-    world_sprites: Query<'w, 's, &'static RenderLayers, Or<(With<Sprite>, With<Text2d>)>>,
+    /// [`Step::ExpectWorldSprites`] — the bound that says what is on screen
+    /// is a function of the canvas. `Text2d` as well as `Sprite`, because the
+    /// goal labels and the emoji items are text.
+    world_sprites: Query<'w, 's, &'static RenderLayers, DrawnInTheWorld>,
     /// What is on the canvas, for the two assertions about culling.
     area: Res<'w, VisibleArea>,
     /// The props that show whether they are being used, for

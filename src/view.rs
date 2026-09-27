@@ -122,6 +122,7 @@ impl CellRect {
     }
 
     /// The part of `self` that is also in `other`.
+    #[cfg(test)]
     pub fn intersect(&self, other: Self) -> Self {
         if self.is_empty() || other.is_empty() {
             return Self::EMPTY;
