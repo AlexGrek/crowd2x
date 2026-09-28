@@ -17,6 +17,7 @@ use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
+use super::super::tasks::{CLOSE_SECONDS, OPEN_SECONDS};
 use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
 
 /// A world minute at the fridge getting a drink out of it: half as long as
@@ -34,8 +35,12 @@ pub enum Stage {
     Clearing,
     /// On the way to it.
     Walking,
+    /// Opening the fridge's door.
+    Opening,
     /// Standing at it, taking a drink out.
     Taking,
+    /// Closing the fridge's door again.
+    Closing,
     /// Water in hand, drinking.
     Drinking,
 }
@@ -48,7 +53,9 @@ impl Stage {
             Some(Task::ConsumeItem(_)) => Stage::Clearing,
             // A wait is only ever queued in front of a walk.
             Some(Task::MoveTo(_) | Task::Wait(_)) => Stage::Walking,
+            Some(Task::OpenFridge(_)) => Stage::Opening,
             Some(Task::TakeItem(_)) => Stage::Taking,
+            Some(Task::CloseFridge(_)) => Stage::Closing,
             None | Some(Task::UseToilet(_) | Task::UseComputer(_) | Task::Sleep(_)) => Stage::Finding,
         }
     }
@@ -58,7 +65,9 @@ impl Stage {
             Stage::Finding => "finding",
             Stage::Clearing => "clearing its hand",
             Stage::Walking => "walking",
+            Stage::Opening => "opening the fridge",
             Stage::Taking => "taking",
+            Stage::Closing => "closing the fridge",
             Stage::Drinking => "drinking",
         }
     }
@@ -88,11 +97,15 @@ impl DrinkGoal {
 
     /// Queue the rest of the drink **from what is true now**, on the back of
     /// the queue: water already in hand is drunk; otherwise walk beside the
-    /// fridge (unless already there), take water, drink it. Anything else in
-    /// hand is finished first, since taking needs an empty hand — food taken
-    /// just before thirst took over would otherwise make every drink fail,
-    /// with nothing hungry enough left in charge to eat it. `false` when there
-    /// is nowhere to stand to use the fridge.
+    /// fridge (unless already there), open it, take water, close it, drink
+    /// it. Anything else in hand is finished first, since taking needs an
+    /// empty hand — food taken just before thirst took over would otherwise
+    /// make every drink fail, with nothing hungry enough left in charge to
+    /// eat it. `false` when there is nowhere to stand to use the fridge.
+    ///
+    /// **The plan resumes from the world here too**, the same as a meal's:
+    /// water already in hand, standing beside the fridge it came from, with
+    /// that fridge still open, closes it before drinking.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
         let held = held(ctx);
         if held != Some(ItemKind::Water) {
@@ -109,7 +122,14 @@ impl DrinkGoal {
             if let Stand::At(cell) = stand {
                 let _ = ctx.tasks.push_back(Task::move_to(cell));
             }
+            let _ = ctx.tasks.push_back(Task::open_fridge(fridge, OPEN_SECONDS));
             let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Water, POUR_SECONDS));
+            let _ = ctx.tasks.push_back(Task::close_fridge(fridge, CLOSE_SECONDS));
+        } else if let Some(fridge) = self.target
+            && ctx.body.center_position().manhattan_distance(fridge) <= 1
+            && ctx.think.fridges.is_open(fridge)
+        {
+            let _ = ctx.tasks.push_back(Task::close_fridge(fridge, CLOSE_SECONDS));
         }
         let _ = ctx
             .tasks
@@ -252,10 +272,15 @@ impl GoalExecutor for DrinkGoal {
 mod tests {
     use super::*;
     use crate::map::{Map, Size, FLOOR, WALL};
+    use crate::sim::brain::memory::Memory;
+    use crate::sim::brain::perception::Perception;
     use crate::sim::brain::routines::{QUENCHED, SATED};
+    use crate::sim::brain::task::Tasks;
     use crate::sim::brain::GoalId;
+    use crate::sim::entity::Body;
     use crate::sim::item::{DRINK, MEAL};
     use crate::sim::testing::{needy_human, prop_at, World};
+    use crate::sim::uid::{EntityType, Uid};
     use crate::sim::{GameEntity, Human};
 
     /// Thirsty, and nothing else pressing.
@@ -367,6 +392,139 @@ mod tests {
         assert_eq!(first, Some(GoalId::Drink), "thirst was the worse of the two");
         assert!(world.meals() > 0 && world.drinks() > 0, "brain: {:?}", human.brain_fields());
         assert_eq!(human.brain().top_goal(), GoalId::Wander, "both seen to: {:?}", human.stats());
+    }
+
+    #[test]
+    fn a_thirsty_human_opens_the_fridge_before_taking_and_closes_it_after() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let fridge = Point::new(5, 5);
+        prop_at(&mut map, "fridge", fridge);
+        let mut world = World::new(map);
+        let mut human = thirsty_human(Point::new(2, 2), 90.0);
+
+        for _ in 0..3000 {
+            world.step(&mut human);
+            if world.log_contains("drank at the fridge") {
+                break;
+            }
+        }
+        assert!(world.log_contains("drank at the fridge"), "brain: {:?}", human.brain_fields());
+        let position = |needle: &str| world.lines().iter().position(|line| line.contains(needle));
+        let (opened, closed, drank) = (
+            position("opened the fridge").expect("should have opened it"),
+            position("closed the fridge").expect("should have closed it"),
+            position("drank at the fridge").expect("should have drunk"),
+        );
+        assert!(opened < closed && closed < drank, "wrong order: opened {opened}, closed {closed}, drank {drank}");
+        assert!(!world.fridges.is_open(fridge), "should have left the fridge closed");
+    }
+
+    #[test]
+    fn the_fridge_warms_while_the_drink_is_poured_and_cools_back_down_afterwards() {
+        // See the sibling test in `eat.rs` for why this asserts the sequence
+        // — warmed, then cooled — rather than a temperature at a fixed tick:
+        // a thirst this high drinks twice and keeps getting thirsty again as
+        // world time passes, so the fridge may cycle more than once.
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let fridge = Point::new(5, 5);
+        prop_at(&mut map, "fridge", fridge);
+        let mut world = World::new(map);
+        let mut human = thirsty_human(Point::new(2, 2), 90.0);
+
+        let mut warmed = false;
+        let mut cooled = false;
+        for _ in 0..40_000 {
+            world.step(&mut human);
+            let temperature = world.fridges.temperature(fridge);
+            warmed |= temperature > crate::sim::fridge::COLDEST + 0.5;
+            if warmed && !world.fridges.is_open(fridge) && temperature < crate::sim::fridge::COLDEST + 0.5 {
+                cooled = true;
+                break;
+            }
+        }
+        assert!(warmed, "the fridge should have warmed up while its door was open");
+        assert!(cooled, "the fridge never cooled back down after warming up");
+    }
+
+    /// `GoalCtx` fields are all `pub`, so this drives `DrinkGoal::prioritized`
+    /// directly rather than through a full simulation — see the sibling pair
+    /// in `eat.rs` for why.
+    #[test]
+    fn a_human_holding_water_beside_a_fridge_it_left_open_closes_it_before_drinking() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let fridge = Point::new(5, 5);
+        prop_at(&mut map, "fridge", fridge);
+        let mut world = World::new(map);
+        assert!(world.fridges.set_open(fridge, true));
+
+        let mut goal = DrinkGoal {
+            stage: Stage::Finding,
+            target: Some(fridge),
+            retries: 0,
+        };
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(4, 5));
+        let mut memory = Memory::default();
+        let mut tasks = Tasks::new();
+        let mut inventory = Inventory::human();
+        let _ = inventory.set_hand(Some(ItemKind::Water));
+        let perception = Perception;
+        let think = world.ctx();
+        let mut ctx = GoalCtx {
+            think: &think,
+            body: &body,
+            perception: &perception,
+            biology: None,
+            memory: &mut memory,
+            tasks: &mut tasks,
+            inventory: Some(&inventory),
+            blocked_by: None,
+            finished: None,
+        };
+
+        goal.prioritized(&mut ctx);
+
+        assert_eq!(tasks.front(), Some(Task::close_fridge(fridge, CLOSE_SECONDS)));
+        assert_eq!(tasks.back(), Some(Task::consume(ItemKind::Water, ItemKind::Water.consume_seconds())));
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn a_human_holding_water_far_from_the_fridge_it_left_open_does_not_close_it() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let fridge = Point::new(5, 5);
+        prop_at(&mut map, "fridge", fridge);
+        let mut world = World::new(map);
+        assert!(world.fridges.set_open(fridge, true));
+
+        let mut goal = DrinkGoal {
+            stage: Stage::Finding,
+            target: Some(fridge),
+            retries: 0,
+        };
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+        let mut memory = Memory::default();
+        let mut tasks = Tasks::new();
+        let mut inventory = Inventory::human();
+        let _ = inventory.set_hand(Some(ItemKind::Water));
+        let perception = Perception;
+        let think = world.ctx();
+        let mut ctx = GoalCtx {
+            think: &think,
+            body: &body,
+            perception: &perception,
+            biology: None,
+            memory: &mut memory,
+            tasks: &mut tasks,
+            inventory: Some(&inventory),
+            blocked_by: None,
+            finished: None,
+        };
+
+        goal.prioritized(&mut ctx);
+
+        assert_eq!(tasks.len(), 1, "only the drink itself, no close queued");
+        assert_eq!(tasks.front(), Some(Task::consume(ItemKind::Water, ItemKind::Water.consume_seconds())));
+        assert!(world.fridges.is_open(fridge), "left open, for somebody else to close");
     }
 
     #[test]

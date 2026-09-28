@@ -77,7 +77,7 @@ use super::entity::Think;
 use super::inventory::Inventory;
 use super::uid::Uid;
 use super::walker::Walker;
-use super::MoveOutcome;
+use super::{Effect, MoveOutcome};
 
 use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SleepGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
@@ -187,7 +187,7 @@ impl Brain {
         walk: &mut Walker,
         mut biology: Option<&mut Biology>,
         mut inventory: Option<&mut Inventory>,
-    ) {
+    ) -> Effect {
         // Disjoint field borrows, so the compiler is what checks the steps
         // below do not overlap — the same trick `process_pass` uses.
         let Brain {
@@ -286,7 +286,9 @@ impl Brain {
             }
         }
 
-        // 6. The current task's executor, which writes the task's result.
+        // 6. The current task's executor, which writes the task's result and
+        // may ask something of the world beyond this entity.
+        let mut effect = Effect::None;
         if task.is_none() {
             *task = tasks.pop_front();
         }
@@ -298,6 +300,7 @@ impl Brain {
                 action: &mut *action,
                 biology: biology.as_deref_mut(),
                 inventory: inventory.as_deref_mut(),
+                effect: &mut effect,
             });
             tasks.set_result(result);
             if result.is_finished() {
@@ -311,6 +314,7 @@ impl Brain {
                 walk.halt();
             }
         }
+        effect
     }
 
     pub fn goals(&self) -> &Goals {
@@ -464,8 +468,8 @@ mod tests {
         fn apply(&mut self, intent: &Intent) {
             self.walk.apply(intent);
         }
-        fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
-            self.brain.react(ctx, outcome, &mut self.walk, None, None);
+        fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+            self.brain.react(ctx, outcome, &mut self.walk, None, None)
         }
     }
 

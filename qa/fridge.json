@@ -1,0 +1,76 @@
+{
+  "name": "a hungry human opens the fridge, takes food, closes it again, and eats",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "kitchen",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 456, "y": 264 }, "kind": "fridge" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "kitchen",
+  "steps": [
+    { "note": "the fridge sits in cell (9, 5): x 9*48+24, y 5*48+24, and a map's objects are in pixels" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "expect_entities": 0 },
+    { "shot": "an empty kitchen with a fridge in it" },
+
+    { "note": "one human, in the far corner from the fridge; every need is rolled at spawn" },
+    { "spawn": { "kind": "human", "x": 2, "y": 1 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "thirst, a bladder, boredom and tiredness switched off, so this is a test about" },
+    { "note": "hunger and the fridge's door alone, not a race between five needs" },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "press": "brains" },
+    { "shot": "a new human, and what its mind is doing" },
+
+    { "note": "a stomach goes from full to starving in eight hours of world, so eating takes" },
+    { "note": "over about five hours after a meal — and a second of watching is two minutes of" },
+    { "note": "world, so 20000 ticks is ten hours: enough however full it was born" },
+    { "tick": 20000 },
+    { "expect_entities": 1 },
+    { "expect_log": "opened the fridge at 9, 5" },
+    { "expect_log": "closed the fridge at 9, 5" },
+    { "expect_log": "ate at the fridge at 9, 5" },
+    { "expect_selected": "human" },
+    { "shot": "after a meal, the door shut again, and the brains menu saying so" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "kitchen" }
+  ]
+}

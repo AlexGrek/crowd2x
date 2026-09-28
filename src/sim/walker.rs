@@ -370,6 +370,7 @@ mod tests {
     use crate::map::{Map, Size, FLOOR, WALL};
     use crate::sim::entity::cell_of;
     use crate::sim::feature::Features;
+    use crate::sim::fridge::Fridges;
     use crate::sim::log::Log;
     use crate::sim::occupancy::Occupancy;
     use crate::sim::uid::EntityType;
@@ -379,6 +380,7 @@ mod tests {
         occupancy: Occupancy,
         log: Log,
         features: Features,
+        fridges: Fridges,
     }
 
     impl World {
@@ -388,6 +390,7 @@ mod tests {
                 map,
                 log: Log::new(),
                 features: Features::default(),
+                fridges: Fridges::default(),
             }
         }
 
@@ -397,6 +400,7 @@ mod tests {
                 occupancy: &self.occupancy,
                 log: &self.log,
                 features: &self.features,
+                fridges: &self.fridges,
                 dt: 1.0 / 60.0,
                 tick,
                 clock: crate::sim::clock::Clock::after_watching(0.0),

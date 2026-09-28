@@ -308,12 +308,18 @@ mod tests {
 
     fn priority_in(routine: &mut NeedRoutine, biology: &Biology) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
-        let (occupancy, log, features) = (Occupancy::new(map.size()), Log::new(), Features::default());
+        let (occupancy, log, features, fridges) = (
+            Occupancy::new(map.size()),
+            Log::new(),
+            Features::default(),
+            crate::sim::fridge::Fridges::default(),
+        );
         let think = Think {
             map: &map,
             occupancy: &occupancy,
             log: &log,
             features: &features,
+            fridges: &fridges,
             dt: 1.0 / 60.0,
             tick: 0,
             clock: crate::sim::clock::Clock::after_watching(0.0),
@@ -470,12 +476,18 @@ mod tests {
     /// The priority `routine` gives sleep for `biology`, at `clock`.
     fn sleep_priority(routine: &mut SleepRoutine, biology: &Biology, clock: Clock) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
-        let (occupancy, log, features) = (Occupancy::new(map.size()), Log::new(), Features::default());
+        let (occupancy, log, features, fridges) = (
+            Occupancy::new(map.size()),
+            Log::new(),
+            Features::default(),
+            crate::sim::fridge::Fridges::default(),
+        );
         let think = Think {
             map: &map,
             occupancy: &occupancy,
             log: &log,
             features: &features,
+            fridges: &fridges,
             dt: 1.0 / 60.0,
             tick: 0,
             clock,

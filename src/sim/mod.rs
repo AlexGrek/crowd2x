@@ -46,7 +46,7 @@
 //! **The processing pass** advances every entity and adds or removes none. It
 //! is handed a [`FrozenEntities`] — the table with its membership frozen,
 //! offering no `insert` and no `remove` — so that is a guarantee the compiler
-//! holds, not a rule to remember. Inside it, three steps:
+//! holds, not a rule to remember. Inside it, four steps:
 //!
 //! 1. **Think.** Read-only over the entities and the map. Every entity returns
 //!    an [`Intent`] into a slot-indexed buffer. Nothing is mutated, so there
@@ -57,7 +57,13 @@
 //!    lands in a second slot-indexed buffer as a [`MoveOutcome`].
 //! 3. **React.** Every entity is handed its own outcome, once the whole crowd
 //!    has moved. This is the second thinking round: an entity whose move was
-//!    cancelled decides here what that means for its plan.
+//!    cancelled decides here what that means for its plan. It may write only
+//!    to itself, and hands back an [`Effect`] for anything it wants to ask of
+//!    the world beyond itself, into a third slot-indexed buffer.
+//! 4. **World.** Single-threaded, slots in ascending order, like move: every
+//!    [`Effect`] is applied — today, a fridge's door — and then the world's
+//!    own state that is not any one entity's, so far only [`Fridges`], moves
+//!    on by the tick's worth of world time. See [`world_step`].
 //!
 //! **The intent buffer is the double buffer.** The `dev` skill asks for
 //! read-from-A-write-to-B, and this is that, without cloning an entity: think
@@ -127,6 +133,7 @@ pub mod clock;
 pub mod entities;
 pub mod entity;
 pub mod feature;
+pub mod fridge;
 pub mod homes;
 pub mod identity;
 pub mod inventory;
@@ -153,6 +160,7 @@ pub use clock::Clock;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
+pub use fridge::Fridges;
 pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
@@ -220,6 +228,25 @@ impl MoveOutcome {
             _ => None,
         }
     }
+}
+
+/// A change asked for *outside* the entity that asked for it.
+///
+/// [`Intent`]'s counterpart for the one kind of change react is not allowed to
+/// make directly: **react may write only to itself** ([`GameEntity::react`]),
+/// so a fridge's door — a fact about the world, read by every entity beside
+/// it — cannot be flipped from inside the parallel round that produces this.
+/// An `Effect` is the request; [`world_step`] is the sequential step,
+/// afterwards, that is allowed to grant it. Small and `Copy` for the same
+/// reason `Intent` is: one per entity per tick, in a buffer that is reused
+/// rather than reallocated.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Effect {
+    /// Nothing. What every entity that never touches a fridge returns.
+    #[default]
+    None,
+    /// Open or close the fridge at `at`.
+    Fridge { at: Point, open: bool },
 }
 
 /// Something done *to* the world, from outside it.
@@ -341,6 +368,10 @@ pub struct GameState {
     /// Where the props a brain can use are. Derived from `map` once, here,
     /// and never again: the simulation's map does not change.
     features: Features,
+    /// Every fridge's door and temperature. Derived from `map` once, like
+    /// `features` — but unlike it, what is stored here changes every tick a
+    /// door is open, through [`Effect::Fridge`] and [`world_step`].
+    fridges: Fridges,
     /// Which beds have been given to whom. Written by the spawn pass and read
     /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
     homes: Homes,
@@ -355,6 +386,10 @@ pub struct GameState {
     /// What the move step made of each intent, read by the reaction round.
     /// Indexed by [`Slot`] and sized alongside [`GameState::intents`].
     moves: Vec<MoveOutcome>,
+    /// What each entity asked of the world beyond itself, written by react
+    /// and drained by [`world_step`] at the end of the tick. Indexed by
+    /// [`Slot`] and sized alongside [`GameState::intents`].
+    effects: Vec<Effect>,
 }
 
 impl GameState {
@@ -367,6 +402,7 @@ impl GameState {
         GameState {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map),
+            fridges: Fridges::from_map(&map),
             homes: Homes::new(),
             map,
             entities: Entities::new(),
@@ -376,6 +412,7 @@ impl GameState {
             elapsed: 0.0,
             intents: Vec::new(),
             moves: Vec::new(),
+            effects: Vec::new(),
         }
     }
 
@@ -386,6 +423,11 @@ impl GameState {
     /// What the map's props are for, and where. See [`feature`].
     pub fn features(&self) -> &Features {
         &self.features
+    }
+
+    /// Every fridge's door and temperature. See [`fridge`].
+    pub fn fridges(&self) -> &Fridges {
+        &self.fridges
     }
 
     /// Which beds belong to whom. See [`homes`].
@@ -479,9 +521,11 @@ impl GameState {
         if self.intents.len() <= slot as usize {
             self.intents.resize(slot as usize + 1, Intent::Idle);
             self.moves.resize(slot as usize + 1, MoveOutcome::Idle);
+            self.effects.resize(slot as usize + 1, Effect::None);
         }
         self.intents[slot as usize] = Intent::Idle;
         self.moves[slot as usize] = MoveOutcome::Idle;
+        self.effects[slot as usize] = Effect::None;
 
         // Takes the cell if it is free, and leaves whoever is already there in
         // possession if it is not — an entity is placed where it was asked
@@ -694,10 +738,10 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
 
 /// **The processing pass: advances every entity, and adds or removes none.**
 ///
-/// Three steps — [`think_step`], [`move_step`], [`react_step`] — over a table
-/// whose membership is frozen: it is handed a [`FrozenEntities`], which has no
-/// `insert` and no `remove`, so this is a guarantee the compiler holds rather
-/// than a rule to remember.
+/// Four steps — [`think_step`], [`move_step`], [`react_step`], [`world_step`]
+/// — over a table whose membership is frozen: it is handed a
+/// [`FrozenEntities`], which has no `insert` and no `remove`, so this is a
+/// guarantee the compiler holds rather than a rule to remember.
 ///
 /// Two things follow from the table's shape being fixed here, and both are the
 /// reason for the split:
@@ -728,9 +772,11 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         occupancy,
         log,
         features,
+        fridges,
         tick,
         intents,
         moves,
+        effects,
         ..
     } = state;
 
@@ -739,10 +785,11 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // Sized by the spawn pass, which is the only thing that can change the
     // arena. If this ever trips, something grew the table outside that pass.
     debug_assert!(
-        intents.len() >= table.capacity() && moves.len() >= table.capacity(),
-        "the slot buffers ({}, {}) are shorter than the entity table ({})",
+        intents.len() >= table.capacity() && moves.len() >= table.capacity() && effects.len() >= table.capacity(),
+        "the slot buffers ({}, {}, {}) are shorter than the entity table ({})",
         intents.len(),
         moves.len(),
+        effects.len(),
         table.capacity()
     );
 
@@ -754,6 +801,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             occupancy,
             log,
             features,
+            fridges,
             dt,
             tick: *tick,
             clock,
@@ -772,12 +820,22 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             occupancy,
             log,
             features,
+            fridges,
             dt,
             tick: *tick,
             clock,
         },
         moves,
+        effects,
     );
+
+    // **Step 4: the world settles what react asked of it, then the fridges
+    // move on.** Sequential, in slot order, for the same reason the move step
+    // is: two entities opening and closing one fridge on the same tick has to
+    // settle the same way on every run. `game_dt` because a fridge's
+    // temperature is on the world's clock, like everything biological — see
+    // `clock`.
+    world_step(fridges, effects, dt * clock::TIME_SCALE);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -906,33 +964,38 @@ fn move_step(
 /// Every entity is asked, not only the ones that were blocked: "did I get
 /// there" is as much an answer as "who stopped me", and a kind that wants to
 /// count its successful steps should not have to be told about them by a
-/// separate channel. The default [`GameEntity::react`] does nothing, so a kind
-/// with no plan pays a call and no more.
+/// separate channel. The default [`GameEntity::react`] does nothing and asks
+/// for nothing, so a kind with no plan pays a call and no more.
 ///
-/// Each entity writes only to itself, so this runs across threads the same way
-/// think does — a `&mut` walk of the table rather than a second intent buffer
-/// nobody would read, and rayon over disjoint slots above [`PARALLEL_AT`].
+/// Each entity writes only to itself — including the [`Effect`] it hands
+/// back, one slot each, the same shape `intents` already is — so this runs
+/// across threads the same way think does: a `&mut` walk of the table zipped
+/// with `effects` rather than a second intent buffer nobody would read, and
+/// rayon over disjoint slots above [`PARALLEL_AT`].
 ///
 /// **This is where pathfinding happens**, and it is the round that most wants
 /// the threads: a far route is a search over the map, one walker's search
 /// shares nothing with another's, and a crowd that has all arrived at once
 /// wants all of them planned at once. See [`walker::Walker`]; and since the
 /// brain runs here too, [`brain`] for what else a reaction decides.
-fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome]) {
+fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome], effects: &mut [Effect]) {
     let moves = &moves[..table.capacity()];
+    let effects = &mut effects[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots_mut() {
-            react_for(entity, ctx, moves[slot as usize]);
+            effects[slot as usize] = react_for(entity, ctx, moves[slot as usize]);
         }
         return;
     }
     table
         .par_iter_slots_mut()
         .zip(moves.par_iter())
-        .for_each(|(entity, outcome)| {
-            if let Some(entity) = entity {
-                react_for(entity, ctx, *outcome);
-            }
+        .zip(effects.par_iter_mut())
+        .for_each(|((entity, outcome), effect)| {
+            *effect = match entity {
+                Some(entity) => react_for(entity, ctx, *outcome),
+                None => Effect::None,
+            };
         });
 }
 
@@ -945,11 +1008,37 @@ fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutc
 /// search every tick for nothing. Skipping is also more faithful to what
 /// freezing claims — "it keeps its cell and its goal" — than a brain that
 /// replans while held still. Its needs are held with it: no time passes for a
-/// frozen body.
-fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome) {
-    if !entity.is_frozen() {
-        entity.react(ctx, outcome);
+/// frozen body, and it asks the world for nothing either.
+fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+    if entity.is_frozen() {
+        Effect::None
+    } else {
+        entity.react(ctx, outcome)
     }
+}
+
+/// **Step 4: the world settles what react asked of it, and the fridges move
+/// on.**
+///
+/// Sequential, in slot order — the same reason [`move_step`] is: two units
+/// opening and closing the same fridge on the same tick is a race, and this
+/// is what settles it the same way on every run. Every [`Effect::Fridge`] is
+/// applied and the slot reset to [`Effect::None`] — react always overwrites
+/// its own slot, but a slot whose entity despawned keeps whatever it was
+/// last set to, so resetting here rather than relying on the next write is
+/// what keeps a stale effect from being replayed.
+///
+/// Then every fridge's temperature moves by `game_dt`, once, regardless of
+/// how many doors just changed — a fridge that was opened and closed in the
+/// same tick still ages by the tick's worth of world time.
+fn world_step(fridges: &mut Fridges, effects: &mut [Effect], game_dt: f32) {
+    for effect in effects.iter_mut() {
+        if let Effect::Fridge { at, open } = *effect {
+            let _ = fridges.set_open(at, open);
+        }
+        *effect = Effect::None;
+    }
+    fridges.advance(game_dt);
 }
 
 #[cfg(test)]
@@ -1383,9 +1472,10 @@ mod tests {
                 count(lines, "drank at the fridge"),
                 count(lines, "used the toilet"),
                 count(lines, "had a go on the computer"),
+                count(lines, "opened the fridge"),
             ]
         };
-        let (mut done_a, mut done_b) = ([0; 4], [0; 4]);
+        let (mut done_a, mut done_b) = ([0; 5], [0; 5]);
         // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
         // parched, bursting or bored for hours: the slowest need to come round
         // is boredom, ten world hours from a great time to bored. `run` ticks
@@ -1408,13 +1498,20 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        let [meals, drinks, reliefs, plays] = done_a;
+        let [meals, drinks, reliefs, plays, opened] = done_a;
         assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
         assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
         assert!(plays > 0, "nobody had a go on a computer, so that part of the brain never ran");
+        assert!(opened > 0, "nobody opened a fridge, so the world step never applied an effect");
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
+        // The world step, across the same threshold: two fridges' doors and
+        // temperatures, settled by the same slot order on every run.
+        assert_eq!(
+            a.fridges().iter().collect::<Vec<_>>(),
+            b.fridges().iter().collect::<Vec<_>>()
+        );
     }
 
     /// A world with a bed in each of `beds` and nothing else in it.
@@ -1959,6 +2056,60 @@ mod tests {
             state.entities().get(uid).unwrap().center_position(),
             Point::new(2, 2)
         );
+    }
+
+    /// A map with one fridge in it and nothing else.
+    fn with_a_fridge(fridge: Point) -> GameState {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        map.add_object(
+            crate::map::ObjectLayer::Props,
+            crate::map::Object {
+                at: Point::new(
+                    fridge.x * crate::map::PIXELS_PER_CELL + 24,
+                    fridge.y * crate::map::PIXELS_PER_CELL + 24,
+                ),
+                kind: crate::map::ObjectKind::new("fridge"),
+            },
+        );
+        GameState::new(map, 1)
+    }
+
+    #[test]
+    fn a_world_step_applies_effects_in_slot_order() {
+        // Two entities' effects aimed at the same fridge on the same tick:
+        // the later slot's request is the one left standing, because
+        // `world_step` walks the slots ascending and applies each in turn.
+        let fridge = Point::new(5, 5);
+        let mut state = with_a_fridge(fridge);
+        let first = state.spawn(EntityType::Human, Point::new(1, 1));
+        let second = state.spawn(EntityType::Human, Point::new(1, 2));
+        let first_slot = state.entities.slot_of(first).unwrap() as usize;
+        let second_slot = state.entities.slot_of(second).unwrap() as usize;
+        assert!(first_slot < second_slot, "test assumes arrival order is slot order here");
+
+        state.effects[first_slot] = Effect::Fridge { at: fridge, open: true };
+        state.effects[second_slot] = Effect::Fridge { at: fridge, open: false };
+        world_step(&mut state.fridges, &mut state.effects, 0.0);
+
+        assert!(!state.fridges().is_open(fridge), "the later slot's request should have won");
+        // The slots are drained either way, so nothing is replayed next tick.
+        assert!(state.effects.iter().all(|e| *e == Effect::None));
+    }
+
+    #[test]
+    fn an_open_fridge_in_a_game_state_warms_tick_over_tick() {
+        let fridge = Point::new(5, 5);
+        let mut state = with_a_fridge(fridge);
+        assert!(state.fridges.set_open(fridge, true));
+
+        let mut last = state.fridges().temperature(fridge);
+        for _ in 0..300 {
+            run(&mut state, 1);
+            let now = state.fridges().temperature(fridge);
+            assert!(now >= last, "should not have cooled while open: {now} after {last}");
+            last = now;
+        }
+        assert!(last > crate::sim::fridge::COLDEST, "never warmed up at all: {last}");
     }
 }
 

@@ -24,6 +24,15 @@ impl TaskExecutor for TakeItem {
     ///
     /// The item is in hand only once the action is over — a unit interrupted
     /// halfway through getting food out of the fridge has none.
+    ///
+    /// **When `from` is a fridge, its door has to be open for the action to
+    /// *start* — and that is checked here only, not every tick while it
+    /// runs.** Every other precondition in this file is checked on every
+    /// tick (rule 7 in the brain-engineer skill); this is a deliberate
+    /// exception. Re-checking the door while the action is under way would
+    /// fail every other unit mid-take the moment anybody closed it, and with
+    /// several units at one fridge that is a livelock rather than a bug: food
+    /// already coming out is not put back because somebody shut the door.
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         if ctx.here().manhattan_distance(self.from) > 1 {
             return TaskResult::Failed;
@@ -33,6 +42,11 @@ impl TaskExecutor for TakeItem {
         };
         if ctx.action.is_none() {
             if inventory.hand().is_some() {
+                return TaskResult::Failed;
+            }
+            if let Some(state) = ctx.think.fridges.get(self.from)
+                && !state.is_open()
+            {
                 return TaskResult::Failed;
             }
             *ctx.action = Action::interact(self.from, self.seconds);
@@ -63,9 +77,16 @@ mod tests {
     use super::super::super::task::Task;
     use super::*;
     use crate::map::{Map, Size, FLOOR};
+    use crate::sim::testing::prop_at;
 
     fn rig_at(cell: Point) -> Rig {
         Rig::new(Map::new(Size::new(9, 9), FLOOR), cell)
+    }
+
+    fn rig_beside_a_fridge(fridge: Point) -> Rig {
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        prop_at(&mut map, "fridge", fridge);
+        Rig::new(map, Point::new(fridge.x - 1, fridge.y))
     }
 
     #[test]
@@ -107,5 +128,56 @@ mod tests {
         rig.walk.body_mut().set_position((1.5, 1.5));
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.hand(), None);
+    }
+
+    #[test]
+    fn taking_from_a_closed_fridge_fails_without_starting() {
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        let mut task = Task::take(fridge, ItemKind::Food, 0.5);
+
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert!(rig.action.is_none());
+        assert_eq!(rig.hand(), None);
+    }
+
+    #[test]
+    fn taking_from_an_open_fridge_works() {
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 0.5);
+
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
+        assert_eq!(rig.hand(), Some(ItemKind::Food));
+    }
+
+    #[test]
+    fn once_taking_has_started_the_door_closing_does_not_fail_it() {
+        // A deliberate exception to checking a precondition every tick: the
+        // door only has to be open for the take to *start*. Otherwise
+        // several units at one fridge would livelock each other's meals
+        // every time somebody shut it.
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 0.5);
+
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert!(rig.world.fridges.set_open(fridge, false), "somebody else closed it mid-take");
+
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
+        assert_eq!(rig.hand(), Some(ItemKind::Food));
+    }
+
+    #[test]
+    fn taking_from_a_cell_with_no_fridge_in_it_is_unchanged() {
+        // No fridge at all at `from`: the door check has nothing to ask about
+        // and does not get in the way.
+        let mut rig = rig_at(Point::new(4, 5));
+        let mut task = Task::take(Point::new(5, 5), ItemKind::Food, 0.5);
+
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
+        assert_eq!(rig.hand(), Some(ItemKind::Food));
     }
 }

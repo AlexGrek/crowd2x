@@ -10,6 +10,12 @@
 //! A prop with no entry here is scenery, which today is every prop but the
 //! fridge, the toilet, the computer and the beds. A prop with two entries is
 //! two things at once: a fridge is food and water.
+//!
+//! **A fridge is the one feature with state of its own** — its door and its
+//! temperature, in [`crate::sim::fridge::Fridges`] rather than here. What
+//! this module answers never changes during a tick: a name is food, or it
+//! is not. Whether the fridge behind that name is open right now is a
+//! different question, asked of a different index.
 
 use rand::rngs::SmallRng;
 use rand::RngExt;
@@ -72,9 +78,13 @@ pub struct Feature {
 /// A name may appear more than once, once per use: the fridge has drinks in
 /// it as well as food, rather than there being a second prop to walk to.
 ///
-/// A fridge never runs out: there is no depletion state, so there is nothing
-/// about a fridge that can change during a tick, which is what lets the index
-/// below be built once and read from every thread.
+/// A fridge never runs out of food or drink — there is no depletion state —
+/// but it does have a door and a temperature now
+/// ([`crate::sim::fridge::Fridges`]), which is why "nothing about a fridge
+/// changes during a tick" is no longer quite true. What still holds is that
+/// *this* index does not: which prop names are food, water, a toilet, a go on
+/// a computer or a bed to sleep in is fixed at map load, which is what lets
+/// it be built once, here, and read from every thread.
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "fridge",

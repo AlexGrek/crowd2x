@@ -37,7 +37,7 @@ use super::inventory::Inventory;
 use super::item::ItemKind;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
-use super::{Intent, MoveOutcome};
+use super::{Effect, Intent, MoveOutcome};
 
 const HUMAN_SPEED: f32 = 2.0;
 const DOG_SPEED: f32 = 3.5;
@@ -165,7 +165,7 @@ impl GameEntity for Human {
     ///
     /// The world's clock, not the player's: a body gets hungry over hours, and
     /// an hour is thirty seconds of watching ([`crate::sim::clock`]).
-    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
         self.biology.advance(ctx.game_dt());
         self.brain.react(
             ctx,
@@ -173,7 +173,7 @@ impl GameEntity for Human {
             &mut self.walk,
             Some(&mut self.biology),
             Some(&mut self.inventory),
-        );
+        )
     }
 
     fn biology(&self) -> Option<&Biology> {
@@ -282,8 +282,8 @@ impl GameEntity for Dog {
     }
 
     /// No needs and no hands: the brain gets the walker and nothing else.
-    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) {
-        self.brain.react(ctx, outcome, &mut self.walk, None, None);
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        self.brain.react(ctx, outcome, &mut self.walk, None, None)
     }
 
     /// Turns to face the way it is walking.

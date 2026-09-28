@@ -5,16 +5,20 @@
 //! checks what has to stay true while it runs, and applies what finishing it
 //! means. See [`super::task`] for why they are not boxed.
 
+pub mod close_fridge;
 pub mod consume_item;
 pub mod move_to;
+pub mod open_fridge;
 pub mod sleep;
 pub mod take_item;
 pub mod use_computer;
 pub mod use_toilet;
 pub mod wait;
 
+pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
 pub use move_to::MoveTo;
+pub use open_fridge::{OpenFridge, OPEN_SECONDS};
 pub use sleep::Sleep;
 pub use take_item::TakeItem;
 pub use use_computer::UseComputer;
@@ -35,7 +39,7 @@ pub(crate) mod rig {
     use crate::sim::testing::World;
     use crate::sim::uid::{EntityType, Uid};
     use crate::sim::walker::Walker;
-    use crate::sim::{Intent, MoveOutcome};
+    use crate::sim::{Effect, Intent, MoveOutcome};
 
     pub struct Rig {
         pub world: World,
@@ -43,6 +47,10 @@ pub(crate) mod rig {
         pub action: Action,
         pub biology: Biology,
         pub inventory: Inventory,
+        /// What the last tick's [`Task::execute`] asked of the world beyond
+        /// this unit — reset to [`Effect::None`] at the start of every
+        /// [`Rig::tick`], the same as the real brain's own local copy.
+        pub effect: Effect,
     }
 
     impl Rig {
@@ -53,6 +61,7 @@ pub(crate) mod rig {
                 action: Action::None,
                 biology: Biology::new(Stats::calm()),
                 inventory: Inventory::human(),
+                effect: Effect::None,
             }
         }
 
@@ -76,6 +85,7 @@ pub(crate) mod rig {
                 action,
                 biology,
                 inventory,
+                effect,
             } = self;
             world.tick += 1;
             let think = world.ctx();
@@ -85,6 +95,7 @@ pub(crate) mod rig {
                 Intent::Idle => MoveOutcome::Idle,
                 Intent::Move { .. } => MoveOutcome::Moved,
             };
+            *effect = Effect::None;
             task.execute(&mut TaskCtx {
                 think: &think,
                 outcome,
@@ -92,6 +103,7 @@ pub(crate) mod rig {
                 action,
                 biology: Some(biology),
                 inventory: Some(inventory),
+                effect,
             })
         }
 

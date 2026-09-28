@@ -19,7 +19,7 @@ use crate::map::Point;
 
 use super::kinds::Facing;
 use super::uid::{EntityType, Uid};
-use super::Intent;
+use super::{Effect, Intent};
 
 /// The state every entity has, whatever else it has.
 ///
@@ -147,9 +147,17 @@ pub trait GameEntity: Send + Sync {
     /// nothing outside this entity — which is what leaves the phase
     /// parallelisable in the same way think is, entity by entity.
     ///
-    /// The default does nothing: a kind with no plan has nothing to revise.
-    fn react(&mut self, ctx: &Think<'_>, outcome: super::MoveOutcome) {
+    /// The one thing it may *ask* for beyond itself is an [`Effect`], applied
+    /// afterwards and sequentially by [`super::world_step`] — a fridge's door
+    /// is a fact about the world, not about the entity that opened it, so
+    /// flipping it here directly would be writing outside itself under
+    /// another name.
+    ///
+    /// The default does nothing and asks for nothing: a kind with no plan has
+    /// nothing to revise.
+    fn react(&mut self, ctx: &Think<'_>, outcome: super::MoveOutcome) -> Effect {
         let _ = (ctx, outcome);
+        Effect::default()
     }
 
     /// Which way it is oriented, if that means anything for this kind.
@@ -349,6 +357,11 @@ pub struct Think<'a> {
     /// Where the props a brain can use are — fridges, so far. Built once with
     /// the world, so reading it is a scan of a handful of cells.
     pub features: &'a super::feature::Features,
+    /// Every fridge's door and temperature, as of the *start* of this tick —
+    /// unlike `features`, this changes tick to tick, through [`Effect`] and
+    /// [`super::world_step`]. A task reads it to decide whether a door is
+    /// open; nothing here may write it directly.
+    pub fridges: &'a super::fridge::Fridges,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —

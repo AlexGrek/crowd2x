@@ -22,10 +22,10 @@ use crate::sim::entity::Think;
 use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 use crate::sim::walker::Walker;
-use crate::sim::MoveOutcome;
+use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
-use super::tasks::{ConsumeItem, MoveTo, Sleep, TakeItem, UseComputer, UseToilet, Wait};
+use super::tasks::{CloseFridge, ConsumeItem, MoveTo, OpenFridge, Sleep, TakeItem, UseComputer, UseToilet, Wait};
 
 /// What a task may touch while it runs: the world to read, the body it moves,
 /// the action it drives, and the parts of its unit a task can change.
@@ -48,6 +48,12 @@ pub struct TaskCtx<'a> {
     /// what makes food arrive in a hand when a `TakeItem` *finishes* rather
     /// than when a goal hears that it did.
     pub inventory: Option<&'a mut Inventory>,
+    /// What this task asks of the world beyond its own unit — so far, only a
+    /// fridge's door. Starts each tick as [`Effect::None`]; a task that wants
+    /// to ask for something writes it once, the tick its action finishes, and
+    /// [`super::super::world_step`](crate::sim::world_step) is what actually
+    /// grants it, sequentially, after every entity has reacted.
+    pub effect: &'a mut Effect,
 }
 
 impl TaskCtx<'_> {
@@ -87,6 +93,8 @@ pub enum Task {
     UseComputer(UseComputer),
     Sleep(Sleep),
     Wait(Wait),
+    OpenFridge(OpenFridge),
+    CloseFridge(CloseFridge),
 }
 
 impl Task {
@@ -129,6 +137,18 @@ impl Task {
         Task::Wait(Wait { seconds })
     }
 
+    /// Open the fridge in `fridge`, from a cell beside it, unless it is open
+    /// already.
+    pub const fn open_fridge(fridge: Point, seconds: f32) -> Task {
+        Task::OpenFridge(OpenFridge { fridge, seconds })
+    }
+
+    /// Close the fridge in `fridge`, from a cell beside it, unless it is
+    /// closed already.
+    pub const fn close_fridge(fridge: Point, seconds: f32) -> Task {
+        Task::CloseFridge(CloseFridge { fridge, seconds })
+    }
+
     /// Run this task's executor for a tick.
     pub fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         match self {
@@ -139,6 +159,8 @@ impl Task {
             Task::UseComputer(task) => task.execute(ctx),
             Task::Sleep(task) => task.execute(ctx),
             Task::Wait(task) => task.execute(ctx),
+            Task::OpenFridge(task) => task.execute(ctx),
+            Task::CloseFridge(task) => task.execute(ctx),
         }
     }
 
@@ -151,6 +173,8 @@ impl Task {
             Task::UseComputer(task) => task.describe(),
             Task::Sleep(task) => task.describe(),
             Task::Wait(task) => task.describe(),
+            Task::OpenFridge(task) => task.describe(),
+            Task::CloseFridge(task) => task.describe(),
         }
     }
 }

@@ -496,7 +496,7 @@ spawned this tick thinks this tick, and it is the only pass that may resize the 
 The **processing pass** advances every entity and adds or removes none. It is handed a
 `FrozenEntities` — the table with its membership frozen, offering no `insert` and no
 `remove` — so **that is a guarantee the compiler holds, not a rule to remember.** Inside
-it are three steps:
+it are four steps:
 
 1. **think** — read-only over the entities and the map, each returning an `Intent` into a
    slot-indexed buffer.
@@ -511,7 +511,16 @@ it are three steps:
 3. **react** — the second thinking round, once the whole crowd has moved. Each entity is
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
-   the tick, with the later slots not moved yet.
+   the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
+   request for a change outside itself, so far only `Effect::Fridge { at, open }` — into a
+   third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
+   door directly: that is a fact about the world, read by every entity beside it, not about
+   the one entity that opened it.
+4. **world** — single-threaded, slots ascending, like move, and for the same reason: two
+   units opening and closing one fridge on the same tick is a race, and this is what settles
+   it the same way on every run. Every `Effect` is applied (`fridges.set_open`), the slot
+   reset to `Effect::None`, and then `Fridges::advance` moves every fridge's temperature on
+   by the tick's worth of world time — see `sim::world_step` and "Features" below.
 
 **Passability is at the tile level, on the centre cell**, and it is two layers asked in
 order: `map`'s `PassabilityMap` for the terrain and the furniture, then `sim/occupancy.rs`
@@ -649,7 +658,8 @@ talking only to the one below:
   once lying in a bed stays in it. A human that arrives to find every bed owned has none, and
   stays up until it is critical. Nothing in a tick reads `Homes`: the unit remembers.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`), `match`-dispatched so
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`,
+  `OpenFridge`, `CloseFridge`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a
@@ -685,22 +695,41 @@ cell the search vetted.
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
 a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
-`Toilet`, `"computer"` is `Entertainment` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never runs out, and is used from one
-of the four cells beside it — it blocks its own. Adding a use for a prop is an entry there,
-a palette entry in `editor/props.rs` and a `map::PROPS` entry (tests fail without them), and
-a goal that queues the tasks.
+`Toilet`, `"computer"` is `Entertainment` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never
+runs out of food or drink, and is used from one of the four cells beside it — it blocks its
+own. Adding a use for a prop is an entry there, a palette entry in `editor/props.rs` and a
+`map::PROPS` entry (tests fail without them), and a goal that queues the tasks.
+
+**A fridge has state of its own: it is open or closed, and it has a temperature**
+(`sim/fridge.rs`, `Fridges`, indexed the same way `Features` is — once, at `GameState::new`,
+from the map's `"fridge"` props). The room is +24°C and a fridge cannot get colder than
++4°C; open, its temperature climbs toward the room exponentially (`5` world minutes to close
+most of the gap) and, closed, the compressor pulls it back down (`30` world minutes) — never
+past either end. **A unit opens a fridge before taking anything out of it and closes it
+afterwards**: `EatGoal`/`DrinkGoal` queue `OpenFridge -> TakeItem -> CloseFridge` around the
+existing take, and `TakeItem` refuses to start against a closed door (checked once, when the
+action starts, not every tick — re-checking would fail every other unit mid-take the moment
+anybody shut it). If a unit is put down between opening and closing — the bladder taking over,
+say — the fridge **stays open and keeps warming** until somebody closes it: its own goal
+closes it first if picked back up still standing beside it, and otherwise the next unit's
+`OpenFridge` finds the door already open and that unit closes it when it is done. Since a
+task may not write outside its own unit, opening and closing are requests — an `Effect`,
+`GameState`'s fourth step, `sim::world_step` — not direct writes; see "The simulation" above.
 
 **A prop can show that it is being used.** A computer's screen is on for as long as
 somebody is sitting at it, and dark otherwise — `game/props.rs` swaps the two strips of
-its palette entry. **In use is a fact about the unit, not about the prop**: a feature has
-no state of its own, which is what lets the feature index be built once and read from
-every thread, so the question is asked of the crowd instead —
+its palette entry. **In use is usually a fact about the unit, not about the prop**: an
+ordinary feature has no state of its own, which is what lets the feature index be built once
+and read from every thread, so the question is asked of the crowd instead —
 `GameEntity::interacting_with` names the cell whoever is mid-`Action::Interact` is using,
 and a prop standing in one of those cells is in use. Only the units on the canvas are asked
 (`VisibleCrowd`), since props are culled to the view too and whoever uses one is beside it
 or in it, and nothing is asked at all when no prop on screen could light up. One seam is
 left at the very edge: a computer at most half on screen, used from the cell beyond it by
-somebody not yet drawn, stays dark until the camera moves another half cell.
+somebody not yet drawn, stays dark until the camera moves another half cell. **The fridge is
+the exception**: its door is a fact about `Fridges` itself, so an open-door strip would read
+`GameState::fridges()` directly rather than asking who is interacting with it — not built
+yet, since there is only the one `fridge.png`.
 
 Every `FeatureKind` also has an `Access`: `Beside` (the fridge and the computer, touched
 from next to them — a computer is a desk with chairs on four sides, so nobody queues for
@@ -1002,6 +1031,7 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action
                         feature.rs is what a prop is for; a computer is somewhere
                         to have a go at something, used from beside it
+                        fridge.rs is a fridge's own state: its door, its temperature
                         item.rs is what can be held and what it is made of
                         inventory.rs is what a unit carries: a hand that costs
                         mass only, stowage that costs mass and space, and limits

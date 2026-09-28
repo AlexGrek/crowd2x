@@ -14,17 +14,23 @@ use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
+use super::fridge::Fridges;
 use super::kinds::Human;
 use super::log::Log;
 use super::occupancy::Occupancy;
 use super::uid::{EntityType, Uid};
-use super::{Intent, MoveOutcome};
+use super::{Effect, Intent, MoveOutcome};
 
 pub struct World {
     pub map: Map,
     pub occupancy: Occupancy,
     pub log: Log,
     pub features: Features,
+    /// Every fridge's door and temperature. Built from `map` once, like
+    /// `features`; [`World::step`] is what applies a react'd
+    /// [`Effect::Fridge`] and advances it, the same as
+    /// [`super::world_step`] does in a real tick.
+    pub fridges: Fridges,
     pub tick: u64,
     pub dt: f32,
     /// What time it is. Opening time, until a test sets it: a test about
@@ -39,6 +45,7 @@ impl World {
         World {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map),
+            fridges: Fridges::from_map(&map),
             map,
             log: Log::new(),
             tick: 0,
@@ -54,6 +61,7 @@ impl World {
             occupancy: &self.occupancy,
             log: &self.log,
             features: &self.features,
+            fridges: &self.fridges,
             dt: self.dt,
             tick: self.tick,
             clock: self.clock,
@@ -90,7 +98,11 @@ impl World {
                 }
             }
         };
-        entity.react(&self.ctx(), outcome);
+        let effect = entity.react(&self.ctx(), outcome);
+        if let Effect::Fridge { at, open } = effect {
+            let _ = self.fridges.set_open(at, open);
+        }
+        self.fridges.advance(self.dt * super::clock::TIME_SCALE);
         self.lines.extend(self.log.drain());
     }
 

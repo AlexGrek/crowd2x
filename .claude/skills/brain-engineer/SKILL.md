@@ -20,7 +20,8 @@ writing any of them.
 | --- | --- | --- | --- | --- |
 | routine | *how badly is each goal wanted?* | biology (stats, switches), body, `Think` | the priority list only | `brain/routines.rs` |
 | goal executor | *how is this want pursued?* | biology, hands, memory, `Think`, last task result | the task queue, memory, its own fields | `brain/goals/` |
-| task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body — the world | `brain/tasks/` |
+| task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body, and its unit's own `Effect` | `brain/tasks/` |
+| effect / world step | *what does a task's request outside its own unit become?* | every entity's `Effect` for the tick | world state no single entity owns — so far, a fridge's door | `sim/mod.rs` (`Effect`, `world_step`), `sim/fridge.rs` |
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
 | feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
