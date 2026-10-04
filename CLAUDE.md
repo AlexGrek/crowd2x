@@ -787,13 +787,28 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   quarter. A process about the mind scales by it — `Fun` gives `AMUSEMENT * novelty`,
   `Satisfaction` a treat's worth times it — and one about the body ignores it, so a second
   meal of the same food fills exactly as much and is less of a treat. It is not a process:
-  it changes no stat and cannot be switched off. When the experience was still remembered,
+  it changes no stat and cannot be switched off. Fading is a background task at `VeryLow`
+  (below), so it runs every 37th tick and not every tick. When the experience was still remembered,
   `handle` returns it, and the task that caused it (`ConsumeItem`, `UseComputer`) logs
   `... had food in recent memory: 70% as good as fresh` (`tasks::report_recalled`).
 - **Satisfaction** (`biology/satisfaction.rs`) is how a person's day is going: it drains
   from content to discontented in 48 world hours and is lifted by a treat — a meal by its
   item's `taste` (`TASTY`, 15), a go on the computer by `ENJOYMENT` (20), each times its
   novelty. Nothing reads it to decide anything yet: it is a readout in the debug menu.
+- **Background tasks** (`sim/background.rs`) are upkeep that runs **on a cadence, not on every
+  tick**: a `BackgroundTask` names its `Priority`, `High`/`Med`/`Low`/`VeryLow`, every
+  3rd/7th/17th/37th tick, and `run(elapsed)` is handed the world time since it last ran.
+  **Every unit keeps its own time**: a `Human` carries a `Schedule` — its own seed, rolled
+  last at spawn, and one countdown per priority that the seed starts at a different point
+  of its period — so different units, and different priorities of one unit, do their
+  background work on different ticks, and a crowd's cost is spread evenly over the period
+  rather than spiking every 37th tick. `Human::react` ticks the schedule once and hands the
+  `Due` it returns to `Biology::background`, which runs the body's tasks (so far only
+  `Recollection`). Each countdown adds up the world time it was handed, so a run is owed
+  exactly what the unit lived through — a first run two ticks after spawning gets two
+  ticks — and a frozen unit's timers stop with it. Pick the priority by how stale the thing
+  can go: a rate over hours is `VeryLow`; anything a decision reads the tick it changes is
+  not background work. The debug menu shows each countdown (`background in`).
 - **Adding a process** is a `ProcessId` variant, a struct and file, a field on `Biology`, and
   its slot in `Biology::parts`/`processes` in id order (a test fails if the slots and ids
   drift). Food reaching the bladder later is a new process between `Hunger` and `Bladder`,
@@ -816,7 +831,8 @@ toilet, 30 at the computer, an hour at a time in bed (thirty seconds of watching
 them are a night) — the longest a go at anything lasts, since having a go at something is
 what a person does when nothing else is pressing. Eating and drinking commit at 60 and
 release at 25, the toilet at 70 and 10, boredom at 60 and 20; one go is worth 60 points of
-fun, so a thoroughly bored person has a second one the way a starving one eats twice.
+fun the first time today (less while the last go is in recent memory, below), so a
+thoroughly bored person has a second one the way a starving one eats twice.
 
 **Everybody is born 70 to 100 percent satisfied in every need** (`Stats::random`,
 `BORN_AT_LEAST_SATISFIED`): fed, watered, comfortable, entertained, rested and content, worn down by
@@ -1045,6 +1061,9 @@ src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
                         clock.rs is what a second is: 1s watched = 2min of world
+                        background.rs is upkeep on a cadence: every 3rd, 7th,
+                        17th or 37th tick by priority, on each unit's own
+                        seeded Schedule
                         occupancy.rs is who stands where: passability's dynamic half
                         walker.rs is the movement action; feature.rs what props are for
                         brain/ is the mind: routine(s), goal(s)/, task(s)/, action

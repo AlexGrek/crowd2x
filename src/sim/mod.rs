@@ -127,6 +127,7 @@
 // nothing did yet.
 #![allow(dead_code, unused_imports)]
 
+pub mod background;
 pub mod biology;
 pub mod brain;
 pub mod clock;
@@ -1752,9 +1753,13 @@ mod tests {
         // inventory — which is twelve of them, a count per item kind plus the
         // two limits, and no `Vec`. What this is here to catch is a jump
         // nobody meant, not a need somebody did.
+        //
+        // Raised from 576 to 640 on purpose: talents filled the old wall to
+        // the byte, and a unit's own background `Schedule` — a seed, a
+        // countdown and the time owed per priority — is 32 bytes more (608).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 576, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 640, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]

@@ -29,6 +29,7 @@ use rand::RngExt;
 
 use crate::map::Point;
 
+use super::background::Schedule;
 use super::biology::{Biology, Stats};
 use super::brain::{Brain, GoalId};
 use super::entity::{Body, GameEntity, Think};
@@ -73,6 +74,10 @@ pub struct Human {
     inventory: Inventory,
     /// Lasting aptitudes, rolled once and changed only explicitly.
     talents: Talents,
+    /// Its own background timers, from its own seed: when this person's
+    /// upkeep that need not run every tick — a memory fading — is next due.
+    /// See [`crate::sim::background`].
+    schedule: Schedule,
 }
 
 impl Human {
@@ -84,6 +89,9 @@ impl Human {
             identity: Identity::human(rng),
             inventory: Inventory::human(),
             talents: Talents::random(rng),
+            // Rolled last, so everything rolled before it is what it was
+            // before there were schedules.
+            schedule: Schedule::new(rng.random()),
         }
     }
 
@@ -173,8 +181,13 @@ impl GameEntity for Human {
     ///
     /// The world's clock, not the player's: a body gets hungry over hours, and
     /// an hour is thirty seconds of watching ([`crate::sim::clock`]).
+    ///
+    /// Background upkeep ([`crate::sim::background`]) comes with it, on the
+    /// ticks it is due.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
         self.biology.advance(ctx.game_dt());
+        let due = self.schedule.tick(ctx.game_dt());
+        self.biology.background(&due);
         self.brain.react(
             ctx,
             outcome,
@@ -221,6 +234,7 @@ impl GameEntity for Human {
         fields.extend(self.walk.debug_fields());
         fields.extend(self.inventory.debug_fields());
         fields.extend(self.biology.debug_fields());
+        fields.push(self.schedule.debug_field());
         fields
     }
 
@@ -580,5 +594,33 @@ mod tests {
         assert!(walker.stats().hunger() > 0.0);
         assert!(walker.stats().thirst() > 0.0);
         assert!(walker.stats().bladder() > 0.0);
+    }
+
+    /// Fading runs in the background, not in `advance`: a human ticked through
+    /// its reactions still forgets, a little later than every tick would.
+    #[test]
+    fn a_human_forgets_a_meal_by_the_next_day_through_its_background_work() {
+        use crate::sim::biology::{Event, Experience, ProcessId};
+        use crate::sim::clock::HOUR;
+
+        let mut world = World::new(room());
+        let mut walker = human(Point::new(4, 4));
+        let biology = walker.biology_mut().unwrap();
+        // Nothing hungry, so nothing eats again and remembers it afresh.
+        biology.set_running(ProcessId::Hunger, false);
+        let _ = biology.handle(Event::Ingested(ItemKind::Food));
+        let food = Experience::Taste(ItemKind::Food);
+
+        let ticks_per_hour = (HOUR / world.ctx().game_dt()) as u32;
+        for _ in 0..4 * ticks_per_hour {
+            world.step(&mut walker);
+        }
+        let familiarity = walker.biology().unwrap().recollection().familiarity(food);
+        assert!((0.45..0.55).contains(&familiarity), "about half gone in four hours: {familiarity}");
+
+        for _ in 0..12 * ticks_per_hour {
+            world.step(&mut walker);
+        }
+        assert!(!walker.biology().unwrap().recollection().recalls(food), "forgotten by the next day");
     }
 }

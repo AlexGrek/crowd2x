@@ -73,6 +73,7 @@ pub use satisfaction::Satisfaction;
 pub use stats::Stats;
 pub use thirst::Thirst;
 
+use super::background::Due;
 use super::item::ItemKind;
 
 /// Every process a body can have.
@@ -205,7 +206,8 @@ pub struct Biology {
     switches: Switches,
     /// What it has done lately, fading — asked before an event reaches the
     /// processes, so a treat had twice today is less of one. Always on: it is
-    /// not a process and changes no stat.
+    /// not a process and changes no stat. Faded by [`Biology::background`],
+    /// not by `advance`.
     recent: Recollection,
     hunger: Hunger,
     thirst: Thirst,
@@ -259,13 +261,20 @@ impl Biology {
     /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's
     /// own `dt`.
     pub fn advance(&mut self, dt: f32) {
-        self.recent.advance(dt);
         let (stats, switches, processes) = self.parts();
         for process in processes {
             if switches.is_on(process.id()) {
                 process.advance(stats, dt);
             }
         }
+    }
+
+    /// The body's background tasks that the unit's
+    /// [`Schedule`](crate::sim::background::Schedule) says are `due` this
+    /// tick, each handed the world time since it last ran. So far that is
+    /// recent memory fading ([`Recollection`]); see [`crate::sim::background`].
+    pub fn background(&mut self, due: &Due) {
+        due.run(&mut self.recent);
     }
 
     /// Tell every running process that `event` happened, in [`ProcessId`]
@@ -302,7 +311,7 @@ impl Biology {
             fun,
             energy,
             satisfaction,
-            ..
+            recent: _,
         } = self;
         (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction])
     }

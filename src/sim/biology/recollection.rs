@@ -15,11 +15,17 @@
 //! means for the stat it owns — [`Satisfaction`](super::Satisfaction) and
 //! [`Fun`](super::Fun) scale by it, hunger and the bladder ignore it.
 //!
+//! Fading is a [`BackgroundTask`] at [`Priority::VeryLow`]: brought up to date
+//! every 37th tick, about a minute of world, which against a four-hour
+//! half-life is a difference no meal could notice — and it is the one part of
+//! a body that would otherwise cost a `powf` per unit per tick.
+//!
 //! Inline and `Copy`: a fixed array, one slot per experience, no allocation.
 //! The brain's [`Memory`](crate::sim::brain::memory::Memory) is for places and
 //! people and allocates a key; this is written every meal by a task in the
 //! middle of a tick, and must not.
 
+use crate::sim::background::{BackgroundTask, Priority};
 use crate::sim::clock::HOUR;
 use crate::sim::item::ItemKind;
 
@@ -108,13 +114,16 @@ pub struct Recollection {
     familiarity: [f32; Experience::COUNT],
 }
 
-impl Recollection {
-    /// `dt` **world** seconds of forgetting.
-    pub fn advance(&mut self, dt: f32) {
+impl BackgroundTask for Recollection {
+    /// Hours to fade by half: nothing a minute late could get wrong.
+    const PRIORITY: Priority = Priority::VeryLow;
+
+    /// `elapsed` **world** seconds of forgetting.
+    fn run(&mut self, elapsed: f32) {
         if self.familiarity.iter().all(|&f| f == 0.0) {
             return;
         }
-        let fade = 0.5f32.powf(dt / (HOURS_TO_HALF_FORGET * HOUR));
+        let fade = 0.5f32.powf(elapsed / (HOURS_TO_HALF_FORGET * HOUR));
         for familiarity in &mut self.familiarity {
             *familiarity *= fade;
             if *familiarity < IN_RECENT_MEMORY {
@@ -122,7 +131,9 @@ impl Recollection {
             }
         }
     }
+}
 
+impl Recollection {
     pub fn familiarity(&self, experience: Experience) -> f32 {
         self.familiarity[experience.slot()]
     }
@@ -163,6 +174,7 @@ impl Recollection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::background::Schedule;
 
     const FOOD: Experience = Experience::Taste(ItemKind::Food);
 
@@ -203,11 +215,11 @@ mod tests {
     fn a_memory_fades_by_half_in_four_hours_and_is_gone_by_the_next_day() {
         let mut recollection = Recollection::default();
         recollection.remember(FOOD);
-        recollection.advance(HOURS_TO_HALF_FORGET * HOUR);
+        recollection.run(HOURS_TO_HALF_FORGET * HOUR);
         assert!((recollection.familiarity(FOOD) - 0.5).abs() < 1e-4, "{}", recollection.familiarity(FOOD));
-        recollection.advance(6.0 * HOUR);
+        recollection.run(6.0 * HOUR);
         assert!(recollection.recalls(FOOD), "still remembered ten hours on");
-        recollection.advance(8.0 * HOUR);
+        recollection.run(8.0 * HOUR);
         assert!(!recollection.recalls(FOOD), "a day later it is new again");
         assert_eq!(recollection.novelty(FOOD), FRESH);
     }
@@ -219,11 +231,31 @@ mod tests {
         let mut once = Recollection::default();
         once.remember(FOOD);
         let mut often = once;
-        once.advance(3.0 * HOUR);
+        once.run(3.0 * HOUR);
         for _ in 0..90 {
-            often.advance(2.0 * 60.0);
+            often.run(2.0 * 60.0);
         }
         assert!((once.familiarity(FOOD) - often.familiarity(FOOD)).abs() < 1e-4);
+    }
+
+    /// Run in the background, a memory fades as it would have run every tick
+    /// — to within a run's worth of the time.
+    #[test]
+    fn fading_in_the_background_comes_to_what_fading_every_tick_does() {
+        let dt = 120.0 / 64.0;
+        let mut every_tick = Recollection::default();
+        every_tick.remember(FOOD);
+        let mut background = every_tick;
+        let mut schedule = Schedule::new(3);
+        let ticks = (3.0 * HOUR / dt) as u64;
+        for _ in 0..ticks {
+            every_tick.run(dt);
+            schedule.tick(dt).run(&mut background);
+        }
+        let (exact, late) = (every_tick.familiarity(FOOD), background.familiarity(FOOD));
+        assert!(late >= exact, "never more forgotten than the time allows: {late} vs {exact}");
+        let a_run = 0.5f32.powf(Priority::VeryLow.period() as f32 * dt / (HOURS_TO_HALF_FORGET * HOUR));
+        assert!(late * a_run <= exact * 1.0001, "and at most one run behind: {late} vs {exact}");
     }
 
     #[test]

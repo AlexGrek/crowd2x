@@ -100,6 +100,15 @@ struct directly with `Stats::calm().with_<stat>(..)`, no `World` needed.
 
 A frozen unit's `react` is skipped, so its processes do not run. That is intended.
 
+**State that only needs bringing up to date now and then is not a process**, it is a
+`BackgroundTask` (`sim/background.rs`): `const PRIORITY` (`High`/`Med`/`Low`/`VeryLow`, every
+3rd/7th/17th/37th tick) and `run(elapsed)`, handed a whole period of world time. Run it from
+`Biology::background` with `due.run(&mut self.field)`, as `Recollection` is — the `Due` comes
+from the unit's own `Schedule` (`Human::schedule`, seeded at spawn), ticked once in
+`Human::react`. Only for something no decision reads the tick it changes: a routine would
+see it up to a period late. A test drives one with `Schedule::new(seed).tick(dt)`, or hands
+`Due::NOTHING` to keep it still.
+
 ## An item
 
 `item.rs`. An item says **what it is made of**, not what it does to a body or to whoever
@@ -435,8 +444,8 @@ pub fn human() -> Brain {
   `Brain::new` panics only on two executors for one goal.
 - Routine order is fixed at construction, and determinism depends on that.
 - Update `a_human_s_brain_says_what_it_is_doing`, which asserts the routine list.
-- Watch `a_human_stays_small_enough_to_be_worth_a_thousand_of` (`size_of::<Human>() <= 576`,
-  496 today). Routines do not count against it. A goal slot (16 bytes, per `GoalId`, on every
+- Watch `a_human_stays_small_enough_to_be_worth_a_thousand_of` (`size_of::<Human>() <= 640`,
+  608 today). Routines do not count against it. A goal slot (16 bytes, per `GoalId`, on every
   kind) and a stat do: raise the wall by a cache line on purpose, with a note, never silently.
 
 A new **unit kind** (not just a new behaviour) is:
