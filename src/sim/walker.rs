@@ -186,6 +186,15 @@ impl Walker {
         }
     }
 
+    /// Which way it is going: from where it stands to the middle of the next
+    /// cell of the route. `None` with no route, or standing on its end.
+    pub fn heading(&self) -> Option<(f32, f32)> {
+        let step = self.path.current()?;
+        let (x, y) = self.body.position();
+        let (dx, dy) = (step.x as f32 + 0.5 - x, step.y as f32 + 0.5 - y);
+        (dx * dx + dy * dy > ARRIVED * ARRIVED).then_some((dx, dy))
+    }
+
     /// Whether the body is in the middle of the cell it is standing in.
     fn is_centred(&self) -> bool {
         let (x, y) = self.body.position();

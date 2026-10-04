@@ -164,6 +164,11 @@ pub enum Event {
     /// Time was spent asleep. **How long**, in world seconds — not how much
     /// rest that is, which is for [`Energy`] to say.
     Slept { world_seconds: f32 },
+    /// Somebody came into view who was not in mind — met for the first time,
+    /// or again after being forgotten. Said by the brain's attention
+    /// (`brain::attention`), not by a task: nothing was *done*, a face was
+    /// noticed.
+    Met,
 }
 
 /// One thing a body does by itself.
@@ -428,6 +433,38 @@ mod tests {
         biology.set_running(ProcessId::Hunger, true);
         biology.handle(Event::Ingested(ItemKind::Food));
         assert_eq!(biology.stats().hunger(), 50.0 - MEAL.min(50.0), "running again");
+    }
+
+    /// The worst a crowd can do: sixteen new faces at every look — every 7th
+    /// tick — for a whole day. Company slows discontent; it must not pin
+    /// anybody at content, or satisfaction would read 100 in every crowd and
+    /// mean nothing.
+    #[test]
+    fn a_whole_day_in_the_thickest_crowd_lifts_satisfaction_without_pinning_it() {
+        use crate::sim::background::Schedule;
+        use crate::sim::clock::TIME_SCALE;
+        let day = |faces_per_look: usize| {
+            let mut biology = calm();
+            biology.edit(|stats| stats.with_satisfaction(100.0));
+            let mut schedule = Schedule::new(5);
+            let dt = TIME_SCALE / 64.0;
+            for tick in 0..(24.0 * HOUR / dt) as u64 {
+                biology.advance(dt);
+                let due = schedule.tick(dt);
+                biology.background(&due);
+                if tick % 7 == 0 {
+                    for _ in 0..faces_per_look {
+                        biology.handle(Event::Met);
+                    }
+                }
+            }
+            biology.stats().satisfaction()
+        };
+        let alone = day(0);
+        let crowded = day(16);
+        assert!((alone - 50.0).abs() < 0.5, "a day wears half of it off: {alone}");
+        assert!(crowded > alone + 10.0, "company is worth something: {crowded} vs {alone}");
+        assert!(crowded < 80.0, "and is not everything: {crowded}");
     }
 
     #[test]

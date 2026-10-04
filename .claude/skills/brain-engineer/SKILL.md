@@ -18,6 +18,8 @@ writing any of them.
 
 | Layer | Answers | Reads | May change | Lives in |
 | --- | --- | --- | --- | --- |
+| perception | *who is in front of it?* | its heading, `Occupancy`, the terrain, a static cone table; every 7th tick | its own sightings | `brain/perception.rs` |
+| attention | *is any of that news?* | the sightings, world time since the last look | its own faces; hands each new one to the brain, which turns a human into `Event::Met` | `brain/attention.rs` |
 | routine | *how badly is each goal wanted?* | biology (stats, switches), body, `Think` | the priority list only | `brain/routines.rs` |
 | goal executor | *how is this want pursued?* | biology, hands, memory, `Think`, last task result | the task queue, memory, its own fields | `brain/goals/` |
 | task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body, and its unit's own `Effect` | `brain/tasks/` |
@@ -40,7 +42,9 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
 ## The pipeline (every tick, in this order)
 
 ```
-0. perception.observe            stub
+0. perception.turn, and on the unit's Priority::Med beat (every 7th tick):
+   perception.look -> attention.attend -> Event::Met per new human face
+   (eyes shut instead while Task::Sleep is current)
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
 3. top changed? old.deprioritized -> current task abandoned, walk halted
                 -> queue cleared -> new.prioritized
@@ -63,6 +67,7 @@ This order has consequences:
 | I want units to... | Add |
 | --- | --- |
 | care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
+| react to who or what it sees | a reaction in `Brain::react` step 0 (the `attend` closure); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()` |
 | care about a time of day, a threat | a **routine** (file map and test list: the `add-routine` skill) |
 | have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
 | do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |

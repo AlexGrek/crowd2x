@@ -7,6 +7,11 @@
 //! [`Recollection`](super::Recollection) comes in: the third meal of the same
 //! food in a day is as filling as the first and much less of a treat.
 //!
+//! Seeing somebody lifts it a little too ([`GLAD_TO_SEE`]): every face that
+//! comes into view and was not in mind, which is the brain's attention's to
+//! say (`brain::attention`), not this process's — by less for every other
+//! face met lately, since company is in recent memory like any treat.
+//!
 //! Nothing reads it to decide anything yet. It is a readout of how a person's
 //! day is going, for the day a routine wants to know.
 
@@ -33,6 +38,17 @@ pub const SATISFACTION_PER_SECOND: f32 = 100.0 / (HOURS_TO_DISCONTENT * HOUR);
 /// come three or four times.
 pub const ENJOYMENT: f32 = 20.0;
 
+/// How much satisfaction seeing somebody is worth — somebody who was not in
+/// mind, near or far.
+///
+/// A third of a meal's [`taste`](crate::sim::item::ItemKind::taste) for
+/// somebody met when nobody has been lately, and less for each meeting since
+/// ([`Experience::Company`](super::Experience::Company) has no floor): a crowd
+/// can lift a day by at most about `GLAD_TO_SEE * ln 2 / 4` ≈ 0.9 an hour,
+/// under half of what a day wears off, so company slows discontent and never
+/// pins anybody at content.
+pub const GLAD_TO_SEE: f32 = 5.0;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Satisfaction;
 
@@ -54,6 +70,7 @@ impl Process for Satisfaction {
         match event {
             Event::Ingested(item) => stats.change_satisfaction(item.taste() * novelty),
             Event::Entertained => stats.change_satisfaction(ENJOYMENT * novelty),
+            Event::Met => stats.change_satisfaction(GLAD_TO_SEE * novelty),
             Event::Relieved | Event::Slept { .. } => {}
         }
     }
@@ -99,6 +116,16 @@ mod tests {
         assert_eq!(stats.satisfaction(), 30.0 + TASTY * 0.5);
         Satisfaction.handle(Event::Entertained, 0.25, &mut stats);
         assert_eq!(stats.satisfaction(), 30.0 + TASTY * 0.5 + ENJOYMENT * 0.25);
+    }
+
+    #[test]
+    fn seeing_somebody_is_a_little_lift_and_less_of_one_in_company() {
+        let mut stats = Stats::calm().with_satisfaction(30.0);
+        Satisfaction.handle(Event::Met, FRESH, &mut stats);
+        assert_eq!(stats.satisfaction(), 30.0 + GLAD_TO_SEE);
+        Satisfaction.handle(Event::Met, 0.25, &mut stats);
+        assert_eq!(stats.satisfaction(), 30.0 + 1.25 * GLAD_TO_SEE);
+        assert!(GLAD_TO_SEE < crate::sim::item::TASTY, "and less than a meal");
     }
 
     #[test]

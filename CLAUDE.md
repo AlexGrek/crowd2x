@@ -13,7 +13,7 @@ advanced by one function, and every unit in it runs a brain — routines, goals,
 actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet,
 have a go on a computer, and sleep in a bed at night — driven by biological processes
 (hunger, thirst, a bladder that a drink fills, fun that drains away, energy that a night in
-bed restores, satisfaction that a treat lifts) that can be switched off per unit, and dulled
+bed restores, satisfaction that a treat or a friendly face lifts) that can be switched off per unit, and dulled
 by a fading memory of what was done lately: the same treat twice in a day is less of one. The computer is also the first prop that
 is *watched* being used: its screen is on for as long as somebody is sitting at it. (A bed
 does not yet show that it is slept in: it has no second strip of art to swap to.)
@@ -613,11 +613,34 @@ the one question a routine asks of it so far.
 
 What an entity does with all this is decided by a `Brain`, which runs entirely in
 `GameEntity::react` — the only `&mut self` hook, after the whole crowd has moved — while
-`think` stays what it was: walk the current route, arithmetic, parallel. Six layers, each
+`think` stays what it was: walk the current route, arithmetic, parallel. Seven layers, each
 talking only to the one below:
 
-- **perception** — a named stub. What it wants is a spatial index on `Think`, never a
-  per-unit scan of the crowd.
+- **perception** (`brain/perception.rs`) — **who is standing in front of it**: a cone 60°
+  either side of the way it is walking (`Heading`, one of eight, kept up every tick and kept
+  when it stops), plus the cells at its elbows, out to `FAR` (8) cells; within `NEAR` (3) is
+  `Range::Near`. Walls hide what is behind them — a Bresenham line over the *terrain*, which
+  also refuses to squeeze between two walls meeting at a corner — and furniture and people
+  do not. **It never scans the crowd**: the cone's cells are a static table per heading
+  (~70 cells, nearest first, built once per process), and a look asks `Occupancy` — already a
+  dense one-slot-per-cell grid, which is the spatial index — who stands in each; only an
+  occupied cell pays for a line of sight. At most `SIGHTINGS` (16), the nearest. A unit looks
+  on its own `Priority::Med` beat, every 7th tick, from the same seeded `Schedule` as its
+  background tasks, so a crowd's looking is spread over the ticks — `Brain::react` takes the
+  tick's `Due` for this. Asleep (`Task::Sleep` current), its eyes are shut. A dog has no
+  schedule and never looks.
+- **attention** (`brain/attention.rs`) — **which of that is news**. A vision memory of
+  `FACES` (32) ids, each with how long it has been out of sight; a sighting already in it
+  only refreshes it, and one not in it is remembered and handed to the brain as a notice —
+  so passing somebody twice is one meeting. A face out of sight for `FORGET_AFTER` (half a
+  world hour) is forgotten and is a meeting again; a full memory gives up whoever has been
+  out of sight longest. The one reaction so far: a **human** noticed is `Event::Met` to the
+  body, which lifts satisfaction (below), and a count (`in mind ... met N` in the brains
+  menu). **There is no log line per meeting** — in a crowd it would be most of the log and
+  an allocation on most looks. While asleep it runs with nothing seen, so faces fade
+  overnight. Perception's sightings and attention's faces are boxed once at spawn: they
+  are touched every 7th tick and inline they would more than double a `Human`, whose size
+  is a test (`a_human_stays_small_enough_to_be_worth_a_thousand_of`, at its 640-byte wall).
 - **memory** — a `BTreeMap<String, Recall>`, nearly empty: the one thing in it so far is which
   bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
   can never be a hash order. What a unit has *done* lately is a different memory, kept by
@@ -670,7 +693,8 @@ talking only to the one below:
 - **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
   is asked for.
 
-The pipeline runs in the order specified and the order is the design: perception; every
+The pipeline runs in the order specified and the order is the design: perception and
+attention (when the unit's schedule says it is time to look); every
 routine arranges the list; on a change at the top, the old goal's `deprioritized`, the
 current task abandoned, the queue cleared, the new goal's `prioritized`; the goal on top's
 `process` **only if the goal changed or no task is current**; then the current task's
@@ -778,13 +802,15 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   `Command::SetProcess`, applied in the spawn pass like a freeze. There is no interface for
   it yet.
 - **Recent memory fades** (`biology/recollection.rs`, `Recollection`). Eating something with
-  a flavour (`ItemKind::taste` above zero, so not water) and a go at something entertaining
-  are each an `Experience` with a **familiarity**: one more each time it happens (capped at
-  `MOST_FAMILIAR`, 3), halving every `HOURS_TO_HALF_FORGET` (4 world hours) and forgotten
+  a flavour (`ItemKind::taste` above zero, so not water), a go at something entertaining and
+  meeting somebody (`Experience::Company`) are each an `Experience` with a **familiarity**:
+  one more each time it happens (a treat capped at `MOST_FAMILIAR`, 3; **company uncapped**,
+  so the `n`th meeting in a row is worth `1/n` and a crowd's joy comes in no faster than it
+  is forgotten — a floor under it pinned everybody in a crowd at 100), halving every `HOURS_TO_HALF_FORGET` (4 world hours) and forgotten
   outright below `IN_RECENT_MEMORY` (0.1), about thirteen hours after one go — "today".
   `Biology::handle` asks it before the event reaches the processes and hands each one the
   **novelty**, `1 / (1 + familiarity)`: a half for something done just now, never below a
-  quarter. A process about the mind scales by it — `Fun` gives `AMUSEMENT * novelty`,
+  quarter for a treat. A process about the mind scales by it — `Fun` gives `AMUSEMENT * novelty`,
   `Satisfaction` a treat's worth times it — and one about the body ignores it, so a second
   meal of the same food fills exactly as much and is less of a treat. It is not a process:
   it changes no stat and cannot be switched off. Fading is a background task at `VeryLow`
@@ -793,8 +819,10 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   `... had food in recent memory: 70% as good as fresh` (`tasks::report_recalled`).
 - **Satisfaction** (`biology/satisfaction.rs`) is how a person's day is going: it drains
   from content to discontented in 48 world hours and is lifted by a treat — a meal by its
-  item's `taste` (`TASTY`, 15), a go on the computer by `ENJOYMENT` (20), each times its
-  novelty. Nothing reads it to decide anything yet: it is a readout in the debug menu.
+  item's `taste` (`TASTY`, 15), a go on the computer by `ENJOYMENT` (20), meeting somebody by
+  `GLAD_TO_SEE` (5), each times its novelty — so the thickest crowd lifts it by under 1 an
+  hour, less than half of what a day wears off. Nothing reads it to decide anything yet: it
+  is a readout in the debug menu.
 - **Background tasks** (`sim/background.rs`) are upkeep that runs **on a cadence, not on every
   tick**: a `BackgroundTask` names its `Priority`, `High`/`Med`/`Low`/`VeryLow`, every
   3rd/7th/17th/37th tick, and `run(elapsed)` is handed the world time since it last ran.
@@ -1070,7 +1098,9 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         seeded Schedule
                         occupancy.rs is who stands where: passability's dynamic half
                         walker.rs is the movement action; feature.rs what props are for
-                        brain/ is the mind: routine(s), goal(s)/, task(s)/, action
+                        brain/ is the mind: perception (a cone in front, every
+                        7th tick), attention (faces in mind, fading),
+                        routine(s), goal(s)/, task(s)/, action
                         feature.rs is what a prop is for; a computer is somewhere
                         to have a go at something, used from beside it
                         fridge.rs is a fridge's own state: its door, its temperature

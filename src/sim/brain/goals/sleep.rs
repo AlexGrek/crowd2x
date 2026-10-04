@@ -283,6 +283,44 @@ mod tests {
         }
     }
 
+    /// Eyes shut: whoever stands round a bed, its sleeper meets nobody — and
+    /// is not glad of company in the middle of the night.
+    #[test]
+    fn a_sleeper_sees_nobody_and_meets_nobody() {
+        use crate::sim::background::Priority;
+        use crate::sim::brain::Task;
+        use crate::sim::uid::{EntityType, Uid};
+        let bed = Point::new(6, 5);
+        let mut world = night_with_beds(&[bed]);
+        let mut human = owner(Point::new(5, 5), 60.0, bed);
+        for _ in 0..600 {
+            world.step(&mut human);
+            if matches!(human.brain().current_task(), Some(Task::Sleep(_))) && human.center_position() == bed {
+                break;
+            }
+        }
+        assert_eq!(human.center_position(), bed, "never got into bed: {:?}", human.brain_fields());
+        let met = human.brain().attention().met();
+
+        // A ring of people round the bed, so whichever way it faces, somebody
+        // is in front of it.
+        let mut n = 100;
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                if i32::max(i32::abs(dx), i32::abs(dy)) == 2 {
+                    world.occupancy.claim(bed.offset(dx, dy), Uid::new(EntityType::Human, n)).unwrap();
+                    n += 1;
+                }
+            }
+        }
+        for _ in 0..3 * Priority::Med.period() {
+            world.step(&mut human);
+            assert!(matches!(human.brain().current_task(), Some(Task::Sleep(_))), "woke up");
+        }
+        assert_eq!(human.brain().perception().seen().count(), 0);
+        assert_eq!(human.brain().attention().met(), met);
+    }
+
     #[test]
     fn a_tired_human_at_night_walks_to_its_own_bed_and_sleeps_in_it() {
         let bed = Point::new(11, 7);

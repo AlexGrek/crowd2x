@@ -183,6 +183,13 @@ impl Due {
         self.elapsed[priority.slot()].is_some()
     }
 
+    /// The world time owed to `priority`'s work, if it is due — for work that
+    /// needs the rest of the tick as well as the time, and so is not a
+    /// [`BackgroundTask`] (the brain looking round, `brain::perception`).
+    pub fn elapsed(&self, priority: Priority) -> Option<f32> {
+        self.elapsed[priority.slot()]
+    }
+
     /// Run `task` if its priority is due, handing it the time since it last
     /// ran.
     pub fn run<T: BackgroundTask>(&self, task: &mut T) {

@@ -1,0 +1,83 @@
+{
+  "name": "a human who sees somebody in front of it is glad to, once while they are in mind",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "pens",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 8 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 120, "y": 312 }, "kind": "crate" },
+              { "at": { "x": 216, "y": 312 }, "kind": "crate" },
+              { "at": { "x": 168, "y": 360 }, "kind": "crate" },
+              { "at": { "x": 168, "y": 264 }, "kind": "crate" },
+              { "at": { "x": 120, "y": 120 }, "kind": "crate" },
+              { "at": { "x": 216, "y": 120 }, "kind": "crate" },
+              { "at": { "x": 168, "y": 168 }, "kind": "crate" },
+              { "at": { "x": 168, "y": 72 }, "kind": "crate" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "pens",
+  "steps": [
+    { "note": "two pens of crates, at (3, 6) and (3, 2): nobody can walk, so nobody turns, and a" },
+    { "note": "unit that has never moved faces south - the upper one at the lower one, three" },
+    { "note": "cells off with two crates between, which a look goes over. The lower one faces" },
+    { "note": "the wall." },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": 3, "y": 6 } },
+    { "spawn": { "kind": "human", "x": 3, "y": 2 } },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "press": "brains" },
+
+    { "note": "a look is every 7th tick, at a point each unit's own schedule picks" },
+    { "tick": 14 },
+    { "wait": 0.2 },
+    { "expect_text": "facing" },
+    { "expect_text": "1 near, 0 far" },
+    { "expect_text": "1 face, met 1" },
+    { "shot": "the upper one has seen the lower one, and met them" },
+
+    { "note": "still in view, so still in mind: not a second meeting" },
+    { "tick": 300 },
+    { "wait": 0.2 },
+    { "expect_text": "1 face, met 1" },
+
+    { "note": "and the lower one, facing the wall, has met nobody" },
+    { "select": 1 },
+    { "wait": 0.2 },
+    { "expect_text": "nobody, met 0" },
+    { "shot": "the lower one sees nobody" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

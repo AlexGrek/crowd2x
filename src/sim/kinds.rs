@@ -29,7 +29,7 @@ use rand::RngExt;
 
 use crate::map::Point;
 
-use super::background::Schedule;
+use super::background::{Due, Schedule};
 use super::biology::{Biology, Stats};
 use super::brain::{Brain, GoalId};
 use super::entity::{Body, GameEntity, Think};
@@ -183,13 +183,15 @@ impl GameEntity for Human {
     /// an hour is thirty seconds of watching ([`crate::sim::clock`]).
     ///
     /// Background upkeep ([`crate::sim::background`]) comes with it, on the
-    /// ticks it is due.
+    /// ticks it is due — and so does the brain looking round, which is handed
+    /// the same schedule.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
         self.biology.advance(ctx.game_dt());
         let due = self.schedule.tick(ctx.game_dt());
         self.biology.background(&due);
         self.brain.react(
             ctx,
+            &due,
             outcome,
             &mut self.walk,
             Some(&mut self.biology),
@@ -312,8 +314,10 @@ impl GameEntity for Dog {
     }
 
     /// No needs and no hands: the brain gets the walker and nothing else.
+    /// No schedule either, so it never looks round — a dog has nothing yet
+    /// that seeing somebody would change.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
-        self.brain.react(ctx, outcome, &mut self.walk, None, None)
+        self.brain.react(ctx, &Due::NOTHING, outcome, &mut self.walk, None, None)
     }
 
     /// Turns to face the way it is walking.

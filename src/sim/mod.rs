@@ -1575,6 +1575,22 @@ mod tests {
         assert!(opened > 0, "nobody opened a fridge, so the world step never applied an effect");
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
+        // Looking round and meeting people, which changes nothing a decision
+        // reads yet and so cannot show in a position: what everybody's day
+        // came to, and what they remember of it, has to agree as well.
+        let mood = |state: &GameState| -> Vec<(f32, f32)> {
+            state
+                .entities()
+                .iter()
+                .filter_map(|e| e.biology())
+                .map(|b| {
+                    let company = b.recollection().familiarity(biology::Experience::Company);
+                    (b.stats().satisfaction(), company)
+                })
+                .collect()
+        };
+        assert!(mood(&a).iter().any(|&(_, company)| company > 0.0), "nobody met anybody");
+        assert_eq!(mood(&a), mood(&b));
         // The world step, across the same threshold: two fridges' doors and
         // temperatures, settled by the same slot order on every run.
         assert_eq!(
@@ -1757,6 +1773,10 @@ mod tests {
         // Raised from 576 to 640 on purpose: talents filled the old wall to
         // the byte, and a unit's own background `Schedule` — a seed, a
         // countdown and the time owed per priority — is 32 bytes more (608).
+        // Perception and attention keep their arrays boxed, out of line, for
+        // exactly this: only a heading and two pointers are inline (632); and
+        // company in recent memory is one more familiarity, which brings a
+        // Human to 640 — the wall, to the byte, again.
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
         assert!(human <= 640, "a Human is {human} bytes, {brain} of them brain");

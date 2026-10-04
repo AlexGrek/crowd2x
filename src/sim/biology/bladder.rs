@@ -80,6 +80,8 @@ impl Process for Bladder {
             // Nor does sleeping, to a process that fills and empties on its
             // own clock.
             Event::Slept { .. } => {}
+            // Nor does company.
+            Event::Met => {}
         }
     }
 

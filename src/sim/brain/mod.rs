@@ -3,7 +3,8 @@
 //! # Layers
 //!
 //! ```text
-//! perception   what it can see                  (a stub, for now)
+//! perception   what it can see                  a cone in front, every 7th tick
+//! attention    which of that is news            faces in mind, fading; a reaction
 //! memory       what it remembers                (its own bed, so far)
 //! routines     arrange the priority list        Need (fed, hydrated, ...), Sleep, StayBusy
 //! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve, Play, Sleep
@@ -24,7 +25,10 @@
 //! and stays parallel.
 //!
 //! ```text
-//! 0. perception.observe(..)                              stub, costs nothing
+//! 0. perception.turn(..) to face the way it walks; and when the unit's own
+//!      schedule says it is time to look (every 7th tick), perception.look(..)
+//!      then attention.attend(..), which reacts to anybody not in mind —
+//!      eyes shut instead, while it is asleep
 //! 1. every routine runs
 //! 2.   ...and arranges the priority list
 //! 3. if the goal on top changed: old.deprioritized() -> current task
@@ -54,6 +58,7 @@
 //! that says this is not that.
 
 pub mod action;
+pub mod attention;
 pub mod goal;
 pub mod goals;
 pub mod memory;
@@ -64,6 +69,7 @@ pub mod task;
 pub mod tasks;
 
 pub use action::{Action, ActionState};
+pub use attention::Attention;
 pub use goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress, Goals};
 pub use memory::{Memory, Recall};
 pub use perception::Perception;
@@ -72,10 +78,11 @@ pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
 use crate::map::Point;
 
-use super::biology::Biology;
+use super::background::{Due, Priority};
+use super::biology::{Biology, Event};
 use super::entity::Think;
 use super::inventory::Inventory;
-use super::uid::Uid;
+use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
@@ -84,6 +91,8 @@ use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
     perception: Perception,
+    /// Who has been seen lately — what makes a sighting news or not.
+    attention: Attention,
     memory: Memory,
     /// Run in this order every tick, as many as the brain was built with.
     ///
@@ -124,7 +133,8 @@ impl Brain {
         executors: impl IntoIterator<Item = Box<dyn GoalExecutor>>,
     ) -> Brain {
         let mut brain = Brain {
-            perception: Perception,
+            perception: Perception::default(),
+            attention: Attention::default(),
             memory: Memory::new(),
             routines: routines.into_iter().collect(),
             goals: Goals::new(),
@@ -179,10 +189,14 @@ impl Brain {
     /// **The pipeline.** See the module docs for the steps and their order.
     ///
     /// `walk` is the body being driven; `biology` and `inventory` are `None`
-    /// for a kind that has no needs or carries nothing.
+    /// for a kind that has no needs or carries nothing. `due` is what the
+    /// unit's own schedule says is due this tick: looking round is
+    /// [`Priority::Med`] work, so a kind that hands [`Due::NOTHING`] never
+    /// looks.
     pub fn react(
         &mut self,
         ctx: &Think<'_>,
+        due: &Due,
         outcome: MoveOutcome,
         walk: &mut Walker,
         mut biology: Option<&mut Biology>,
@@ -192,6 +206,7 @@ impl Brain {
         // below do not overlap — the same trick `process_pass` uses.
         let Brain {
             perception,
+            attention,
             memory,
             routines,
             goals,
@@ -205,8 +220,28 @@ impl Brain {
         } = self;
         let body = *walk.body();
 
-        // 0. Look around.
-        perception.observe(ctx, &body);
+        // 0. Face the way it is going, and when it is time, look round and
+        // take in what is news. Asleep, its eyes are shut: it sees nobody, and
+        // whoever it had in mind fades as the night goes on.
+        perception.turn(walk.heading());
+        if let Some(elapsed) = due.elapsed(Priority::Med) {
+            if matches!(task, Some(Task::Sleep(_))) {
+                perception.close_eyes();
+                attention.attend(std::iter::empty(), elapsed, |_| {});
+            } else {
+                perception.look(ctx, &body);
+                let mut met = 0;
+                attention.attend(perception.seen(), elapsed, |notice| {
+                    if notice.uid.kind() == Some(EntityType::Human) {
+                        met += 1;
+                        if let Some(biology) = biology.as_deref_mut() {
+                            biology.handle(Event::Met);
+                        }
+                    }
+                });
+                attention.met_with(met);
+            }
+        }
 
         // 1, 2. Every routine arranges the list, from scratch.
         goals.clear_priorities();
@@ -352,6 +387,16 @@ impl Brain {
         self.memory.remember(memory::HOME_BED, Recall::Cell(bed));
     }
 
+    /// What it saw at its last look.
+    pub fn perception(&self) -> &Perception {
+        &self.perception
+    }
+
+    /// Who it has seen lately.
+    pub fn attention(&self) -> &Attention {
+        &self.attention
+    }
+
     /// What a brain would tell a debugger, for the brains menu.
     ///
     /// Allocates freely: it is asked about the one unit somebody has selected,
@@ -410,6 +455,8 @@ impl Brain {
         if let Some(executor) = self.executors[top as usize].as_deref() {
             fields.extend(executor.debug_fields());
         }
+        fields.extend(self.perception.debug_fields());
+        fields.extend(self.attention.debug_fields());
         fields.push((
             "memory",
             if self.memory.is_empty() {
@@ -469,7 +516,7 @@ mod tests {
             self.walk.apply(intent);
         }
         fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
-            self.brain.react(ctx, outcome, &mut self.walk, None, None)
+            self.brain.react(ctx, &Due::NOTHING, outcome, &mut self.walk, None, None)
         }
     }
 
@@ -940,5 +987,80 @@ mod tests {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
         assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, stay busy"));
+        for wanted in ["facing", "sees", "in mind"] {
+            assert!(names.contains(&wanted), "no {wanted} in {names:?}");
+        }
+    }
+
+    /// A human boxed in by crates, so it cannot wander off or turn round: it
+    /// faces south, the way a unit that has never moved does, for good.
+    fn boxed_in(me: Point) -> (World, crate::sim::kinds::Human) {
+        let mut map = Map::new(Size::new(11, 11), FLOOR);
+        for side in me.cardinal_neighbours() {
+            crate::sim::testing::prop_at(&mut map, "crate", side);
+        }
+        let mut human = crate::sim::testing::needy_human(me, 0.0, 0.0, 0.0);
+        human.biology_mut().unwrap().edit(|stats| stats.with_satisfaction(50.0));
+        (World::new(map), human)
+    }
+
+    fn greetings(human: &crate::sim::kinds::Human) -> u32 {
+        human.brain().attention().met()
+    }
+
+    #[test]
+    fn a_human_who_sees_somebody_is_glad_once_and_again_only_after_forgetting_them() {
+        use crate::sim::biology::satisfaction::GLAD_TO_SEE;
+        let me = Point::new(5, 5);
+        let (mut world, mut human) = boxed_in(me);
+        let friend = Uid::new(EntityType::Human, 5);
+        let there = Point::new(5, 2);
+        world.occupancy.claim(there, friend).unwrap();
+
+        // Every 7th tick, at a point the unit's own schedule picks.
+        for _ in 0..Priority::Med.period() {
+            world.step(&mut human);
+        }
+        assert_eq!(human.brain().perception().heading(), perception::Heading::South);
+        assert_eq!(greetings(&human), 1);
+        assert!(human.brain().attention().remembers(friend));
+        assert!(human.stats().satisfaction() > 50.0 + GLAD_TO_SEE - 0.1, "{}", human.stats().satisfaction());
+
+        // In view the whole time: in mind, and not news again.
+        for _ in 0..200 {
+            world.step(&mut human);
+        }
+        assert_eq!(greetings(&human), 1);
+
+        // Gone for longer than a face is kept in mind, then back.
+        world.occupancy.release(there, friend);
+        let world_dt = world.dt * crate::sim::clock::TIME_SCALE;
+        let away = (attention::FORGET_AFTER / world_dt) as usize + 2 * Priority::Med.period() as usize;
+        for _ in 0..away {
+            world.step(&mut human);
+        }
+        assert!(!human.brain().attention().remembers(friend));
+        world.occupancy.claim(there, friend).unwrap();
+        for _ in 0..Priority::Med.period() {
+            world.step(&mut human);
+        }
+        assert_eq!(greetings(&human), 2, "forgotten, so met again");
+    }
+
+    #[test]
+    fn a_human_out_of_sight_behind_or_a_dog_in_front_is_no_meeting() {
+        let me = Point::new(5, 5);
+        let (mut world, mut human) = boxed_in(me);
+        let behind = Uid::new(EntityType::Human, 5);
+        let dog = Uid::new(EntityType::Dog, 6);
+        world.occupancy.claim(Point::new(5, 8), behind).unwrap();
+        world.occupancy.claim(Point::new(5, 2), dog).unwrap();
+        for _ in 0..3 * Priority::Med.period() {
+            world.step(&mut human);
+        }
+        assert_eq!(greetings(&human), 0);
+        assert!(human.brain().attention().remembers(dog), "a dog is seen, and is no news to anybody");
+        assert!(!human.brain().attention().remembers(behind));
+        assert!(human.stats().satisfaction() < 50.0);
     }
 }

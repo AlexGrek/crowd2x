@@ -8,6 +8,11 @@
 //! **familiarity**, raised by one each time it happens and fading away with
 //! world time.
 //!
+//! Company is the one experience with no floor: meeting somebody is a little
+//! less of a lift for every other person met lately, all the way down, so the
+//! joy a crowd can give adds up only as fast as meetings fade from memory —
+//! see [`Experience::most_familiar`].
+//!
 //! It is not a [`Process`](super::Process): it changes no stat, and it cannot
 //! be switched off. It is what [`Biology::handle`](super::Biology::handle)
 //! asks before an event reaches the processes, so each of them is told how
@@ -46,7 +51,8 @@ pub const HOURS_TO_HALF_FORGET: f32 = 4.0;
 /// hours — "today", which is what the dulling is meant to be about.
 pub const IN_RECENT_MEMORY: f32 = 0.1;
 
-/// The most familiar anything gets, however often it is done.
+/// The most familiar a treat gets, however often it is had — company has no
+/// such cap ([`Experience::most_familiar`]).
 ///
 /// Caps the dulling: [`Recollection::novelty`] never falls below a quarter, so
 /// a thoroughly bored person at a computer still gets more fun from a go than
@@ -65,19 +71,25 @@ pub enum Experience {
     Taste(ItemKind),
     /// A go at something entertaining.
     Entertainment,
+    /// Meeting somebody: anybody who came into view and was not in mind
+    /// (`brain::attention`).
+    Company,
 }
 
 impl Experience {
-    /// One slot per item kind, then entertainment.
-    pub const COUNT: usize = ItemKind::COUNT + 1;
+    /// One slot per item kind, then entertainment, then company.
+    pub const COUNT: usize = ItemKind::COUNT + 2;
 
     /// Which experience an event is, if it is one. **Something with no taste is
     /// not an experience** — there is no flavour to tire of in a glass of
-    /// water — and neither is the toilet or a night's sleep.
+    /// water — and neither is the toilet or a night's sleep. Meeting somebody
+    /// is: not *that* somebody, whose face is the brain's attention's to
+    /// remember, but company in general.
     pub fn of(event: Event) -> Option<Experience> {
         match event {
             Event::Ingested(item) if item.taste() > 0.0 => Some(Experience::Taste(item)),
             Event::Entertained => Some(Experience::Entertainment),
+            Event::Met => Some(Experience::Company),
             Event::Ingested(_) | Event::Relieved | Event::Slept { .. } => None,
         }
     }
@@ -86,6 +98,26 @@ impl Experience {
         match self {
             Experience::Taste(item) => item.name(),
             Experience::Entertainment => "entertainment",
+            Experience::Company => "company",
+        }
+    }
+
+    /// The most familiar it can get.
+    ///
+    /// A treat is capped at [`MOST_FAMILIAR`], so the hundredth go is still
+    /// worth a quarter of the first. Company is not capped: in a crowd a unit
+    /// meets somebody new every few seconds of world, and a floor under each
+    /// meeting would add up to a lift no day could wear off. Uncapped, the
+    /// `n`th meeting in a row is worth `1 / n` of the first, and however many
+    /// people go by, the joy of meeting them comes in no faster than the
+    /// memory of them fades: at most about [`GLAD_TO_SEE`] times `ln 2 /`
+    /// [`HOURS_TO_HALF_FORGET`] an hour.
+    ///
+    /// [`GLAD_TO_SEE`]: super::satisfaction::GLAD_TO_SEE
+    pub const fn most_familiar(self) -> f32 {
+        match self {
+            Experience::Taste(_) | Experience::Entertainment => MOST_FAMILIAR,
+            Experience::Company => f32::MAX,
         }
     }
 
@@ -93,11 +125,13 @@ impl Experience {
         match self {
             Experience::Taste(item) => item as usize,
             Experience::Entertainment => ItemKind::COUNT,
+            Experience::Company => ItemKind::COUNT + 1,
         }
     }
 
     const ALL: [Experience; Experience::COUNT] = {
-        let mut all = [Experience::Entertainment; Experience::COUNT];
+        let mut all = [Experience::Company; Experience::COUNT];
+        all[ItemKind::COUNT] = Experience::Entertainment;
         let mut i = 0;
         while i < ItemKind::COUNT {
             all[i] = Experience::Taste(ItemKind::ALL[i]);
@@ -145,7 +179,7 @@ impl Recollection {
 
     /// How good `experience` would be now, as a fraction of how good it was the
     /// first time: 1 when forgotten, a half with it done once just now, a third
-    /// for twice, never below `1 / (1 + MOST_FAMILIAR)`.
+    /// for twice, never below `1 / (1 + MOST_FAMILIAR)` for a treat.
     pub fn novelty(&self, experience: Experience) -> f32 {
         1.0 / (1.0 + self.familiarity(experience))
     }
@@ -153,7 +187,7 @@ impl Recollection {
     /// It happened: one more time to remember.
     pub fn remember(&mut self, experience: Experience) {
         let familiarity = &mut self.familiarity[experience.slot()];
-        *familiarity = (*familiarity + 1.0).min(MOST_FAMILIAR);
+        *familiarity = (*familiarity + 1.0).min(experience.most_familiar());
     }
 
     /// One field however much is remembered, so the unit panel's layout does
@@ -212,6 +246,17 @@ mod tests {
     }
 
     #[test]
+    fn company_has_no_floor_each_meeting_in_a_row_is_worth_less() {
+        let mut recollection = Recollection::default();
+        for n in 1..=100 {
+            let novelty = recollection.novelty(Experience::Company);
+            assert!((novelty - 1.0 / n as f32).abs() < 1e-6, "meeting {n}: {novelty}");
+            recollection.remember(Experience::Company);
+        }
+        assert_eq!(recollection.novelty(FOOD), FRESH, "and it dulls nothing else");
+    }
+
+    #[test]
     fn a_memory_fades_by_half_in_four_hours_and_is_gone_by_the_next_day() {
         let mut recollection = Recollection::default();
         recollection.remember(FOOD);
@@ -263,6 +308,7 @@ mod tests {
         assert_eq!(Experience::of(Event::Ingested(ItemKind::Water)), None);
         assert_eq!(Experience::of(Event::Relieved), None);
         assert_eq!(Experience::of(Event::Slept { world_seconds: HOUR }), None);
+        assert_eq!(Experience::of(Event::Met), Some(Experience::Company));
         assert_eq!(Experience::of(Event::Ingested(ItemKind::Food)), Some(FOOD));
         assert_eq!(Experience::of(Event::Entertained), Some(Experience::Entertainment));
     }

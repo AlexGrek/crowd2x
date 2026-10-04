@@ -553,7 +553,7 @@ mod tests {
         let mut tasks = Tasks::new();
         let mut inventory = Inventory::human();
         let _ = inventory.set_hand(Some(ItemKind::Food));
-        let perception = Perception;
+        let perception = Perception::default();
         let think = world.ctx();
         let mut ctx = GoalCtx {
             think: &think,
@@ -596,7 +596,7 @@ mod tests {
         let mut tasks = Tasks::new();
         let mut inventory = Inventory::human();
         let _ = inventory.set_hand(Some(ItemKind::Food));
-        let perception = Perception;
+        let perception = Perception::default();
         let think = world.ctx();
         let mut ctx = GoalCtx {
             think: &think,
