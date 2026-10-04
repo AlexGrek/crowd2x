@@ -13,7 +13,8 @@ advanced by one function, and every unit in it runs a brain — routines, goals,
 actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet,
 have a go on a computer, and sleep in a bed at night — driven by biological processes
 (hunger, thirst, a bladder that a drink fills, fun that drains away, energy that a night in
-bed restores) that can be switched off per unit. The computer is also the first prop that
+bed restores, satisfaction that a treat lifts) that can be switched off per unit, and dulled
+by a fading memory of what was done lately: the same treat twice in a day is less of one. The computer is also the first prop that
 is *watched* being used: its screen is on for as long as somebody is sitting at it. (A bed
 does not yet show that it is slept in: it has no second strip of art to swap to.)
 
@@ -619,7 +620,8 @@ talking only to the one below:
   per-unit scan of the crowd.
 - **memory** — a `BTreeMap<String, Recall>`, nearly empty: the one thing in it so far is which
   bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
-  can never be a hash order.
+  can never be a hash order. What a unit has *done* lately is a different memory, kept by
+  the body because a task writes it every meal (`biology::Recollection`, under "Biology").
 - **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
@@ -764,7 +766,7 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   through every task that consumes anything. An item says what it is made of, not what it
   does to a body.
 - **A process** is a struct in its own file implementing `Process`: `advance(stats, dt)` for
-  time passing and `handle(event, stats)` for something happening to the body. It may keep
+  time passing and `handle(event, novelty, stats)` for something happening to the body. It may keep
   state of its own — `Bladder` holds what has been drunk but has not arrived, filling at
   `FILLING_PER_SECOND` on top of the slow `BLADDER_PER_SECOND`. Processes run in `ProcessId`
   order through `&mut dyn` over `Biology`'s own fields: nothing boxed, nothing allocated.
@@ -775,6 +777,23 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
   Switched from code (`Biology::set_running`) or from outside the world with
   `Command::SetProcess`, applied in the spawn pass like a freeze. There is no interface for
   it yet.
+- **Recent memory fades** (`biology/recollection.rs`, `Recollection`). Eating something with
+  a flavour (`ItemKind::taste` above zero, so not water) and a go at something entertaining
+  are each an `Experience` with a **familiarity**: one more each time it happens (capped at
+  `MOST_FAMILIAR`, 3), halving every `HOURS_TO_HALF_FORGET` (4 world hours) and forgotten
+  outright below `IN_RECENT_MEMORY` (0.1), about thirteen hours after one go — "today".
+  `Biology::handle` asks it before the event reaches the processes and hands each one the
+  **novelty**, `1 / (1 + familiarity)`: a half for something done just now, never below a
+  quarter. A process about the mind scales by it — `Fun` gives `AMUSEMENT * novelty`,
+  `Satisfaction` a treat's worth times it — and one about the body ignores it, so a second
+  meal of the same food fills exactly as much and is less of a treat. It is not a process:
+  it changes no stat and cannot be switched off. When the experience was still remembered,
+  `handle` returns it, and the task that caused it (`ConsumeItem`, `UseComputer`) logs
+  `... had food in recent memory: 70% as good as fresh` (`tasks::report_recalled`).
+- **Satisfaction** (`biology/satisfaction.rs`) is how a person's day is going: it drains
+  from content to discontented in 48 world hours and is lifted by a treat — a meal by its
+  item's `taste` (`TASTY`, 15), a go on the computer by `ENJOYMENT` (20), each times its
+  novelty. Nothing reads it to decide anything yet: it is a readout in the debug menu.
 - **Adding a process** is a `ProcessId` variant, a struct and file, a field on `Biology`, and
   its slot in `Biology::parts`/`processes` in id order (a test fails if the slots and ids
   drift). Food reaching the bladder later is a new process between `Hunger` and `Bladder`,
@@ -800,7 +819,7 @@ release at 25, the toilet at 70 and 10, boredom at 60 and 20; one go is worth 60
 fun, so a thoroughly bored person has a second one the way a starving one eats twice.
 
 **Everybody is born 70 to 100 percent satisfied in every need** (`Stats::random`,
-`BORN_AT_LEAST_SATISFIED`): fed, watered, comfortable, entertained and rested, worn down by
+`BORN_AT_LEAST_SATISFIED`): fed, watered, comfortable, entertained, rested and content, worn down by
 the world from there. Rolling a need anywhere in its range put a quarter of every crowd
 past the line where it goes looking for a meal or a bed on its first tick. It also means
 the first hunger is hours of world away, which a test that waits for one has to allow.
@@ -1036,7 +1055,9 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         inventory.rs is what a unit carries: a hand that costs
                         mass only, stowage that costs mass and space, and limits
                         biology/ is the body: Stats, and the processes that alone
-                        change them (hunger, thirst, bladder, fun, energy), each switchable
+                        change them (hunger, thirst, bladder, fun, energy,
+                        satisfaction), each switchable; recollection.rs is
+                        recent memory, fading, which dulls a treat had twice
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
 src/awake.rs            macOS: hold the display awake so a run can be photographed

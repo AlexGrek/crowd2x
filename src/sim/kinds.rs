@@ -35,6 +35,7 @@ use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
 use super::item::ItemKind;
+use super::talents::Talents;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, Intent, MoveOutcome};
@@ -70,6 +71,8 @@ pub struct Human {
     /// `Copy`, like the biology — see [`Inventory`] for which of its two
     /// limits counts the hand.
     inventory: Inventory,
+    /// Lasting aptitudes, rolled once and changed only explicitly.
+    talents: Talents,
 }
 
 impl Human {
@@ -80,6 +83,7 @@ impl Human {
             biology: Biology::new(Stats::random(rng)),
             identity: Identity::human(rng),
             inventory: Inventory::human(),
+            talents: Talents::random(rng),
         }
     }
 
@@ -91,6 +95,10 @@ impl Human {
     /// Who this person is: name and gender.
     pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    pub fn talents(&self) -> &Talents {
+        &self.talents
     }
 
     pub fn brain(&self) -> &Brain {
@@ -190,6 +198,14 @@ impl GameEntity for Human {
 
     fn inventory_mut(&mut self) -> Option<&mut Inventory> {
         Some(&mut self.inventory)
+    }
+
+    fn talents(&self) -> Option<&Talents> {
+        Some(&self.talents)
+    }
+
+    fn talents_mut(&mut self) -> Option<&mut Talents> {
+        Some(&mut self.talents)
     }
 
     fn current_goal(&self) -> Option<GoalId> {

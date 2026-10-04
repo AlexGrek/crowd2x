@@ -1,6 +1,6 @@
 //! Things a unit can hold: [`ItemKind`].
 //!
-//! An item says what it is made of — how nourishing, how much water, how heavy
+//! An item says what it is made of — how nourishing, how much water, how tasty, how heavy
 //! and how bulky — and not what that does to whoever consumes it or carries it.
 //! That is somebody else's business: the processes in [`super::biology`] read
 //! the nourishment when they hear it was eaten, so a drink filling a bladder is
@@ -23,6 +23,13 @@ pub const MEAL: f32 = 60.0;
 
 /// How much water one drink is: the thirst it takes away.
 pub const DRINK: f32 = 60.0;
+
+/// How much of a treat one meal is: the satisfaction it gives, the first time.
+///
+/// Not how filling it is — that is [`MEAL`], and it is the same every time.
+/// What the treat is worth *this* time is for the body to say, by how recently
+/// it had the same thing (`biology::Recollection`).
+pub const TASTY: f32 = 15.0;
 
 /// What a portion of food weighs, in kilograms.
 pub const MEAL_MASS: f32 = 0.5;
@@ -110,6 +117,16 @@ impl ItemKind {
         match self {
             ItemKind::Food => 0.0,
             ItemKind::Water => DRINK,
+        }
+    }
+
+    /// How much of a treat it is, on the satisfaction scale. Zero for
+    /// something with no flavour to speak of — and something with no flavour
+    /// is nothing to tire of either.
+    pub const fn taste(self) -> f32 {
+        match self {
+            ItemKind::Food => TASTY,
+            ItemKind::Water => 0.0,
         }
     }
 

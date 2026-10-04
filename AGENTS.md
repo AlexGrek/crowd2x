@@ -299,11 +299,12 @@ directly instead of listening for the `Cancelled` it would otherwise fire on eve
 #### Selecting somebody (`game/selection.rs`, `game/unitpanel.rs`)
 
 A left click on the map picks whoever is standing in that cell, a green frame
-(`selection.png`) says who, and a panel along the bottom shows their portrait and five
+(`selection.png`) says who, and a panel along the bottom shows their portrait and six
 menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains` (the
-goal in charge, the priority list, the task, its result and action — live, like `debug`)
-and `items` (the hand, what is stowed, and both totals against both limits — live too,
-since a unit picks things up while you are reading). Clicking empty ground, or `close`,
+goal in charge, the priority list, the task, its result and action — live, like `debug`),
+`items` (the hand, what is stowed, and both totals against both limits — live too,
+since a unit picks things up while you are reading), and `talents` (nine integer aptitudes,
+each out of 100). Clicking empty ground, or `close`,
 selects nobody and the panel goes with them.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
@@ -484,6 +485,16 @@ carry out; no time passes for it, its biology included. It keeps its cell and it
 letting it go again carries on rather than starting over. `GameEntity::debug_fields` is the
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
+
+#### Lasting talents (`sim/talents.rs`)
+
+Humans have nine talents: arts, engineering, communication, management, athleticism,
+military, beauty, responsibility and precision. Each is an integer from 0 to 100,
+generated independently at spawn from a normal distribution with mean 50 and standard
+deviation 15, rounded and truncated to that range. Generation uses the person's seeded
+RNG, so it replays deterministically. Talents are separate from biology and remain stable
+as time passes; explicit changes use `Command::SetTalent` in the spawn pass and clamp to
+the same bounds. `GameEntity::talents` exposes them to the live unit panel; dogs have none.
 
 #### What a unit carries (`sim/inventory.rs`, `sim/item.rs`)
 

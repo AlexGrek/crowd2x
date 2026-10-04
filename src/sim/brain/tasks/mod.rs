@@ -25,6 +25,26 @@ pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;
 pub use wait::Wait;
 
+use crate::sim::biology::Experience;
+
+use super::task::TaskCtx;
+
+/// Say that what a task just did was **in recent memory**, and so less of a
+/// treat than it would have been — what [`Biology::handle`] hands back when it
+/// was. Once per thing done, never per tick, so it cannot flood the log.
+///
+/// [`Biology::handle`]: crate::sim::biology::Biology::handle
+pub(super) fn report_recalled(ctx: &TaskCtx<'_>, recalled: Option<(Experience, f32)>) {
+    if let Some((experience, novelty)) = recalled {
+        ctx.think.log.push(format!(
+            "{} had {} in recent memory: {:.0}% as good as fresh",
+            ctx.walk.body().uid(),
+            experience.name(),
+            novelty * 100.0
+        ));
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod rig {
     //! One unit's body, hands and biology, with no brain above them, so a task

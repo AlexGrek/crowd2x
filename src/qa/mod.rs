@@ -1190,6 +1190,13 @@ fn perform(
                 })
         }
 
+        Step::ExpectText(needle) => checks
+            .labels
+            .iter()
+            .any(|text| text.0.contains(needle))
+            .then_some(Next::Now)
+            .ok_or(format!("no UI text contains {needle:?}")),
+
         Step::ExpectLog(needle) => checks
             .log
             .contains(needle)

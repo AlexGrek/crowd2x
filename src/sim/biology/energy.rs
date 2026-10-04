@@ -44,7 +44,7 @@ impl Process for Energy {
         stats.change_stamina(-ENERGY_PER_SECOND * dt);
     }
 
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
         if let Event::Slept { world_seconds } = event {
             stats.change_stamina(RECOVERY_PER_SECOND * world_seconds);
         }
@@ -54,6 +54,7 @@ impl Process for Energy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::biology::recollection::FRESH;
     use crate::sim::clock::{MINUTE, TIME_SCALE};
     use crate::sim::item::ItemKind;
 
@@ -90,7 +91,7 @@ mod tests {
             for _ in 0..(HOUR / DT) as u32 {
                 Energy.advance(&mut stats, DT);
             }
-            Energy.handle(Event::Slept { world_seconds: HOUR }, &mut stats);
+            Energy.handle(Event::Slept { world_seconds: HOUR }, FRESH, &mut stats);
             assert!(stats.stamina() > 0.0, "hour {hour}");
         }
         assert!((stats.stamina() - 100.0).abs() < 1.0, "{}", stats.stamina());
@@ -99,23 +100,23 @@ mod tests {
     #[test]
     fn rest_never_goes_past_fully_rested_however_long_somebody_sleeps() {
         let mut stats = Stats::calm().with_stamina(80.0);
-        Energy.handle(Event::Slept { world_seconds: 20.0 * HOUR }, &mut stats);
+        Energy.handle(Event::Slept { world_seconds: 20.0 * HOUR }, FRESH, &mut stats);
         assert_eq!(stats.stamina(), 100.0);
     }
 
     #[test]
     fn a_short_sleep_is_worth_a_short_rest() {
         let mut stats = Stats::calm().with_stamina(20.0);
-        Energy.handle(Event::Slept { world_seconds: HOUR }, &mut stats);
+        Energy.handle(Event::Slept { world_seconds: HOUR }, FRESH, &mut stats);
         assert!(stats.stamina() > 20.0 && stats.stamina() < 50.0, "{}", stats.stamina());
     }
 
     #[test]
     fn eating_the_toilet_and_a_computer_are_not_rest() {
         let mut stats = Stats::calm().with_stamina(30.0);
-        Energy.handle(Event::Ingested(ItemKind::Food), &mut stats);
-        Energy.handle(Event::Relieved, &mut stats);
-        Energy.handle(Event::Entertained, &mut stats);
+        Energy.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
+        Energy.handle(Event::Relieved, FRESH, &mut stats);
+        Energy.handle(Event::Entertained, FRESH, &mut stats);
         assert_eq!(stats.stamina(), 30.0);
     }
 }

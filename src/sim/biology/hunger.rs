@@ -35,7 +35,7 @@ impl Process for Hunger {
     }
 
     /// Whatever was eaten takes away as much hunger as it is nourishing.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
         if let Event::Ingested(item) = event {
             stats.change_hunger(-item.nutrition());
         }
@@ -45,6 +45,7 @@ impl Process for Hunger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::biology::recollection::FRESH;
     use crate::sim::brain::routines::PECKISH;
     use crate::sim::clock::MINUTE;
     use crate::sim::item::{ItemKind, MEAL};
@@ -73,16 +74,16 @@ mod tests {
     #[test]
     fn eating_takes_hunger_away_and_never_past_full() {
         let mut stats = Stats::calm().with_hunger(70.0);
-        Hunger.handle(Event::Ingested(ItemKind::Food), &mut stats);
+        Hunger.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
         assert_eq!(stats.hunger(), 70.0 - MEAL);
-        Hunger.handle(Event::Ingested(ItemKind::Food), &mut stats);
+        Hunger.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
         assert_eq!(stats.hunger(), 0.0);
     }
 
     #[test]
     fn water_is_not_a_meal() {
         let mut stats = Stats::calm().with_hunger(70.0);
-        Hunger.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        Hunger.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         assert_eq!(stats.hunger(), 70.0);
     }
 }

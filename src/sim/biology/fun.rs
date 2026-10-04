@@ -49,14 +49,17 @@ impl Process for Fun {
         stats.change_fun(-FUN_PER_SECOND * dt);
     }
 
-    /// Having done something entertaining puts [`AMUSEMENT`] back.
+    /// Having done something entertaining puts [`AMUSEMENT`] back — all of
+    /// it the first time today, less for a go had again while the last one is
+    /// still in recent memory (`novelty`, from
+    /// [`Recollection`](super::Recollection)).
     ///
     /// What that something *was* is not this process's business, the same way
     /// a bladder does not care which toilet was used: a task says what
     /// happened to the body and the body decides what it comes to.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
         if event == Event::Entertained {
-            stats.change_fun(AMUSEMENT);
+            stats.change_fun(AMUSEMENT * novelty);
         }
     }
 }
@@ -64,6 +67,7 @@ impl Process for Fun {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::biology::recollection::FRESH;
     use crate::sim::brain::routines::{AMUSED, BORED};
     use crate::sim::clock::MINUTE;
     use crate::sim::item::ItemKind;
@@ -93,7 +97,7 @@ mod tests {
     fn a_go_at_something_entertaining_is_worth_more_than_the_wait_for_one() {
         let mut stats = Stats::calm().with_fun(100.0 - BORED);
         assert!(stats.boredom() >= BORED, "bored enough to want a go");
-        Fun.handle(Event::Entertained, &mut stats);
+        Fun.handle(Event::Entertained, FRESH, &mut stats);
         assert!(stats.boredom() <= AMUSED, "{} left", stats.boredom());
     }
 
@@ -101,16 +105,23 @@ mod tests {
     fn fun_never_goes_past_having_a_great_time_however_many_goes_it_takes() {
         let mut stats = Stats::calm().with_fun(50.0);
         for _ in 0..10 {
-            Fun.handle(Event::Entertained, &mut stats);
+            Fun.handle(Event::Entertained, FRESH, &mut stats);
         }
         assert_eq!(stats.fun(), 100.0);
     }
 
     #[test]
+    fn a_go_had_again_while_the_last_is_remembered_is_less_fun() {
+        let mut stats = Stats::calm().with_fun(10.0);
+        Fun.handle(Event::Entertained, 0.5, &mut stats);
+        assert_eq!(stats.fun(), 10.0 + AMUSEMENT * 0.5);
+    }
+
+    #[test]
     fn eating_and_the_toilet_are_not_entertainment() {
         let mut stats = Stats::calm().with_fun(30.0);
-        Fun.handle(Event::Ingested(ItemKind::Food), &mut stats);
-        Fun.handle(Event::Relieved, &mut stats);
+        Fun.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
+        Fun.handle(Event::Relieved, FRESH, &mut stats);
         assert_eq!(stats.fun(), 30.0);
     }
 }

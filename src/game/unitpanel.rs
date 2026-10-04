@@ -6,7 +6,7 @@
 //! | [despawn] [freeze]                |
 //! +-----------------------------------+
 //! | [##] human                        |
-//! | [##] [life][debug][stats][brains][items][close]
+//! | [##] [life][debug][stats][brains][items][talents][close]
 //! +-----------------------------------+
 //! ```
 //!
@@ -50,7 +50,7 @@
 use bevy::prelude::*;
 
 use crate::characters::{dog, human};
-use crate::sim::{EntityType, GameEntity, ItemKind, MoveOutcome, Uid};
+use crate::sim::{EntityType, GameEntity, ItemKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -68,12 +68,12 @@ const PORTRAIT: f32 = 32.0;
 
 /// Which menu is open under the bar, if any.
 ///
-/// One at a time: these are four views of one unit, not four panels, and two
+/// One at a time: these are views of one unit, and two
 /// of them open at once would cover the map they are about.
 #[derive(Resource, Default, PartialEq, Eq)]
 struct OpenMenu(Option<Menu>);
 
-/// The five things there are to know about a unit.
+/// The views of a selected unit.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     /// What can be done to it: despawn, freeze.
@@ -90,6 +90,8 @@ enum Menu {
     /// is to the two limits — live, like the debug menu, because a unit picks
     /// things up and eats them while you are reading.
     Items,
+    /// Lasting aptitudes, shown live so explicit changes appear immediately.
+    Talents,
 }
 
 impl Menu {
@@ -102,6 +104,7 @@ impl Menu {
             Menu::Stats => "stats",
             Menu::Brains => "brains",
             Menu::Items => "items",
+            Menu::Talents => "talents",
         }
     }
 }
@@ -133,6 +136,8 @@ enum Readout {
     Brains,
     /// Every field of the items menu, rewritten as a block.
     Items,
+    /// Every talent, rewritten when its value changes.
+    Talents,
     /// The freeze button's own label, which flips to `unfreeze`.
     Freeze,
     /// The line by the portrait: what it is, and whether it is held.
@@ -335,6 +340,7 @@ fn rebuild(
                                 (Action::Open(Menu::Stats), plain_button("stats", px(24))),
                                 (Action::Open(Menu::Brains), plain_button("brains", px(28))),
                                 (Action::Open(Menu::Items), plain_button("items", px(24))),
+                                (Action::Open(Menu::Talents), plain_button("talents", px(32))),
                                 (Action::Close, plain_button("close", px(24))),
                             ],
                         ),
@@ -346,8 +352,8 @@ fn rebuild(
 
 /// What goes inside an open menu.
 ///
-/// Spawned into the menu rather than returned as a bundle: the four menus are
-/// four different shapes, and `impl Bundle` cannot be four types.
+/// Spawned into the menu rather than returned as a bundle: the menus have
+/// different shapes.
 ///
 /// The two readouts are built holding what is true *now* rather than being
 /// left blank for [`update_readouts`] to fill in: the panel is spawned through
@@ -402,6 +408,12 @@ fn menu_contents(
             parent.spawn((
                 Readout::Items,
                 label(items_block(entity), FONT_BODY, TEXT),
+            ));
+        }
+        Menu::Talents => {
+            parent.spawn((
+                Readout::Talents,
+                label(talents_block(entity), FONT_BODY, TEXT),
             ));
         }
         // Deliberately empty, and saying so: a menu that opened onto nothing
@@ -500,6 +512,7 @@ fn update_readouts(
             Readout::Debug => debug_block(&sim, entity),
             Readout::Brains => brains_block(entity),
             Readout::Items => items_block(entity),
+            Readout::Talents => talents_block(entity),
             Readout::Freeze => freeze_label(entity).to_string(),
             Readout::Title => title(entity),
         };
@@ -631,6 +644,18 @@ fn items_block(entity: &dyn GameEntity) -> String {
     field_block(fields)
 }
 
+/// All nine aptitudes, with their shared range visible next to each value.
+fn talents_block(entity: &dyn GameEntity) -> String {
+    let Some(talents) = entity.talents() else {
+        return "no talents".to_string();
+    };
+    field_block(
+        Talent::ALL.into_iter()
+            .map(|talent| (talent.name(), format!("{} / 100", talents.get(talent))))
+            .collect(),
+    )
+}
+
 /// What the unit's mind is doing, as a block of lines — or a plain `empty` for
 /// a kind with no brain, which is more honest than a blank menu.
 fn brains_block(entity: &dyn GameEntity) -> String {
@@ -735,6 +760,27 @@ mod tests {
         // water plus 1.0 of food by weight, and 2.0 of food alone by volume.
         assert_eq!(field(&block, "mass"), "1.5 / 10.0 kg");
         assert_eq!(field(&block, "space"), "2.0 / 12.0 L");
+    }
+
+    #[test]
+    fn the_talents_menu_shows_all_nine_scores_and_follows_explicit_changes() {
+        let mut person = human();
+        let block = talents_block(&person);
+        assert_eq!(block.lines().count(), Talent::ALL.len());
+        for talent in Talent::ALL {
+            assert_eq!(field(&block, talent.name()), format!("{} / 100", person.talents().get(talent)));
+        }
+        GameEntity::talents_mut(&mut person).unwrap().set(Talent::Precision, 100);
+        assert_eq!(field(&talents_block(&person), "precision"), "100 / 100");
+    }
+
+    #[test]
+    fn a_dog_has_no_human_talent_scores_to_show() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let dog = crate::sim::Dog::new(
+            Uid::new(EntityType::Dog, 1), Point::new(0, 0), crate::sim::Facing::Left, &mut rng,
+        );
+        assert_eq!(talents_block(&dog), "no talents");
     }
 
     #[test]

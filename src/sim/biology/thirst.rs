@@ -29,7 +29,7 @@ impl Process for Thirst {
     }
 
     /// Whatever was drunk takes away as much thirst as it has water in it.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
         if let Event::Ingested(item) = event {
             stats.change_thirst(-item.hydration());
         }
@@ -39,6 +39,7 @@ impl Process for Thirst {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::biology::recollection::FRESH;
     use crate::sim::biology::hunger::HUNGER_PER_SECOND;
     use crate::sim::brain::routines::THIRSTY;
     use crate::sim::clock::MINUTE;
@@ -67,16 +68,16 @@ mod tests {
     #[test]
     fn drinking_takes_thirst_away_and_never_past_quenched() {
         let mut stats = Stats::calm().with_thirst(70.0);
-        Thirst.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        Thirst.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         assert_eq!(stats.thirst(), 70.0 - DRINK);
-        Thirst.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        Thirst.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         assert_eq!(stats.thirst(), 0.0);
     }
 
     #[test]
     fn food_does_not_quench_thirst() {
         let mut stats = Stats::calm().with_thirst(70.0);
-        Thirst.handle(Event::Ingested(ItemKind::Food), &mut stats);
+        Thirst.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
         assert_eq!(stats.thirst(), 70.0);
     }
 }

@@ -59,6 +59,8 @@ pub mod bladder;
 pub mod energy;
 pub mod fun;
 pub mod hunger;
+pub mod recollection;
+pub mod satisfaction;
 pub mod stats;
 pub mod thirst;
 
@@ -66,6 +68,8 @@ pub use bladder::Bladder;
 pub use energy::Energy;
 pub use fun::Fun;
 pub use hunger::Hunger;
+pub use recollection::{Experience, Recollection};
+pub use satisfaction::Satisfaction;
 pub use stats::Stats;
 pub use thirst::Thirst;
 
@@ -83,16 +87,18 @@ pub enum ProcessId {
     Bladder = 2,
     Fun = 3,
     Energy = 4,
+    Satisfaction = 5,
 }
 
 impl ProcessId {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
     pub const ALL: [ProcessId; ProcessId::COUNT] = [
         ProcessId::Hunger,
         ProcessId::Thirst,
         ProcessId::Bladder,
         ProcessId::Fun,
         ProcessId::Energy,
+        ProcessId::Satisfaction,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -102,6 +108,7 @@ impl ProcessId {
             ProcessId::Bladder => "bladder",
             ProcessId::Fun => "fun",
             ProcessId::Energy => "energy",
+            ProcessId::Satisfaction => "satisfaction",
         }
     }
 
@@ -171,8 +178,14 @@ pub trait Process {
 
     /// Something happened to the body. Most processes care about few events,
     /// so the default ignores them all.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
-        let _ = (event, stats);
+    ///
+    /// `novelty` is how fresh it felt, from 1 (never done, or long forgotten)
+    /// down towards a quarter (done again and again today) — what
+    /// [`Recollection::novelty`] said before it was remembered. A process about
+    /// the mind scales what it does by it; one about the body ignores it,
+    /// since a meal is as filling the third time as the first.
+    fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
+        let _ = (event, novelty, stats);
     }
 
     /// State of its own worth showing a debugger. Allocates; never asked in a
@@ -182,18 +195,24 @@ pub trait Process {
     }
 }
 
-/// A living body: its stats, its processes, and which of them are running.
+/// A living body: its stats, its processes, which of them are running, and
+/// what it has done lately.
 ///
 /// Inline in the kind that has one, and `Copy` — every process is plain data.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Biology {
     stats: Stats,
     switches: Switches,
+    /// What it has done lately, fading — asked before an event reaches the
+    /// processes, so a treat had twice today is less of one. Always on: it is
+    /// not a process and changes no stat.
+    recent: Recollection,
     hunger: Hunger,
     thirst: Thirst,
     bladder: Bladder,
     fun: Fun,
     energy: Energy,
+    satisfaction: Satisfaction,
 }
 
 impl Biology {
@@ -202,11 +221,13 @@ impl Biology {
         Biology {
             stats,
             switches: Switches::ALL,
+            recent: Recollection::default(),
             hunger: Hunger,
             thirst: Thirst,
             bladder: Bladder::default(),
             fun: Fun,
             energy: Energy,
+            satisfaction: Satisfaction,
         }
     }
 
@@ -216,6 +237,11 @@ impl Biology {
 
     pub fn switches(&self) -> Switches {
         self.switches
+    }
+
+    /// What it has done lately.
+    pub fn recollection(&self) -> &Recollection {
+        &self.recent
     }
 
     pub fn is_running(&self, process: ProcessId) -> bool {
@@ -233,6 +259,7 @@ impl Biology {
     /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's
     /// own `dt`.
     pub fn advance(&mut self, dt: f32) {
+        self.recent.advance(dt);
         let (stats, switches, processes) = self.parts();
         for process in processes {
             if switches.is_on(process.id()) {
@@ -242,14 +269,25 @@ impl Biology {
     }
 
     /// Tell every running process that `event` happened, in [`ProcessId`]
-    /// order.
-    pub fn handle(&mut self, event: Event) {
+    /// order, and how fresh it felt; then remember it.
+    ///
+    /// Returns what it was and how fresh, **when it was still in recent
+    /// memory** and so worth less than it would have been — for the task that
+    /// caused it to say so. `None` for an event that is no
+    /// [`Experience`], or one long enough ago to be forgotten.
+    pub fn handle(&mut self, event: Event) -> Option<(Experience, f32)> {
+        let experience = Experience::of(event);
+        let novelty = experience.map_or(recollection::FRESH, |e| self.recent.novelty(e));
         let (stats, switches, processes) = self.parts();
         for process in processes {
             if switches.is_on(process.id()) {
-                process.handle(event, stats);
+                process.handle(event, novelty, stats);
             }
         }
+        let experience = experience?;
+        let recalled = self.recent.recalls(experience);
+        self.recent.remember(experience);
+        recalled.then_some((experience, novelty))
     }
 
     /// The stats, the switches and every process, borrowed apart so a process
@@ -263,13 +301,15 @@ impl Biology {
             bladder,
             fun,
             energy,
+            satisfaction,
+            ..
         } = self;
-        (stats, *switches, [hunger, thirst, bladder, fun, energy])
+        (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction])
     }
 
     /// Every process, read-only. Slot `i` is `ProcessId` `i`.
     fn processes(&self) -> [&dyn Process; ProcessId::COUNT] {
-        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy]
+        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy, &self.satisfaction]
     }
 
     /// The stats, which processes are running, and what each running process
@@ -294,6 +334,7 @@ impl Biology {
         for process in self.processes() {
             fields.extend(process.debug_fields());
         }
+        fields.push(self.recent.debug_field());
         fields
     }
 
@@ -345,6 +386,7 @@ mod tests {
         assert!(switches.is_on(ProcessId::Bladder));
         assert!(switches.is_on(ProcessId::Fun));
         assert!(switches.is_on(ProcessId::Energy));
+        assert!(switches.is_on(ProcessId::Satisfaction));
         assert_eq!(switches.with(ProcessId::Thirst, true), Switches::ALL);
         assert_eq!(
             ProcessId::ALL.iter().fold(Switches::ALL, |s, &p| s.with(p, false)),
@@ -360,6 +402,7 @@ mod tests {
         assert!(stats.hunger() > 50.0 && stats.thirst() > 50.0 && stats.bladder() > 50.0, "{stats:?}");
         assert!(stats.fun() < 50.0, "and the one that drains instead: {stats:?}");
         assert!(stats.stamina() < 50.0, "and so does the one that tires: {stats:?}");
+        assert!(stats.satisfaction() < 50.0, "and contentment wears off: {stats:?}");
     }
 
     #[test]
@@ -390,12 +433,13 @@ mod tests {
                 .find(|(name, _)| *name == "processes")
                 .map(|(_, value)| value)
         };
-        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy"));
+        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy, satisfaction"));
 
         biology.set_running(ProcessId::Hunger, false);
         biology.set_running(ProcessId::Bladder, false);
         biology.set_running(ProcessId::Fun, false);
         biology.set_running(ProcessId::Energy, false);
+        biology.set_running(ProcessId::Satisfaction, false);
         assert_eq!(processes(&biology).as_deref(), Some("thirst"));
         assert_eq!(names(&biology), before, "the unit panel lays these out once");
     }

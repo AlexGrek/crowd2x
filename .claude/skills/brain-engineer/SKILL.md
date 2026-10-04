@@ -26,7 +26,8 @@ writing any of them.
 | feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
 | inventory | *what is being carried, and does it still fit?* | its own slots | only a task writes it | `sim/inventory.rs` |
-| process | *what does a body do by itself?* | its stats, **world** `dt`, events | **the only writer of stats** | `sim/biology/` |
+| process | *what does a body do by itself?* | its stats, **world** `dt`, events and how fresh each felt | **the only writer of stats** | `sim/biology/` |
+| recollection | *how recently was this treat had?* | events, **world** `dt` | its own familiarities; never a stat | `sim/biology/recollection.rs` |
 
 **Goals decide, tasks act, processes change the body.** A goal never writes the body or hands
 (`GoalCtx` gives it read-only references for exactly this reason). Food goes into a hand when

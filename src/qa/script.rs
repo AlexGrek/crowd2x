@@ -434,6 +434,8 @@ pub enum Step {
     /// drained as it is displayed, so asking it would be a race with the
     /// system that empties it.
     ExpectLog(String),
+    /// A UI text node on the current screen contains this text.
+    ExpectText(String),
     /// Select the unit that arrived at this index: `0` is the oldest thing in
     /// the world, `1` the next, and a despawn closes the gap.
     ///

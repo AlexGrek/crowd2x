@@ -70,7 +70,7 @@ impl Process for Bladder {
 
     /// A drink goes on its way in; a toilet empties what has arrived. What is
     /// still on its way keeps coming — it was not in the bladder to empty.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
         match event {
             Event::Ingested(item) => self.on_its_way += item.hydration() * BLADDER_PER_HYDRATION,
             Event::Relieved => stats.change_bladder(-stats.bladder()),
@@ -91,6 +91,7 @@ impl Process for Bladder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::biology::recollection::FRESH;
     use crate::sim::brain::routines::BURSTING;
     use crate::sim::clock::TIME_SCALE;
     use crate::sim::item::ItemKind;
@@ -123,7 +124,7 @@ mod tests {
         run(&mut bladder, &mut stats, 3.0 * HOUR);
         assert!(stats.bladder() < BURSTING, "{}", stats.bladder());
 
-        bladder.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        bladder.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         run(&mut bladder, &mut stats, ARRIVES_OVER);
         assert!(stats.bladder() > BURSTING, "a drink is what tips it: {}", stats.bladder());
     }
@@ -131,7 +132,7 @@ mod tests {
     #[test]
     fn a_drink_fills_the_bladder_quickly_but_not_all_at_once() {
         let (mut bladder, mut stats) = (Bladder::default(), Stats::calm().with_bladder(0.0));
-        bladder.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        bladder.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         assert_eq!(stats.bladder(), 0.0, "swallowed is not arrived");
 
         run(&mut bladder, &mut stats, MINUTE);
@@ -151,17 +152,17 @@ mod tests {
     #[test]
     fn food_does_not_reach_the_bladder() {
         let (mut bladder, mut stats) = (Bladder::default(), Stats::calm().with_bladder(0.0));
-        bladder.handle(Event::Ingested(ItemKind::Food), &mut stats);
+        bladder.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
         assert_eq!(bladder.on_its_way(), 0.0);
     }
 
     #[test]
     fn a_toilet_empties_what_arrived_and_what_is_on_its_way_keeps_coming() {
         let (mut bladder, mut stats) = (Bladder::default(), Stats::calm().with_bladder(80.0));
-        bladder.handle(Event::Ingested(ItemKind::Water), &mut stats);
+        bladder.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         run(&mut bladder, &mut stats, MINUTE);
 
-        bladder.handle(Event::Relieved, &mut stats);
+        bladder.handle(Event::Relieved, FRESH, &mut stats);
         assert_eq!(stats.bladder(), 0.0);
         assert!(bladder.on_its_way() > 0.0);
         run(&mut bladder, &mut stats, MINUTE);
@@ -172,7 +173,7 @@ mod tests {
     fn a_bladder_never_fills_past_desperate() {
         let (mut bladder, mut stats) = (Bladder::default(), Stats::calm().with_bladder(95.0));
         for _ in 0..5 {
-            bladder.handle(Event::Ingested(ItemKind::Water), &mut stats);
+            bladder.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         }
         run(&mut bladder, &mut stats, HOUR);
         assert_eq!(stats.bladder(), 100.0);

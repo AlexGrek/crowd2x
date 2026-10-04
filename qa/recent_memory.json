@@ -1,0 +1,72 @@
+{
+  "name": "a second meal the same day is in recent memory: as filling, less of a treat",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "kitchen",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 456, "y": 264 }, "kind": "fridge" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "kitchen",
+  "steps": [
+    { "note": "the fridge sits in cell (9, 5); zoomed out so the whole kitchen is on screen" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "spawn": { "kind": "human", "x": 2, "y": 1 } },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "everything but hunger and satisfaction switched off, so this is a test about meals" },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "press": "debug" },
+    { "shot": "a new human: satisfaction, and nothing in recent memory" },
+
+    { "note": "born at most 30 hungry, so the first meal is within five hours of world; food" },
+    { "note": "then takes 4.8 hours to bring it back to 60, so the second is before ten. A memory" },
+    { "note": "halves every four hours and is forgotten about thirteen hours on, so lunch is" },
+    { "note": "still remembered at dinner. 1920 ticks is an hour; 26000 is thirteen and a half" },
+    { "tick": 26000 },
+    { "expect_log": "ate at the fridge at 9, 5" },
+    { "expect_log": "had food in recent memory" },
+    { "shot": "after the second meal: food in recent memory, and how satisfied it left them" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "kitchen" }
+  ]
+}

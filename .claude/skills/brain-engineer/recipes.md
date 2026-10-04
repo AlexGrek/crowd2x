@@ -64,7 +64,10 @@ impl Process for Tiredness {
     }
 
     /// Something happened to the body. Ignore what does not concern it.
-    fn handle(&mut self, event: Event, stats: &mut Stats) {
+    /// `novelty` is how fresh it felt (1 = never done today, down to 0.25),
+    /// from `Recollection`: scale by it only if the process is about the mind
+    /// (`Fun`, `Satisfaction`); a body's processes ignore it.
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
         if let Event::Slept { seconds } = event {
             stats.change_stamina(seconds * 2.0);
         }
@@ -82,6 +85,10 @@ Then in `biology/mod.rs`:
 5. an `Event` variant if something new happens to a body (then an arm in every process that
    `match`es events exhaustively, like `Bladder`);
 6. update `the_debug_view_says_which_processes_are_running_and_keeps_its_shape`.
+
+A new `Event` that a person can tire of (a new treat) also needs an arm in
+`Experience::of` in `biology/recollection.rs`, and a slot if it is a new kind of experience
+rather than a new item (items get one each). Tests hand a process `recollection::FRESH`.
 
 A process that reacts to something already happening needs no new event. The bladder hears
 `Event::Ingested(item)` and reads `item.hydration()`. Food reaching it later is a new process,

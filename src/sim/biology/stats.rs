@@ -21,7 +21,7 @@ use rand::RngExt;
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Hunger, thirst, bladder, fun and stamina are the stats that move so far —
+/// Hunger, thirst, bladder, fun, stamina and satisfaction are the stats that move so far —
 /// the rest are rolled at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
@@ -33,6 +33,7 @@ pub struct Stats {
     bladder: f32,
     mental_health: f32,
     attention: f32,
+    satisfaction: f32,
 }
 
 /// A need kept to its 0-100 range.
@@ -52,7 +53,8 @@ pub const BORN_AT_LEAST_SATISFIED: f32 = 70.0;
 
 impl Stats {
     /// A new body: every need 70 to 100 percent satisfied
-    /// ([`BORN_AT_LEAST_SATISFIED`]), everything else anywhere in its range.
+    /// ([`BORN_AT_LEAST_SATISFIED`]) and as content with life, everything else
+    /// anywhere in its range.
     ///
     /// Satisfaction is what is rolled, and each need turns it the way up it
     /// reads: hunger, thirst and the bladder *rise* towards the thing that has
@@ -71,6 +73,7 @@ impl Stats {
             bladder,
             mental_health: rng.random_range(0.0..=100.0),
             attention: rng.random_range(0.0..=1.0),
+            satisfaction: rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0),
         }
     }
 
@@ -95,6 +98,10 @@ impl Stats {
         self.stamina = need(self.stamina + by);
     }
 
+    pub(super) fn change_satisfaction(&mut self, by: f32) {
+        self.satisfaction = need(self.satisfaction + by);
+    }
+
     /// Every stat at the middle of its range — a person with nothing unusual
     /// about them, for a test that wants to set one stat and know the rest.
     #[cfg(test)]
@@ -108,6 +115,7 @@ impl Stats {
             bladder: 50.0,
             mental_health: 50.0,
             attention: 0.5,
+            satisfaction: 50.0,
         }
     }
 
@@ -138,6 +146,12 @@ impl Stats {
     #[cfg(test)]
     pub(crate) fn with_stamina(mut self, stamina: f32) -> Stats {
         self.stamina = stamina;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_satisfaction(mut self, satisfaction: f32) -> Stats {
+        self.satisfaction = satisfaction;
         self
     }
 
@@ -203,6 +217,14 @@ impl Stats {
         self.attention
     }
 
+    /// 0 (thoroughly discontented) to 100 (thoroughly content): how a
+    /// person's day is going. Worn down by time and lifted by a treat — a tasty
+    /// meal, a go on the computer — by less each time the same treat comes
+    /// round again the same day.
+    pub fn satisfaction(&self) -> f32 {
+        self.satisfaction
+    }
+
     /// Name and value of every stat, in the order above — the shape
     /// [`crate::sim::GameEntity::debug_fields`] wants, so a kind that carries
     /// stats can hand them over in one line rather than naming each field
@@ -217,6 +239,7 @@ impl Stats {
             ("bladder", self.bladder),
             ("mental_health", self.mental_health),
             ("attention", self.attention),
+            ("satisfaction", self.satisfaction),
         ]
     }
 }
@@ -239,6 +262,7 @@ mod tests {
             assert!((0.0..=100.0).contains(&stats.bladder()));
             assert!((0.0..=100.0).contains(&stats.mental_health()));
             assert!((0.0..=1.0).contains(&stats.attention()));
+            assert!((0.0..=100.0).contains(&stats.satisfaction()));
         }
     }
 
@@ -254,6 +278,7 @@ mod tests {
             assert!(stats.bladder() <= least, "bladder {}", stats.bladder());
             assert!(stats.boredom() <= least, "boredom {}", stats.boredom());
             assert!(stats.tiredness() <= least, "tiredness {}", stats.tiredness());
+            assert!(stats.satisfaction() >= BORN_AT_LEAST_SATISFIED, "satisfaction {}", stats.satisfaction());
         }
     }
 
@@ -316,7 +341,17 @@ mod tests {
         let names: Vec<&str> = stats.fields().iter().map(|(name, _)| *name).collect();
         assert_eq!(
             names,
-            ["health", "stamina", "fun", "hunger", "thirst", "bladder", "mental_health", "attention"]
+            [
+                "health",
+                "stamina",
+                "fun",
+                "hunger",
+                "thirst",
+                "bladder",
+                "mental_health",
+                "attention",
+                "satisfaction"
+            ]
         );
     }
 }

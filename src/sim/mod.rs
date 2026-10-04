@@ -143,6 +143,7 @@ pub mod log;
 pub mod occupancy;
 pub mod path;
 pub(crate) mod rng;
+pub mod talents;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod uid;
@@ -168,6 +169,7 @@ pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{find_path, Path, PathFinder};
+pub use talents::{Talent, Talents};
 pub use uid::{EntityType, Uid};
 pub use walker::Walker;
 
@@ -270,6 +272,9 @@ pub enum Command {
     /// [`biology`] for what off means. From outside the world for the same
     /// reasons a freeze is, and applied at the same point in the tick.
     SetProcess { uid: Uid, process: ProcessId, running: bool },
+    /// Change one lasting aptitude explicitly; time alone does not move it.
+    /// Values are clamped to 0..=100 and applied before processing begins.
+    SetTalent { uid: Uid, talent: Talent, value: i32 },
     /// Put an item into an entity's [`Inventory`], if it will fit.
     ///
     /// From outside the world like the two above, and the only way anything
@@ -326,6 +331,11 @@ impl Input {
 
     pub fn set_process(&mut self, uid: Uid, process: ProcessId, running: bool) -> &mut Input {
         self.commands.push(Command::SetProcess { uid, process, running });
+        self
+    }
+
+    pub fn set_talent(&mut self, uid: Uid, talent: Talent, value: i32) -> &mut Input {
+        self.commands.push(Command::SetTalent { uid, talent, value });
         self
     }
 
@@ -661,6 +671,22 @@ impl GameState {
         true
     }
 
+    /// Explicitly change one talent, including on a frozen person. Returns
+    /// false for a missing entity or a kind without talents.
+    pub fn set_talent(&mut self, uid: Uid, talent: Talent, value: i32) -> bool {
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("set talent: no such entity {uid}"));
+            return false;
+        };
+        let Some(talents) = entity.talents_mut() else {
+            self.log.push(format!("set talent: {uid} has no talents"));
+            return false;
+        };
+        talents.set(talent, value);
+        self.log.push(format!("{uid} {} talent set to {}", talent.name(), talents.get(talent)));
+        true
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -697,9 +723,10 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
-/// [`Command::Freeze`], [`Command::SetProcess`], [`Command::GiveItem`] and
-/// [`Command::Hold`] are drained here too. They change nothing structural, but they arrive on the
-/// same queue and want the same timing: a freeze asked for this tick is in
+/// [`Command::Freeze`], [`Command::SetProcess`], [`Command::GiveItem`],
+/// [`Command::Hold`] and [`Command::SetTalent`] are drained here too. They
+/// change nothing structural, but arrive on the same queue and want the same
+/// timing: a freeze asked for this tick is in
 /// force before anything thinks, rather than one tick after the button was
 /// pressed.
 ///
@@ -725,6 +752,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::SetProcess { uid, process, running } => {
                 state.set_process(*uid, *process, *running);
+            }
+            Command::SetTalent { uid, talent, value } => {
+                state.set_talent(*uid, *talent, *value);
             }
             Command::GiveItem { uid, item } => {
                 state.give_item(*uid, *item);
@@ -1213,6 +1243,44 @@ mod tests {
     fn hunger_of(state: &GameState, uid: Uid) -> f32 {
         let entity = state.entities().get(uid).expect("still alive");
         entity.biology().expect("a human has a body").stats().hunger()
+    }
+
+    #[test]
+    fn talents_are_reproducible_stable_over_time_and_mutable_by_command() {
+        let mut a = world();
+        let mut b = world();
+        let uid = a.spawn(EntityType::Human, Point::new(4, 4));
+        let replay = b.spawn(EntityType::Human, Point::new(4, 4));
+        let before = *a.entities().get(uid).unwrap().talents().unwrap();
+        assert_eq!(before, *b.entities().get(replay).unwrap().talents().unwrap());
+        run(&mut a, 1000);
+        assert_eq!(before, *a.entities().get(uid).unwrap().talents().unwrap());
+
+        let mut input = Input::new();
+        input.freeze(uid, true).set_talent(uid, Talent::Precision, 120);
+        spawn_pass(&mut a, &input);
+        let mut expected = before;
+        expected.set(Talent::Precision, 100);
+        assert_eq!(expected, *a.entities().get(uid).unwrap().talents().unwrap());
+        run(&mut a, 100);
+        assert_eq!(expected, *a.entities().get(uid).unwrap().talents().unwrap());
+
+        input.clear();
+        input.set_talent(uid, Talent::Precision, -5);
+        process_game_state(&mut a, 1.0 / 60.0, &input);
+        assert_eq!(a.entities().get(uid).unwrap().talents().unwrap().get(Talent::Precision), 0);
+    }
+
+    #[test]
+    fn a_talent_change_for_a_dog_or_missing_entity_is_refused() {
+        let mut state = world();
+        let dog = state.spawn(EntityType::Dog, Point::new(4, 4));
+        assert!(state.entities().get(dog).unwrap().talents().is_none());
+        assert!(!state.set_talent(dog, Talent::Arts, 80));
+        assert!(!state.set_talent(Uid::new(EntityType::Human, 99), Talent::Arts, 80));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("has no talents")), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("no such entity")), "{lines:?}");
     }
 
     #[test]
@@ -2112,4 +2180,3 @@ mod tests {
         assert!(last > crate::sim::fridge::COLDEST, "never warmed up at all: {last}");
     }
 }
-

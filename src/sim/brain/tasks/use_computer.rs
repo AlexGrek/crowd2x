@@ -28,7 +28,8 @@ impl TaskExecutor for UseComputer {
     /// with no body has nothing that could be entertained either.
     ///
     /// The body hears [`Event::Entertained`] only once the action is over —
-    /// half a go is no fun at all.
+    /// half a go is no fun at all. A go had again while the last one is still
+    /// in recent memory is less fun and less of a treat, and the log says so.
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         if ctx.here().manhattan_distance(self.computer) > 1 || ctx.biology.is_none() {
             return TaskResult::Failed;
@@ -41,9 +42,8 @@ impl TaskExecutor for UseComputer {
 
         match ctx.advance_action() {
             ActionState::Finished => {
-                if let Some(biology) = ctx.biology.as_deref_mut() {
-                    biology.handle(Event::Entertained);
-                }
+                let recalled = ctx.biology.as_deref_mut().and_then(|b| b.handle(Event::Entertained));
+                super::report_recalled(ctx, recalled);
                 TaskResult::Success
             }
             state => TaskResult::of(state),
@@ -96,6 +96,27 @@ mod tests {
         rig.walk.body_mut().set_position((1.5, 1.5));
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.biology.stats().fun(), 20.0);
+    }
+
+    #[test]
+    fn a_second_go_the_same_day_is_less_fun_and_in_recent_memory() {
+        let mut rig = rig_at(Point::new(5, 6), 0.0);
+        rig.biology.edit(|stats| stats.with_satisfaction(0.0));
+        let mut first = Task::use_computer(Point::new(6, 6), 0.5);
+        assert_eq!(rig.run(&mut first, 600), TaskResult::Success);
+        let after_first = *rig.biology.stats();
+        assert!(!rig.world.log.drain().iter().any(|l| l.contains("in recent memory")));
+
+        let mut second = Task::use_computer(Point::new(6, 6), 0.5);
+        assert_eq!(rig.run(&mut second, 600), TaskResult::Success);
+        let after_second = *rig.biology.stats();
+
+        let fun = (after_first.fun(), after_second.fun() - after_first.fun());
+        assert!(fun.1 > 0.0 && fun.1 < fun.0 * 0.6, "the second go is about half the fun: {fun:?}");
+        let treat = (after_first.satisfaction(), after_second.satisfaction() - after_first.satisfaction());
+        assert!(treat.1 > 0.0 && treat.1 < treat.0 * 0.6, "and half the treat: {treat:?}");
+        let lines = rig.world.log.drain();
+        assert!(lines.iter().any(|l| l.contains("had entertainment in recent memory")), "{lines:?}");
     }
 
     /// A computer is used from beside it, so the unit stays where it is

@@ -222,6 +222,17 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Lasting aptitudes, when this kind has them. The unit panel reads them
+    /// through the trait, and explicit commands update them through the same
+    /// simulation queue as other changes.
+    fn talents(&self) -> Option<&super::talents::Talents> {
+        None
+    }
+
+    fn talents_mut(&mut self) -> Option<&mut super::talents::Talents> {
+        None
+    }
+
     /// What this kind would tell a debugger about itself, beyond the body.
     ///
     /// Name and value, in the order they should be read. The universal facts —
