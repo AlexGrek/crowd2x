@@ -955,7 +955,11 @@ game is already below 60Hz; and a debug timing (this crate is `opt-level = 1` th
 good for a *ratio* and worthless as a speed, which is why the profile and the vsync
 setting are recorded in the report. `qa/perf_simulation.json`, `qa/perf_rendering.json`
 and `qa/perf_huge_map.json` (twenty thousand humans on a 256x256 map) are the three that
-exist.
+exist. **`perf_rendering` is marked `"required": false`**: its frame budget fails on a
+machine whose display caps every frame at the refresh rate — an empty map took 16ms a frame
+here, on `main` as much as after any change — so `tools/qa.py` still runs it and prints its
+numbers, lists it as "not required, failed", and does not fail the run for it. Any test can
+carry the flag; reserve it for one whose verdict depends on the machine, not the code.
 
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,

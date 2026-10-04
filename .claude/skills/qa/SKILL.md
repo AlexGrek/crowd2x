@@ -60,6 +60,7 @@ map will delete a real one.
 | `shot_delay` | Seconds either side of a screenshot. | `0.5` |
 | `timeout` | Whole-run limit; a stuck test fails instead of hanging. | `60` |
 | `vsync` | Whether the window waits for the display. Turn it **off** to measure frames. | `true` |
+| `required` | Whether a failure fails the run. `false` still runs and reports the test (numbers included) but lists it as "not required, failed" and leaves the exit code alone — for a verdict that depends on the machine, like `perf_rendering`'s frame budget. | `true` |
 
 Unknown fields and unknown step names are **errors**, not ignored: a typo that silently
 skipped a step would make a test pass by not testing anything.

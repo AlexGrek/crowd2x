@@ -22,7 +22,11 @@ exactly the one whose numbers are worth reading.
     uv run tools/qa.py --release          # optimised build; the only honest
                                           # profile to quote a timing from
 
-Exits non-zero if any test failed, so it can gate a commit.
+Exits non-zero if any test failed, so it can gate a commit. A test marked
+"required": false is run and reported like any other, but its failure is
+listed as not required and does not fail the run - for a test whose verdict
+depends on the machine (a frame budget on a display that caps frames at its
+refresh rate) more than on the code.
 """
 
 import json
@@ -111,6 +115,13 @@ def report_perf(perf: Path) -> None:
         )
 
 
+def is_required(path: Path) -> bool:
+    try:
+        return json.loads(path.read_text()).get("required", True) is not False
+    except json.JSONDecodeError:
+        return True
+
+
 def run_one(path: Path, verbose: bool, release: bool) -> bool:
     name = path.stem
     maps = SCRATCH / name / "maps"
@@ -160,7 +171,8 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
         report_perf(perf)
         return True
 
-    print(f"FAIL {name} (exit {result.returncode})")
+    excused = "" if is_required(path) else ", not required"
+    print(f"FAIL {name} (exit {result.returncode}{excused})")
     report_shots(shots)
     report_perf(perf)
     if not verbose:
@@ -184,9 +196,13 @@ def main() -> int:
         print(f"no tests found in {QA_DIR}")
         return 1
 
-    passed = sum(run_one(path, verbose, release) for path in tests)
-    failed = len(tests) - passed
+    results = [(path, run_one(path, verbose, release)) for path in tests]
+    passed = sum(ok for _, ok in results)
+    excused = [path.stem for path, ok in results if not ok and not is_required(path)]
+    failed = len(tests) - passed - len(excused)
     print(f"\n{passed}/{len(tests)} passed")
+    if excused:
+        print(f"not required, failed: {', '.join(excused)}")
     return 1 if failed else 0
 
 

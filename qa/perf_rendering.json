@@ -1,5 +1,6 @@
 {
   "name": "what a crowd costs to draw",
+  "required": false,
   "state": "game",
   "given": {
     "maps": [

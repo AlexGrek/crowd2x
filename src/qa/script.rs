@@ -100,6 +100,13 @@ pub struct Script {
     /// what the frame actually costs.
     #[serde(default = "default_vsync")]
     pub vsync: bool,
+    /// Whether a failure fails the suite. On by default; off for a test whose
+    /// verdict depends on the machine more than on the code — a frame budget
+    /// on a display that caps every frame at its refresh rate. Read by
+    /// `tools/qa.py`, which still runs the test and prints its numbers; the
+    /// game only accepts the field.
+    #[serde(default = "default_required")]
+    pub required: bool,
     pub steps: Vec<Step>,
 
     /// Where the script was read from, for naming its screenshots. Not part of
@@ -179,6 +186,10 @@ fn default_timeout() -> f32 {
 
 fn default_shot_delay() -> f32 {
     DEFAULT_SHOT_DELAY
+}
+
+fn default_required() -> bool {
+    true
 }
 
 fn default_vsync() -> bool {
