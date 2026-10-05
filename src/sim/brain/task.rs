@@ -79,6 +79,18 @@ pub trait TaskExecutor {
     /// not assumed to still be.
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult;
 
+    /// It is being dropped half done — another goal took charge — and this is
+    /// its one chance to tell the body what it **already** did. `action` is
+    /// the action as it stood.
+    ///
+    /// Most tasks owe nothing: half a meal is not eaten and a fridge half
+    /// opened is not open, so the default does nothing. The exception is one
+    /// whose worth is the time spent rather than the thing finished — an hour
+    /// of sleep cut short at forty minutes was forty minutes of sleep.
+    fn interrupted(&mut self, action: &Action, biology: Option<&mut Biology>) {
+        let _ = (action, biology);
+    }
+
     /// How it reads in a debug view.
     fn describe(&self) -> String;
 }
@@ -161,6 +173,22 @@ impl Task {
             Task::Wait(task) => task.execute(ctx),
             Task::OpenFridge(task) => task.execute(ctx),
             Task::CloseFridge(task) => task.execute(ctx),
+        }
+    }
+
+    /// Tell this task's executor it is being dropped half done. See
+    /// [`TaskExecutor::interrupted`].
+    pub fn interrupted(&mut self, action: &Action, biology: Option<&mut Biology>) {
+        match self {
+            Task::MoveTo(task) => task.interrupted(action, biology),
+            Task::TakeItem(task) => task.interrupted(action, biology),
+            Task::ConsumeItem(task) => task.interrupted(action, biology),
+            Task::UseToilet(task) => task.interrupted(action, biology),
+            Task::UseComputer(task) => task.interrupted(action, biology),
+            Task::Sleep(task) => task.interrupted(action, biology),
+            Task::Wait(task) => task.interrupted(action, biology),
+            Task::OpenFridge(task) => task.interrupted(action, biology),
+            Task::CloseFridge(task) => task.interrupted(action, biology),
         }
     }
 

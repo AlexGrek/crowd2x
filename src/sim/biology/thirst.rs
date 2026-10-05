@@ -16,12 +16,20 @@ pub const HOURS_TO_PARCHED: f32 = 5.0;
 /// [`Think::game_dt`]: crate::sim::entity::Think::game_dt
 pub const THIRST_PER_SECOND: f32 = 100.0 / (HOURS_TO_PARCHED * HOUR);
 
+/// How much of its pace thirst keeps asleep: less is lost lying still in the
+/// dark than moving about in the day.
+pub const ASLEEP_PACE: f32 = 0.5;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Thirst;
 
 impl Process for Thirst {
     fn id(&self) -> ProcessId {
         ProcessId::Thirst
+    }
+
+    fn asleep_pace(&self) -> f32 {
+        ASLEEP_PACE
     }
 
     fn advance(&mut self, stats: &mut Stats, dt: f32) {

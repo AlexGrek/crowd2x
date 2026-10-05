@@ -45,6 +45,10 @@ pub const ARRIVES_OVER: f32 = 30.0 * MINUTE;
 /// How fast what was drunk arrives in the bladder, per world second.
 pub const FILLING_PER_SECOND: f32 = DRINK * BLADDER_PER_HYDRATION / ARRIVES_OVER;
 
+/// How much of its pace the bladder keeps asleep: a body makes far less water
+/// at night, which is what lets a person sleep through it.
+pub const ASLEEP_PACE: f32 = 0.4;
+
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Bladder {
     /// Drunk, and not in the bladder yet, in bladder points.
@@ -60,6 +64,10 @@ impl Bladder {
 impl Process for Bladder {
     fn id(&self) -> ProcessId {
         ProcessId::Bladder
+    }
+
+    fn asleep_pace(&self) -> f32 {
+        ASLEEP_PACE
     }
 
     fn advance(&mut self, stats: &mut Stats, dt: f32) {

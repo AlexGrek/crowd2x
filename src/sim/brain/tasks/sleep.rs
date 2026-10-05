@@ -9,10 +9,12 @@
 //! One task is **one stretch of sleep**, an hour of world at the length the
 //! goal queues it. A night is several of them, one after another, and that is
 //! the design: whoever is in charge between two stretches can be somebody
-//! else.
+//! else. A stretch cut short still counts for what was slept of it
+//! ([`TaskExecutor::interrupted`]): rest is the time in bed, not a finished
+//! hour, and a sleeper woken for the toilet every hour once rested not at all.
 
 use crate::map::Point;
-use crate::sim::biology::Event;
+use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::TIME_SCALE;
 
 use super::super::action::{Action, ActionState};
@@ -46,8 +48,9 @@ impl TaskExecutor for Sleep {
     /// body in a doorway blocks a walk — one sleeper to a bed — and the goal
     /// that queued this decides what that means.
     ///
-    /// The body hears [`Event::Slept`] only once the action is over: half an
-    /// hour's sleep that was cut short is not a stretch of sleep at all.
+    /// The body hears [`Event::Slept`] once the action is over — or, if the
+    /// stretch is cut short, for as much of it as was slept
+    /// ([`Sleep::interrupted`](TaskExecutor::interrupted)).
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         if ctx.here().manhattan_distance(self.bed) > 1 || ctx.biology.is_none() {
             return TaskResult::Failed;
@@ -79,6 +82,18 @@ impl TaskExecutor for Sleep {
                 TaskResult::Success
             }
             state => TaskResult::of(state),
+        }
+    }
+
+    /// Woken before the stretch was up: what was slept of it is still rest.
+    /// Nothing for a unit still getting into bed — that was a walk.
+    fn interrupted(&mut self, action: &Action, biology: Option<&mut Biology>) {
+        if let (Action::Interact { elapsed, .. }, Some(biology)) = (action, biology)
+            && *elapsed > 0.0
+        {
+            biology.handle(Event::Slept {
+                world_seconds: elapsed * TIME_SCALE,
+            });
         }
     }
 
@@ -129,6 +144,34 @@ mod tests {
         assert_eq!(rig.run(&mut task, 5000), TaskResult::Success);
         let gained = rig.biology.stats().stamina() - 20.0;
         assert!((gained - 100.0 / 8.0 - 100.0 / 16.0).abs() < 0.5, "gained {gained}");
+    }
+
+    /// Woken half way through an hour: half an hour's rest, not none. Told
+    /// by the brain when another goal takes over (`TaskExecutor::interrupted`).
+    #[test]
+    fn woken_half_way_through_a_stretch_it_has_still_slept_half_of_it() {
+        let bed = Point::new(6, 6);
+        let mut rig = rig_at(bed, 20.0);
+        let mut task = Task::sleep(bed, watched(HOUR));
+        let half = (watched(HOUR) / 2.0 / rig.world.dt) as usize;
+        for _ in 0..half {
+            assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        }
+        assert_eq!(rig.biology.stats().stamina(), 20.0, "nothing until it is over or cut short");
+        task.interrupted(&rig.action, Some(&mut rig.biology));
+        let gained = rig.biology.stats().stamina() - 20.0;
+        let hour = 100.0 / 8.0 + 100.0 / 16.0;
+        assert!((gained - hour / 2.0).abs() < 0.2, "gained {gained}, half an hour is {}", hour / 2.0);
+    }
+
+    #[test]
+    fn woken_while_still_getting_into_bed_it_has_slept_nothing() {
+        let mut rig = rig_at(Point::new(5, 6), 20.0);
+        let mut task = Task::sleep(Point::new(6, 6), watched(HOUR));
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert!(matches!(rig.action, Action::Move { .. }), "{:?}", rig.action);
+        task.interrupted(&rig.action, Some(&mut rig.biology));
+        assert_eq!(rig.biology.stats().stamina(), 20.0);
     }
 
     #[test]

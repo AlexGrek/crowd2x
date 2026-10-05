@@ -681,8 +681,14 @@ talking only to the one below:
   taking needs an empty hand; without that, food taken just before thirst took over makes
   every drink fail forever. `SleepGoal` queues **one hour** in bed and reports `Achieved`; if
   the routine still wants sleep it stays on top and the next hour starts from where the unit
-  lies, so how long a night is belongs to the routine, and an interruption costs the hour in
-  progress rather than the night. **Which bed:** a human has one of its own, handed out at spawn
+  lies, so how long a night is belongs to the routine, and an interruption costs nothing that
+  was slept: a task dropped half done is told so (`TaskExecutor::interrupted`, before the new
+  goal takes over) and `Sleep` reports the part of the hour it got. **A sleeping body ages
+  slower** (`Brain::is_asleep` → `Biology::advance_asleep`): each process keeps its
+  `Process::asleep_pace` — hunger and thirst half, the bladder 0.4, boredom none — because a
+  sleeper that got hungry, thirsty and bored at a waking pace was out of bed every hour and,
+  with an interrupted hour worth nothing, never rested (`qa/a_day_in_the_office.json` is what
+  showed it). **Which bed:** a human has one of its own, handed out at spawn
   (`GameState::give_a_bed`: the nearest bed nobody owns, *only while one is free* — a `Homes`
   registry on `GameState`, written by the spawn pass alone and released on despawn) and
   remembered in its `Memory`. By default that is the one it goes to, and the only one. It takes
@@ -996,10 +1002,19 @@ here, on `main` as much as after any change — so `tools/qa.py` still runs it a
 numbers, lists it as "not required, failed", and does not fail the run for it. Any test can
 carry the flag; reserve it for one whose verdict depends on the machine, not the code.
 
+**A test can also watch the world go by** (`src/qa/observe.rs`). `{"observe": {"name":
+"a day", "ticks": 46080, "every": 1920}}` ticks like `tick` and samples every unit with a body
+before, every `every` ticks and after — each stat and the goal on top — into
+`qa-observe/<test>/<name>.csv` (a row per unit per sample) and `<name>.json` (the crowd's
+averages and goals per sample), which `tools/qa.py` prints as a table; `{"expect_stat":
+{"stat": "hunger", "max": 75, "of": "crowd"}}` asserts on a stat of the selected unit or the
+crowd's average. `qa/a_day_in_the_office.json` lives through a day in
+`qa/fixtures/office.json` (beds, fridges, toilets, computers) and is the example.
+
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
 `expect_sprites`, `expect_drawn`, `expect_world_sprites`, `expect_held`, `expect_selected`,
-`expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time` — and
+`expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time`, `expect_stat` — and
 `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
@@ -1120,6 +1135,7 @@ src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bev
                         recent memory, fading, which dulls a treat had twice
 src/qa/                 scripted QA: script.rs is the JSON schema, mod.rs replays it
                         perf.rs is the measuring half: statistics, budgets, scaling
+                        observe.rs is the watching half: stats sampled over time
 src/awake.rs            macOS: hold the display awake so a run can be photographed
 src/characters/         how a character is drawn: CELL/ART/upscale, depth_for
                         item.rs is what an item looks like: a texture or an emoji, per kind
@@ -1131,6 +1147,7 @@ tools/qa.py                runs every qa/*.json against the real binary
 qa/                     scripted QA tests, one JSON file each; fixtures/ holds map JSON
 qa-screenshots/         what those tests photographed (gitignored)
 qa-perf/                what the perf tests measured (gitignored: one machine's evidence)
+qa-observe/             what `observe` steps saw: CSV + JSON per observation (gitignored)
 maps/                   saved maps (gitignored; CROWD2X_MAPS points elsewhere)
 assets/                 imported wholesale from an earlier prototype (layout preserved; .tmx maps not imported)
 ```

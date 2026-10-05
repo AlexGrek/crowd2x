@@ -27,9 +27,10 @@ pub const HOURS_OF_SLEEP: f32 = 8.0;
 
 /// Stamina gained per world second slept.
 ///
-/// The drain keeps running while somebody is asleep — a process does not know
-/// what its body is doing — so it is added back here: the *net* gain is
-/// `100 / HOURS_OF_SLEEP` an hour, and eight hours in bed is a full recovery.
+/// The drain keeps running while somebody is asleep — this process keeps its
+/// whole pace in bed ([`Process::asleep_pace`] is left at 1) — so it is added
+/// back here: the *net* gain is `100 / HOURS_OF_SLEEP` an hour, and eight hours
+/// in bed is a full recovery.
 pub const RECOVERY_PER_SECOND: f32 = 100.0 / (HOURS_OF_SLEEP * HOUR) + ENERGY_PER_SECOND;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

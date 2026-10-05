@@ -44,6 +44,7 @@
 //! Point `CROWD2X_MAPS` at a scratch directory when running these, or a test
 //! will delete maps somebody meant to keep; `tools/qa.py` does that for you.
 
+pub mod observe;
 pub mod perf;
 pub mod script;
 
@@ -92,6 +93,10 @@ const SHOTS_DIR: &str = "qa-screenshots";
 /// `tools/qa.py`, the same way screenshots are.
 const ENV_PERF: &str = "CROWD2X_QA_PERF";
 const PERF_DIR: &str = "qa-perf";
+/// Where an `observe` step writes what it saw: a directory per test, a CSV
+/// and a JSON per observation. Overridden per test by `tools/qa.py`.
+const ENV_OBSERVE: &str = "CROWD2X_QA_OBSERVE";
+const OBSERVE_DIR: &str = "qa-observe";
 
 /// Size of the maps a `given` fixture creates.
 const FIXTURE_SIZE: (i32, i32) = (8, 6);
@@ -205,6 +210,8 @@ struct Run {
     perf: Perf,
     /// Where the numbers are written when the run ends.
     perf_path: std::path::PathBuf,
+    /// Where this test's observations are written, each as it is taken.
+    observe_dir: std::path::PathBuf,
 }
 
 /// The performance half of a run.
@@ -280,6 +287,9 @@ impl Run {
             .unwrap_or_else(|_| {
                 std::path::Path::new(PERF_DIR).join(format!("{}.json", script.stem()))
             });
+        let observe_dir = std::env::var(ENV_OBSERVE)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::Path::new(OBSERVE_DIR).join(script.stem()));
         let report = perf::Report::new(&script.stem(), script.vsync);
         Self {
             ready_at: script.settle,
@@ -298,6 +308,7 @@ impl Run {
                 window: None,
             },
             perf_path,
+            observe_dir,
         }
     }
 
@@ -646,9 +657,11 @@ fn drive(
     // Read out first: `run` is a `ResMut`, so a field read and a field borrow
     // in the same call would both go through the deref and conflict.
     let pad = run.pad;
+    let observe_dir = run.observe_dir.clone();
     let outcome = perform(
         &step,
         pad,
+        &observe_dir,
         &mut run.perf,
         &mut devices,
         &mut intents,
@@ -685,6 +698,7 @@ fn drive(
 fn perform(
     step: &Step,
     pad: Entity,
+    observe_dir: &std::path::Path,
     perf: &mut Perf,
     devices: &mut Devices,
     intents: &mut Intents,
@@ -1048,6 +1062,75 @@ fn perform(
                 process_pass(&mut sim.0, dt);
             }
             Ok(Next::Now)
+        }
+
+        Step::Observe { name, ticks, every } => {
+            if *ticks == 0 || *every == 0 {
+                return Err("an observation needs some ticks, and a cadence of at least one".to_string());
+            }
+            if intents.sim.is_none() {
+                return Err(
+                    "there is no simulation to observe — `observe` only means anything on the game screen"
+                        .to_string(),
+                );
+            }
+            let commands = std::mem::take(&mut intents.sim_input.0);
+            let sim = intents.sim.as_deref_mut().expect("checked just above");
+            let dt = checks.fixed.timestep().as_secs_f32();
+
+            // Exactly `tick`'s passes — one spawn pass, then the processing
+            // passes — with a look at the world before the first, every
+            // `every`, and after the last.
+            spawn_pass(&mut sim.0, &commands);
+            let mut observation = observe::Observation::new(name);
+            observation.sample(&sim.0, 0);
+            info!("qa: observe {}", observation.line());
+            for tick in 1..=*ticks {
+                process_pass(&mut sim.0, dt);
+                if tick % *every == 0 || tick == *ticks {
+                    observation.sample(&sim.0, tick);
+                    info!("qa: observe {}", observation.line());
+                }
+            }
+            write_observation(observe_dir, &observation);
+            Ok(Next::Now)
+        }
+
+        Step::ExpectStat { stat, min, max, of } => {
+            if min.is_none() && max.is_none() {
+                return Err(format!("`expect_stat` on {stat} needs a min, a max, or both"));
+            }
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?;
+            let (value, whose) = match of.as_deref().unwrap_or("selected") {
+                "selected" => {
+                    let uid = intents.selected.get().ok_or(
+                        "nobody is selected — `expect_stat` is about the selected unit unless it says \"of\": \"crowd\""
+                            .to_string(),
+                    )?;
+                    let entity = sim
+                        .0
+                        .entities()
+                        .get(uid)
+                        .ok_or(format!("the selected unit {uid} is not in the world"))?;
+                    (observe::stat_of(entity, stat)?, format!("{uid}'s"))
+                }
+                "crowd" => (observe::crowd_stat(&sim.0, stat)?, "the crowd's average".to_string()),
+                other => return Err(format!("`of` is \"selected\" or \"crowd\", not {other:?}")),
+            };
+            let low = min.is_none_or(|min| value >= min);
+            let high = max.is_none_or(|max| value <= max);
+            let range = match (min, max) {
+                (Some(min), Some(max)) => format!("between {min} and {max}"),
+                (Some(min), None) => format!("at least {min}"),
+                (None, Some(max)) => format!("at most {max}"),
+                (None, None) => unreachable!("refused above"),
+            };
+            (low && high)
+                .then_some(Next::Now)
+                .ok_or(format!("expected {whose} {stat} {range}, found {value:.1}"))
         }
 
         Step::ExpectSpeed(wanted) => {
@@ -1498,6 +1581,24 @@ fn write_perf_report(run: &Run) {
     match std::fs::write(&run.perf_path, run.perf.report.to_json()) {
         Ok(()) => info!("qa: perf written to {}", run.perf_path.display()),
         Err(error) => warn!("qa: cannot write {}: {error}", run.perf_path.display()),
+    }
+}
+
+/// Write what an `observe` step saw, as soon as it has seen it — so a test
+/// that fails an assertion afterwards still leaves the record behind, which
+/// is the run whose record is most worth reading.
+fn write_observation(dir: &std::path::Path, observation: &observe::Observation) {
+    if let Err(error) = std::fs::create_dir_all(dir) {
+        warn!("qa: cannot create {}: {error}", dir.display());
+        return;
+    }
+    let stem = slug(observation.name());
+    for (extension, contents) in [("csv", observation.to_csv()), ("json", observation.to_json())] {
+        let path = dir.join(format!("{stem}.{extension}"));
+        match std::fs::write(&path, contents) {
+            Ok(()) => info!("qa: observation written to {}", path.display()),
+            Err(error) => warn!("qa: cannot write {}: {error}", path.display()),
+        }
     }
 }
 

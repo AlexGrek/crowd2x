@@ -182,6 +182,18 @@ pub trait Process {
     /// in this module is written at.
     fn advance(&mut self, stats: &mut Stats, dt: f32);
 
+    /// How much of its pace it keeps while the body is **asleep**: 1 for a
+    /// process that does not care (the default), 0 for one that stops.
+    ///
+    /// The one thing a process is told about what its body is doing, because
+    /// it is the one thing that changes how fast a body ages: a sleeper burns
+    /// less, makes less water, and does not get bored. A unit that got
+    /// hungry, thirsty and bored at a waking pace all night was out of bed
+    /// every hour for one of them, and never rested.
+    fn asleep_pace(&self) -> f32 {
+        1.0
+    }
+
     /// Something happened to the body. Most processes care about few events,
     /// so the default ignores them all.
     ///
@@ -266,10 +278,22 @@ impl Biology {
     /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's
     /// own `dt`.
     pub fn advance(&mut self, dt: f32) {
+        self.advance_while(dt, false);
+    }
+
+    /// Time passing for a body that is **asleep**: every running process at
+    /// its [`Process::asleep_pace`] — hunger, thirst and the bladder slower,
+    /// boredom not at all.
+    pub fn advance_asleep(&mut self, dt: f32) {
+        self.advance_while(dt, true);
+    }
+
+    fn advance_while(&mut self, dt: f32, asleep: bool) {
         let (stats, switches, processes) = self.parts();
         for process in processes {
             if switches.is_on(process.id()) {
-                process.advance(stats, dt);
+                let pace = if asleep { process.asleep_pace() } else { 1.0 };
+                process.advance(stats, dt * pace);
             }
         }
     }
@@ -417,6 +441,25 @@ mod tests {
         assert!(stats.fun() < 50.0, "and the one that drains instead: {stats:?}");
         assert!(stats.stamina() < 50.0, "and so does the one that tires: {stats:?}");
         assert!(stats.satisfaction() < 50.0, "and contentment wears off: {stats:?}");
+    }
+
+    #[test]
+    fn asleep_a_body_gets_hungry_thirsty_and_full_slower_and_not_bored_at_all() {
+        let (mut awake, mut asleep) = (calm(), calm());
+        awake.advance(2.0 * HOUR);
+        asleep.advance_asleep(2.0 * HOUR);
+        let (a, s) = (awake.stats(), asleep.stats());
+        for (name, awake, asleep) in [
+            ("hunger", a.hunger(), s.hunger()),
+            ("thirst", a.thirst(), s.thirst()),
+            ("bladder", a.bladder(), s.bladder()),
+        ] {
+            assert!(asleep > 50.0 && asleep < awake, "{name}: {asleep} asleep, {awake} awake");
+        }
+        assert_eq!(s.fun(), 50.0, "nobody gets bored in their sleep");
+        assert!(a.fun() < 50.0);
+        assert_eq!(s.stamina(), a.stamina(), "the drain is the same; sleep is paid back by the event");
+        assert_eq!(s.satisfaction(), a.satisfaction());
     }
 
     #[test]

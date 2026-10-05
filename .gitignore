@@ -16,3 +16,7 @@ __pycache__/
 # timings taken by the scripted perf tests: evidence from one machine, and the
 # numbers worth keeping are quoted in the test that asserts on them
 /qa-perf
+
+# what the scripted QA tests watched happen (`observe` steps): evidence from one
+# run, like the screenshots
+/qa-observe

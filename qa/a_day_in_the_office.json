@@ -1,0 +1,47 @@
+{
+  "name": "six people live through a day in an office, and it shows in how they are",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "office", "file": "qa/fixtures/office.json" }
+    ]
+  },
+  "open": "office",
+  "timeout": 300,
+  "steps": [
+    { "note": "an 18x12 office: six beds along the top, two fridges, two toilets, two computers" },
+    { "note": "paused, so the only world that goes by is the one the script asks for" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": 2, "y": 7 } },
+    { "spawn": { "kind": "human", "x": 4, "y": 7 } },
+    { "spawn": { "kind": "human", "x": 6, "y": 7 } },
+    { "spawn": { "kind": "human", "x": 8, "y": 7 } },
+    { "spawn": { "kind": "human", "x": 10, "y": 7 } },
+    { "spawn": { "kind": "human", "x": 12, "y": 7 } },
+    { "tick": 1 },
+    { "expect_entities": 6 },
+    { "select": 0 },
+    { "press": "debug" },
+    { "shot": "08:00, everybody just arrived" },
+
+    { "note": "a whole day from opening time, sampled every world hour: 1920 ticks an hour" },
+    { "observe": { "name": "a day", "ticks": 46080, "every": 1920 } },
+    { "expect_entities": 6 },
+
+    { "note": "the needs with a prop for them are kept in hand all day: the crowd's average" },
+    { "note": "ran 12-60 for hunger, 16-56 thirst, 13-55 bladder when this was written" },
+    { "expect_stat": { "stat": "hunger", "max": 75, "of": "crowd" } },
+    { "expect_stat": { "stat": "thirst", "max": 75, "of": "crowd" } },
+    { "expect_stat": { "stat": "bladder", "max": 75, "of": "crowd" } },
+    { "note": "a day of meals, goes on the computer and company leaves people content (~98)" },
+    { "expect_stat": { "stat": "satisfaction", "min": 60, "of": "crowd" } },
+    { "note": "and a night in bed rests them: the crowd's stamina ran 85 at 08:00, ~32 by" },
+    { "note": "evening, and ~96 at 06:00 (86 at 08:00). It stayed under 45 all night while every" },
+    { "note": "need ran at a waking pace in bed and an hour of sleep cut short was worth nothing" },
+    { "expect_stat": { "stat": "stamina", "min": 70, "of": "crowd" } },
+    { "expect_stat": { "stat": "hunger", "min": 0, "max": 100 } },
+    { "wait": 0.2 },
+    { "shot": "08:00 the next day" }
+  ]
+}

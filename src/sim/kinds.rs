@@ -186,7 +186,13 @@ impl GameEntity for Human {
     /// ticks it is due — and so does the brain looking round, which is handed
     /// the same schedule.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
-        self.biology.advance(ctx.game_dt());
+        // Asleep as of last tick's brain: a body lying in bed ages at the
+        // pace of a sleeper (`Process::asleep_pace`).
+        if self.brain.is_asleep() {
+            self.biology.advance_asleep(ctx.game_dt());
+        } else {
+            self.biology.advance(ctx.game_dt());
+        }
         let due = self.schedule.tick(ctx.game_dt());
         self.biology.background(&due);
         self.brain.react(

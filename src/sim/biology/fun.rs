@@ -34,12 +34,20 @@ pub const FUN_PER_SECOND: f32 = 100.0 / (HOURS_TO_BORED * HOUR);
 /// [`BORED`]: crate::sim::brain::routines::BORED
 pub const AMUSEMENT: f32 = 60.0;
 
+/// How much of its pace boredom keeps asleep: none. Nobody gets bored in their
+/// sleep, and a sleeper who did was up at two in the morning for the computer.
+pub const ASLEEP_PACE: f32 = 0.0;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Fun;
 
 impl Process for Fun {
     fn id(&self) -> ProcessId {
         ProcessId::Fun
+    }
+
+    fn asleep_pace(&self) -> f32 {
+        ASLEEP_PACE
     }
 
     /// Fun drains. Nothing is entertaining for ever, and a body left alone

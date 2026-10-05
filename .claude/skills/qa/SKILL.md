@@ -113,6 +113,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
+| `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
 | `{"look_at": {"x": 128, "y": 128}}` | Point the game camera at the middle of a cell, through the map clamp. Takes effect next frame. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -201,6 +202,7 @@ the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
+| `{"expect_stat": {"stat": "hunger", "max": 75, "of": "crowd"}}` | A stat in a range — `min`, `max` or both — of the selected unit (`"of": "selected"`, the default) or the crowd's average (`"crowd"`). Any name the debug menu shows. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
 | `{"expect_scaling": {"from": "100 humans", "to": "1000 humans", "slack": 1.5}}` | Cost per entity did not grow with the crowd. |
 
@@ -405,6 +407,37 @@ pooling had landed:
 forces vsync on a window that is not in the foreground, whatever `"vsync"` says. Leave the
 game window in front, and rerun rather than quote a run where every frame sits on the
 refresh interval.
+
+## Watching a world go by
+
+A measurement says how long ticks took; an **observation** says what they did to the people
+in them. `observe` runs ticks exactly as `tick` does — one spawn pass, then the processing
+passes — and samples every unit with a body at tick 0, every `every` ticks and at the end.
+Each sample records every stat (`Stats::fields`, the debug menu's names) and the goal on
+top. It is written as soon as the step ends, pass or fail, to `qa-observe/<test>/`:
+
+- `<name>.csv` — a row per unit per sample: `tick,hours,clock,unit,goal,health,...`. For a
+  plot, or for following one person through the day.
+- `<name>.json` — a row per sample: the crowd's average of every stat and how many units were
+  on each goal. `tools/qa.py` prints it as a table, pass or fail, so a run reads as a day:
+
+```
+observed 'a day': 6 unit(s), 25 samples  (qa-observe/a_day_in_the_office/a-day.csv)
+  clock            health stamina     fun  hunger  thirst bladder ...  goals
+  day 1  08:02:30    48.5    84.7    83.6    12.1    16.1    13.4 ...  wander 6
+  day 1  13:02:30    48.5    53.5    53.6    24.6    36.1    47.8 ...  play 3, wander 2, relieve 1
+```
+
+**Pause first** (`{"key": "p"}`): the game's own fixed steps run between a script's steps,
+and a paused world moves only by what the script asks. 1920 ticks is a world hour, so a day
+is `"ticks": 46080, "every": 1920`; a few humans take seconds of that in debug.
+
+`expect_stat` is the assertion to put after one. Assert on the **crowd** for anything about
+how people fare in general — one unit's luck decides its own stats, a crowd's average does
+not hinge on one person's walk to the fridge — and on the selected unit for a test about one
+need in one body (with the others switched off, `process`). Write the range observed when
+the test was written in a `note` beside it, as for a perf budget. `qa/a_day_in_the_office.json`
+(`qa/fixtures/office.json`: beds, fridges, toilets, computers) is the example.
 
 ## Screenshots
 

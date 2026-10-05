@@ -299,6 +299,24 @@ pub enum Step {
     /// number it names.
     Tick(u32),
 
+    /// Advance the simulation like [`Step::Tick`], and **watch it**: sample
+    /// every unit with a body every `every` ticks — and once before the first
+    /// and once after the last — recording each of its stats and the goal it
+    /// was pursuing.
+    ///
+    /// The deliverable is the record, the way a measurement's is: written to
+    /// `qa-observe/<test>/<name>.csv` (a row per unit per sample) and
+    /// `<name>.json` (the crowd's average of every stat per sample, and how
+    /// many were on each goal), and printed by `tools/qa.py`. It is what
+    /// answers "what happens to these people over a day", which a single
+    /// assertion at the end cannot. Pause first (`{"key": "p"}`) if the record
+    /// should be exactly `ticks` of world and not a little more.
+    Observe {
+        name: String,
+        ticks: u32,
+        every: u32,
+    },
+
     /// Put a whole crowd in the world at once, spread over the cells that can
     /// be stood on.
     ///
@@ -439,6 +457,23 @@ pub enum Step {
     /// says everything it needs to — a build that had lost the time scale
     /// would be an hour short of it, not a minute.
     ExpectWorldTime { hours: f64 },
+    /// That a stat — `hunger`, `satisfaction`, any name the debug menu shows
+    /// — is within a range: at least `min`, at most `max`, either or both.
+    ///
+    /// `of` is whose: `"selected"` (the default), or `"crowd"` for the
+    /// average over every unit with a body. The selected unit's is the claim
+    /// for a test about one person and one need; the crowd's is the claim
+    /// for "after a day, people are this content", which no one unit's luck
+    /// should decide.
+    ExpectStat {
+        stat: String,
+        #[serde(default)]
+        min: Option<f32>,
+        #[serde(default)]
+        max: Option<f32>,
+        #[serde(default)]
+        of: Option<String>,
+    },
     /// That the simulation has said something containing this text.
     ///
     /// Reads the log panel's own lines rather than the queue: the queue is
@@ -746,6 +781,28 @@ mod tests {
         assert!(matches!(script.steps[2], Step::MeasureFrames { seconds, .. } if seconds == 2.0));
         assert!(matches!(script.steps[3], Step::ExpectUnder { ms, .. } if ms == 8.0));
         assert!(matches!(script.steps[4], Step::ExpectScaling { slack, .. } if slack == 1.5));
+    }
+
+    #[test]
+    fn a_test_can_watch_the_world_and_assert_on_a_stat() {
+        let script = Script::parse(
+            r#"{
+                "name": "a day",
+                "state": "game",
+                "steps": [
+                    { "observe": { "name": "a day", "ticks": 46080, "every": 1920 } },
+                    { "expect_stat": { "stat": "satisfaction", "min": 10 } },
+                    { "expect_stat": { "stat": "hunger", "max": 90, "of": "crowd" } }
+                ]
+            }"#,
+        )
+        .expect("valid script");
+        assert!(matches!(script.steps[0], Step::Observe { ticks: 46080, every: 1920, .. }));
+        assert!(matches!(
+            script.steps[1],
+            Step::ExpectStat { ref stat, min: Some(10.0), max: None, of: None } if stat == "satisfaction"
+        ));
+        assert!(matches!(script.steps[2], Step::ExpectStat { of: Some(ref of), .. } if of == "crowd"));
     }
 
     /// A misspelled step name has to be an error. Silently skipping one would

@@ -295,7 +295,7 @@ mod tests {
         let mut human = owner(Point::new(5, 5), 60.0, bed);
         for _ in 0..600 {
             world.step(&mut human);
-            if matches!(human.brain().current_task(), Some(Task::Sleep(_))) && human.center_position() == bed {
+            if human.brain().is_asleep() {
                 break;
             }
         }
@@ -315,10 +315,79 @@ mod tests {
         }
         for _ in 0..3 * Priority::Med.period() {
             world.step(&mut human);
-            assert!(matches!(human.brain().current_task(), Some(Task::Sleep(_))), "woke up");
+            assert!(human.brain().is_asleep(), "woke up");
         }
         assert_eq!(human.brain().perception().saw(), (0, 0));
         assert_eq!(human.brain().attention().met(), met);
+    }
+
+    fn step_until(world: &mut World, human: &mut Human, ticks: u32, done: impl Fn(&Human) -> bool) -> bool {
+        for _ in 0..ticks {
+            world.step(human);
+            if done(human) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Up for the toilet forty minutes into an hour: the forty minutes were
+    /// sleep. The brain tells the task it is being dropped before the toilet
+    /// takes over, and the task tells the body.
+    #[test]
+    fn a_sleeper_woken_for_the_toilet_keeps_the_rest_it_got() {
+        let bed = Point::new(6, 5);
+        let mut world = night_with_beds(&[bed]);
+        prop_at(&mut world.map, "toilet", Point::new(10, 5));
+        world.features = crate::sim::feature::Features::from_map(&world.map);
+        let mut human = owner(Point::new(5, 5), 70.0, bed);
+        human.biology_mut().unwrap().set_running(ProcessId::Bladder, true);
+        assert!(step_until(&mut world, &mut human, 600, |h| h.brain().is_asleep()), "never got to sleep");
+        let before = human.stats().stamina();
+
+        // Forty world minutes asleep, then bursting.
+        let forty_minutes = (40.0 * crate::sim::clock::MINUTE / TIME_SCALE / world.dt) as u32;
+        for _ in 0..forty_minutes {
+            world.step(&mut human);
+        }
+        assert!(human.brain().is_asleep(), "{:?}", human.brain_fields());
+        human.set_bladder(95.0);
+        assert!(step_until(&mut world, &mut human, 10, |h| h.brain().top_goal() == GoalId::Relieve));
+        let gained = human.stats().stamina() - before;
+        // Forty minutes is 2/3 of an hour's 12.5 net: about 8.3.
+        assert!(gained > 6.0, "kept {gained} of forty minutes' sleep");
+    }
+
+    /// What `qa/a_day_in_the_office.json` caught: everything a body does
+    /// running at once, and somewhere for each of it — a fridge, a toilet, a
+    /// computer — and still a night in bed leaves somebody rested. With every
+    /// need at a waking pace and an interrupted hour worth nothing, a sleeper
+    /// was up for one of them every hour and stamina never got past 45.
+    #[test]
+    fn a_night_with_every_need_running_still_rests_a_tired_human() {
+        let bed = Point::new(6, 8);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "bed 1", bed);
+        prop_at(&mut map, "fridge", Point::new(2, 3));
+        prop_at(&mut map, "toilet", Point::new(11, 3));
+        prop_at(&mut map, "computer", Point::new(7, 2));
+        let mut world = World::new(map);
+        world.clock = midnight();
+        // A long day behind them: tired, peckish, thirsty, getting bored.
+        let mut human = needy_human(Point::new(6, 6), 45.0, 45.0, 40.0);
+        human.set_stamina(25.0);
+        human.set_fun(55.0);
+        assert!(human.set_home(bed));
+
+        let night = (8.0 * HOUR / TIME_SCALE / world.dt) as u32;
+        let mut asleep = 0;
+        for _ in 0..night {
+            world.step(&mut human);
+            asleep += human.brain().is_asleep() as u32;
+        }
+        let stamina = human.stats().stamina();
+        assert!(stamina >= 70.0, "stamina {stamina} after a night; asleep {asleep} of {night} ticks");
+        assert!(asleep > night / 2, "asleep only {asleep} of {night} ticks");
     }
 
     #[test]

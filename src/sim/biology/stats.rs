@@ -229,6 +229,23 @@ impl Stats {
     /// [`crate::sim::GameEntity::debug_fields`] wants, so a kind that carries
     /// stats can hand them over in one line rather than naming each field
     /// again at the call site.
+    /// Every stat's name, in [`Stats::fields`] order — for something that
+    /// needs the names without a body to read them off (a QA script naming
+    /// the stat it asserts on). A test holds the two lists together.
+    pub fn named() -> &'static [&'static str] {
+        &[
+            "health",
+            "stamina",
+            "fun",
+            "hunger",
+            "thirst",
+            "bladder",
+            "mental_health",
+            "attention",
+            "satisfaction",
+        ]
+    }
+
     pub fn fields(&self) -> Vec<(&'static str, f32)> {
         vec![
             ("health", self.health),
@@ -332,6 +349,13 @@ mod tests {
         );
         assert_eq!(Stats::calm().with_fun(0.0).boredom(), 100.0);
         assert_eq!(Stats::calm().with_fun(30.0).boredom(), 70.0);
+    }
+
+    #[test]
+    fn the_list_of_names_is_the_names_the_fields_give() {
+        let stats = Stats::calm();
+        let names: Vec<&str> = stats.fields().iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, Stats::named());
     }
 
     #[test]

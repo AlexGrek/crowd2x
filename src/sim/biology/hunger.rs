@@ -22,12 +22,20 @@ pub const HOURS_TO_STARVING: f32 = 8.0;
 /// [`Think::game_dt`]: crate::sim::entity::Think::game_dt
 pub const HUNGER_PER_SECOND: f32 = 100.0 / (HOURS_TO_STARVING * HOUR);
 
+/// How much of its pace hunger keeps asleep: a sleeping body burns about half
+/// what a waking one does.
+pub const ASLEEP_PACE: f32 = 0.5;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Hunger;
 
 impl Process for Hunger {
     fn id(&self) -> ProcessId {
         ProcessId::Hunger
+    }
+
+    fn asleep_pace(&self) -> f32 {
+        ASLEEP_PACE
     }
 
     fn advance(&mut self, stats: &mut Stats, dt: f32) {

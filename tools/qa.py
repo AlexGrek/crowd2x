@@ -49,6 +49,9 @@ SHOTS = ROOT / "qa-screenshots"
 # ...and its measurements here, next to them and gitignored for the same
 # reason: a timing is evidence from one machine, not source.
 PERF = ROOT / "qa-perf"
+# What `observe` steps saw: a directory per test, a CSV and a JSON per
+# observation. Evidence, like the screenshots.
+OBSERVE = ROOT / "qa-observe"
 # The window size the coordinates in a `mouse` step assume: 320x180 canvas at
 # PIXEL_SCALE 4. Forced so a test does not depend on the last window size.
 WINDOW = "1280x720"
@@ -115,6 +118,41 @@ def report_perf(perf: Path) -> None:
         )
 
 
+# How each stat is printed: attention runs 0-1, everything else 0-100.
+STAT_FORMAT = {"attention": "{:7.2f}"}
+
+
+def report_observations(observed: Path) -> None:
+    """Print what a test watched: the crowd's average of every stat at every
+    sample, and what most of them were doing - a day going by, a row at a time.
+
+    The whole record, a unit per row, is in the CSV beside the JSON.
+    """
+    if not observed.exists():
+        return
+    for path in sorted(observed.glob("*.json")):
+        try:
+            report = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            print(f"     cannot read {path.name}: {error}")
+            continue
+        stats = report.get("stats", [])
+        samples = report.get("samples", [])
+        units = samples[-1]["units"] if samples else 0
+        print(f"     observed {report.get('name')!r}: {units} unit(s), {len(samples)} samples"
+              f"  ({path.with_suffix('.csv').relative_to(ROOT)})")
+        header = "".join(f"{name[:7]:>8}" for name in stats)
+        print(f"       {'clock':<16}{header}  goals")
+        for sample in samples:
+            mean = sample.get("mean", {})
+            cells = "".join(
+                " " + STAT_FORMAT.get(name, "{:7.1f}").format(mean.get(name, 0.0)) for name in stats
+            )
+            goals = sorted(sample.get("goals", {}).items(), key=lambda kv: (-kv[1], kv[0]))
+            doing = ", ".join(f"{goal} {count}" for goal, count in goals[:4])
+            print(f"       {sample.get('clock', ''):<16}{cells}  {doing}")
+
+
 def is_required(path: Path) -> bool:
     try:
         return json.loads(path.read_text()).get("required", True) is not False
@@ -134,6 +172,9 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
     perf = PERF / f"{name}.json"
     perf.unlink(missing_ok=True)
 
+    observed = OBSERVE / name
+    shutil.rmtree(observed, ignore_errors=True)
+
     try:
         timeout = json.loads(path.read_text()).get("timeout", 60)
     except json.JSONDecodeError as error:
@@ -146,6 +187,7 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
         "CROWD2X_MAPS": str(maps),
         "CROWD2X_QA_SHOTS": str(shots),
         "CROWD2X_QA_PERF": str(perf),
+        "CROWD2X_QA_OBSERVE": str(observed),
         "CROWD2X_WINDOW": WINDOW,
     }
 
@@ -169,12 +211,14 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
         print(f"PASS {name}")
         report_shots(shots)
         report_perf(perf)
+        report_observations(observed)
         return True
 
     excused = "" if is_required(path) else ", not required"
     print(f"FAIL {name} (exit {result.returncode}{excused})")
     report_shots(shots)
     report_perf(perf)
+    report_observations(observed)
     if not verbose:
         # Only the qa lines: the rest is bevy's startup chatter.
         for line in (result.stderr or "").splitlines():

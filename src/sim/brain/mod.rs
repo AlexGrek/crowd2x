@@ -227,7 +227,7 @@ impl Brain {
         if let Some(elapsed) = due.elapsed(Priority::Med) {
             // Faces first, before the look: see `Attention::age`.
             attention.age(elapsed);
-            if matches!(task, Some(Task::Sleep(_))) {
+            if is_asleep(task, action) {
                 perception.close_eyes();
             } else {
                 let sightings = perception.look(ctx, &body);
@@ -259,6 +259,14 @@ impl Brain {
         }
 
         let changed = goals.settle();
+        // A task dropped half done may owe the body what it already did — an
+        // hour of sleep cut short is still what was slept of it. Told here,
+        // before the goals are handed the body read-only below.
+        if changed.is_some()
+            && let Some(current) = task.as_mut()
+        {
+            current.interrupted(action, biology.as_deref_mut());
+        }
         {
             // Goals read the body and what it carries; only tasks, below,
             // change them.
@@ -363,6 +371,13 @@ impl Brain {
 
     pub fn action(&self) -> Action {
         self.action
+    }
+
+    /// Whether it is lying in a bed asleep — not walking to one, not getting
+    /// in. What the body ages by (`Biology::advance_asleep`) and what shuts
+    /// its eyes.
+    pub fn is_asleep(&self) -> bool {
+        is_asleep(&self.task, &self.action)
     }
 
     pub fn current_task(&self) -> Option<Task> {
@@ -472,6 +487,12 @@ impl Brain {
         ));
         fields
     }
+}
+
+/// Asleep: the task is a stretch of sleep and its action is the lying in the
+/// bed, not the step into it.
+fn is_asleep(task: &Option<Task>, action: &Action) -> bool {
+    matches!(task, Some(Task::Sleep(_))) && matches!(action, Action::Interact { .. })
 }
 
 #[cfg(test)]
