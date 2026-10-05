@@ -181,6 +181,12 @@ pub struct Map {
     /// Indexed by `ObjectLayer as usize`, one entry per variant.
     objects: Vec<Vec<Object>>,
     passability: PassabilityMap,
+    /// Which cells can be seen *through*: the terrain's half of passability
+    /// alone — a wall hides what is behind it, a fridge or a bed does not.
+    /// The same one-bit-per-cell shape, for the same reason: a unit looking
+    /// round asks it about every cell on a line of sight, and the catalogue
+    /// behind a tile id is a lookup and a branch per cell where this is a bit.
+    sight: PassabilityMap,
 }
 
 impl Map {
@@ -200,6 +206,7 @@ impl Map {
             terrain: vec![TerrainLayer { tiles }],
             objects: ObjectLayer::ALL.map(|_| Vec::new()).into(),
             passability: PassabilityMap::new(size),
+            sight: PassabilityMap::new(size),
         };
         map.rebuild_passability();
         map
@@ -259,8 +266,9 @@ impl Map {
     /// them happens here and every caller keeps asking the same question.
     pub fn rebuild_passability(&mut self) {
         for (index, tile) in self.terrain[BASE].tiles.iter().enumerate() {
-            self.passability
-                .set(self.size.point_at(index), tile.is_passable());
+            let point = self.size.point_at(index);
+            self.passability.set(point, tile.is_passable());
+            self.sight.set(point, tile.is_passable());
         }
         for prop in &self.objects[ObjectLayer::Props as usize] {
             if !prop.kind.prop_passability().is_passable() {
@@ -275,7 +283,9 @@ impl Map {
     /// Scans the props, which is the cost of an edit and never of a tick —
     /// nothing in the simulation changes the map.
     fn refresh_passability(&mut self, point: Point) {
-        let passable = self.terrain(point).is_some_and(TerrainId::is_passable)
+        let see_through = self.terrain(point).is_some_and(TerrainId::is_passable);
+        self.sight.set(point, see_through);
+        let passable = see_through
             && !self.objects(ObjectLayer::Props).iter().any(|prop| {
                 prop.cell() == point && !prop.kind.prop_passability().is_passable()
             });
@@ -285,6 +295,12 @@ impl Map {
     /// The static passability map, for pathfinding and steering to hold on to.
     pub fn passability(&self) -> &PassabilityMap {
         &self.passability
+    }
+
+    /// Which cells can be seen through: passable terrain, whatever stands on
+    /// it. Off the map is opaque.
+    pub fn sight(&self) -> &PassabilityMap {
+        &self.sight
     }
 
     /// Whether an agent can stand at `point`: the terrain allows it and no

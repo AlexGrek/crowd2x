@@ -21,7 +21,7 @@
 //! runs with nothing seen, so faces fade overnight.
 //!
 //! What a meeting does to the unit is the brain's business, not this
-//! module's: [`Attention::attend`] hands each one to a closure.
+//! module's: [`Attention::take_in`] hands each one to a closure.
 
 use crate::sim::clock::MINUTE;
 use crate::sim::uid::Uid;
@@ -39,18 +39,25 @@ pub const FACES: usize = 32;
 const _: () = assert!(FACES > SIGHTINGS);
 
 /// The faces in mind, as two arrays rather than an array of pairs: what a
-/// look does is scan every id for one, and age every timer at once, and both
+/// look does is scan every key for one, and age every timer at once, and both
 /// are a tight loop over one contiguous array that way.
 ///
-/// An empty slot is id `0` — never a [`Uid`], which is non-zero — with an
-/// infinite timer, so "the slot to reuse" is one argmax over the timers: an
+/// **Small on purpose, because it is cold.** A unit's faces were last touched
+/// a look ago, seven ticks and a crowd's worth of other units back, so in a
+/// big crowd every look reads them from far away in memory — and the cost of
+/// a look is mostly how many cache lines that is, not what is done with them.
+/// So a face is a 32-bit key ([`key`]) and a 16-bit timer, and all of it is
+/// three lines instead of six.
+///
+/// An empty slot is key `0` — [`key`] never gives it — with the timer at its
+/// top ([`EMPTY`]), so "the slot to reuse" is one argmax over the timers: an
 /// empty one wins over anybody, and a full memory gives up whoever has been
 /// out of sight longest.
 #[derive(Clone, PartialEq, Debug)]
 struct Faces {
-    uids: [u64; FACES],
-    /// World seconds since each was last seen.
-    unseen: [f32; FACES],
+    keys: [u32; FACES],
+    /// Quarter world seconds since each was last seen, saturating.
+    unseen: [u16; FACES],
     /// How many people it has been glad to see, ever — a meeting being a
     /// person noticed who was not in mind. For the debug menu and tests, in
     /// place of a log line per meeting, which in a crowd would be most of the
@@ -59,9 +66,33 @@ struct Faces {
     met: u32,
 }
 
+/// What a timer counts in a world second. A quarter second is finer than any
+/// look is apart (a look is ~13 world seconds) and leaves [`FORGET_AFTER`]
+/// well inside 16 bits.
+const PER_SECOND: f32 = 4.0;
+
+/// [`FORGET_AFTER`] on a timer.
+const FORGOTTEN: u16 = (FORGET_AFTER * PER_SECOND) as u16;
+
+/// The timer of an empty slot: longer out of sight than anybody.
+const EMPTY: u16 = u16::MAX;
+
+const _: () = assert!((FORGOTTEN as u32) < EMPTY as u32);
+
+/// A face's key: the id folded to 32 bits, never `0`.
+///
+/// Two people whose keys collide are one face to whoever sees both — the
+/// second is not news while the first is in mind. One pair in four billion,
+/// for a missed greeting; the price of three cache lines a look instead of
+/// six.
+fn key(uid: Uid) -> u32 {
+    let raw = uid.raw();
+    ((raw ^ (raw >> 32)) as u32).max(1)
+}
+
 impl Default for Faces {
     fn default() -> Faces {
-        Faces { uids: [0; FACES], unseen: [f32::INFINITY; FACES], met: 0 }
+        Faces { keys: [0; FACES], unseen: [EMPTY; FACES], met: 0 }
     }
 }
 
@@ -75,31 +106,40 @@ pub struct Attention {
 }
 
 impl Attention {
-    /// Take in a look: `elapsed` **world** seconds since the last one go by
-    /// for every face, those gone too long are forgotten, everyone `seen` is
-    /// refreshed — and everyone seen who was not in mind is remembered and
-    /// handed to `notice`, in the order they were seen.
+    /// `elapsed` **world** seconds go by for every face, and those gone too
+    /// long are forgotten. All a unit with its eyes shut does.
     ///
-    /// With nothing seen it only ages and forgets, which is what a unit with
-    /// its eyes shut does.
-    pub fn attend(&mut self, seen: impl Iterator<Item = Sighting>, elapsed: f32, mut notice: impl FnMut(Notice)) {
-        let Faces { uids, unseen, .. } = &mut *self.faces;
-        for (uid, unseen) in uids.iter_mut().zip(unseen.iter_mut()) {
-            *unseen += elapsed;
-            if *unseen > FORGET_AFTER {
-                *uid = 0;
-                *unseen = f32::INFINITY;
+    /// Apart from [`Attention::take_in`], and asked first — before the look —
+    /// for speed: the faces were last touched a look ago and are the one part
+    /// of looking round likely to come from far away in memory, so touching
+    /// them before the scan lets them arrive while it runs instead of after.
+    pub fn age(&mut self, elapsed: f32) {
+        let Faces { keys, unseen, .. } = &mut *self.faces;
+        let gone = (elapsed * PER_SECOND).round().clamp(0.0, EMPTY as f32) as u16;
+        for (key, unseen) in keys.iter_mut().zip(unseen.iter_mut()) {
+            *unseen = unseen.saturating_add(gone);
+            if *unseen > FORGOTTEN {
+                *key = 0;
+                *unseen = EMPTY;
             }
         }
+    }
+
+    /// Take in a look, once [`Attention::age`] has been told how long since
+    /// the last one: everyone `seen` is refreshed — and everyone seen who was
+    /// not in mind is remembered and handed to `notice`, in the order they
+    /// were seen.
+    pub fn take_in(&mut self, seen: impl Iterator<Item = Sighting>, mut notice: impl FnMut(Notice)) {
+        let Faces { keys, unseen, .. } = &mut *self.faces;
         for sighting in seen {
-            let raw = sighting.uid.raw();
-            if let Some(i) = uids.iter().position(|&uid| uid == raw) {
-                unseen[i] = 0.0;
+            let wanted = key(sighting.uid);
+            if let Some(i) = keys.iter().position(|&key| key == wanted) {
+                unseen[i] = 0;
                 continue;
             }
             let room = longest_unseen(unseen);
-            uids[room] = raw;
-            unseen[room] = 0.0;
+            keys[room] = wanted;
+            unseen[room] = 0;
             notice(sighting);
         }
     }
@@ -116,12 +156,12 @@ impl Attention {
 
     /// Whether `uid` is in mind.
     pub fn remembers(&self, uid: Uid) -> bool {
-        self.faces.uids.contains(&uid.raw())
+        self.faces.keys.contains(&key(uid))
     }
 
     /// How many faces are in mind.
     pub fn len(&self) -> usize {
-        self.faces.uids.iter().filter(|&&uid| uid != 0).count()
+        self.faces.keys.iter().filter(|&&key| key != 0).count()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -142,7 +182,7 @@ impl Attention {
 
 /// The slot out of sight the longest — an empty one first, since it is
 /// infinitely long — ties to the first, so which goes is the same on every run.
-fn longest_unseen(unseen: &[f32; FACES]) -> usize {
+fn longest_unseen(unseen: &[u16; FACES]) -> usize {
     let mut longest = 0;
     for (i, &time) in unseen.iter().enumerate().skip(1) {
         if time > unseen[longest] {
@@ -166,7 +206,8 @@ mod tests {
     /// One look, returning who was noticed.
     fn attend(attention: &mut Attention, seen: &[u64], elapsed: f32) -> Vec<u64> {
         let mut noticed = Vec::new();
-        attention.attend(seen.iter().map(|&n| sighting(n)), elapsed, |notice| noticed.push(notice.uid.body()));
+        attention.age(elapsed);
+        attention.take_in(seen.iter().map(|&n| sighting(n)), |notice| noticed.push(notice.uid.body()));
         noticed
     }
 
@@ -208,7 +249,7 @@ mod tests {
         attend(&mut attention, &[1, 3], FORGET_AFTER * 0.6);
         assert!(!attention.remembers(Uid::new(EntityType::Human, 2)));
         assert_eq!(attend(&mut attention, &[4], 1.0), [4]);
-        assert_eq!(attention.faces.uids[1], Uid::new(EntityType::Human, 4).raw());
+        assert_eq!(attention.faces.keys[1], key(Uid::new(EntityType::Human, 4)));
         assert_eq!(attention.len(), 3);
     }
 
@@ -219,6 +260,17 @@ mod tests {
         attend(&mut attention, &[2, 3], 0.0);
         attention.met_with(2);
         assert_eq!(attention.debug_fields(), [("in mind", "2 faces, met 2".to_string())]);
+    }
+
+    #[test]
+    fn a_key_is_never_the_empty_slot_and_tells_ids_apart() {
+        let keys: Vec<u32> = (1..1000).map(|n| key(Uid::new(EntityType::Human, n))).collect();
+        assert!(keys.iter().all(|&key| key != 0));
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), keys.len());
+        assert_ne!(key(Uid::new(EntityType::Human, 7)), key(Uid::new(EntityType::Dog, 7)));
     }
 
     #[test]

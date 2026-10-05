@@ -19,7 +19,9 @@
 //! About seventy reads, nearly all of them of empty cells; only a cell that has
 //! somebody in it pays for a line of sight, at most [`FAR`] reads of the
 //! terrain. Nothing scans the crowd, which is what killed the earlier
-//! prototype.
+//! prototype. Away from the map's edge (nearly every look) an empty cell costs
+//! one bit of [`Occupancy`](crate::sim::occupancy::Occupancy)'s occupied
+//! bitmap and nothing else.
 //!
 //! And it does not happen every tick. A unit looks round on its own
 //! [`Priority::Med`](crate::sim::background::Priority::Med) beat — every 7th
@@ -31,8 +33,11 @@
 //! since that is a couple of comparisons and a walker that turned a corner
 //! between two looks should look down the new corridor.
 //!
-//! What was seen is kept until the next look ([`Perception::seen`]), and
-//! [`super::attention`] is what decides whether any of it matters.
+//! Who was seen is handed back from the look ([`Sightings`], on the stack) for
+//! [`super::attention`] to decide whether any of it matters; all a unit keeps
+//! of it is how many were near and how many far. **A look is mostly cache
+//! misses** in a big crowd — whatever a unit keeps was last touched a look
+//! ago — so what is not needed between looks is not kept.
 
 use std::sync::LazyLock;
 
@@ -143,25 +148,115 @@ pub struct Sighting {
     pub range: Range,
 }
 
-/// One cell of a cone, relative to whoever is looking.
+/// One test on a line of sight: the view is blocked here when **both** cells
+/// are opaque. A cell the line passes through is a check of that cell twice;
+/// a diagonal step of the line is a check of the two cells either side of the
+/// corner it cuts, which is what stops a look slipping between two walls that
+/// meet only at a corner.
+///
+/// Offsets from whoever is looking, in a byte each: nothing on a line is more
+/// than [`FAR`] away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Check {
+    a: (i8, i8),
+    b: (i8, i8),
+}
+
+/// The most checks a line can need: a cell and a corner for every step.
+const MOST_CHECKS: usize = 2 * FAR as usize;
+
+/// One cell of a cone, relative to whoever is looking — what [`Cone::cells`]
+/// hands out, for anybody who wants the cone as a list.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ViewCell {
     pub offset: Point,
     pub range: Range,
 }
 
-/// Every cell a unit facing `heading` can see, nearest first — ties broken by
+/// The checks a line of sight to one cell has to pass, nearest first.
+///
+/// Worked out here, once per process, rather than walked on every look: a
+/// line depends only on the offset, never on where the viewer stands, so every
+/// look in the game would walk the same few dozen lines.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Line {
+    checks: [Check; MOST_CHECKS],
+    len: u8,
+}
+
+impl Line {
+    fn to(offset: Point) -> Line {
+        let mut line = Line { checks: [Check { a: (0, 0), b: (0, 0) }; MOST_CHECKS], len: 0 };
+        line_checks(offset, |check| {
+            line.checks[line.len as usize] = check;
+            line.len += 1;
+            true
+        });
+        line
+    }
+
+    fn checks(&self) -> &[Check] {
+        &self.checks[..self.len as usize]
+    }
+}
+
+/// Every cell a unit facing one way can see, nearest first — ties broken by
 /// position, so a look's order, and so the order things are noticed in, is the
 /// same on every run.
 ///
-/// Built once per process, eight small tables; a look only reads them.
-pub fn cone(heading: Heading) -> &'static [ViewCell] {
-    static CONES: LazyLock<[Box<[ViewCell]>; 8]> =
-        LazyLock::new(|| Heading::ALL.map(|heading| build_cone(heading).into_boxed_slice()));
+/// **Laid out for the scan, not for reading.** What a look reads of every cell
+/// is its offset, and most cells it reads are empty; so the offsets are an
+/// array of their own, two bytes each and a few cache lines for the whole
+/// cone, and a cell's line of sight — sixty-odd bytes — sits in a parallel
+/// array that only an occupied cell touches. Kept together, a look walked
+/// some seventy lines of table to find out that seventy cells were empty. And
+/// since the cells are nearest first, the near ones are a prefix: a count, not
+/// a field per cell.
+pub struct Cone {
+    offsets: Box<[(i8, i8)]>,
+    /// How many of `offsets`, from the front, are [`Range::Near`].
+    near: usize,
+    /// Parallel to `offsets`.
+    lines: Box<[Line]>,
+}
+
+impl Cone {
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+
+    fn offset(&self, index: usize) -> Point {
+        let (x, y) = self.offsets[index];
+        Point::new(x as i32, y as i32)
+    }
+
+    fn range(&self, index: usize) -> Range {
+        if index < self.near { Range::Near } else { Range::Far }
+    }
+
+    /// The cells, nearest first.
+    pub fn cells(&self) -> impl Iterator<Item = ViewCell> + '_ {
+        (0..self.len()).map(|i| ViewCell { offset: self.offset(i), range: self.range(i) })
+    }
+
+    /// What a line of sight to the `index`th cell has to pass.
+    pub fn checks(&self, index: usize) -> &[Check] {
+        self.lines[index].checks()
+    }
+}
+
+/// The cone a unit facing `heading` sees through. Built once per process,
+/// eight small tables; a look only reads them.
+pub fn cone(heading: Heading) -> &'static Cone {
+    static CONES: LazyLock<[Cone; 8]> = LazyLock::new(|| Heading::ALL.map(build_cone));
     &CONES[heading as usize]
 }
 
-fn build_cone(heading: Heading) -> Vec<ViewCell> {
+fn build_cone(heading: Heading) -> Cone {
     let (hx, hy) = heading.step();
     let cos = HALF_ANGLE_DEGREES.to_radians().cos();
     let length = ((hx * hx + hy * hy) as f32).sqrt();
@@ -179,31 +274,30 @@ fn build_cone(heading: Heading) -> Vec<ViewCell> {
             // elbow is noticed even if they are not in front of you.
             let beside = dx.abs().max(dy.abs()) == 1 && dot >= 0.0;
             if in_cone || beside {
-                let range = if distance_sq <= NEAR * NEAR { Range::Near } else { Range::Far };
-                cells.push(ViewCell { offset: Point::new(dx, dy), range });
+                cells.push(Point::new(dx, dy));
             }
         }
     }
-    cells.sort_by_key(|cell| (cell.offset.x.pow(2) + cell.offset.y.pow(2), cell.offset.y, cell.offset.x));
-    cells
+    cells.sort_by_key(|cell| (cell.x.pow(2) + cell.y.pow(2), cell.y, cell.x));
+    Cone {
+        offsets: cells.iter().map(|cell| (cell.x as i8, cell.y as i8)).collect(),
+        near: cells.iter().filter(|cell| cell.x.pow(2) + cell.y.pow(2) <= NEAR * NEAR).count(),
+        lines: cells.iter().map(|&cell| Line::to(cell)).collect(),
+    }
 }
 
-/// Whether nothing blocks the view from `from` to `to`: every cell strictly
-/// between them, on a Bresenham line, is terrain that could be walked on —
-/// and no diagonal step of the line squeezes between two walls that meet only
-/// at a corner, which would be seeing through a wall at its seam.
-///
-/// Terrain and not passability: a fridge or a bed stops a walk but not a look
-/// over it. Off the map is opaque.
-pub fn in_sight(map: &Map, from: Point, to: Point) -> bool {
-    let clear = |cell: Point| map.terrain(cell).is_some_and(|tile| tile.is_passable());
-    let (dx, dy) = ((to.x - from.x).abs(), -(to.y - from.y).abs());
-    let (sx, sy) = ((to.x - from.x).signum(), (to.y - from.y).signum());
-    let (mut x, mut y, mut error) = (from.x, from.y, dx + dy);
+/// Hand `check` every test on the Bresenham line from the origin to `to`, in
+/// order, until it returns `false`; returns whether it never did. The one
+/// definition of a line of sight, for the tables and for [`in_sight`].
+fn line_checks(to: Point, mut check: impl FnMut(Check) -> bool) -> bool {
+    let (dx, dy) = (to.x.abs(), -to.y.abs());
+    let (sx, sy) = (to.x.signum(), to.y.signum());
+    let (mut x, mut y, mut error) = (0, 0, dx + dy);
+    let byte = |x: i32, y: i32| (x as i8, y as i8);
     loop {
         let doubled = 2 * error;
         let (step_x, step_y) = (doubled >= dy, doubled <= dx);
-        if step_x && step_y && !clear(Point::new(x + sx, y)) && !clear(Point::new(x, y + sy)) {
+        if step_x && step_y && !check(Check { a: byte(x + sx, y), b: byte(x, y + sy) }) {
             return false;
         }
         if step_x {
@@ -214,29 +308,69 @@ pub fn in_sight(map: &Map, from: Point, to: Point) -> bool {
             error += dx;
             y += sy;
         }
-        let cell = Point::new(x, y);
-        if cell == to {
+        if (x, y) == (to.x, to.y) {
             return true;
         }
-        if !clear(cell) {
+        if !check(Check { a: byte(x, y), b: byte(x, y) }) {
             return false;
         }
     }
 }
 
-/// What a unit can see: which way it faces, and who it saw at its last look.
+/// Whether nothing blocks the view from `from` to `to` (no further than
+/// [`FAR`] apart): every cell strictly between them, on a Bresenham line, is
+/// terrain that could be walked on — and no diagonal step of the line squeezes
+/// between two walls that meet only at a corner, which would be seeing through
+/// a wall at its seam.
 ///
-/// The heading is inline, since it is kept up every tick; who was seen is a
-/// fixed array **boxed once, at spawn**, since it is only touched every 7th
-/// tick and inline it would more than double the size of a human — the
-/// arena's hot data is what walks every tick, and this is not that. Looking
-/// allocates nothing.
-#[derive(Clone, PartialEq, Debug, Default)]
+/// Terrain and not passability ([`Map::sight`]): a fridge or a bed stops a
+/// walk but not a look over it. Off the map is opaque.
+pub fn in_sight(map: &Map, from: Point, to: Point) -> bool {
+    let clear = |(x, y): (i8, i8)| map.sight().is_passable(from.offset(x as i32, y as i32));
+    line_checks(to - from, |check| clear(check.a) || clear(check.b))
+}
+
+/// Who one look took in, nearest first: a fixed array on the stack, handed
+/// from [`Perception::look`] to whoever reacts to it and then gone.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Sightings {
+    seen: [Option<Sighting>; SIGHTINGS],
+    len: u8,
+}
+
+impl Sightings {
+    const NONE: Sightings = Sightings { seen: [None; SIGHTINGS], len: 0 };
+
+    pub fn iter(&self) -> impl Iterator<Item = Sighting> + '_ {
+        self.seen[..self.len as usize].iter().flatten().copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn push(&mut self, sighting: Sighting) {
+        self.seen[self.len as usize] = Some(sighting);
+        self.len += 1;
+    }
+
+    fn is_full(&self) -> bool {
+        self.len as usize == SIGHTINGS
+    }
+}
+
+/// What a unit can see: which way it faces, and how many it saw near and far
+/// at its last look. Three bytes, inline: kept up every tick, and nothing in it
+/// that a look's [`Sightings`] does not hand on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Perception {
     heading: Heading,
-    seen: Box<[Option<Sighting>; SIGHTINGS]>,
-    /// How many of `seen` are filled, from the front.
-    len: u8,
+    near: u8,
+    far: u8,
 }
 
 impl Perception {
@@ -254,42 +388,97 @@ impl Perception {
 
     /// **Look round**: forget what was seen last time, and take in whoever is
     /// in the cone in front, nearest first, up to [`SIGHTINGS`] of them.
-    pub fn look(&mut self, ctx: &Think<'_>, body: &Body) {
-        // Only `len` is reset: what lies past it is never read, and clearing
-        // the whole array on every look is a write nobody needs.
-        self.len = 0;
+    ///
+    /// Two scans with one body. Far enough from every edge that the whole cone
+    /// is on the map — nearly every look, on any map worth a crowd — a cell is
+    /// one row-major offset from the viewer's own index, read with no bounds
+    /// checks of its own; near an edge, every cell is asked by its coordinates,
+    /// and off the map answers nobody and opaque.
+    pub fn look(&mut self, ctx: &Think<'_>, body: &Body) -> Sightings {
         let here = body.center_position();
         let me = body.uid();
-        for cell in cone(self.heading) {
-            if self.len as usize == SIGHTINGS {
-                break;
+        let occupancy = ctx.occupancy;
+        let sight = ctx.map.sight();
+        let size = occupancy.size();
+        let interior = here.x >= FAR && here.y >= FAR && here.x + FAR < size.width && here.y + FAR < size.height;
+        let sightings = if interior {
+            let width = size.width as isize;
+            let base = here.y as isize * width + here.x as isize;
+            let at = move |x: i32, y: i32| (base + y as isize * width + x as isize) as usize;
+            self.scan(
+                me,
+                here,
+                |offset| occupancy.is_occupied_at(at(offset.x, offset.y)),
+                |offset| occupancy.occupant_at(at(offset.x, offset.y)),
+                |(x, y)| sight.is_passable_at(at(x as i32, y as i32)),
+            )
+        } else {
+            self.scan(
+                me,
+                here,
+                |offset| occupancy.is_occupied(here + offset),
+                |offset| occupancy.occupant(here + offset),
+                |(x, y)| sight.is_passable(here.offset(x as i32, y as i32)),
+            )
+        };
+        let near = sightings.iter().filter(|seen| seen.range == Range::Near).count();
+        self.near = near as u8;
+        self.far = (sightings.len() - near) as u8;
+        sightings
+    }
+
+    /// The look itself, over whichever way of reading a cell [`Perception::look`]
+    /// picked: whether anybody is at an offset, who, and whether an offset can
+    /// be seen through.
+    ///
+    /// In that order, cheapest first: a bit says a cell is empty, the line of
+    /// sight is bits too, and *who* is there — a word out of an array the size
+    /// of the map, and the read most likely to miss the cache — is only asked
+    /// of somebody actually seen.
+    #[inline(always)]
+    fn scan(
+        &self,
+        me: Uid,
+        here: Point,
+        occupied: impl Fn(Point) -> bool,
+        occupant: impl Fn(Point) -> Option<Uid>,
+        clear: impl Fn((i8, i8)) -> bool,
+    ) -> Sightings {
+        let mut sightings = Sightings::NONE;
+        let cone = cone(self.heading);
+        for index in 0..cone.len() {
+            let offset = cone.offset(index);
+            if !occupied(offset) || !cone.checks(index).iter().all(|check| clear(check.a) || clear(check.b)) {
+                continue;
             }
-            let at = here + cell.offset;
-            let Some(uid) = ctx.occupancy.occupant(at) else {
+            let Some(uid) = occupant(offset) else {
                 continue;
             };
-            if uid == me || !in_sight(ctx.map, here, at) {
+            if uid == me {
                 continue;
             }
-            self.seen[self.len as usize] = Some(Sighting { uid, cell: at, range: cell.range });
-            self.len += 1;
+            sightings.push(Sighting { uid, cell: here + offset, range: cone.range(index) });
+            if sightings.is_full() {
+                break;
+            }
         }
+        sightings
     }
 
     /// See nobody: what a look is while asleep.
     pub fn close_eyes(&mut self) {
-        self.len = 0;
+        self.near = 0;
+        self.far = 0;
     }
 
-    /// Who was seen at the last look, nearest first.
-    pub fn seen(&self) -> impl Iterator<Item = Sighting> + '_ {
-        self.seen[..self.len as usize].iter().flatten().copied()
+    /// How many it saw at its last look, near and far.
+    pub fn saw(&self) -> (usize, usize) {
+        (self.near as usize, self.far as usize)
     }
 
     /// For the brains menu. Allocates; never asked in a tick.
     pub fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        let near = self.seen().filter(|seen| seen.range == Range::Near).count();
-        let far = self.seen().filter(|seen| seen.range == Range::Far).count();
+        let (near, far) = self.saw();
         vec![
             ("facing", self.heading.name().to_string()),
             (
@@ -311,12 +500,15 @@ mod tests {
         Uid::new(EntityType::Human, n)
     }
 
-    /// A unit at `cell` facing `heading` in `world`, having just looked.
-    fn look(world: &World, cell: Point, heading: Heading) -> Perception {
+    /// Who a unit at `cell` facing `heading` in `world` sees.
+    fn look(world: &World, cell: Point, heading: Heading) -> Sightings {
+        facing(heading).look(&world.ctx(), &Body::at_cell(uid(1), cell))
+    }
+
+    fn facing(heading: Heading) -> Perception {
         let (dx, dy) = heading.step();
         let mut perception = Perception::default();
         perception.turn(Some((dx as f32, dy as f32)));
-        perception.look(&world.ctx(), &Body::at_cell(uid(1), cell));
         perception
     }
 
@@ -350,7 +542,7 @@ mod tests {
     #[test]
     fn a_cone_is_a_small_fixed_size_and_reaches_three_cells_near_and_eight_far() {
         for heading in Heading::ALL {
-            let cells = cone(heading);
+            let cells: Vec<ViewCell> = cone(heading).cells().collect();
             assert!((50..=90).contains(&cells.len()), "{heading:?}: {}", cells.len());
             let (hx, hy) = heading.step();
             let ahead = |n: i32| Point::new(hx * n, hy * n);
@@ -369,7 +561,7 @@ mod tests {
     #[test]
     fn a_cone_is_nearest_first() {
         let distances: Vec<i32> = cone(Heading::North)
-            .iter()
+            .cells()
             .map(|c| c.offset.x.pow(2) + c.offset.y.pow(2))
             .collect();
         assert!(distances.windows(2).all(|pair| pair[0] <= pair[1]));
@@ -382,7 +574,7 @@ mod tests {
         put(&mut world, 2, Point::new(10, 7));
         put(&mut world, 3, Point::new(11, 12));
         put(&mut world, 4, Point::new(10, 3));
-        let seen: Vec<Sighting> = look(&world, me, Heading::North).seen().collect();
+        let seen: Vec<Sighting> = look(&world, me, Heading::North).iter().collect();
         assert_eq!(
             seen,
             [
@@ -398,7 +590,7 @@ mod tests {
         let me = Point::new(10, 5);
         put(&mut world, 1, me);
         put(&mut world, 2, Point::new(10, 14));
-        assert_eq!(look(&world, me, Heading::North).seen().count(), 0);
+        assert_eq!(look(&world, me, Heading::North).iter().count(), 0);
     }
 
     #[test]
@@ -412,7 +604,7 @@ mod tests {
         let me = Point::new(10, 5);
         put(&mut world, 2, Point::new(10, 7));
         put(&mut world, 3, Point::new(10, 10));
-        let seen: Vec<Uid> = look(&world, me, Heading::North).seen().map(|s| s.uid).collect();
+        let seen: Vec<Uid> = look(&world, me, Heading::North).iter().map(|s| s.uid).collect();
         assert_eq!(seen, [uid(2)], "seen over the fridge, not through the wall");
     }
 
@@ -430,11 +622,37 @@ mod tests {
         put(&mut world, 2, Point::new(7, 7));
         put(&mut world, 3, Point::new(6, 6));
         assert!(!in_sight(&world.map, me, Point::new(7, 7)));
+        let cone = cone(Heading::NorthEast);
+        assert!((0..cone.len()).all(|i| cone.checks(i).len() <= MOST_CHECKS));
         assert!(!in_sight(&world.map, me, Point::new(6, 6)), "even right beside it");
-        assert_eq!(look(&world, me, Heading::NorthEast).seen().count(), 0);
+        assert_eq!(look(&world, me, Heading::NorthEast).iter().count(), 0);
         // With a gap in it there is a view.
         world.map.set_terrain(Point::new(6, 5), FLOOR);
         assert!(in_sight(&world.map, me, Point::new(6, 6)));
+    }
+
+    /// The two scans must agree: one unit at the edge of the map and one in
+    /// the middle, with the same people around each, see the same people.
+    #[test]
+    fn a_look_from_the_middle_and_a_look_from_the_edge_see_alike() {
+        let mut map = Map::new(Size::new(40, 40), FLOOR);
+        for (x, y) in [(22, 23), (2, 3), (24, 22), (4, 2), (21, 24), (1, 4)] {
+            map.set_terrain(Point::new(x, y), WALL);
+        }
+        let mut world = World::new(map);
+        let (middle, edge) = (Point::new(20, 20), Point::new(0, 0));
+        let mut n = 2;
+        for (dx, dy) in [(1, 1), (3, 4), (5, 5), (2, 6), (6, 2), (0, 3), (4, 0), (7, 3)] {
+            put(&mut world, n, middle.offset(dx, dy));
+            put(&mut world, n + 1, edge.offset(dx, dy));
+            n += 2;
+        }
+        let offsets = |from: Point| -> Vec<(Point, Range)> {
+            look(&world, from, Heading::NorthEast).iter().map(|s| (s.cell - from, s.range)).collect()
+        };
+        assert!(offsets(middle).len() >= 4, "{:?}", offsets(middle));
+        assert!(offsets(middle).len() < 8, "and the walls hid somebody: {:?}", offsets(middle));
+        assert_eq!(offsets(middle), offsets(edge));
     }
 
     #[test]
@@ -442,14 +660,13 @@ mod tests {
         let mut world = World::new(Map::new(Size::new(30, 30), FLOOR));
         let me = Point::new(15, 5);
         let mut n = 2;
-        for cell in cone(Heading::North) {
+        for cell in cone(Heading::North).cells() {
             put(&mut world, n, me + cell.offset);
             n += 1;
         }
-        let perception = look(&world, me, Heading::North);
-        let seen: Vec<Sighting> = perception.seen().collect();
+        let seen: Vec<Sighting> = look(&world, me, Heading::North).iter().collect();
         assert_eq!(seen.len(), SIGHTINGS);
-        let nearest: Vec<Point> = cone(Heading::North)[..SIGHTINGS].iter().map(|c| me + c.offset).collect();
+        let nearest: Vec<Point> = cone(Heading::North).cells().take(SIGHTINGS).map(|c| me + c.offset).collect();
         assert_eq!(seen.iter().map(|s| s.cell).collect::<Vec<_>>(), nearest);
     }
 
@@ -458,10 +675,11 @@ mod tests {
         let mut world = World::new(Map::new(Size::new(20, 20), FLOOR));
         let me = Point::new(10, 5);
         put(&mut world, 2, Point::new(10, 7));
-        let mut perception = look(&world, me, Heading::North);
-        assert_eq!(perception.seen().count(), 1);
+        let mut perception = facing(Heading::North);
+        assert_eq!(perception.look(&world.ctx(), &Body::at_cell(uid(1), me)).len(), 1);
+        assert_eq!(perception.saw(), (1, 0));
         world.occupancy.clear();
-        perception.look(&world.ctx(), &Body::at_cell(uid(1), me));
-        assert_eq!(perception.seen().count(), 0);
+        assert!(perception.look(&world.ctx(), &Body::at_cell(uid(1), me)).is_empty());
+        assert_eq!(perception.saw(), (0, 0));
     }
 }

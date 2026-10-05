@@ -43,7 +43,8 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
 
 ```
 0. perception.turn, and on the unit's Priority::Med beat (every 7th tick):
-   perception.look -> attention.attend -> Event::Met per new human face
+   attention.age (first: it is the cold memory) -> perception.look ->
+   attention.take_in -> Event::Met per new human face
    (eyes shut instead while Task::Sleep is current)
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
 3. top changed? old.deprioritized -> current task abandoned, walk halted
@@ -67,7 +68,7 @@ This order has consequences:
 | I want units to... | Add |
 | --- | --- |
 | care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
-| react to who or what it sees | a reaction in `Brain::react` step 0 (the `attend` closure); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()` |
+| react to who or what it sees | a reaction in `Brain::react` step 0 (the `take_in` closure); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()` |
 | care about a time of day, a threat | a **routine** (file map and test list: the `add-routine` skill) |
 | have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
 | do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |

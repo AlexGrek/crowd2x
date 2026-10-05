@@ -317,7 +317,7 @@ mod tests {
             world.step(&mut human);
             assert!(matches!(human.brain().current_task(), Some(Task::Sleep(_))), "woke up");
         }
-        assert_eq!(human.brain().perception().seen().count(), 0);
+        assert_eq!(human.brain().perception().saw(), (0, 0));
         assert_eq!(human.brain().attention().met(), met);
     }
 

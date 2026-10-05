@@ -27,7 +27,7 @@
 //! ```text
 //! 0. perception.turn(..) to face the way it walks; and when the unit's own
 //!      schedule says it is time to look (every 7th tick), perception.look(..)
-//!      then attention.attend(..), which reacts to anybody not in mind —
+//!      and attention.take_in(..), which reacts to anybody not in mind —
 //!      eyes shut instead, while it is asleep
 //! 1. every routine runs
 //! 2.   ...and arranges the priority list
@@ -225,13 +225,14 @@ impl Brain {
         // whoever it had in mind fades as the night goes on.
         perception.turn(walk.heading());
         if let Some(elapsed) = due.elapsed(Priority::Med) {
+            // Faces first, before the look: see `Attention::age`.
+            attention.age(elapsed);
             if matches!(task, Some(Task::Sleep(_))) {
                 perception.close_eyes();
-                attention.attend(std::iter::empty(), elapsed, |_| {});
             } else {
-                perception.look(ctx, &body);
+                let sightings = perception.look(ctx, &body);
                 let mut met = 0;
-                attention.attend(perception.seen(), elapsed, |notice| {
+                attention.take_in(sightings.iter(), |notice| {
                     if notice.uid.kind() == Some(EntityType::Human) {
                         met += 1;
                         if let Some(biology) = biology.as_deref_mut() {

@@ -45,9 +45,9 @@
   "open": "pens",
   "steps": [
     { "note": "two pens of crates, at (3, 6) and (3, 2): nobody can walk, so nobody turns, and a" },
-    { "note": "unit that has never moved faces south - the upper one at the lower one, three" },
-    { "note": "cells off with two crates between, which a look goes over. The lower one faces" },
-    { "note": "the wall." },
+    { "note": "unit that has never moved faces south - the upper one at the lower one, four" },
+    { "note": "cells off (far: near is three) with two crates between, which a look goes over." },
+    { "note": "The lower one faces the wall." },
     { "key": "p" },
     { "expect_speed": "paused" },
     { "spawn": { "kind": "human", "x": 3, "y": 6 } },
@@ -62,7 +62,7 @@
     { "tick": 14 },
     { "wait": 0.2 },
     { "expect_text": "facing" },
-    { "expect_text": "1 near, 0 far" },
+    { "expect_text": "0 near, 1 far" },
     { "expect_text": "1 face, met 1" },
     { "shot": "the upper one has seen the lower one, and met them" },
 
@@ -73,6 +73,8 @@
 
     { "note": "and the lower one, facing the wall, has met nobody" },
     { "select": 1 },
+    { "note": "a new selection closes the open menu" },
+    { "press": "brains" },
     { "wait": 0.2 },
     { "expect_text": "nobody, met 0" },
     { "shot": "the lower one sees nobody" },

@@ -49,6 +49,13 @@ use super::uid::Uid;
 pub struct Occupancy {
     size: Size,
     cells: Vec<Option<Uid>>,
+    /// The same, one bit per cell: whether anybody is there at all, kept in
+    /// step by every write to `cells`. What a unit looking round scans
+    /// (`brain::perception`): seventy cells of it are a few words in the
+    /// nearest cache, where seventy cells of `cells` are some fifty lines of
+    /// a crowd-sized array — and most of them are empty, which is all the
+    /// look needs to know about them.
+    occupied: Vec<u64>,
 }
 
 impl Occupancy {
@@ -57,6 +64,7 @@ impl Occupancy {
         Occupancy {
             size,
             cells: vec![None; size.area()],
+            occupied: vec![0; size.area().div_ceil(64)],
         }
     }
 
@@ -70,6 +78,21 @@ impl Occupancy {
     /// the same rule [`crate::map::PassabilityMap::is_passable`] follows.
     pub fn occupant(&self, cell: Point) -> Option<Uid> {
         self.cells[self.size.index_of(cell)?]
+    }
+
+    /// Who is standing at a row-major index the caller has already worked
+    /// out — the scan-friendly form of [`Occupancy::occupant`]. An index past
+    /// the end panics.
+    #[inline]
+    pub fn occupant_at(&self, index: usize) -> Option<Uid> {
+        self.cells[index]
+    }
+
+    /// Whether anybody stands at a row-major index — one bit, for a scan to
+    /// pass over an empty cell without reading [`Occupancy::occupant_at`].
+    #[inline]
+    pub fn is_occupied_at(&self, index: usize) -> bool {
+        self.occupied[index / 64] & (1 << (index % 64)) != 0
     }
 
     pub fn is_occupied(&self, cell: Point) -> bool {
@@ -106,6 +129,7 @@ impl Occupancy {
             Some(other) if other != uid => Err(other),
             _ => {
                 self.cells[index] = Some(uid);
+                self.occupied[index / 64] |= 1 << (index % 64);
                 Ok(())
             }
         }
@@ -122,6 +146,7 @@ impl Occupancy {
         };
         if self.cells[index] == Some(uid) {
             self.cells[index] = None;
+            self.occupied[index / 64] &= !(1 << (index % 64));
             true
         } else {
             false
@@ -136,6 +161,7 @@ impl Occupancy {
 
     pub fn clear(&mut self) {
         self.cells.fill(None);
+        self.occupied.fill(0);
     }
 }
 
@@ -246,6 +272,32 @@ mod tests {
             assert_eq!(occupancy.count_occupied(), 1);
             assert_eq!(occupancy.occupant(here), Some(uid(1)));
         }
+    }
+
+    /// The bitmap a look scans says exactly what `cells` says, through every
+    /// kind of write.
+    #[test]
+    fn the_occupied_bits_follow_every_claim_release_and_clear() {
+        let mut occupancy = Occupancy::new(Size::new(70, 3));
+        let agrees = |occupancy: &Occupancy| {
+            occupancy
+                .size()
+                .points()
+                .all(|cell| occupancy.is_occupied_at(occupancy.size().index_of(cell).unwrap()) == occupancy.is_occupied(cell))
+        };
+        for (i, x) in [0, 63, 64, 69].into_iter().enumerate() {
+            occupancy.claim(Point::new(x, 1), uid(i as u64 + 1)).expect("empty");
+        }
+        assert!(agrees(&occupancy));
+        assert!(occupancy.is_occupied_at(occupancy.size().index_of(Point::new(64, 1)).unwrap()));
+        assert_eq!(occupancy.claim(Point::new(63, 1), uid(9)), Err(uid(2)));
+        assert!(!occupancy.release(Point::new(64, 1), uid(9)), "not theirs to give up");
+        assert!(agrees(&occupancy));
+        assert!(occupancy.release(Point::new(64, 1), uid(3)));
+        assert!(agrees(&occupancy));
+        occupancy.clear();
+        assert!(agrees(&occupancy));
+        assert_eq!(occupancy.count_occupied(), 0);
     }
 
     #[test]

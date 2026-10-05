@@ -619,18 +619,26 @@ talking only to the one below:
 - **perception** (`brain/perception.rs`) — **who is standing in front of it**: a cone 60°
   either side of the way it is walking (`Heading`, one of eight, kept up every tick and kept
   when it stops), plus the cells at its elbows, out to `FAR` (8) cells; within `NEAR` (3) is
-  `Range::Near`. Walls hide what is behind them — a Bresenham line over the *terrain*, which
-  also refuses to squeeze between two walls meeting at a corner — and furniture and people
-  do not. **It never scans the crowd**: the cone's cells are a static table per heading
-  (~70 cells, nearest first, built once per process), and a look asks `Occupancy` — already a
-  dense one-slot-per-cell grid, which is the spatial index — who stands in each; only an
-  occupied cell pays for a line of sight. At most `SIGHTINGS` (16), the nearest. A unit looks
+  `Range::Near`. Walls hide what is behind them — a Bresenham line over the *terrain*
+  (`Map::sight`, a see-through bit per cell kept beside passability), which also refuses to
+  squeeze between two walls meeting at a corner — and furniture and people do not. **It never
+  scans the crowd**: the cone's cells are a static table per heading (~70 cells, nearest
+  first, built once per process) — the offsets packed two bytes each, since every look
+  reads them all, and each cell's line-of-sight checks in a parallel array that only an
+  occupied cell touches — and a look asks
+  `Occupancy` — the spatial index — who stands in each; an empty cell costs one bit of its
+  occupied bitmap, and only an occupied one pays for a line of sight. Away from the map's
+  edge a cell is one offset from the viewer's own index, with no bounds checks. At most
+  `SIGHTINGS` (16), the nearest, handed back on the stack (`Sightings`): a unit keeps only its
+  heading and how many it saw near and far, because **a look in a big crowd is mostly cache
+  misses** on whatever the unit kept since its last one. A unit looks
   on its own `Priority::Med` beat, every 7th tick, from the same seeded `Schedule` as its
   background tasks, so a crowd's looking is spread over the ticks — `Brain::react` takes the
   tick's `Due` for this. Asleep (`Task::Sleep` current), its eyes are shut. A dog has no
   schedule and never looks.
 - **attention** (`brain/attention.rs`) — **which of that is news**. A vision memory of
-  `FACES` (32) ids, each with how long it has been out of sight; a sighting already in it
+  `FACES` (32) faces — a 32-bit key folded from the id and a 16-bit quarter-second timer, so
+  three cache lines a look — a sighting already in it
   only refreshes it, and one not in it is remembered and handed to the brain as a notice —
   so passing somebody twice is one meeting. A face out of sight for `FORGET_AFTER` (half a
   world hour) is forgotten and is a meeting again; a full memory gives up whoever has been
@@ -638,9 +646,8 @@ talking only to the one below:
   body, which lifts satisfaction (below), and a count (`in mind ... met N` in the brains
   menu). **There is no log line per meeting** — in a crowd it would be most of the log and
   an allocation on most looks. While asleep it runs with nothing seen, so faces fade
-  overnight. Perception's sightings and attention's faces are boxed once at spawn: they
-  are touched every 7th tick and inline they would more than double a `Human`, whose size
-  is a test (`a_human_stays_small_enough_to_be_worth_a_thousand_of`, at its 640-byte wall).
+  overnight. Its faces are boxed once at spawn: touched every 7th tick, inline they would
+  bloat a `Human`, whose size is a test (`a_human_stays_small_enough_to_be_worth_a_thousand_of`).
 - **memory** — a `BTreeMap<String, Recall>`, nearly empty: the one thing in it so far is which
   bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
   can never be a hash order. What a unit has *done* lately is a different memory, kept by

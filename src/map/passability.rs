@@ -46,6 +46,14 @@ impl PassabilityMap {
         }
     }
 
+    /// The bit for a row-major index the caller has already worked out —
+    /// for a scan that adds one offset per cell instead of bounds-checking
+    /// both coordinates of every one. An index past the end panics.
+    #[inline]
+    pub fn is_passable_at(&self, index: usize) -> bool {
+        self.words[index / 64] & (1 << (index % 64)) != 0
+    }
+
     pub fn is_blocked(&self, point: Point) -> bool {
         !self.is_passable(point)
     }

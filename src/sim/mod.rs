@@ -1773,10 +1773,9 @@ mod tests {
         // Raised from 576 to 640 on purpose: talents filled the old wall to
         // the byte, and a unit's own background `Schedule` — a seed, a
         // countdown and the time owed per priority — is 32 bytes more (608).
-        // Perception and attention keep their arrays boxed, out of line, for
-        // exactly this: only a heading and two pointers are inline (632); and
-        // company in recent memory is one more familiarity, which brings a
-        // Human to 640 — the wall, to the byte, again.
+        // Perception keeps a heading and two counts inline and attention its
+        // faces boxed, out of line, for exactly this; company in recent memory
+        // is one more familiarity.
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
         assert!(human <= 640, "a Human is {human} bytes, {brain} of them brain");
