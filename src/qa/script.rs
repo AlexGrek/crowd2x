@@ -146,6 +146,8 @@ pub struct Given {
 /// * `{"name": "office", "map": { ...a whole map document... }}` — the map
 ///   written inline, which keeps a test that depends on exactly which cells
 ///   are painted readable in one place.
+/// * `{"name": "town", "district": 7}` — a district generated from that
+///   seed (`map::district`), residents' spawners and all.
 ///
 /// A file or an inline document is loaded through the real format, so a
 /// fixture that has drifted out of date fails at startup with the format's own
@@ -160,6 +162,8 @@ pub enum GivenMap {
         file: Option<String>,
         #[serde(default)]
         map: Option<serde_json::Value>,
+        #[serde(default)]
+        district: Option<u64>,
     },
 }
 

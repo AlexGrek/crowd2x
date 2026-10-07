@@ -1,0 +1,51 @@
+{
+  "name": "a generated district: its residents arrive in their houses and live a day there",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "district", "district": 7 }
+    ]
+  },
+  "open": "district",
+  "timeout": 600,
+  "steps": [
+    { "note": "seed 7: 79x54, 32 houses of one or two people, the bank across the bottom left, shops above the middle" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "press": "-" },
+    { "press": "-" },
+    { "press": "-" },
+    { "expect_zoom": 1 },
+    { "tick": 1 },
+    { "note": "everybody comes from a spawner beside their own bed: 53 people for seed 7" },
+    { "expect_entities": 53 },
+    { "expect_log": "53 moved in" },
+    { "expect_log": "was given the bed" },
+
+    { "look_at": { "x": 20, "y": 10 } },
+    { "wait": 0.3 },
+    { "expect_drawn": {} },
+    { "expect_world_sprites": { "min": 40, "max": 1200 } },
+    { "shot": "the bank: lobby, desks, restrooms" },
+
+    { "look_at": { "x": 45, "y": 6 } },
+    { "wait": 0.3 },
+    { "expect_drawn": {} },
+    { "shot": "houses beside the bank" },
+
+    { "look_at": { "x": 29, "y": 43 } },
+    { "wait": 0.3 },
+    { "shot": "the shops" },
+
+    { "note": "a whole day, sampled every world hour: 1920 ticks an hour" },
+    { "observe": { "name": "a day", "ticks": 46080, "every": 1920 } },
+    { "expect_entities": 53 },
+    { "note": "no assertion on needs yet: a brain goes to the nearest fridge or toilet as the crow" },
+    { "note": "flies, so the crowd that gathers at the bank's computers converges on the one nearest" },
+    { "note": "fridge and jams there. When this was written the crowd's hunger ran ~84, bladder ~90" },
+    { "note": "and stamina ~6 by morning; the table above is the evidence to watch when that changes" },
+    { "look_at": { "x": 20, "y": 10 } },
+    { "wait": 0.3 },
+    { "shot": "08:00 the next day, at the bank" }
+  ]
+}

@@ -154,7 +154,7 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
-use crate::map::{Map, Point};
+use crate::map::{Map, ObjectLayer, Point};
 
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
@@ -547,6 +547,37 @@ impl GameState {
         self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
         self.give_a_bed(uid, at);
         uid
+    }
+
+    /// Spawn whoever the map's spawners say lives here: one entity per
+    /// spawner, of the kind it names, in its cell, in the order the map lists
+    /// them. Returns how many arrived.
+    ///
+    /// Not part of [`GameState::new`], which still brings nobody: a world is
+    /// what its caller asked for, and the game screen is the caller that asks
+    /// for this. A kind this build does not know is logged and skipped, as an
+    /// unknown tile is impassable rather than a panic.
+    pub fn spawn_from_spawners(&mut self) -> usize {
+        let spawners: Vec<(String, Point)> = self
+            .map
+            .objects(ObjectLayer::Spawners)
+            .iter()
+            .map(|spawner| (spawner.kind.as_str().to_string(), spawner.cell()))
+            .collect();
+        let mut arrived = 0;
+        for (name, at) in spawners {
+            match EntityType::from_name(&name) {
+                Some(kind) => {
+                    self.spawn(kind, at);
+                    arrived += 1;
+                }
+                None => self.log.push(format!("no such kind {name:?} to spawn at {},{}", at.x, at.y)),
+            }
+        }
+        if arrived > 0 {
+            self.log.push(format!("{arrived} moved in"));
+        }
+        arrived
     }
 
     /// Hand somebody who has just arrived the nearest bed nobody owns, if it
@@ -2202,5 +2233,38 @@ mod tests {
             last = now;
         }
         assert!(last > crate::sim::fridge::COLDEST, "never warmed up at all: {last}");
+    }
+
+    #[test]
+    fn everybody_in_a_district_moves_into_a_bed_of_their_own_house() {
+        for seed in [0, 7, 42] {
+            let district = crate::map::district::generate(seed);
+            let mut state = GameState::new(district.map.clone(), seed);
+            assert_eq!(state.spawn_from_spawners(), district.residents(), "seed {seed}");
+            assert_eq!(state.len(), district.residents());
+            assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
+
+            for house in &district.houses {
+                for &bed in &house.beds {
+                    let owner = state.homes().owner(bed).expect("an empty bed in somebody's house");
+                    let lives_at = state.entities().get(owner).unwrap().center_position();
+                    assert!(house.walls.contains(lives_at), "seed {seed}: {owner} sleeps away from home");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_spawner_of_a_kind_nobody_knows_spawns_nobody() {
+        let mut map = Map::new(Size::new(4, 4), FLOOR);
+        let at = |kind: &str| crate::map::Object {
+            at: Point::new(24, 24),
+            kind: crate::map::ObjectKind::new(kind),
+        };
+        map.add_object(ObjectLayer::Spawners, at("unicorn"));
+        map.add_object(ObjectLayer::Spawners, at("dog"));
+        let mut state = GameState::new(map, 1);
+        assert_eq!(state.spawn_from_spawners(), 1);
+        assert_eq!(state.len(), 1);
     }
 }

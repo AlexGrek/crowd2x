@@ -21,6 +21,7 @@
 //! | `CROWD2X_EXIT` | Quit after this many seconds even without a capture. | off |
 //! | `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
 //! | `CROWD2X_MAP` | Open this saved map, instead of a scratch one. | scratch |
+//! | `CROWD2X_DISTRICT` | Open a district generated from this seed (wins over `CROWD2X_MAP`). | off |
 //! | `CROWD2X_ZOOM` | Start at this zoom (screen pixels per canvas pixel). | `4` |
 //! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 //! | `CROWD2X_SPAWN` | Scatter this many actors on the map when the game screen opens. | none |
@@ -31,6 +32,7 @@
 //! CROWD2X_SHOT=/tmp/editor.png CROWD2X_STATE=editor CROWD2X_MAP=office cargo run
 //! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 //! CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
+//! CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run
 //! CROWD2X_EXIT=5 cargo run          # smoke run, no capture
 //! ```
 //!
@@ -60,6 +62,7 @@ const ENV_WINDOW: &str = "CROWD2X_WINDOW";
 const ENV_EXIT: &str = "CROWD2X_EXIT";
 const ENV_STATE: &str = "CROWD2X_STATE";
 const ENV_MAP: &str = "CROWD2X_MAP";
+const ENV_DISTRICT: &str = "CROWD2X_DISTRICT";
 const ENV_ZOOM: &str = "CROWD2X_ZOOM";
 const ENV_HIDE_UI: &str = "CROWD2X_HIDE_UI";
 const ENV_SPAWN: &str = "CROWD2X_SPAWN";
@@ -84,6 +87,7 @@ impl Plugin for DebugPlugin {
             .add_systems(Update, (manual_screenshot, run_capture_script));
 
         open_map_from_env(app);
+        open_district_from_env(app);
         set_zoom_from_env(app);
         spawn_actors_from_env(app);
 
@@ -186,6 +190,26 @@ fn open_map_from_env(app: &mut App) {
         }
         Err(error) => error!("debug: cannot open {ENV_MAP}={name:?}: {error}"),
     }
+}
+
+/// Open a district generated from a seed, without saving it anywhere.
+///
+/// In `build` for the reason [`open_map_from_env`] is, and after it, so a
+/// district asked for replaces a saved map asked for too.
+fn open_district_from_env(app: &mut App) {
+    let Ok(raw) = std::env::var(ENV_DISTRICT) else {
+        return;
+    };
+    let Ok(seed) = raw.trim().parse::<u64>() else {
+        error!("debug: {ENV_DISTRICT}={raw:?} is not a seed");
+        return;
+    };
+    if std::env::var(ENV_MAP).is_ok() {
+        warn!("debug: both {ENV_MAP} and {ENV_DISTRICT} set, opening the district");
+    }
+    info!("debug: {ENV_DISTRICT}={seed}, generating it");
+    let map = crate::map::district::generate(seed).map;
+    app.insert_resource(CurrentMap::new(format!("district {seed}"), map));
 }
 
 /// Start zoomed in or out, for checking that the pixel grid survives it.

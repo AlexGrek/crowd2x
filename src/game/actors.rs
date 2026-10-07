@@ -254,13 +254,16 @@ fn build_world(
     current: Res<CurrentMap>,
 ) {
     let size = current.map.size();
-    let state = GameState::new(current.map.clone(), DEFAULT_SEED);
+    let mut state = GameState::new(current.map.clone(), DEFAULT_SEED);
     state.log.push(format!(
         "opened {} ({}x{})",
         current.title(),
         size.width,
         size.height
     ));
+    // Whoever the map says lives here. Straight into the world rather than
+    // through `SimInput`, so they are there on the first frame drawn.
+    state.spawn_from_spawners();
 
     commands.insert_resource(Sim(state));
     // The dog atlas used to be loaded by the demo crowd on `Startup`. It

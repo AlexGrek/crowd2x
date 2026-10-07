@@ -48,6 +48,7 @@ CROWD2X_SHOT=/tmp/odd.png CROWD2X_WINDOW=1002x602 cargo run    # capture at a gi
 CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
 CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
+CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run   # a generated district
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
 
 # check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
@@ -416,8 +417,10 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
 - A map is dimensions plus layers: **terrain** layers where every cell of every layer is
   defined (there is no empty cell, only the `VOID` tile — so no consumer handles a hole),
   and sparse **object** layers, `Props` and `Spawners`. Only the base terrain layer exists
-  so far, and both object layers are placeholders — a spawner has deliberately not been
-  defined yet.
+  so far. **A spawner names an entity kind** (`"human"`), and the game screen spawns one
+  in its cell when the map is played (`GameState::spawn_from_spawners`, called by
+  `game/actors.rs` — `GameState::new` itself still brings nobody). An unknown kind is
+  logged and skipped. The editor has no spawner tool; it keeps the ones a map has.
 - A cell holds a `TerrainId` into the static `TERRAIN` catalogue, so a big map is a flat
   array of `u16`. Passability lives in the catalogue, and an id this build does not know
   is impassable rather than a panic.
@@ -443,6 +446,25 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   their own.
 - Art is not in here. Which PNG draws a floor belongs to the Bevy adapter; the editor is
   not wired to this format yet and still spawns its own tile entities.
+
+**The district generator** (`map/district.rs`, plain Rust like the rest of `map/`):
+`district::generate(seed)` builds a 79x54 district — a grid of 2x2-lot blocks with
+3-cell streets between and around them, everything outside a building paved — holding 32
+houses of 1-2 residents (a bed each, a fridge, a toilet, and a `"human"` spawner beside
+each bed), a bank across two merged blocks (a lobby lined with fridges, desk rows of
+computers, two restrooms at each end) and three empty shops. One `SmallRng`, drawn in a
+fixed order, so a seed is a district. Three rules keep it livable, and its tests check
+them over 64 seeds: **a door is always in a wall facing the lot's street side** (so
+nothing is sealed off), **doors are two wide** (one person in and one out of a one-cell
+door wait for each other forever), and **house furniture keeps two free cells beside it**
+(whoever is in a toilet or bed cannot leave past somebody waiting in its only doorway). A
+spawner one step from its own bed and two from any other is what makes the nearest-free-bed
+rule hand each resident its own. Reached from the browser's `district` button (a fresh
+seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture
+`{"name": ..., "district": seed}`. **Known limit:** a brain goes to the nearest fridge or
+toilet as the crow flies and has no idea of a crowd, so the district's crowd — drawn to the
+bank's computers — converges on one fridge and jams; `qa/district.json` observes a day and
+records the numbers instead of asserting on needs.
 
 Maps serialise to JSON (`map/format.rs`, `Map::to_json` / `Map::from_json`), and the file
 is a different shape from the runtime map on purpose — `format.rs` is the only thing that
@@ -1076,7 +1098,7 @@ a sleeping display or no display — which is an environment problem and not a t
 A test can start from a world rather than an empty one: `given.maps` takes a bare name (an
 empty map), `{"name": ..., "file": ...}` (a map kept in `qa/fixtures/`), or
 `{"name": ..., "map": {...}}` (the map document written inline, for tests that depend on
-exactly which cells are painted). `"open": "<name>"` has that map already loaded when the
+exactly which cells are painted), or `{"name": ..., "district": 7}` (a generated district). `"open": "<name>"` has that map already loaded when the
 app starts, in whichever screen `state` names — `editor` or `game`; a script asking for a
 screen this build does not have stops with a message saying so rather than running
 against the wrong screen.
@@ -1112,6 +1134,7 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
                         props.rs lights up a prop while somebody is using it
                         held.rs draws what a hand holds, in front of its carrier
 src/map/                the map + coordinate system - plain Rust, no bevy
+                        district.rs generates a seeded district: houses, bank, shops
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
                         clock.rs is what a second is: 1s watched = 2min of world

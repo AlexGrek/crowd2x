@@ -364,30 +364,33 @@ fn seed_fixture_maps(script: &Script) -> Option<CurrentMap> {
     }
 }
 
-/// An empty map, a map from a file, or a map written into the test itself.
+/// An empty map, a map from a file, a map written into the test itself, or a
+/// district generated from a seed.
 ///
 /// A file or an inline document goes through the real format, so a fixture
 /// that has drifted fails here, named, rather than halfway through a test as a
 /// wrong tile.
 fn build_fixture(fixture: &GivenMap) -> Result<Map, String> {
-    let (file, inline) = match fixture {
-        GivenMap::Empty(_) => (None, None),
-        GivenMap::Built { file, map, .. } => (file.as_ref(), map.as_ref()),
+    let (file, inline, district) = match fixture {
+        GivenMap::Empty(_) => (None, None, None),
+        GivenMap::Built { file, map, district, .. } => (file.as_ref(), map.as_ref(), *district),
     };
 
-    match (file, inline) {
-        (None, None) => Ok(Map::new(Size::new(FIXTURE_SIZE.0, FIXTURE_SIZE.1), VOID)),
-        (Some(path), None) => {
+    match (file, inline, district) {
+        (None, None, None) => Ok(Map::new(Size::new(FIXTURE_SIZE.0, FIXTURE_SIZE.1), VOID)),
+        (Some(path), None, None) => {
             let json = std::fs::read_to_string(path)
                 .map_err(|error| format!("cannot read {path}: {error}"))?;
             Map::from_json(&json).map_err(|error| format!("{path}: {error}"))
         }
-        (None, Some(document)) => {
+        (None, Some(document), None) => {
             Map::from_json(&document.to_string()).map_err(|error| error.to_string())
         }
-        (Some(_), Some(_)) => {
-            Err("has both a `file` and a `map`; it can only come from one of them".to_string())
-        }
+        (None, None, Some(seed)) => Ok(crate::map::district::generate(seed).map),
+        _ => Err(
+            "has more than one of `file`, `map` and `district`; it can only come from one of them"
+                .to_string(),
+        ),
     }
 }
 

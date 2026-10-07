@@ -29,7 +29,7 @@ use bevy::prelude::*;
 use bevy::ui::ScrollPosition;
 
 use crate::editor::CurrentMap;
-use crate::map::{sanitize_name, Map, MapStore, Size, VOID};
+use crate::map::{district, sanitize_name, Map, MapStore, Size, VOID};
 use crate::state::AppState;
 use crate::ui::keyboard::{self, TextEntry, TextEntryClosed, MODAL_Z};
 use crate::ui::nav::{Activated, Cancelled, Focus, FocusStyle, Focusable, NavSystems, Scope};
@@ -120,6 +120,8 @@ enum Action {
     /// Start typing in the name field.
     TypeName,
     Create,
+    /// Generate a district from a fresh seed and play it.
+    District,
     /// Open a map in the game.
     Play(String),
     /// Open a map in the editor.
@@ -203,7 +205,7 @@ fn open_browser(
                     // A visible way out, so leaving is not a keyboard secret.
                     (
                         Action::Back,
-                        button("back", Focusable::new(NAME_ROW, 2), px(30)),
+                        button("back", Focusable::new(NAME_ROW, 3), px(30)),
                     ),
                 ],
             ),
@@ -243,6 +245,10 @@ fn open_browser(
                     (
                         Action::Create,
                         button("create", Focusable::new(NAME_ROW, 1), px(40)),
+                    ),
+                    (
+                        Action::District,
+                        button("district", Focusable::new(NAME_ROW, 2), px(40)),
                     ),
                 ],
             ),
@@ -434,6 +440,29 @@ fn run_actions(
                 }
             }
 
+            // A district is ready to play the moment it exists, so it opens
+            // in the game rather than the editor. The seed goes in the log
+            // and, without a typed name, in the map's name, so one somebody
+            // liked can be made again.
+            Action::District => {
+                let seed = fresh_seed();
+                let name = sanitize_name(entry.text()).unwrap_or_else(|| format!("district {seed}"));
+                let name = maps.0.unique_name(&name);
+                let map = district::generate(seed).map;
+                info!("maps: generated {name} from seed {seed}");
+                match maps.0.save(&name, &map) {
+                    Ok(()) => {
+                        entry.clear();
+                        commands.insert_resource(CurrentMap::new(name, map));
+                        next.set(AppState::Game);
+                    }
+                    Err(error) => {
+                        error!("maps: {error}");
+                        status.0 = format!("could not generate: {error}");
+                    }
+                }
+            }
+
             // Playing and editing differ only in where they go: both load the
             // map and hand it over, so a map cannot be opened in one screen
             // from a file and in the other from something else.
@@ -474,6 +503,15 @@ fn run_actions(
             Action::Back => next.set(AppState::MainMenu),
         }
     }
+}
+
+/// A seed nobody chose, from the clock. Only the browser wants one —
+/// everything that has to replay is handed its seed. Kept to five digits,
+/// because it ends up in a map's name and is meant to be typed back in.
+fn fresh_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_nanos() as u64 % 100_000)
 }
 
 /// Load a saved map and go to the screen that shows it.

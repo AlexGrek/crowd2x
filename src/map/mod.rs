@@ -17,8 +17,9 @@
 //! * **Objects** — sparse lists of positioned things, one list per
 //!   [`ObjectLayer`]: props and spawners. A prop blocks the cell it stands in
 //!   ([`PROPS`]); the simulation reads props for what they are *for*
-//!   (`sim::feature` — a fridge is food), by name; what a spawner is has
-//!   deliberately not been decided.
+//!   (`sim::feature` — a fridge is food), by name. A spawner names an entity
+//!   kind (`"human"`), and playing the map spawns one of it where it stands
+//!   (`sim::GameState::spawn_from_spawners`).
 //!
 //! Maps serialise to JSON — see [`format`] for the on-disk shape, and
 //! [`Map::to_json`] / [`Map::from_json`].
@@ -37,6 +38,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod coords;
+pub mod district;
 mod format;
 mod passability;
 mod props;
@@ -113,7 +115,10 @@ impl ObjectLayer {
 /// silently turn every saved bed into a toilet. Whoever owns the layer
 /// resolves the name; a spawner and a prop will not share a catalogue.
 ///
-/// Spawners are still a placeholder — nothing writes to that layer yet.
+/// A spawner's kind is an entity kind (`"human"`): the game spawns one of
+/// those in the spawner's cell when the map is played. Only the district
+/// generator ([`district`]) writes spawners so far; the editor has no tool
+/// for them, and keeps the ones a map already has.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 #[derive(Serialize, Deserialize)]
 pub struct ObjectKind(pub String);

@@ -1,0 +1,19 @@
+{
+  "name": "generate a district from the browser and play it",
+  "state": "maps",
+  "steps": [
+    { "expect_no_map": "town" },
+    { "name": "town" },
+    { "press": "district" },
+    { "note": "a district is ready to play, so it opens in the game, already lived in" },
+    { "expect_state": "game" },
+    { "expect_map": "town" },
+    { "wait": 0.5 },
+    { "shot": "a freshly generated district" },
+
+    { "note": "it was saved like any map, and is in the list on the way back" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "expect_map": "town" }
+  ]
+}

@@ -67,18 +67,22 @@ skipped a step would make a test pass by not testing anything.
 
 ## Fixture maps
 
-Three ways to say a map exists before the test starts, in `given.maps`:
+Four ways to say a map exists before the test starts, in `given.maps`:
 
 ```json
 "alpha"                                                  // an empty 8x6 map
 { "name": "office", "file": "qa/fixtures/walled_room.json" }  // a map kept on disk
 { "name": "inline", "map": { "version": 1, "size": { ... }, ... } }  // written inline
+{ "name": "town", "district": 7 }                        // a district generated from a seed
 ```
 
 Use a bare name for anything about the *list* (browsing, copying, deleting), a `file` for
 a fixture worth looking at or sharing between tests, and an inline `map` when the test
 depends on exactly which cells are painted — that keeps the map and the assertions about
-it in one place. A file or an inline document is loaded through the real map format, so a
+it in one place. A `district` is `map::district::generate(seed)`: 79x54, 32 houses, the
+bank and three shops, and a `"human"` spawner per resident — so opening it in the game
+puts its residents in the world before the first step runs. The resident count depends on
+the seed (53 for seed 7); `qa/district.json` is the example. A file or an inline document is loaded through the real map format, so a
 fixture that has drifted fails at startup with the format's own error.
 
 Remember terrain rows are written **bottom-up**: row 0 of the document is y 0.
