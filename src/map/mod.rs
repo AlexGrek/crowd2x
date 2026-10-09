@@ -15,11 +15,17 @@
 //!   has to handle a hole. Only the base layer exists so far; see
 //!   [`Map::terrain_layers`].
 //! * **Objects** — sparse lists of positioned things, one list per
-//!   [`ObjectLayer`]: props and spawners. A prop blocks the cell it stands in
+//!   [`ObjectLayer`]: props, spawners and ceiling lamps. A prop blocks the cell it stands in
 //!   ([`PROPS`]); the simulation reads props for what they are *for*
 //!   (`sim::feature` — a fridge is food), by name. A spawner names an entity
 //!   kind (`"human"`), and playing the map spawns one of it where it stands
 //!   (`sim::GameState::spawn_from_spawners`).
+//!
+//! * **The ceiling** — one flag per cell: whether there is a roof over it.
+//!   Absent over the streets, present over every room. It decides nothing a
+//!   unit does; it is what lets the sun in (`crate::lighting`), and a map
+//!   with no ceiling anywhere — every map made before it existed — is open
+//!   sky everywhere.
 //!
 //! Maps serialise to JSON — see [`format`] for the on-disk shape, and
 //! [`Map::to_json`] / [`Map::from_json`].
@@ -89,10 +95,14 @@ impl TerrainLayer {
 pub enum ObjectLayer {
     Props = 0,
     Spawners = 1,
+    /// Lights hung from the ceiling. Up out of everybody's way, so a lamp
+    /// never blocks a cell, and what it is for is light alone
+    /// (`crate::lighting::scene::EMITTERS`, by name).
+    Lamps = 2,
 }
 
 impl ObjectLayer {
-    pub const ALL: [ObjectLayer; 2] = [ObjectLayer::Props, ObjectLayer::Spawners];
+    pub const ALL: [ObjectLayer; 3] = [ObjectLayer::Props, ObjectLayer::Spawners, ObjectLayer::Lamps];
 
     /// The key this layer is stored under in a map file. Renaming one is a
     /// format change, not a cosmetic edit.
@@ -100,6 +110,7 @@ impl ObjectLayer {
         match self {
             ObjectLayer::Props => "props",
             ObjectLayer::Spawners => "spawners",
+            ObjectLayer::Lamps => "lamps",
         }
     }
 
@@ -171,6 +182,8 @@ impl std::fmt::Debug for Map {
             .field("terrain_layers", &self.terrain.len())
             .field("props", &self.objects(ObjectLayer::Props).len())
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
+            .field("lamps", &self.objects(ObjectLayer::Lamps).len())
+            .field("ceiling", &self.ceiling_count())
             .finish()
     }
 }
@@ -192,6 +205,10 @@ pub struct Map {
     /// round asks it about every cell on a line of sight, and the catalogue
     /// behind a tile id is a lookup and a branch per cell where this is a bit.
     sight: PassabilityMap,
+    /// Which cells have a roof over them, row-major. Authored, like the
+    /// terrain, and read only by lighting: it is where the sun does not
+    /// reach directly.
+    ceiling: Vec<bool>,
 }
 
 impl Map {
@@ -212,6 +229,7 @@ impl Map {
             objects: ObjectLayer::ALL.map(|_| Vec::new()).into(),
             passability: PassabilityMap::new(size),
             sight: PassabilityMap::new(size),
+            ceiling: vec![false; size.area()],
         };
         map.rebuild_passability();
         map
@@ -295,6 +313,27 @@ impl Map {
                 prop.cell() == point && !prop.kind.prop_passability().is_passable()
             });
         self.passability.set(point, passable);
+    }
+
+    /// Whether there is a ceiling over `point`. Off the map is open sky.
+    pub fn has_ceiling(&self, point: Point) -> bool {
+        self.size.index_of(point).is_some_and(|index| self.ceiling[index])
+    }
+
+    /// Roof a cell over, or open it to the sky. Returns whether the point was
+    /// on the map. Nothing else about the cell changes: a ceiling is not in
+    /// anybody's way.
+    pub fn set_ceiling(&mut self, point: Point, roofed: bool) -> bool {
+        let Some(index) = self.size.index_of(point) else {
+            return false;
+        };
+        self.ceiling[index] = roofed;
+        true
+    }
+
+    /// How many cells have a ceiling.
+    pub fn ceiling_count(&self) -> usize {
+        self.ceiling.iter().filter(|&&roofed| roofed).count()
     }
 
     /// The static passability map, for pathfinding and steering to hold on to.
@@ -558,6 +597,25 @@ mod tests {
         assert_eq!(incremental, rebuilt);
         assert!(!map.is_passable(Point::new(0, 0)) && !map.is_passable(Point::new(4, 4)));
         assert!(map.is_passable(Point::new(3, 1)));
+    }
+
+    #[test]
+    fn a_new_map_is_open_sky_and_a_ceiling_blocks_nobody() {
+        let mut map = Map::new(Size::new(3, 3), FLOOR);
+        assert_eq!(map.ceiling_count(), 0);
+        assert!(map.set_ceiling(Point::new(1, 1), true));
+        assert!(map.has_ceiling(Point::new(1, 1)));
+        assert!(!map.has_ceiling(Point::new(0, 1)));
+        assert!(map.is_passable(Point::new(1, 1)), "a roof is not in anybody's way");
+        assert!(!map.set_ceiling(Point::new(5, 5), true), "off the map is refused");
+        assert!(!map.has_ceiling(Point::new(-1, 0)), "off the map is open sky");
+    }
+
+    #[test]
+    fn a_lamp_blocks_nothing() {
+        let mut map = Map::new(Size::new(3, 3), FLOOR);
+        map.add_object(ObjectLayer::Lamps, prop("ceiling lamp", Point::new(1, 1)));
+        assert_eq!(map.passability().count_passable(), 9);
     }
 
     #[test]

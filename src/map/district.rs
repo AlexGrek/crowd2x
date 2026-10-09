@@ -32,6 +32,16 @@
 //! which is street — so nothing generated can be sealed off, and a test walks
 //! the whole map to make sure.
 //!
+//! # Roofs and lamps
+//!
+//! Every building is roofed over, walls and all, and the streets and yards
+//! are open sky — so the sun lights the street and comes in by the doors
+//! (`crate::lighting`). A house and a shop each get one warm [`HOUSE_LAMP`]
+//! in the middle of the room; the bank gets [`OFFICE_LAMP`]s in a grid every
+//! [`OFFICE_LAMP_SPACING`] cells. Both are laid out from the buildings once
+//! they are built, drawing nothing from the seed, so adding them changed no
+//! district: a seed is still the same streets, houses and people.
+//!
 //! # Residents
 //!
 //! A house has a bed for each of its residents, a fridge and a toilet — each
@@ -72,6 +82,13 @@ pub const HEIGHT: i32 = BLOCKS_Y * BLOCK_H + (BLOCKS_Y + 1) * STREET;
 
 /// Everything outside a building.
 const PAVING: &str = "floor";
+/// What lights a house or a shop.
+pub const HOUSE_LAMP: &str = "ceiling lamp";
+/// What lights the bank, in rows.
+pub const OFFICE_LAMP: &str = "tube lamp";
+/// Cells between two of the bank's lamps, each way: close enough that their
+/// light overlaps (a tube lamp reaches five).
+pub const OFFICE_LAMP_SPACING: i32 = 5;
 const HOUSE_WALL: &str = "wall red";
 const HOUSE_FLOORS: [&str; 2] = ["wood", "wood cracked"];
 const BANK_WALL: &str = "wall purple";
@@ -295,7 +312,7 @@ pub fn generate(seed: u64) -> District {
     // Back into street order, so the spawners — and so the order people
     // arrive in — read the map from the bottom left rather than at random.
     lots.sort_by_key(|lot| (lot.origin.y, lot.origin.x));
-    let houses = lots
+    let houses: Vec<House> = lots
         .into_iter()
         .map(|lot| house(&mut rng, &mut map, &mut props, &mut spawners, lot))
         .collect();
@@ -306,6 +323,7 @@ pub fn generate(seed: u64) -> District {
     for spawner in spawners {
         map.add_object(ObjectLayer::Spawners, spawner);
     }
+    roof_and_light(&mut map, &houses, bank, &shops);
 
     District {
         seed,
@@ -313,6 +331,37 @@ pub fn generate(seed: u64) -> District {
         houses,
         bank,
         shops,
+    }
+}
+
+/// A roof over every building, and the lamps under them. Last, from the
+/// buildings as built, and without the seed — see the module docs.
+fn roof_and_light(map: &mut Map, houses: &[House], bank: Rect, shops: &[Rect]) {
+    let rooms = houses.iter().map(|house| house.walls).chain(shops.iter().copied());
+    for walls in rooms.clone().chain([bank]) {
+        for cell in walls.cells() {
+            map.set_ceiling(cell, true);
+        }
+    }
+    let mut hang = |map: &mut Map, name: &str, cell: Point| {
+        // Not inside a wall: a lamp there would light nothing but the wall.
+        if map.sight().is_passable(cell) {
+            map.add_object(ObjectLayer::Lamps, object(name, cell));
+        }
+    };
+    for walls in rooms {
+        let inside = walls.interior();
+        hang(map, HOUSE_LAMP, Point::new(inside.x + inside.w / 2, inside.y + inside.h / 2));
+    }
+    let inside = bank.interior();
+    let offset = Point::new(
+        (inside.w - 1) % OFFICE_LAMP_SPACING / 2,
+        (inside.h - 1) % OFFICE_LAMP_SPACING / 2,
+    );
+    for y in (inside.y + offset.y..=inside.top()).step_by(OFFICE_LAMP_SPACING as usize) {
+        for x in (inside.x + offset.x..=inside.right()).step_by(OFFICE_LAMP_SPACING as usize) {
+            hang(map, OFFICE_LAMP, Point::new(x, y));
+        }
     }
 }
 
@@ -596,6 +645,47 @@ mod tests {
             }
         }
         seen
+    }
+
+    #[test]
+    fn every_building_is_roofed_and_the_streets_are_open_sky() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let buildings: Vec<Rect> = district
+                .houses
+                .iter()
+                .map(|house| house.walls)
+                .chain(district.shops.iter().copied())
+                .chain([district.bank])
+                .collect();
+            for cell in map.size().points() {
+                let inside = buildings.iter().any(|walls| walls.contains(cell));
+                assert_eq!(map.has_ceiling(cell), inside, "seed {seed}, {cell:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_house_and_shop_has_a_lamp_and_the_bank_a_grid_of_them() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let lamps = district.map.objects(ObjectLayer::Lamps);
+            let in_room = |rect: Rect, name: &str| {
+                lamps.iter().filter(|lamp| lamp.kind.as_str() == name && rect.interior().contains(lamp.cell())).count()
+            };
+            for house in &district.houses {
+                assert_eq!(in_room(house.walls, HOUSE_LAMP), 1, "seed {seed}, house at {:?}", house.walls);
+            }
+            for &shop in &district.shops {
+                assert_eq!(in_room(shop, HOUSE_LAMP), 1, "seed {seed}, shop at {shop:?}");
+            }
+            assert!(in_room(district.bank, OFFICE_LAMP) >= 12, "seed {seed}: {}", in_room(district.bank, OFFICE_LAMP));
+            for lamp in lamps {
+                assert!(district.map.sight().is_passable(lamp.cell()), "seed {seed}: a lamp in a wall");
+                assert!(crate::lighting::scene::emission(lamp.kind.as_str()).is_some());
+            }
+        }
     }
 
     #[test]

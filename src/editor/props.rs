@@ -1,4 +1,11 @@
-//! The props layer: free-standing objects.
+//! The props layer: free-standing objects — and the lamps layer, which is
+//! drawn the same way.
+//!
+//! A lamp is an object like a prop — free-placed in whole pixels, stored by
+//! its palette name — but on the map's `Lamps` layer, from [`LAMP_PALETTE`],
+//! and drawn at [`LAMP_Z`] rather than by depth: it hangs from the ceiling,
+//! so everybody walks under it. What it is for is light
+//! (`crate::lighting::scene::EMITTERS`, by the same name).
 //!
 //! A prop is built by a deliberately different sprite function from a
 //! background tile. It is not bound to a cell, several can overlap, and its
@@ -29,6 +36,10 @@ use crate::view::{CellRect, VisibleArea};
 /// How close the cursor has to be to a prop's centre to delete it.
 const ERASE_RADIUS: f32 = CELL as f32 / 2.0;
 
+/// A lamp is above everything in the world — it is on the ceiling — and
+/// under the editor's cursor and rectangle preview.
+const LAMP_Z: f32 = 50.0;
+
 /// How fast a prop's art cycles, for the ones that move. Fast enough that a
 /// screen reads as flickering rather than as stepping through pictures.
 const SECONDS_PER_FRAME: f32 = 0.12;
@@ -54,10 +65,33 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::animated("computer", "computer_idle.png", 10).used("computer.png", 11),
 ];
 
+/// What can hang from the ceiling. Each one's light is its entry in
+/// `lighting::scene::EMITTERS`, under the same name, and a test says so.
+pub const LAMP_PALETTE: &[PaletteItem] = &[
+    // Warm, for a room: a house's.
+    PaletteItem::upscaled("ceiling lamp", "ceiling_lamp.png"),
+    // Cool, in rows: an office's.
+    PaletteItem::upscaled("tube lamp", "tube_lamp.png"),
+];
+
+/// The palette an object layer is placed from. Spawners have none — the
+/// editor keeps the ones a map has and places no more.
+pub fn palette_of(layer: ObjectLayer) -> &'static [PaletteItem] {
+    match layer {
+        ObjectLayer::Props => PALETTE,
+        ObjectLayer::Lamps => LAMP_PALETTE,
+        ObjectLayer::Spawners => &[],
+    }
+}
+
+/// The object layers the window draws.
+const DRAWN: [ObjectLayer; 2] = [ObjectLayer::Props, ObjectLayer::Lamps];
+
 /// A placed prop, carrying the object it stands for so erasing it can take
 /// that object out of the map without guessing which one it was.
 #[derive(Component)]
 pub struct Prop {
+    layer: ObjectLayer,
     at: Point,
     kind: &'static str,
 }
@@ -122,15 +156,16 @@ impl Usable {
     }
 }
 
-/// The palette entry that draws an object kind, or `None` for one this build
-/// has no art for.
-pub fn item_of(kind: &ObjectKind) -> Option<usize> {
-    PALETTE.iter().position(|item| item.name == kind.as_str())
+/// The palette entry that draws an object kind on a layer, or `None` for one
+/// this build has no art for.
+pub fn item_of(layer: ObjectLayer, kind: &ObjectKind) -> Option<usize> {
+    palette_of(layer).iter().position(|item| item.name == kind.as_str())
 }
 
-/// Put a prop in the map. What draws it is [`sync_prop_window`], from the map,
-/// so this cannot show a prop the saved file does not contain.
-pub fn place(window: &mut PropWindow, map: &mut Map, pos: Vec2, item: usize) {
+/// Put a prop — or a lamp, by `layer` — in the map. What draws it is
+/// [`sync_prop_window`], from the map, so this cannot show one the saved file
+/// does not contain.
+pub fn place(window: &mut PropWindow, map: &mut Map, layer: ObjectLayer, pos: Vec2, item: usize) {
     // Whole pixels only: a sprite on a fractional coordinate samples between
     // texels and puts a seam through the pixel grid. It is also what lets a
     // position be an exact key when the prop is erased again.
@@ -138,10 +173,10 @@ pub fn place(window: &mut PropWindow, map: &mut Map, pos: Vec2, item: usize) {
     let at = Point::new(pos.x as i32, pos.y as i32);
 
     map.add_object(
-        ObjectLayer::Props,
+        layer,
         Object {
             at,
-            kind: ObjectKind::new(PALETTE[item].name),
+            kind: ObjectKind::new(palette_of(layer)[item].name),
         },
     );
     window.touch();
@@ -155,11 +190,15 @@ pub fn place(window: &mut PropWindow, map: &mut Map, pos: Vec2, item: usize) {
 pub fn erase_nearest(
     window: &mut PropWindow,
     map: &mut Map,
+    layer: ObjectLayer,
     props: &Query<(Entity, &Prop, &Transform)>,
     pos: Vec2,
 ) {
     let nearest = props
         .iter()
+        // Only the layer being edited: a lamp over a bed is erased with the
+        // lamps layer and the bed with the props layer, whichever is nearer.
+        .filter(|(_, prop, _)| prop.layer == layer)
         .map(|(entity, prop, transform)| {
             (
                 entity,
@@ -174,7 +213,7 @@ pub fn erase_nearest(
         // One object per sprite, so a stack of props erases one at a time.
         // The sprite goes when the window is told the map changed, which is
         // the same route placing one takes.
-        if map.remove_object(ObjectLayer::Props, &prop.object()) {
+        if map.remove_object(layer, &prop.object()) {
             window.touch();
         }
     }
@@ -194,8 +233,8 @@ pub fn erase_nearest(
 /// (`crate tall` is 48x64) and a pool would need an honest margin.
 #[derive(Resource, Default)]
 pub struct PropWindow {
-    /// Index into the map's `Props` layer, and the sprite drawing it.
-    drawn: HashMap<usize, Entity>,
+    /// `(layer, index into it)`, and the sprite drawing it.
+    drawn: HashMap<(usize, usize), Entity>,
     /// What `drawn` covers, so a camera that has not crossed a cell boundary
     /// does no work.
     rect: CellRect,
@@ -257,32 +296,34 @@ pub fn sync_prop_window(
         window.dirty = false;
     }
 
-    let objects = current.map.objects(ObjectLayer::Props);
+    let map = &current.map;
     let wanted = area.tiles;
     let on_canvas = |object: &Object| {
         let cell = object.cell();
         wanted.contains(IVec2::new(cell.x, cell.y))
     };
 
-    window.drawn.retain(|index, entity| {
-        if objects.get(*index).is_some_and(on_canvas) {
+    window.drawn.retain(|&(layer, index), entity| {
+        if map.objects(DRAWN[layer]).get(index).is_some_and(on_canvas) {
             return true;
         }
         commands.entity(*entity).despawn();
         false
     });
 
-    for (index, object) in objects.iter().enumerate() {
-        if !on_canvas(object) || window.drawn.contains_key(&index) {
-            continue;
-        }
-        // One this build has no art for is left in the map, so saving does
-        // not delete a prop it merely has no picture for. Not warned here:
-        // this runs every time the view moves, and a map with one unknown prop
-        // would fill the log with it.
-        if let Some(item) = item_of(&object.kind) {
-            let prop = spawn_prop(&mut commands, &assets, object.at, item, *state.get());
-            window.drawn.insert(index, prop);
+    for (slot, &layer) in DRAWN.iter().enumerate() {
+        for (index, object) in map.objects(layer).iter().enumerate() {
+            if !on_canvas(object) || window.drawn.contains_key(&(slot, index)) {
+                continue;
+            }
+            // One this build has no art for is left in the map, so saving does
+            // not delete a prop it merely has no picture for. Not warned here:
+            // this runs every time the view moves, and a map with one unknown
+            // prop would fill the log with it.
+            if let Some(item) = item_of(layer, &object.kind) {
+                let prop = spawn_prop(&mut commands, &assets, layer, object.at, item, *state.get());
+                window.drawn.insert((slot, index), prop);
+            }
         }
     }
 
@@ -295,16 +336,19 @@ pub fn sync_prop_window(
 fn spawn_prop(
     commands: &mut Commands,
     assets: &AssetServer,
+    layer: ObjectLayer,
     at: Point,
     item: usize,
     state: AppState,
 ) -> Entity {
-    let item = &PALETTE[item];
+    let item = &palette_of(layer)[item];
     let y = at.y as f32;
+    let z = if layer == ObjectLayer::Lamps { LAMP_Z } else { depth_for(y) };
     let prop = commands
         .spawn((
-            Name::new("prop"),
+            Name::new(if layer == ObjectLayer::Lamps { "lamp" } else { "prop" }),
             Prop {
+                layer,
                 at,
                 kind: item.name,
             },
@@ -314,7 +358,7 @@ fn spawn_prop(
                 rect: item.first_frame(),
                 ..default()
             },
-            Transform::from_xyz(at.x as f32, y, depth_for(y)).with_scale(upscale(item.scale)),
+            Transform::from_xyz(at.x as f32, y, z).with_scale(upscale(item.scale)),
             WORLD_LAYER,
             DespawnOnExit(state),
         ))
@@ -347,10 +391,39 @@ mod tests {
     /// that did not round-trip would come back from a file undrawable.
     #[test]
     fn every_prop_is_stored_under_a_name_that_finds_it_again() {
-        for (index, item) in PALETTE.iter().enumerate() {
-            assert_eq!(item_of(&ObjectKind::new(item.name)), Some(index));
+        for layer in DRAWN {
+            for (index, item) in palette_of(layer).iter().enumerate() {
+                assert_eq!(item_of(layer, &ObjectKind::new(item.name)), Some(index));
+            }
         }
-        assert_eq!(item_of(&ObjectKind::new("hat stand")), None);
+        assert_eq!(item_of(ObjectLayer::Props, &ObjectKind::new("hat stand")), None);
+        assert_eq!(item_of(ObjectLayer::Props, &ObjectKind::new("ceiling lamp")), None, "a lamp is not a prop");
+    }
+
+    /// A lamp that gave off no light would be a picture of a lamp.
+    #[test]
+    fn every_lamp_gives_off_light() {
+        for item in LAMP_PALETTE {
+            let emission = crate::lighting::scene::emission(item.name)
+                .unwrap_or_else(|| panic!("{:?} has no entry in EMITTERS", item.name));
+            assert!(emission.always_on, "{:?}: a lamp is never switched off by anybody", item.name);
+        }
+    }
+
+    /// Names are unique across the palettes, since `Tool::select` and a QA
+    /// script's `tool` step find an entry by name alone.
+    #[test]
+    fn no_two_palettes_share_a_name() {
+        let mut names: Vec<&str> = PALETTE
+            .iter()
+            .chain(LAMP_PALETTE)
+            .chain(super::super::background::PALETTE)
+            .map(|item| item.name)
+            .collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count);
     }
 
     /// A prop the simulation gives a use to has to be one the editor can place,
@@ -359,7 +432,7 @@ mod tests {
     fn every_feature_the_simulation_knows_is_a_prop_the_editor_can_place() {
         for feature in crate::sim::feature::FEATURES {
             assert!(
-                item_of(&ObjectKind::new(feature.name)).is_some(),
+                item_of(ObjectLayer::Props, &ObjectKind::new(feature.name)).is_some(),
                 "no palette entry for {:?}",
                 feature.name
             );
@@ -385,7 +458,11 @@ mod tests {
     #[test]
     fn every_catalogue_prop_can_be_placed() {
         for prop in crate::map::PROPS {
-            assert!(item_of(&ObjectKind::new(prop.name)).is_some(), "no palette entry for {:?}", prop.name);
+            assert!(
+                item_of(ObjectLayer::Props, &ObjectKind::new(prop.name)).is_some(),
+                "no palette entry for {:?}",
+                prop.name
+            );
         }
     }
 
@@ -394,7 +471,7 @@ mod tests {
     /// swapping one for the other cannot resize the sprite.
     #[test]
     fn a_prop_that_lights_up_has_one_art_size_for_both_its_strips() {
-        let computer = &PALETTE[item_of(&ObjectKind::new("computer")).expect("in the palette")];
+        let computer = &PALETTE[item_of(ObjectLayer::Props, &ObjectKind::new("computer")).expect("in the palette")];
         let busy = computer.in_use.expect("a computer has a screen-on strip");
         assert!(computer.art.frames > 1, "and both of them move");
         assert!(busy.frames > 1);
@@ -425,6 +502,7 @@ mod tests {
     #[test]
     fn a_prop_erases_the_object_it_was_placed_from() {
         let prop = Prop {
+            layer: ObjectLayer::Props,
             at: Point::new(72, 24),
             kind: PALETTE[0].name,
         };

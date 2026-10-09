@@ -1,0 +1,165 @@
+{
+  "name": "the lightmap the GPU bakes is the one the reference computes, as lights switch",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "office",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 12,
+            "height": 7
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 168,
+                  "y": 168
+                },
+                "kind": "computer"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 264
+                },
+                "kind": "fridge"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 72
+                },
+                "kind": "toilet"
+              },
+              {
+                "at": {
+                  "x": 360,
+                  "y": 72
+                },
+                "kind": "fire"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "office",
+  "steps": [
+    {
+      "note": "the computer sits in cell (3, 3) and a fire in (7, 1); the fire is always lit, the computer only while somebody is at it"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 1
+      }
+    },
+    {
+      "shot": "a fire, and a computer nobody is using"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "note": "the same human as qa/computer.json: in the middle of a go on the computer at tick 9700"
+    },
+    {
+      "tick": 9700
+    },
+    {
+      "expect_prop_in_use": {
+        "kind": "computer",
+        "in_use": true
+      }
+    },
+    {
+      "note": "switching the screen on re-bakes only the chunks it reaches, and the whole map must still agree with the reference"
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 2
+      }
+    },
+    {
+      "shot": "the screen lights the desk"
+    },
+    {
+      "tick": 1200
+    },
+    {
+      "expect_prop_in_use": {
+        "kind": "computer",
+        "in_use": false
+      }
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 1
+      }
+    }
+  ]
+}

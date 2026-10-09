@@ -1,0 +1,33 @@
+{
+  "name": "lighting a huge map",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "huge_lit",
+        "file": "qa/fixtures/huge_lit.json"
+      }
+    ]
+  },
+  "open": "huge_lit",
+  "vsync": false,
+  "settle": 2.0,
+  "timeout": 300,
+  "required": false,
+  "steps": [
+    {
+      "note": "256x256 of 16-cell rooms and 2000 fires: 1280x1280 subtiles, 1024 chunks"
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 2000
+      }
+    },
+    {
+      "measure_frames": {
+        "name": "a huge lit map (frames)",
+        "seconds": 3.0
+      }
+    }
+  ]
+}

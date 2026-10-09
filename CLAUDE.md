@@ -16,7 +16,10 @@ have a go on a computer, and sleep in a bed at night — driven by biological pr
 bed restores, satisfaction that a treat or a friendly face lifts) that can be switched off per unit, and dulled
 by a fading memory of what was done lately: the same treat twice in a day is less of one. The computer is also the first prop that
 is *watched* being used: its screen is on for as long as somebody is sitting at it. (A bed
-does not yet show that it is slept in: it has no second strip of art to swap to.)
+does not yet show that it is slept in: it has no second strip of art to swap to.) The game
+screen is **lit**: a day/night ambient from the world's clock, and an RGB lightmap at five
+subtiles a cell, baked by a compute shader from the map's fires and the computers in use,
+with walls casting shadows.
 
 ## Commands
 
@@ -50,6 +53,8 @@ CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 
 CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
 CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run   # a generated district
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
+CROWD2X_LIGHT_CHECK=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run   # GPU lightmap vs CPU reference, logged
+CROWD2X_LIGHT_STRESS=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run --release  # full re-bake every frame, GPU time logged
 
 # check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
 # window resolution, so on-screen text is legitimately not on the pixel grid.
@@ -105,9 +110,70 @@ What keeps this exact, and easy to break:
   (999x601 arrives as 1000x602) fails the grid check for a reason that is not this —
   ask for even sizes.
 
+**The canvas quad is a lit material, not a sprite** (`CanvasMaterial`,
+`assets/shaders/lit_canvas.wgsl`). It fetches each canvas texel with `textureLoad` and
+multiplies it by the light at *that texel's* world position — ambient plus the lightmap,
+sampled bilinearly — so the light is smooth across texels and still one colour within one,
+and the upscale stays exact (checked at 3x and 6x). What lights it is `CanvasLight`, a
+resource `src/lighting/` writes on the game screen; its default is unlit, which is every
+other screen, drawn exactly as rendered. `light_canvas` runs after the camera is snapped,
+since the shader derives world positions from it.
+
 **Anything new that should render must carry `WORLD_LAYER`**, or it won't appear.
 Verify with `tools/check_pixel_grid.py` after touching this file, window setup in
 `main.rs`, or any sprite `Transform` that could land on a fractional coordinate.
+
+### Lighting (`src/lighting/`)
+
+An RGB lightmap at **five subtiles a cell** (`scene::SUBTILES`), computed on the GPU by a
+compute shader (`assets/shaders/lighting.wgsl`), **only where something changed**. Three
+parts, each a step further from the simulation:
+
+- **`scene.rs` — plain Rust, no `bevy::`.** What the lightmap is computed *from*: one
+  occlusion bit per subtile (from `Map::sight`, so walls block light and furniture does
+  not), the lights (`EMITTERS`, a catalogue keyed by prop name like `PROPS` — `"fire"`
+  always on, `"computer"` only while somebody is using it), and a CSR index from each
+  `CHUNK` (40 subtiles, 8 cells) to the lights that can reach it. Switching a light dirties
+  the chunks under its radius and no others. It also holds **the CPU reference,
+  `LightScene::evaluate`**, which the shader is kept line for line with and checked against.
+  The `ambient` curve (white by day, so a day looks exactly as drawn; dusk; a dark blue
+  night from 21:00 to 05:00) lives here too.
+- **`mod.rs` — the main world.** Builds a `Lighting` from the simulated map on the game
+  screen, switches computer lights by asking `Occupancy` about each computer's own cell and
+  the four beside it — *not* the on-screen crowd `game/props.rs` asks, since a screen's
+  light reaches past its picture and the lightmap must not depend on the camera — and
+  hands each frame's dirty chunks over in a `LightUpload` that the extract system *takes*,
+  so each change crosses to the render world once. A frame with no change uploads and
+  dispatches nothing.
+- **`gpu.rs` — the render world.** Buffers, and one dispatch of `(5, 5, dirty chunks)`
+  workgroups in `RenderGraph`'s `Render` set **before `camera_driver`** — so a frame is
+  drawn with what was baked for it, and so its GPU timestamp is recorded (in `Begin` it
+  races `begin_diagnostics_frame` and the span is dropped). Bevy 0.19 has no render graph
+  of nodes: a global compute pass is a system in the `RenderGraph` *schedule* taking
+  `RenderContext`. Dirty chunks wait here until the pipeline has compiled.
+
+The algorithm is **direct visibility**: a texel is lit by a light when the line between
+them crosses no opaque subtile (Amanatides-Woo over the subtile grid; the texel's own subtile
+may be opaque, which is how a wall's face is lit one subtile deep). **A line through a
+subtile corner** (crossing times within `CORNER`) steps diagonally and is stopped only
+between two opaque subtiles: lights on prop centres make exact corners common, and leaving
+the tie to rounding made the CPU and the GPU pick different sides of a lone wall corner.
+Attenuated by
+`(1 - d²/r²)²`, summed in `f32` and stored as `rgba16float` so overlapping lights do not
+saturate before they are drawn. The cap at full brightness is in the canvas shader.
+
+**How it is checked:** `LightProbe` reads the lightmap back once the scene's latest
+`generation` has been baked (`Lighting::is_baked`) and compares every texel with the
+reference — `expect_lighting` in a QA script, `CROWD2X_LIGHT_CHECK=1` by hand. It agrees to
+within f16 rounding (worst 0.0009) on every map tried, 1.6M texels included, and a shader
+deliberately broken fails it. **Measured** (`CROWD2X_LIGHT_STRESS=1` re-bakes everything
+every frame and logs GPU timestamps): a full bake of a 256x256 map with 2000 fires
+(1280x1280 texels, 1024 chunks) is **0.38 ms of GPU** and ~4 µs of CPU, on an RTX 5070 Ti.
+
+Not done yet: lights only come from props, are never added or moved during play (that
+would rebuild the chunk index — `rebuild_index` — which is built for it), and a moving
+light would want a dynamic overlay rather than chunk re-bakes. The z dimension of one
+dispatch caps a frame at 65535 dirty chunks, a 4096x4096-cell map's worth.
 
 ### Characters (`src/characters/`)
 
@@ -1036,7 +1102,8 @@ crowd's average. `qa/a_day_in_the_office.json` lives through a day in
 Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
 `expect_sprites`, `expect_drawn`, `expect_world_sprites`, `expect_held`, `expect_selected`,
-`expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time`, `expect_stat` — and
+`expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time`, `expect_stat`,
+`expect_lighting` — and
 `expect_tile` reads the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
@@ -1118,7 +1185,11 @@ delete maps somebody meant to keep; `tools/qa.py` gives each test its own.
 ```
 src/main.rs             app + window setup, plugin registration
 src/state.rs            AppState
-src/render.rs           PixelRenderPlugin - the pixel-perfect pipeline
+src/render.rs           PixelRenderPlugin - the pixel-perfect pipeline; the canvas
+                        quad is CanvasMaterial, which is where the world is lit
+src/lighting/           the lightmap: scene.rs (plain Rust: occlusion, lights, chunks,
+                        the CPU reference), mod.rs (main world), gpu.rs (the compute
+                        dispatch); shaders in assets/shaders/
 src/view.rs             VisibleArea - what is on the canvas, and near enough to it to
                         matter; everything that culls reads it
 src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (typing)

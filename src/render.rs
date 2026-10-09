@@ -19,12 +19,25 @@
 //! window eases its scale up to the new factor over a few frames
 //! ([`ZoomQuadScale`]) rather than snapping there, so a zoom step still reads
 //! as one whole step but does not feel like a cut.
+//!
+//! **The blit is also where the world is lit.** The canvas quad is drawn by
+//! [`CanvasMaterial`] rather than as a sprite: its shader fetches each canvas
+//! texel exactly (no filtering) and multiplies it by the light at that
+//! texel's world position — the ambient light of the time of day plus the
+//! lightmap `crate::lighting` bakes, sampled bilinearly. Both are worked out
+//! per *canvas texel*, so every screen pixel of a texel still gets one colour
+//! and the upscale stays exact. With no [`CanvasLight`] lightmap (the editor,
+//! the menus) the canvas is drawn exactly as it was rendered.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat, TextureUsages,
+};
+use bevy::shader::ShaderRef;
+use bevy::sprite_render::{Material2d, Material2dPlugin};
 use bevy::window::{PrimaryWindow, WindowResized};
 
 /// Every world pixel becomes a PIXEL_SCALE x PIXEL_SCALE block on screen,
@@ -58,8 +71,10 @@ pub struct PixelRenderPlugin;
 
 impl Plugin for PixelRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PixelZoom>()
+        app.add_plugins(Material2dPlugin::<CanvasMaterial>::default())
+            .init_resource::<PixelZoom>()
             .init_resource::<CameraTarget>()
+            .init_resource::<CanvasLight>()
             .add_systems(Startup, setup_pipeline)
             // Chained: a camera moved this frame should be snapped this frame,
             // not photographed one frame off the pixel grid first.
@@ -70,6 +85,7 @@ impl Plugin for PixelRenderPlugin {
                     ease_zoom_quad,
                     apply_camera_target,
                     snap_camera_to_pixels,
+                    light_canvas,
                 )
                     .chain()
                     .in_set(PixelSystems),
@@ -140,6 +156,74 @@ impl PixelZoom {
 /// wanted instead of silently looking at the corner of the map.
 #[derive(Resource, Default)]
 pub struct CameraTarget(pub Option<Vec2>);
+
+/// How the canvas is lit when it is blitted: written by whoever owns the
+/// light (`crate::lighting`, on the game screen), read by [`light_canvas`].
+///
+/// The default is unlit — the canvas drawn exactly as rendered — which is
+/// what every screen without a world to light gets.
+#[derive(Resource, Clone, PartialEq)]
+pub struct CanvasLight {
+    /// The baked lightmap, `rgba16float` at `subtiles_per_unit` texels per
+    /// world unit, its origin at world (0, 0). `None` draws the canvas unlit.
+    pub lightmap: Option<Handle<Image>>,
+    pub lightmap_size: UVec2,
+    pub subtiles_per_unit: f32,
+    /// Linear RGB light under open sky, before any lamp: daylight is white.
+    pub ambient: Vec3,
+    /// Linear RGB light under a ceiling the sky does not reach, before any
+    /// lamp. Mixed toward `ambient` by the lightmap's sky factor.
+    pub indoor: Vec3,
+}
+
+impl Default for CanvasLight {
+    fn default() -> Self {
+        Self {
+            lightmap: None,
+            lightmap_size: UVec2::ZERO,
+            subtiles_per_unit: 0.0,
+            ambient: Vec3::ONE,
+            indoor: Vec3::ONE,
+        }
+    }
+}
+
+/// The canvas quad's material: the canvas, and the light to draw it in.
+/// `assets/shaders/lit_canvas.wgsl`.
+#[derive(Asset, TypePath, AsBindGroup, Clone)]
+pub struct CanvasMaterial {
+    #[uniform(0)]
+    params: CanvasParams,
+    #[texture(1)]
+    canvas: Handle<Image>,
+    /// The fallback image while there is no lightmap; never read then.
+    #[texture(2)]
+    lightmap: Option<Handle<Image>>,
+}
+
+#[derive(ShaderType, Clone, Copy, Default, PartialEq)]
+struct CanvasParams {
+    camera: Vec2,
+    canvas_size: Vec2,
+    ambient: Vec4,
+    indoor: Vec4,
+    lightmap_size: Vec2,
+    subtiles_per_unit: f32,
+    lit: f32,
+}
+
+impl Material2d for CanvasMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/lit_canvas.wgsl".into()
+    }
+
+    /// Opaque: the canvas is cleared to an opaque colour every frame, so
+    /// every texel it hands over already is, and nothing is behind the quad
+    /// but the window's black.
+    fn alpha_mode(&self) -> bevy::sprite_render::AlphaMode2d {
+        bevy::sprite_render::AlphaMode2d::Opaque
+    }
+}
 
 /// Handle of the off-screen canvas plus the resolution it was created at.
 #[derive(Resource)]
@@ -255,6 +339,8 @@ fn quad_offset(window: UVec2, canvas: UVec2, zoom: u32) -> Vec2 {
 fn setup_pipeline(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CanvasMaterial>>,
     zoom: Res<PixelZoom>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
@@ -283,14 +369,15 @@ fn setup_pipeline(
         CameraPan::default(),
     ));
 
-    // Draws the canvas to the window, `zoom` times bigger.
+    // Draws the canvas to the window, `zoom` times bigger, lit.
     commands.spawn((
         Name::new("canvas quad"),
-        Sprite {
-            image: image.clone(),
-            custom_size: Some(size.as_vec2()),
-            ..default()
-        },
+        Mesh2d(meshes.add(Rectangle::from_size(size.as_vec2()))),
+        MeshMaterial2d(materials.add(CanvasMaterial {
+            params: CanvasParams { canvas_size: size.as_vec2(), ..default() },
+            canvas: image.clone(),
+            lightmap: None,
+        })),
         Transform::from_translation(offset.extend(0.0)).with_scale(Vec3::splat(zoom.factor())),
         UPSCALE_LAYER,
         CanvasQuad,
@@ -330,9 +417,11 @@ fn resize_canvas(
     mut resized: MessageReader<WindowResized>,
     zoom: Res<PixelZoom>,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CanvasMaterial>>,
     mut canvas: ResMut<PixelCanvas>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut quads: Query<(&mut Sprite, &mut Transform), With<CanvasQuad>>,
+    mut quads: Query<(&mut Mesh2d, &MeshMaterial2d<CanvasMaterial>, &mut Transform), With<CanvasQuad>>,
     mut targets: Query<&mut RenderTarget, With<WorldCamera>>,
 ) {
     if resized.read().count() == 0 && !zoom.is_changed() {
@@ -348,9 +437,13 @@ fn resize_canvas(
 
     let offset = quad_offset(window_size(window), size, zoom.get());
     let image = images.add(create_canvas_image(size));
-    for (mut sprite, mut transform) in &mut quads {
-        sprite.image = image.clone();
-        sprite.custom_size = Some(size.as_vec2());
+    for (mut mesh, material, mut transform) in &mut quads {
+        let old = std::mem::replace(&mut mesh.0, meshes.add(Rectangle::from_size(size.as_vec2())));
+        meshes.remove(&old);
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.canvas = image.clone();
+            material.params.canvas_size = size.as_vec2();
+        }
         transform.translation = offset.extend(0.0);
         // Scale is not set here: the canvas resolution jumps to the new zoom
         // immediately (a fractional one would break the pixel grid), but the
@@ -406,6 +499,41 @@ fn snap_camera_to_pixels(mut cameras: Query<(&mut Transform, &CameraPan), With<W
     for (mut transform, pan) in &mut cameras {
         transform.translation.x = pan.0.x.round();
         transform.translation.y = pan.0.y.round();
+    }
+}
+
+/// Hand the canvas material this frame's camera and light.
+///
+/// Only once the camera has been snapped: the shader works out each texel's
+/// world position from it, and half a pixel of disagreement would slide the
+/// light across the floor as the camera pans. Written only when something it
+/// says has changed, since writing a material re-uploads it.
+fn light_canvas(
+    light: Res<CanvasLight>,
+    canvas: Res<PixelCanvas>,
+    cameras: Query<&Transform, With<WorldCamera>>,
+    quads: Query<&MeshMaterial2d<CanvasMaterial>, With<CanvasQuad>>,
+    mut materials: ResMut<Assets<CanvasMaterial>>,
+) {
+    let Ok(camera) = cameras.single() else { return };
+    let params = CanvasParams {
+        camera: camera.translation.truncate(),
+        canvas_size: canvas.size.as_vec2(),
+        ambient: light.ambient.extend(1.0),
+        indoor: light.indoor.extend(1.0),
+        lightmap_size: light.lightmap_size.as_vec2(),
+        subtiles_per_unit: light.subtiles_per_unit,
+        lit: if light.lightmap.is_some() { 1.0 } else { 0.0 },
+    };
+    for quad in &quads {
+        let Some(current) = materials.get(&quad.0) else { continue };
+        if current.params == params && current.lightmap == light.lightmap {
+            continue;
+        }
+        if let Some(mut material) = materials.get_mut(&quad.0) {
+            material.params = params;
+            material.lightmap.clone_from(&light.lightmap);
+        }
     }
 }
 

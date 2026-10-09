@@ -204,6 +204,7 @@ the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
+| `{"expect_lighting": {"lights_on": 2}}` | The GPU's lightmap, read back once the latest change is baked, agrees with the CPU reference on every texel; `lights_on` (optional) counts lights switched on. Waits for the bake by re-running itself (`Next::Again`) until the script's timeout. Game screen only. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_stat": {"stat": "hunger", "max": 75, "of": "crowd"}}` | A stat in a range — `min`, `max` or both — of the selected unit (`"of": "selected"`, the default) or the crowd's average (`"crowd"`). Any name the debug menu shows. |

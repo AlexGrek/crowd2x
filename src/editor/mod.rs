@@ -28,6 +28,7 @@
 //! Everything else — palette, layer, save, leave — has a button on both.
 
 pub mod background;
+pub mod ceiling;
 pub mod props;
 
 use bevy::input::mouse::MouseWheel;
@@ -36,7 +37,7 @@ use bevy::window::{CursorMoved, PrimaryWindow};
 
 use crate::browser::Maps;
 use crate::characters::{upscale, ART_SCALE, CELL};
-use crate::map::{Map, Size, VOID};
+use crate::map::{Map, ObjectLayer, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
 use crate::view::ViewSystems;
@@ -59,7 +60,7 @@ const SCRATCH: (i32, i32) = (24, 16);
 /// `bevy_ui` and composited over the whole canvas, so it needs no depth.
 const CURSOR_Z: f32 = 100.0;
 
-const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y layer\n                         wasd or right stick pan   f5/start save   esc/B maps";
+const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y or 1-4 layer\n                         wasd or right stick pan   f5/start save   esc/B maps";
 
 /// Corner brackets drawn at the cursor, at the 16px art size like the rest.
 const SELECTION_FRAME: &str = "selection.png";
@@ -164,25 +165,54 @@ impl PaletteItem {
     }
 }
 
+/// What is being edited. In the order `tab` steps through them and `1`-`4`
+/// pick them: the floor, what stands on it, what hangs over it, and the roof.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
     #[default]
     Background,
     Props,
+    Lamps,
+    Ceiling,
 }
 
 impl Layer {
+    const ALL: [Layer; 4] = [Layer::Background, Layer::Props, Layer::Lamps, Layer::Ceiling];
+
     fn name(self) -> &'static str {
         match self {
             Layer::Background => "background",
             Layer::Props => "props",
+            Layer::Lamps => "lamps",
+            Layer::Ceiling => "ceiling",
         }
     }
 
-    fn other(self) -> Self {
+    fn next(self) -> Self {
+        let at = Layer::ALL.iter().position(|&layer| layer == self).unwrap_or(0);
+        Layer::ALL[(at + 1) % Layer::ALL.len()]
+    }
+
+    fn palette(self) -> &'static [PaletteItem] {
         match self {
-            Layer::Background => Layer::Props,
-            Layer::Props => Layer::Background,
+            Layer::Background => background::PALETTE,
+            Layer::Props => props::PALETTE,
+            Layer::Lamps => props::LAMP_PALETTE,
+            Layer::Ceiling => ceiling::PALETTE,
+        }
+    }
+
+    /// Whether a press is a rectangle, corner to corner, rather than a
+    /// single placement — for this layer and the item selected on it.
+    fn instrument(self, item: &PaletteItem) -> Option<Instrument> {
+        match self {
+            Layer::Background => match Instrument::for_background_item(item.name) {
+                Instrument::Brush => None,
+                rectangle => Some(rectangle),
+            },
+            // A room is roofed in one stroke.
+            Layer::Ceiling => Some(Instrument::Block),
+            Layer::Props | Layer::Lamps => None,
         }
     }
 }
@@ -227,20 +257,29 @@ pub struct Tool {
     layer: Layer,
     background: usize,
     props: usize,
+    lamps: usize,
+    ceiling: usize,
 }
 
 impl Tool {
+    pub fn layer(&self) -> Layer {
+        self.layer
+    }
+
     fn palette(&self) -> &'static [PaletteItem] {
-        match self.layer {
-            Layer::Background => background::PALETTE,
-            Layer::Props => props::PALETTE,
-        }
+        self.layer.palette()
     }
 
     fn index(&self) -> usize {
-        match self.layer {
+        self.index_on(self.layer)
+    }
+
+    fn index_on(&self, layer: Layer) -> usize {
+        match layer {
             Layer::Background => self.background,
             Layer::Props => self.props,
+            Layer::Lamps => self.lamps,
+            Layer::Ceiling => self.ceiling,
         }
     }
 
@@ -253,6 +292,8 @@ impl Tool {
         let index = match self.layer {
             Layer::Background => &mut self.background,
             Layer::Props => &mut self.props,
+            Layer::Lamps => &mut self.lamps,
+            Layer::Ceiling => &mut self.ceiling,
         };
         *index = (*index as i32 + step).rem_euclid(len) as usize;
     }
@@ -263,15 +304,17 @@ impl Tool {
     /// instead of pressing `e` nine times and hoping the palette order has not
     /// changed since it was written.
     pub fn select(&mut self, name: &str) -> bool {
-        if let Some(index) = background::PALETTE.iter().position(|item| item.name == name) {
-            self.layer = Layer::Background;
-            self.background = index;
-            return true;
-        }
-        if let Some(index) = props::PALETTE.iter().position(|item| item.name == name) {
-            self.layer = Layer::Props;
-            self.props = index;
-            return true;
+        for layer in Layer::ALL {
+            if let Some(index) = layer.palette().iter().position(|item| item.name == name) {
+                self.layer = layer;
+                match layer {
+                    Layer::Background => self.background = index,
+                    Layer::Props => self.props = index,
+                    Layer::Lamps => self.lamps = index,
+                    Layer::Ceiling => self.ceiling = index,
+                }
+                return true;
+            }
         }
         false
     }
@@ -283,7 +326,8 @@ impl Tool {
                 Instrument::Block => "  drag corner to corner for a filled block",
                 Instrument::Brush => "",
             },
-            Layer::Props => "",
+            Layer::Ceiling => "  drag corner to corner to roof it, rmb to open it to the sky",
+            Layer::Props | Layer::Lamps => "",
         };
         format!(
             "layer  {}\nitem   {}  {}/{}{}",
@@ -379,8 +423,10 @@ struct RectangleDrag {
     /// Placing or erasing, fixed for the life of the drag so letting go of
     /// the wrong button mid-drag can't flip what release does.
     erasing: bool,
-    /// The background palette entry this drag paints, captured at the press
-    /// so cycling the palette mid-drag can't change what release paints.
+    /// The layer this drag is for and the palette entry it paints, captured
+    /// at the press so cycling either mid-drag can't change what release
+    /// does.
+    layer: Layer,
     item: usize,
     /// What the last frame's preview covered, so a still drag does not
     /// respawn the same sprites every frame.
@@ -425,7 +471,7 @@ impl RectangleDrag {
                     DespawnOnExit(AppState::Editor),
                 ))
             } else {
-                let item = &background::PALETTE[self.item];
+                let item = &self.layer.palette()[self.item];
                 commands.spawn((
                     Sprite {
                         image: assets.load(item.art.path),
@@ -474,6 +520,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<RectangleDrag>()
             .init_resource::<background::TileWindow>()
             .init_resource::<props::PropWindow>()
+            .init_resource::<ceiling::CeilingOverlay>()
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
@@ -497,7 +544,7 @@ impl Plugin for EditorPlugin {
             // longer exist — and re-point them, silently, drawing nothing.
             .add_systems(
                 OnEnter(AppState::Editor),
-                reset_map_windows,
+                (reset_map_windows, ceiling::reset),
             )
             .add_systems(OnEnter(AppState::Game), reset_map_windows)
             .add_systems(OnExit(AppState::Editor), leave_editor)
@@ -513,6 +560,7 @@ impl Plugin for EditorPlugin {
                     cycle_item,
                     edit,
                     update_cursor,
+                    ceiling::sync_ceiling_overlay.after(ViewSystems),
                     update_hud,
                     save_on_demand,
                     leave,
@@ -762,11 +810,14 @@ fn switch_layer(
             .iter()
             .any(|pad| pad.just_pressed(GamepadButton::North));
     if toggled {
-        tool.layer = tool.layer.other();
-    } else if keys.just_pressed(KeyCode::Digit1) {
-        tool.layer = Layer::Background;
-    } else if keys.just_pressed(KeyCode::Digit2) {
-        tool.layer = Layer::Props;
+        tool.layer = tool.layer.next();
+        return;
+    }
+    let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
+    for (key, layer) in digits.into_iter().zip(Layer::ALL) {
+        if keys.just_pressed(key) {
+            tool.layer = layer;
+        }
     }
 }
 
@@ -809,6 +860,7 @@ fn edit(
     cursor: Res<Cursor>,
     mut window: ResMut<background::TileWindow>,
     mut prop_window: ResMut<props::PropWindow>,
+    mut overlay: ResMut<ceiling::CeilingOverlay>,
     mut current: ResMut<CurrentMap>,
     mut rect: ResMut<RectangleDrag>,
     placed: Query<(Entity, &props::Prop, &Transform)>,
@@ -831,91 +883,71 @@ fn edit(
     let erase_released = buttons.just_released(MouseButton::Right)
         || pads().any(|pad| pad.just_released(GamepadButton::West));
 
-    // Switching away from the background layer mid-drag would otherwise
-    // leave the preview on screen with nothing left driving it.
-    if rect.anchor.is_some() && tool.layer != Layer::Background {
+    // Switching layer, or to a tool that is not a rectangle, mid-drag would
+    // otherwise leave the preview on screen with nothing left driving it.
+    let instrument = tool.layer.instrument(tool.item());
+    if rect.anchor.is_some() && (rect.layer != tool.layer || instrument.is_none()) {
         rect.cancel(&mut commands);
     }
 
+    let cell = background::cell_of(world);
+    if let Some(instrument) = instrument {
+        // Corner to corner: nothing is painted until release, so the
+        // rectangle can grow, shrink or flip freely on the way there.
+        if rect.anchor.is_none() && (place_once || erase_once) {
+            rect.anchor = Some(cell);
+            rect.erasing = erase_once && !place_once;
+            rect.layer = tool.layer;
+            rect.item = tool.index();
+        }
+        let Some(anchor) = rect.anchor else {
+            return;
+        };
+        let cells: Vec<IVec2> = RectangleDrag::cells(anchor, cell, instrument)
+            .into_iter()
+            .filter(|&cell| current.map.contains(background::point_of(cell)))
+            .collect();
+        rect.show(&mut commands, &assets, cells);
+
+        let released = if rect.erasing { erase_released } else { place_released };
+        if released {
+            let erasing = rect.erasing;
+            let item = rect.item;
+            for cell in std::mem::take(&mut rect.cells) {
+                match (rect.layer, erasing) {
+                    (Layer::Ceiling, roofless) => {
+                        ceiling::set(&mut overlay, &mut current.map, cell, !roofless)
+                    }
+                    (_, true) => background::erase(&mut window, &mut current.map, cell),
+                    (_, false) => background::paint(&mut window, &mut current.map, cell, item),
+                }
+            }
+            rect.cancel(&mut commands);
+        }
+        return;
+    }
+
     match tool.layer {
+        // Held rather than clicked: most tiles are painted by dragging over
+        // cells.
         Layer::Background => {
-            let cell = background::cell_of(world);
-            match Instrument::for_background_item(tool.item().name) {
-                // Held rather than clicked: most tiles are painted by
-                // dragging over cells.
-                Instrument::Brush => {
-                    // A tool switched away from mid-drag: same reasoning as
-                    // above, just within the one layer.
-                    if rect.anchor.is_some() {
-                        rect.cancel(&mut commands);
-                    }
-                    if place_held {
-                        background::paint(
-                            &mut window,
-                            &mut current.map,
-                            cell,
-                            tool.background,
-                        );
-                    } else if erase_held {
-                        background::erase(&mut window, &mut current.map, cell);
-                    }
-                }
-                // Corner to corner: nothing is painted until release, so the
-                // rectangle can grow, shrink or flip freely on the way there.
-                instrument @ (Instrument::Wall | Instrument::Block) => {
-                    if rect.anchor.is_none() {
-                        if place_once {
-                            rect.anchor = Some(cell);
-                            rect.erasing = false;
-                            rect.item = tool.background;
-                        } else if erase_once {
-                            rect.anchor = Some(cell);
-                            rect.erasing = true;
-                            rect.item = tool.background;
-                        }
-                    }
-
-                    if let Some(anchor) = rect.anchor {
-                        let cells: Vec<IVec2> = RectangleDrag::cells(anchor, cell, instrument)
-                            .into_iter()
-                            .filter(|&cell| current.map.contains(background::point_of(cell)))
-                            .collect();
-                        rect.show(&mut commands, &assets, cells);
-
-                        let released = if rect.erasing {
-                            erase_released
-                        } else {
-                            place_released
-                        };
-                        if released {
-                            let erasing = rect.erasing;
-                            let item = rect.item;
-                            for cell in std::mem::take(&mut rect.cells) {
-                                if erasing {
-                                    background::erase(&mut window, &mut current.map, cell);
-                                } else {
-                                    background::paint(
-                                        &mut window,
-                                        &mut current.map,
-                                        cell,
-                                        item,
-                                    );
-                                }
-                            }
-                            rect.cancel(&mut commands);
-                        }
-                    }
-                }
+            if place_held {
+                background::paint(&mut window, &mut current.map, cell, tool.background);
+            } else if erase_held {
+                background::erase(&mut window, &mut current.map, cell);
             }
         }
-        // One press, one prop.
-        Layer::Props => {
+        // One press, one prop — or one lamp.
+        layer @ (Layer::Props | Layer::Lamps) => {
+            let objects = if layer == Layer::Props { ObjectLayer::Props } else { ObjectLayer::Lamps };
             if place_once {
-                props::place(&mut prop_window, &mut current.map, world, tool.props);
+                props::place(&mut prop_window, &mut current.map, objects, world, tool.index());
             } else if erase_once {
-                props::erase_nearest(&mut prop_window, &mut current.map, &placed, world);
+                props::erase_nearest(&mut prop_window, &mut current.map, objects, &placed, world);
             }
         }
+        // Always a rectangle, handled above.
+        Layer::Ceiling => {}
     }
 }
 
@@ -945,8 +977,8 @@ fn update_cursor(
             continue;
         };
         let snapped = match tool.layer {
-            Layer::Background => background::cell_centre(background::cell_of(pos)),
-            Layer::Props => pos.round(),
+            Layer::Background | Layer::Ceiling => background::cell_centre(background::cell_of(pos)),
+            Layer::Props | Layer::Lamps => pos.round(),
         };
         transform.translation.x = snapped.x;
         transform.translation.y = snapped.y;
@@ -998,6 +1030,8 @@ mod tests {
         let strips = background::PALETTE
             .iter()
             .chain(props::PALETTE)
+            .chain(props::LAMP_PALETTE)
+            .chain(ceiling::PALETTE)
             .flat_map(|item| {
                 [Some((item, item.art)), item.in_use.map(|strip| (item, strip))]
             })

@@ -82,6 +82,7 @@ use crate::ui::keyboard::TextEntry;
 use crate::ui::nav::{Activated, Focus, Focusable, Scope};
 use crate::characters::{OVERHANG_ABOVE, OVERHANG_BELOW, OVERHANG_SIDE};
 use crate::view::{VisibleArea, HYSTERESIS};
+use crate::lighting::{Lighting, LightProbe};
 use perf::{Measured, Measurement};
 use script::{gamepad_button, key_char, key_code, GivenMap, Script, Side, Step};
 
@@ -194,6 +195,8 @@ struct Run {
     ready_at: f32,
     /// Something pressed that has to be let go of, and when.
     holding: Option<(Held, f32)>,
+    /// Where a `drag` moves the editor cursor to just before it lets go.
+    drag_to: Option<Vec2>,
     failures: Vec<String>,
     finished: bool,
     /// The virtual gamepad every script gets, connected at startup.
@@ -296,6 +299,7 @@ impl Run {
             script,
             step: 0,
             holding: None,
+            drag_to: None,
             failures: Vec::new(),
             finished: false,
             pad: Entity::PLACEHOLDER,
@@ -556,6 +560,9 @@ struct Intents<'w> {
     /// straight onto the transform, so the map clamp applies exactly as it
     /// does to panning there by hand.
     camera: ResMut<'w, CameraTarget>,
+    /// Asks for, and holds, a read-back of the lightmap.
+    light_probe: ResMut<'w, LightProbe>,
+    lighting: Option<Res<'w, Lighting>>,
 }
 
 /// What the driver should do once a step has been performed.
@@ -564,8 +571,14 @@ enum Next {
     Now,
     /// Wait this long first.
     After(f32),
+    /// Not yet: run this same step again shortly. For a step waiting on
+    /// something that arrives a few frames later, such as a GPU read-back;
+    /// the script's timeout is what stops it waiting forever.
+    Again,
     /// Let go of this after that long, then carry on.
     Holding(Held, f32),
+    /// Like `Holding` a mouse button, with the editor cursor moved here first.
+    Drag(MouseButton, Vec2),
     /// Start counting frames, under this name, for this long.
     ///
     /// Frames are the one thing a step cannot do and then return from: what is
@@ -628,6 +641,11 @@ fn drive(
             return;
         }
         run.holding = None;
+        if let Some(to) = run.drag_to.take() {
+            // Moved on the frame the button goes up, and the release is only
+            // seen on the next — so the cursor is already there when it is.
+            intents.cursor.place(to);
+        }
         release(held, &mut devices, run.pad);
         run.ready_at = now + run.script.gap;
         return;
@@ -673,8 +691,17 @@ fn drive(
     );
     match outcome {
         Ok(Next::Now) => run.ready_at = now + run.script.gap,
+        Ok(Next::Again) => {
+            run.step -= 1;
+            run.ready_at = now + 0.05;
+        }
         Ok(Next::After(seconds)) => run.ready_at = now + seconds + run.script.gap,
         Ok(Next::Holding(held, seconds)) => run.holding = Some((held, now + seconds)),
+        Ok(Next::Drag(button, to)) => {
+            // Long enough for the press to land on the first cell first.
+            run.holding = Some((Held::Mouse(button), now + 0.2));
+            run.drag_to = Some(to);
+        }
         Ok(Next::Frames {
             name,
             seconds,
@@ -822,6 +849,19 @@ fn perform(
                 window: Entity::PLACEHOLDER,
             });
             Ok(Next::Holding(Held::Mouse(button), *seconds))
+        }
+
+        Step::Drag { from, to, button } => {
+            let cell = |c: script::DragCell| crate::editor::background::cell_centre(IVec2::new(c.x, c.y));
+            intents.cursor.place(cell(*from));
+            let button = button.code();
+            devices.buttons.press(button);
+            devices.click_messages.write(MouseButtonInput {
+                button,
+                state: ButtonState::Pressed,
+                window: Entity::PLACEHOLDER,
+            });
+            Ok(Next::Drag(button, cell(*to)))
         }
 
         Step::Wheel(y) => {
@@ -1187,6 +1227,36 @@ fn perform(
             }
         }
 
+        Step::ExpectCeiling { map, x, y, roofed } => {
+            let saved = checks.maps.0.load(map).map_err(|error| format!("{map}: {error}"))?;
+            let at = crate::map::Point::new(*x, *y);
+            if !saved.contains(at) {
+                return Err(format!("({x}, {y}) is outside {map}"));
+            }
+            let found = saved.has_ceiling(at);
+            (found == *roofed).then_some(Next::Now).ok_or(format!(
+                "{map} ({x}, {y}) {}, expected {}",
+                if found { "has a ceiling" } else { "is open sky" },
+                if *roofed { "a ceiling" } else { "open sky" },
+            ))
+        }
+
+        Step::ExpectObjects { map, layer, kind, count } => {
+            let saved = checks.maps.0.load(map).map_err(|error| format!("{map}: {error}"))?;
+            let layer = crate::map::ObjectLayer::from_name(layer)
+                .ok_or(format!("no object layer called {layer:?}"))?;
+            let found = saved
+                .objects(layer)
+                .iter()
+                .filter(|object| kind.as_deref().is_none_or(|kind| object.kind.as_str() == kind))
+                .count();
+            (found == *count).then_some(Next::Now).ok_or(format!(
+                "{map} has {found} {}{}, expected {count}",
+                layer.name(),
+                kind.as_deref().map(|kind| format!(" of kind {kind:?}")).unwrap_or_default(),
+            ))
+        }
+
         Step::ExpectEntities(wanted) => {
             let actual = intents
                 .sim
@@ -1228,6 +1298,29 @@ fn perform(
             } else {
                 format!("expected no {kind} in use, found {lit}")
             })
+        }
+
+        Step::ExpectLighting { lights_on } => {
+            let lighting = intents
+                .lighting
+                .as_deref()
+                .ok_or("there is no lighting — expected the game screen".to_string())?;
+            let generation = lighting.scene.generation();
+            let Some(report) = intents.light_probe.result_for(generation) else {
+                intents.light_probe.ask(generation);
+                return Ok(Next::Again);
+            };
+            info!("qa: lighting {report}");
+            if report.wrong > 0 {
+                return Err(format!("the GPU lightmap disagrees with the reference: {report}"));
+            }
+            if let Some(wanted) = lights_on {
+                let on = lighting.scene.lights.iter().filter(|l| l.enabled).count();
+                if on != *wanted {
+                    return Err(format!("expected {wanted} lights on, found {on}"));
+                }
+            }
+            Ok(Next::Now)
         }
 
         Step::ExpectSprites(wanted) => {

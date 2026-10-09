@@ -1,0 +1,75 @@
+{
+  "name": "a roof keeps the sun out but for what comes in by the door, and the lamps light the rest",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "roofed_rooms",
+        "file": "qa/fixtures/roofed_rooms.json"
+      }
+    ]
+  },
+  "open": "roofed_rooms",
+  "steps": [
+    {
+      "note": "a street, a house with a warm lamp and a door in its bottom wall, an office of tube lamps behind a partition, a fire outside"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 2
+    },
+    {
+      "look_at": {
+        "x": 15,
+        "y": 9
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 6
+      }
+    },
+    {
+      "shot": "noon: the street in the sun, the rooms in the shade but for the doorways, and lit by their lamps"
+    },
+    {
+      "note": "1920 ticks a world hour: twelve hours on is eight at night"
+    },
+    {
+      "tick": 23040
+    },
+    {
+      "shot": "dusk: the street goes warm and dim, the rooms stay lit"
+    },
+    {
+      "tick": 5760
+    },
+    {
+      "expect_world_time": {
+        "hours": 15
+      }
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 6
+      }
+    },
+    {
+      "shot": "eleven at night: the lamps and the fire are all the light there is"
+    }
+  ]
+}

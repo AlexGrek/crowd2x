@@ -33,13 +33,26 @@ use serde::{Deserialize, Serialize};
 use super::{Map, Object, ObjectLayer, Point, Size, TerrainId, BASE};
 
 /// Bumped when a change to the shape below stops older files loading.
+/// Adding the ceiling did not: a file without one is open sky, which is what
+/// every map before it was.
 pub const FORMAT_VERSION: u32 = 1;
+
+/// A ceiling row's two characters: a roof, and open sky. Characters rather
+/// than `1,0` because the layer is two-valued and a row of `#` and `.` reads
+/// as the building it is.
+const ROOFED: char = '#';
+const OPEN: char = '.';
 
 #[derive(Serialize, Deserialize)]
 struct MapFile {
     version: u32,
     size: SizeFile,
     terrain: TerrainFile,
+    /// One string per map row, bottom row first, [`ROOFED`] or [`OPEN`] per
+    /// cell. Left out of a file with no ceiling at all, so a map saved
+    /// before ceilings existed saves back byte for byte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ceiling: Option<Vec<String>>,
     /// Keyed by [`ObjectLayer::name`] so the file says which list is which,
     /// rather than depending on the order two arrays happen to be written in.
     objects: BTreeMap<String, Vec<Object>>,
@@ -83,6 +96,9 @@ pub enum MapFormatError {
     UnnameableTerrain(u16),
     UnknownObjectLayer(String),
     WrongRowCount { expected: i32, found: usize },
+    WrongCeilingRowCount { expected: i32, found: usize },
+    WrongCeilingRowWidth { row: usize, expected: i32, found: usize },
+    MalformedCeiling { row: usize, found: char },
     WrongRowWidth { row: usize, expected: i32, found: usize },
     MalformedRow { row: usize, token: String },
     TileOutOfPalette { row: usize, column: usize, index: u16 },
@@ -112,6 +128,16 @@ impl fmt::Display for MapFormatError {
             Self::WrongRowCount { expected, found } => {
                 write!(f, "expected {expected} terrain rows, found {found}")
             }
+            Self::WrongCeilingRowCount { expected, found } => {
+                write!(f, "expected {expected} ceiling rows, found {found}")
+            }
+            Self::WrongCeilingRowWidth { row, expected, found } => {
+                write!(f, "ceiling row {row} has {found} cells, expected {expected}")
+            }
+            Self::MalformedCeiling { row, found } => write!(
+                f,
+                "ceiling row {row} has {found:?}, expected {ROOFED:?} or {OPEN:?}"
+            ),
             Self::WrongRowWidth {
                 row,
                 expected,
@@ -190,8 +216,21 @@ impl Map {
                 palette: palette.iter().map(|tile| tile.name().to_string()).collect(),
                 layers: vec![LayerFile { rows }],
             },
+            ceiling: (self.ceiling_count() > 0).then(|| {
+                (0..self.size.height)
+                    .map(|y| {
+                        (0..self.size.width)
+                            .map(|x| if self.has_ceiling(Point::new(x, y)) { ROOFED } else { OPEN })
+                            .collect()
+                    })
+                    .collect()
+            }),
+            // Lamps came later than the other two: an empty list of them is
+            // left out, like an absent ceiling, so a map made before them
+            // saves back unchanged.
             objects: ObjectLayer::ALL
                 .into_iter()
+                .filter(|&layer| layer != ObjectLayer::Lamps || !self.objects(layer).is_empty())
                 .map(|layer| (layer.name().to_string(), self.objects(layer).to_vec()))
                 .collect(),
         };
@@ -235,6 +274,9 @@ impl Map {
         let tiles = decode_layer(layer, size, &palette)?;
 
         let mut map = Map::from_base_layer(size, tiles);
+        if let Some(rows) = &file.ceiling {
+            decode_ceiling(rows, &mut map)?;
+        }
         for (name, objects) in file.objects {
             let layer = ObjectLayer::from_name(&name)
                 .ok_or(MapFormatError::UnknownObjectLayer(name.clone()))?;
@@ -245,6 +287,37 @@ impl Map {
 
         Ok(map)
     }
+}
+
+/// The ceiling's rows onto a map, refusing anything but exactly one
+/// [`ROOFED`] or [`OPEN`] per cell — the same no-repair rule as the terrain.
+fn decode_ceiling(rows: &[String], map: &mut Map) -> Result<(), MapFormatError> {
+    let size = map.size();
+    if rows.len() != size.height as usize {
+        return Err(MapFormatError::WrongCeilingRowCount {
+            expected: size.height,
+            found: rows.len(),
+        });
+    }
+    for (y, row) in rows.iter().enumerate() {
+        let width = row.chars().count();
+        if width != size.width as usize {
+            return Err(MapFormatError::WrongCeilingRowWidth {
+                row: y,
+                expected: size.width,
+                found: width,
+            });
+        }
+        for (x, c) in row.chars().enumerate() {
+            let roofed = match c {
+                ROOFED => true,
+                OPEN => false,
+                found => return Err(MapFormatError::MalformedCeiling { row: y, found }),
+            };
+            map.set_ceiling(Point::new(x as i32, y as i32), roofed);
+        }
+    }
+    Ok(())
 }
 
 /// One layer's rows into the flat, row-major tile array a [`Map`] holds.
@@ -349,6 +422,54 @@ mod tests {
         assert!(map.passability().is_blocked(Point::new(0, 1)), "the bed");
         assert!(map.is_passable(Point::new(2, 0)), "a spawner is not in the way");
         assert_eq!(map.passability().count_passable(), 4);
+    }
+
+    #[test]
+    fn a_ceiling_and_its_lamps_survive_a_round_trip() {
+        let mut before = sample();
+        before.set_ceiling(Point::new(0, 0), true);
+        before.set_ceiling(Point::new(2, 1), true);
+        before.add_object(
+            ObjectLayer::Lamps,
+            Object {
+                at: Point::new(24, 24),
+                kind: ObjectKind::new("ceiling lamp"),
+            },
+        );
+        let json = before.to_json().unwrap();
+        assert!(json.contains("\"#..\""), "rows are bottom-up, one character a cell: {json}");
+        let after = reload(&before);
+        for point in before.size().points() {
+            assert_eq!(after.has_ceiling(point), before.has_ceiling(point), "{point:?}");
+        }
+        assert_eq!(after.objects(ObjectLayer::Lamps), before.objects(ObjectLayer::Lamps));
+    }
+
+    #[test]
+    fn a_map_with_no_ceiling_writes_none() {
+        // So every map saved before ceilings existed saves back unchanged.
+        assert!(!sample().to_json().unwrap().contains("ceiling"));
+    }
+
+    #[test]
+    fn a_ceiling_row_of_the_wrong_width_or_character_is_refused() {
+        let json = sample().to_json().unwrap();
+        let with = |rows: &str| {
+            json.replacen("\"terrain\"", &format!("\"ceiling\": {rows},\n  \"terrain\""), 1)
+        };
+        assert!(matches!(
+            Map::from_json(&with(r##"["#.", "..."]"##)),
+            Err(MapFormatError::WrongCeilingRowWidth { row: 0, .. })
+        ));
+        assert!(matches!(
+            Map::from_json(&with(r##"["#x.", "..."]"##)),
+            Err(MapFormatError::MalformedCeiling { row: 0, found: 'x' })
+        ));
+        assert!(matches!(
+            Map::from_json(&with(r##"["..."]"##)),
+            Err(MapFormatError::WrongCeilingRowCount { .. })
+        ));
+        assert!(Map::from_json(&with(r##"["#..", "..#"]"##)).is_ok());
     }
 
     #[test]

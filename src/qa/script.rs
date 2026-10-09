@@ -405,6 +405,16 @@ pub enum Step {
         #[serde(default = "default_tap")]
         seconds: f32,
     },
+    /// Press a mouse button with the editor cursor on one cell, move it to
+    /// another while held, and let go there: a corner-to-corner rectangle —
+    /// a room's walls, a block, a roof. `click` cannot, since the cursor
+    /// stays put for as long as a click is held.
+    Drag {
+        from: DragCell,
+        to: DragCell,
+        #[serde(default)]
+        button: Button,
+    },
     /// Scroll: positive is up, in list rows.
     Wheel(f32),
     /// Save a screenshot, named rather than pathed: the file lands in this
@@ -439,6 +449,23 @@ pub enum Step {
         y: i32,
         terrain: String,
     },
+    /// Whether a cell of a *saved* map has a ceiling over it — the
+    /// `expect_tile` of the ceiling layer.
+    ExpectCeiling {
+        map: String,
+        x: i32,
+        y: i32,
+        roofed: bool,
+    },
+    /// How many objects a *saved* map has on one object layer: `props`,
+    /// `spawners` or `lamps`, optionally only those of one `kind`.
+    ExpectObjects {
+        map: String,
+        layer: String,
+        #[serde(default)]
+        kind: Option<String>,
+        count: usize,
+    },
     /// How many entities are alive in the simulation.
     ExpectEntities(usize),
     /// Whether a prop that shows whether it is being used is showing that
@@ -451,6 +478,14 @@ pub enum Step {
     /// true when **any** prop of that kind is in use, since a test that
     /// cares which one can put one computer on the map.
     ExpectPropInUse { kind: String, in_use: bool },
+    /// That the lightmap the GPU baked is the one the CPU reference says it
+    /// should be, every texel of it — read back once the latest change has
+    /// been baked, so the step waits for the bake rather than racing it.
+    /// `lights_on`, when given, is how many lights are switched on.
+    ExpectLighting {
+        #[serde(default)]
+        lights_on: Option<usize>,
+    },
     /// That at least this many hours have gone by on the **world's** clock —
     /// a hundred and twenty times as fast as the one the test is watched on
     /// (`sim::clock`).
@@ -922,4 +957,12 @@ mod tests {
             GivenMap::Built { map: Some(_), .. }
         ));
     }
+}
+
+/// A cell for [`Step::Drag`].
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(deny_unknown_fields)]
+pub struct DragCell {
+    pub x: i32,
+    pub y: i32,
 }

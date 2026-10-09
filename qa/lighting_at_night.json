@@ -1,0 +1,90 @@
+{
+  "name": "night falls and the fires light their rooms",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "lit_rooms",
+        "file": "qa/fixtures/lit_rooms.json"
+      }
+    ]
+  },
+  "open": "lit_rooms",
+  "steps": [
+    {
+      "note": "two rooms joined by a doorway, a pillar in each, three fires and a computer nobody is using"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 3
+    },
+    {
+      "look_at": {
+        "x": 12,
+        "y": 8
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 3
+      }
+    },
+    {
+      "shot": "eight in the morning: daylight, so the canvas is drawn as it was"
+    },
+    {
+      "note": "1920 ticks a world hour: fifteen hours on is eleven at night"
+    },
+    {
+      "tick": 28800
+    },
+    {
+      "expect_world_time": {
+        "hours": 15
+      }
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 3
+      }
+    },
+    {
+      "shot": "eleven at night: the fires light their rooms, and the walls cast shadows"
+    },
+    {
+      "key": "e"
+    },
+    {
+      "key": "e"
+    },
+    {
+      "key": "e"
+    },
+    {
+      "expect_zoom": 6
+    },
+    {
+      "look_at": {
+        "x": 7,
+        "y": 7
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "close up: the light is smooth across texels, and every texel is one colour"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "name": "a roof is dragged over a room and lamps hung under it, and the saved map and the game both have them",
+  "state": "editor",
+  "given": {
+    "maps": [
+      "loft"
+    ]
+  },
+  "open": "loft",
+  "steps": [
+    {
+      "note": "the ceiling is painted corner to corner like a block, and a right drag opens it to the sky again"
+    },
+    {
+      "tool": "ceiling"
+    },
+    {
+      "drag": {
+        "from": {
+          "x": 2,
+          "y": 2
+        },
+        "to": {
+          "x": 6,
+          "y": 5
+        }
+      }
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "shot": "a roof dragged over twenty cells, hatched while the ceiling is the layer being edited"
+    },
+    {
+      "drag": {
+        "from": {
+          "x": 5,
+          "y": 4
+        },
+        "to": {
+          "x": 6,
+          "y": 5
+        },
+        "button": "right"
+      }
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "shot": "a corner of it opened to the sky again"
+    },
+    {
+      "note": "a lamp is one press, like a prop, and only a lamp is erased on the lamps layer"
+    },
+    {
+      "tool": "ceiling lamp"
+    },
+    {
+      "cursor_cell": {
+        "x": 3,
+        "y": 3
+      }
+    },
+    {
+      "click": {}
+    },
+    {
+      "tool": "tube lamp"
+    },
+    {
+      "cursor_cell": {
+        "x": 8,
+        "y": 3
+      }
+    },
+    {
+      "click": {}
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "click": {
+        "button": "right"
+      }
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "tool": "floor"
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "shot": "a lamp hung in the room, and the hatch gone with the ceiling layer"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    },
+    {
+      "expect_ceiling": {
+        "map": "loft",
+        "x": 2,
+        "y": 2,
+        "roofed": true
+      }
+    },
+    {
+      "expect_ceiling": {
+        "map": "loft",
+        "x": 4,
+        "y": 3,
+        "roofed": true
+      }
+    },
+    {
+      "expect_ceiling": {
+        "map": "loft",
+        "x": 6,
+        "y": 5,
+        "roofed": false
+      }
+    },
+    {
+      "expect_ceiling": {
+        "map": "loft",
+        "x": 5,
+        "y": 4,
+        "roofed": false
+      }
+    },
+    {
+      "expect_ceiling": {
+        "map": "loft",
+        "x": 7,
+        "y": 3,
+        "roofed": false
+      }
+    },
+    {
+      "expect_objects": {
+        "map": "loft",
+        "layer": "lamps",
+        "count": 1
+      }
+    },
+    {
+      "expect_objects": {
+        "map": "loft",
+        "layer": "lamps",
+        "kind": "ceiling lamp",
+        "count": 1
+      }
+    },
+    {
+      "note": "and what the editor saved is what the game lights"
+    },
+    {
+      "press": "loft"
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 1
+      }
+    }
+  ]
+}
