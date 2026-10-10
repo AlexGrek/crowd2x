@@ -215,6 +215,11 @@ impl Features {
         }
     }
 
+    /// Every working feature of `kind`, sorted by cell.
+    pub fn cells_of(&self, kind: FeatureKind) -> &[Point] {
+        self.cells(kind)
+    }
+
     pub fn count(&self, kind: FeatureKind) -> usize {
         self.cells(kind).len()
     }

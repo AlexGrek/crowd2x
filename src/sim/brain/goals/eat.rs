@@ -21,7 +21,7 @@ use crate::sim::item::ItemKind;
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::super::tasks::{CLOSE_SECONDS, OPEN_SECONDS};
-use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
+use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 
 /// A couple of world minutes at the fridge getting food out of it. Eating it
 /// takes [`CHEW_SECONDS`](crate::sim::item::CHEW_SECONDS).
@@ -84,10 +84,8 @@ impl Stage {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct EatGoal {
     stage: Stage,
-    /// The fridge, by cell.
-    target: Option<Point>,
-    /// Walks to the fridge blocked by a body so far, in a row.
-    retries: u8,
+    /// Which place it is going to, and how the way there has gone.
+    seek: Seek,
 }
 
 impl EatGoal {
@@ -124,7 +122,7 @@ impl EatGoal {
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
         let held = held(ctx);
         if held != Some(ItemKind::Food) {
-            let Some(fridge) = self.target else {
+            let Some(fridge) = self.seek.target else {
                 return false;
             };
             let stand = stand_beside(ctx, fridge);
@@ -140,7 +138,7 @@ impl EatGoal {
             let _ = ctx.tasks.push_back(Task::open_fridge(fridge, OPEN_SECONDS));
             let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Food, TAKE_SECONDS));
             let _ = ctx.tasks.push_back(Task::close_fridge(fridge, CLOSE_SECONDS));
-        } else if let Some(fridge) = self.target
+        } else if let Some(fridge) = self.seek.target
             && ctx.body.center_position().manhattan_distance(fridge) <= 1
             && ctx.think.fridges.is_open(fridge)
         {
@@ -155,13 +153,12 @@ impl EatGoal {
 
     fn forget(&mut self) {
         self.stage = Stage::Finding;
-        self.target = None;
-        self.retries = 0;
+        self.seek.forget();
     }
 
     /// The meal is over: say so, and start the next one from scratch.
     fn eaten(&mut self, ctx: &GoalCtx<'_>) {
-        let line = match self.target {
+        let line = match self.seek.target {
             Some(fridge) => format!("{} ate at the fridge at {}, {}", ctx.body.uid(), fridge.x, fridge.y),
             None => format!("{} ate what it was carrying", ctx.body.uid()),
         };
@@ -188,10 +185,10 @@ impl GoalExecutor for EatGoal {
     /// The half-walked route is gone — the brain dropped it — but the fridge
     /// is not, so what is left of the meal goes back on the queue.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() && held(ctx) != Some(ItemKind::Food) {
+        if self.seek.target.is_none() && held(ctx) != Some(ItemKind::Food) {
             return;
         }
-        self.retries = 0;
+        self.seek.steady();
         if !self.plan(ctx) {
             self.forget();
         }
@@ -216,16 +213,14 @@ impl GoalExecutor for EatGoal {
         match (last, ctx.finished) {
             (TaskResult::Failed, Some(Task::MoveTo(_))) => {
                 ctx.tasks.clear();
-                if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    // Somebody in the way of the fridge: bodies move. Give them
-                    // a moment, then set off again.
-                    self.retries += 1;
-                    let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
-                    if self.plan(ctx) {
-                        return GoalProgress::Working;
-                    }
+                // A body in the way: wait and try again. No way there, or
+                // no end to the crowd: remember it as out of reach and try
+                // the next one (see `Seek`).
+                if self.seek.setback(ctx, |ctx| nearest_in_reach(ctx, FeatureKind::Food)) && self.plan(ctx) {
+                    return GoalProgress::Working;
                 }
-                // No way to the fridge, or no end to the crowd round it.
+                // Nowhere left to try: give up on this visit rather than
+                // retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
             }
@@ -243,7 +238,7 @@ impl GoalExecutor for EatGoal {
             }
             (TaskResult::Success, finished) => {
                 if let Some(Task::MoveTo(_)) = finished {
-                    self.retries = 0;
+                    self.seek.steady();
                 }
                 self.stage = Stage::of(ctx.tasks.front());
             }
@@ -256,11 +251,10 @@ impl GoalExecutor for EatGoal {
 
         // Nothing queued: start, or start again.
         if held(ctx) != Some(ItemKind::Food) {
-            let here = ctx.body.center_position();
-            let Some(fridge) = ctx.think.features.nearest(FeatureKind::Food, here) else {
+            let Some(fridge) = choose_nearest(ctx, FeatureKind::Food) else {
                 return GoalProgress::Blocked;
             };
-            self.target = Some(fridge);
+            self.seek.choose(fridge);
         }
         if self.plan(ctx) {
             GoalProgress::Working
@@ -275,7 +269,7 @@ impl GoalExecutor for EatGoal {
             ("stage", self.stage.name().to_string()),
             (
                 "fridge",
-                match self.target {
+                match self.seek.target {
                     Some(cell) => format!("{}, {}", cell.x, cell.y),
                     None => "none".to_string(),
                 },
@@ -565,8 +559,7 @@ mod tests {
 
         let mut goal = EatGoal {
             stage: Stage::Finding,
-            target: Some(fridge),
-            retries: 0,
+            seek: Seek::at(fridge),
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(4, 5));
         let mut memory = Memory::default();
@@ -608,8 +601,7 @@ mod tests {
 
         let mut goal = EatGoal {
             stage: Stage::Finding,
-            target: Some(fridge),
-            retries: 0,
+            seek: Seek::at(fridge),
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut memory = Memory::default();
@@ -659,5 +651,55 @@ mod tests {
         // Wandering asks for a route every few seconds; a fridge retried
         // every tick would be a thousand.
         assert!(routes < 100, "{routes} routes in 1000 ticks");
+    }
+
+    #[test]
+    fn a_walled_off_fridge_is_passed_over_on_the_spot_for_one_that_can_be_reached() {
+        // The nearer fridge, as the crow flies, is sealed in a room. The
+        // same mechanism as the toilet's (`Seek`), so a fridge it could not
+        // get to is remembered, and the next one is gone for at once.
+        let mut map = Map::new(Size::new(16, 12), FLOOR);
+        for i in 0..5 {
+            map.set_terrain(Point::new(i, 4), WALL);
+            map.set_terrain(Point::new(4, i), WALL);
+        }
+        prop_at(&mut map, "fridge", Point::new(1, 1));
+        prop_at(&mut map, "fridge", Point::new(14, 10));
+        let mut world = World::new(map);
+        let mut human = hungry_human(Point::new(5, 5), 95.0);
+
+        crate::sim::walker::ROUTES_ASKED.with(|asked| asked.set(0));
+        let mut held_off = false;
+        for _ in 0..3000 {
+            world.step(&mut human);
+            held_off |= human.brain().goals().cooldown(GoalId::Eat) > 0;
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        let routes = crate::sim::walker::ROUTES_ASKED.with(|asked| asked.get());
+        assert!(world.log_contains("gave up on reaching 1, 1"), "lines: {:?}", world.lines());
+        assert!(world.log_contains("ate at the fridge at 14, 10"), "brain: {:?}", human.brain_fields());
+        assert!(!held_off, "the sealed fridge should have been swapped for the other on the spot");
+        assert!(routes < 20, "{routes} routes for one rerouted meal");
+    }
+
+    #[test]
+    fn a_fridge_given_up_on_for_food_is_not_gone_back_to_for_a_drink() {
+        // Memory is of places, not of what they were wanted for: a fridge is
+        // food and water, and it is just as out of reach for either.
+        let mut map = Map::new(Size::new(16, 12), FLOOR);
+        prop_at(&mut map, "fridge", Point::new(6, 6));
+        prop_at(&mut map, "fridge", Point::new(13, 6));
+        let mut world = World::new(map);
+        let mut human = needy_human(Point::new(5, 6), 0.0, 95.0, 0.0);
+        human.brain_mut().memory_mut().out_of_reach_mut().remember(Point::new(6, 6), 0.0);
+        for _ in 0..3000 {
+            world.step(&mut human);
+            if world.drinks() > 0 {
+                break;
+            }
+        }
+        assert!(world.log_contains("drank at the fridge at 13, 6"), "brain: {:?}", human.brain_fields());
     }
 }

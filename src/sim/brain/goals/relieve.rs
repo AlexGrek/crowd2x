@@ -15,7 +15,7 @@ use crate::sim::feature::FeatureKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
-use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
+use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 
 /// Five world minutes on the toilet — two and a half seconds of watching,
 /// written in world units like every duration a body is watched standing
@@ -30,13 +30,14 @@ pub const TOILET_SECONDS: f32 = watched(5.0 * MINUTE);
 /// simply blocked, exactly as one standing in a doorway would be. What this
 /// goal remembers is the toilet it chose and how many times in a row either
 /// the walk there or the step inside it has been refused.
+///
+/// A toilet it gives up on is remembered as out of reach for a while
+/// ([`crate::sim::brain::memory::OutOfReach`]) and the next nearest is tried
+/// instead, so a crowd at one door spreads out over the others.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct RelieveGoal {
-    /// The toilet, by cell.
-    target: Option<Point>,
-    /// Walks to the toilet, or attempts to step inside it, blocked by a body
-    /// so far, in a row.
-    retries: u8,
+    /// Which place it is going to, and how the way there has gone.
+    seek: Seek,
 }
 
 impl RelieveGoal {
@@ -48,7 +49,7 @@ impl RelieveGoal {
     /// walk beside the toilet (unless already there), use it. `false` when
     /// there is nowhere to stand to use it.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
-        let Some(toilet) = self.target else {
+        let Some(toilet) = self.seek.target else {
             return false;
         };
         match stand_beside(ctx, toilet) {
@@ -63,8 +64,7 @@ impl RelieveGoal {
     }
 
     fn forget(&mut self) {
-        self.target = None;
-        self.retries = 0;
+        self.seek.forget();
     }
 
     /// Done: say so, and start the next visit from scratch.
@@ -83,10 +83,10 @@ impl GoalExecutor for RelieveGoal {
 
     /// The half-walked route is gone, the toilet is not.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() {
+        if self.seek.target.is_none() {
             return;
         }
-        self.retries = 0;
+        self.seek.steady();
         if !self.plan(ctx) {
             self.forget();
         }
@@ -115,19 +115,14 @@ impl GoalExecutor for RelieveGoal {
                 // toilet when this one tried to step in — either way,
                 // something a moving body caused, so it may move again.
                 ctx.tasks.clear();
-                if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    // Give them a moment, then set off again — which,
-                    // starting from beside it already, is straight back to
-                    // trying to step in.
-                    self.retries += 1;
-                    let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
-                    if self.plan(ctx) {
-                        return GoalProgress::Working;
-                    }
+                // A body in the way: wait and try again. No way there, or
+                // no end to the crowd: remember it as out of reach and try
+                // the next one (see `Seek`).
+                if self.seek.setback(ctx, |ctx| nearest_in_reach(ctx, FeatureKind::Toilet)) && self.plan(ctx) {
+                    return GoalProgress::Working;
                 }
-                // No way to the toilet, no end to the crowd round it, or it
-                // is still occupied after waiting: any of them means giving
-                // up on this visit rather than retrying every tick.
+                // Nowhere left to try: give up on this visit rather than
+                // retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
             }
@@ -142,7 +137,7 @@ impl GoalExecutor for RelieveGoal {
                 self.relieved(ctx, task.toilet);
                 return GoalProgress::Achieved;
             }
-            (TaskResult::Success, Some(Task::MoveTo(_))) => self.retries = 0,
+            (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
             _ => {}
         }
 
@@ -151,11 +146,10 @@ impl GoalExecutor for RelieveGoal {
         }
 
         // Nothing queued: start, or start again.
-        let here = ctx.body.center_position();
-        let Some(toilet) = ctx.think.features.nearest(FeatureKind::Toilet, here) else {
+        let Some(toilet) = choose_nearest(ctx, FeatureKind::Toilet) else {
             return GoalProgress::Blocked;
         };
-        self.target = Some(toilet);
+        self.seek.choose(toilet);
         if self.plan(ctx) {
             GoalProgress::Working
         } else {
@@ -167,7 +161,7 @@ impl GoalExecutor for RelieveGoal {
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         vec![(
             "toilet",
-            match self.target {
+            match self.seek.target {
                 Some(cell) => format!("{}, {}", cell.x, cell.y),
                 None => "none".to_string(),
             },
@@ -181,7 +175,9 @@ mod tests {
     use crate::map::{Map, Size, FLOOR, WALL};
     use crate::sim::biology::ProcessId;
     use crate::sim::brain::routines::RELIEVED;
+    use crate::sim::brain::memory::OUT_OF_REACH_FOR;
     use crate::sim::brain::GoalId;
+    use crate::sim::clock::{Clock, TIME_SCALE};
     use crate::sim::testing::{needy_human, prop_at, World};
     use crate::sim::uid::{EntityType, Uid};
     use crate::sim::{GameEntity, Human};
@@ -292,6 +288,105 @@ mod tests {
         assert_eq!(world.reliefs(), 0);
         assert_eq!(human.brain().top_goal(), GoalId::Wander);
         assert!(human.brain().goals().cooldown(GoalId::Relieve) > 0, "the toilet should be held off");
+    }
+
+    #[test]
+    fn a_toilet_that_stays_taken_is_remembered_and_the_next_nearest_is_used_instead() {
+        let mut map = Map::new(Size::new(16, 12), FLOOR);
+        let near = Point::new(6, 6);
+        let far = Point::new(13, 6);
+        prop_at(&mut map, "toilet", near);
+        prop_at(&mut map, "toilet", far);
+        let mut world = World::new(map);
+        let occupant = Uid::new(EntityType::Human, 999);
+        world.occupancy.claim(near, occupant).expect("empty at the start");
+
+        let mut human = bursting_human(Point::new(5, 6), 95.0);
+        let mut held_off = false;
+        for _ in 0..2000 {
+            world.step(&mut human);
+            held_off |= human.brain().goals().cooldown(GoalId::Relieve) > 0;
+            if world.reliefs() > 0 {
+                break;
+            }
+        }
+        assert!(world.log_contains("gave up on reaching 6, 6"), "lines: {:?}", world.lines());
+        assert!(!held_off, "should have gone straight on to the next toilet, not given up the visit");
+        assert!(
+            world.log_contains("used the toilet at 13, 6"),
+            "should have gone on to the other toilet; brain: {:?}",
+            human.brain_fields()
+        );
+        let now = world.clock.elapsed();
+        assert!(human.brain().memory().out_of_reach().contains(near, now));
+    }
+
+    #[test]
+    fn a_walled_off_toilet_is_passed_over_for_one_that_can_be_reached() {
+        // The nearer toilet, as the crow flies, is sealed in a room.
+        let mut map = Map::new(Size::new(16, 12), FLOOR);
+        for i in 0..5 {
+            map.set_terrain(Point::new(i, 4), WALL);
+            map.set_terrain(Point::new(4, i), WALL);
+        }
+        prop_at(&mut map, "toilet", Point::new(1, 1));
+        prop_at(&mut map, "toilet", Point::new(14, 10));
+        let mut world = World::new(map);
+        let mut human = bursting_human(Point::new(5, 5), 95.0);
+
+        crate::sim::walker::ROUTES_ASKED.with(|asked| asked.set(0));
+        let mut held_off = false;
+        for _ in 0..3000 {
+            world.step(&mut human);
+            held_off |= human.brain().goals().cooldown(GoalId::Relieve) > 0;
+            if world.reliefs() > 0 {
+                break;
+            }
+        }
+        let routes = crate::sim::walker::ROUTES_ASKED.with(|asked| asked.get());
+        assert!(world.log_contains("used the toilet at 14, 10"), "brain: {:?}", human.brain_fields());
+        assert!(!held_off, "the sealed toilet should have been swapped for the other on the spot");
+        assert!(routes < 20, "{routes} routes for one rerouted visit");
+    }
+
+    #[test]
+    fn a_toilet_given_up_on_is_avoided_until_the_memory_of_it_fades() {
+        // Where the same bursting human ends up, having given up on the near
+        // toilet an hour of world ago less `early` seconds.
+        let goes_to = |early: f64| {
+            let mut map = Map::new(Size::new(16, 12), FLOOR);
+            prop_at(&mut map, "toilet", Point::new(6, 6));
+            prop_at(&mut map, "toilet", Point::new(13, 6));
+            let mut world = World::new(map);
+            let mut human = bursting_human(Point::new(5, 6), 95.0);
+            human.brain_mut().memory_mut().out_of_reach_mut().remember(Point::new(6, 6), 0.0);
+            world.clock = Clock::after_watching((OUT_OF_REACH_FOR - early) / TIME_SCALE as f64);
+            for _ in 0..3000 {
+                world.step(&mut human);
+                if world.reliefs() > 0 {
+                    return human.center_position();
+                }
+            }
+            panic!("never relieved; brain: {:?}", human.brain_fields());
+        };
+        assert_eq!(goes_to(60.0), Point::new(13, 6), "a minute short of forgiven: the far one");
+        assert_eq!(goes_to(0.0), Point::new(6, 6), "forgiven: the nearest again");
+    }
+
+    #[test]
+    fn a_lone_toilet_given_up_on_is_still_tried_again_rather_than_never() {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        prop_at(&mut map, "toilet", Point::new(6, 6));
+        let mut world = World::new(map);
+        let mut human = bursting_human(Point::new(5, 6), 95.0);
+        human.brain_mut().memory_mut().out_of_reach_mut().remember(Point::new(6, 6), 0.0);
+        for _ in 0..1000 {
+            world.step(&mut human);
+            if world.reliefs() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.reliefs(), 1, "the only toilet is still a toilet; brain: {:?}", human.brain_fields());
     }
 
     #[test]

@@ -78,7 +78,8 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
 - **Humans** (`human.rs`): a layered paperdoll — a base body with eyes, clothes, hair as
   child sprites, each a separate PNG in `assets/human/`. Add a look by dropping a 16x16
   PNG in `assets/human/` and adding its path to the matching array (`CLOTHES`, `EYES`,
-  `HAIR`); `Look::random` and `spawn` handle the rest. The scale lives on the root, so
+  `HAIR`); `Look::random` and `spawn` handle the rest. Hair and outfits are generated
+  from masks and palettes by `tools/human_art.py` — the `pixel-artist` skill. The scale lives on the root, so
   the layers cannot drift apart.
 - **Dogs** (`dog.rs`): a 4-frame idle atlas of 16x16 frames — the atlas grid is in source
   texels, not screen pixels (`FrameAnimation`, `src/animation.rs`), with a

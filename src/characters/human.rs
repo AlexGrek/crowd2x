@@ -2,7 +2,9 @@
 //!
 //! Every layer is a full 16x16 frame drawn at the same position, so a character
 //! is just a stack of sprites in a fixed order. Adding a new hairstyle or outfit
-//! means dropping a PNG into `assets/human/` and listing it here.
+//! means dropping a PNG into `assets/human/` and listing it here — or, for a
+//! new style or colour, adding a mask or palette to `tools/human_art.py`, which
+//! draws every hair and outfit layer and prints these lists.
 //!
 //! The stack is scaled once, on the root: the children inherit it, so a layer
 //! can never end up at a different scale from the body it is drawn on.
@@ -14,15 +16,102 @@ use super::{depth_for, snap_to_texel, upscale, Character, ART_SCALE};
 use crate::render::WORLD_LAYER;
 
 pub const BASE: &str = "human/human_base.png";
-pub(super) const CLOTHES: [&str; 2] = [
+// The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.
+pub(super) const CLOTHES: [&str; 24] = [
     "human/clothes_swimsuit_blue.png",
     "human/clothes_swimsuit_pink.png",
+    "human/clothes_sundress_red.png",
+    "human/clothes_sundress_yellow.png",
+    "human/clothes_sundress_green.png",
+    "human/clothes_sundress_white.png",
+    "human/clothes_sundress_teal.png",
+    "human/clothes_sundress_orange.png",
+    "human/clothes_sundress_purple.png",
+    "human/clothes_gown_red.png",
+    "human/clothes_gown_black.png",
+    "human/clothes_gown_navy.png",
+    "human/clothes_gown_purple.png",
+    "human/clothes_gown_white.png",
+    "human/clothes_gown_green.png",
+    "human/clothes_shorts_white_jeans.png",
+    "human/clothes_shorts_red_khaki.png",
+    "human/clothes_shorts_yellow_jeans.png",
+    "human/clothes_shorts_teal_charcoal.png",
+    "human/clothes_trousers_white_charcoal.png",
+    "human/clothes_trousers_black_jeans.png",
+    "human/clothes_trousers_green_khaki.png",
+    "human/clothes_trousers_navy_brown.png",
+    "human/clothes_trousers_orange_jeans.png",
 ];
 pub(super) const EYES: [&str; 1] = ["human/eyes_brown.png"];
-pub(super) const HAIR: [&str; 3] = [
-    "human/hair_blonde.png",
-    "human/hair_blonde_longer.png",
-    "human/hair_blue.png",
+// Drawn by `tools/human_art.py generate`, which prints this list.
+pub(super) const HAIR: [&str; 66] = [
+    "human/hair_bob_blonde.png",
+    "human/hair_bob_black.png",
+    "human/hair_bob_brown.png",
+    "human/hair_bob_auburn.png",
+    "human/hair_bob_ginger.png",
+    "human/hair_bob_grey.png",
+    "human/hair_bob_blue.png",
+    "human/hair_bob_pink.png",
+    "human/hair_long_blonde.png",
+    "human/hair_long_black.png",
+    "human/hair_long_brown.png",
+    "human/hair_long_auburn.png",
+    "human/hair_long_ginger.png",
+    "human/hair_long_grey.png",
+    "human/hair_long_purple.png",
+    "human/hair_very_long_blonde.png",
+    "human/hair_very_long_black.png",
+    "human/hair_very_long_brown.png",
+    "human/hair_very_long_auburn.png",
+    "human/hair_very_long_ginger.png",
+    "human/hair_very_long_grey.png",
+    "human/hair_crop_blonde.png",
+    "human/hair_crop_black.png",
+    "human/hair_crop_brown.png",
+    "human/hair_crop_auburn.png",
+    "human/hair_crop_ginger.png",
+    "human/hair_crop_grey.png",
+    "human/hair_crop_blue.png",
+    "human/hair_crop_green.png",
+    "human/hair_swept_blonde.png",
+    "human/hair_swept_black.png",
+    "human/hair_swept_brown.png",
+    "human/hair_swept_auburn.png",
+    "human/hair_swept_ginger.png",
+    "human/hair_swept_grey.png",
+    "human/hair_swept_green.png",
+    "human/hair_mohawk_blonde.png",
+    "human/hair_mohawk_black.png",
+    "human/hair_mohawk_brown.png",
+    "human/hair_mohawk_auburn.png",
+    "human/hair_mohawk_ginger.png",
+    "human/hair_mohawk_grey.png",
+    "human/hair_mohawk_pink.png",
+    "human/hair_mohawk_green.png",
+    "human/hair_bun_blonde.png",
+    "human/hair_bun_black.png",
+    "human/hair_bun_brown.png",
+    "human/hair_bun_auburn.png",
+    "human/hair_bun_ginger.png",
+    "human/hair_bun_grey.png",
+    "human/hair_bun_purple.png",
+    "human/hair_pigtails_blonde.png",
+    "human/hair_pigtails_black.png",
+    "human/hair_pigtails_brown.png",
+    "human/hair_pigtails_auburn.png",
+    "human/hair_pigtails_ginger.png",
+    "human/hair_pigtails_grey.png",
+    "human/hair_pigtails_blue.png",
+    "human/hair_pigtails_pink.png",
+    "human/hair_afro_blonde.png",
+    "human/hair_afro_black.png",
+    "human/hair_afro_brown.png",
+    "human/hair_afro_auburn.png",
+    "human/hair_afro_ginger.png",
+    "human/hair_afro_grey.png",
+    "human/hair_afro_purple.png",
 ];
 
 /// Depth offsets within a single character, applied on top of `depth_for`.

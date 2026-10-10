@@ -124,6 +124,11 @@ impl Human {
     }
 
     #[cfg(test)]
+    pub(crate) fn brain_mut(&mut self) -> &mut Brain {
+        &mut self.brain
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_hunger(&mut self, hunger: f32) {
         self.biology.edit(|stats| stats.with_hunger(hunger));
     }

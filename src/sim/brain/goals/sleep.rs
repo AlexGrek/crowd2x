@@ -25,6 +25,13 @@
 //!    not take a bed that is not theirs; somebody who cannot go on will.
 //! 4. Otherwise **nothing**: the goal is held off like any other that found
 //!    itself impossible, and the unit stays up.
+//!
+//! A bed it could not get to, or into, is remembered as out of reach for a
+//! while ([`OutOfReach`](crate::sim::brain::memory::OutOfReach)) and passed
+//! over in 2 and 3 for any bed that is not — so one critically tired tries
+//! another bed rather than the same jammed door. Straight after giving up that
+//! is final; at the start of the next stretch a remembered bed is still taken
+//! if nothing else will do, so nobody is kept from their own bed by a memory.
 
 use crate::map::Point;
 use crate::sim::clock::{watched, HOUR};
@@ -35,7 +42,7 @@ use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::memory::{Recall, HOME_BED};
 use super::super::routines::CRITICALLY_TIRED;
 use super::super::task::{Task, TaskResult};
-use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
+use super::{stand_beside, Seek, Stand};
 
 /// One stretch of sleep: an hour of world in bed, thirty seconds of watching
 /// it. Written in world units like every duration a body is watched standing
@@ -50,11 +57,8 @@ pub const SLEEP_SECONDS: f32 = watched(HOUR);
 /// goal being put down.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct SleepGoal {
-    /// The bed, by cell.
-    target: Option<Point>,
-    /// Walks to the bed, or attempts to get into it, blocked by a body so far,
-    /// in a row.
-    retries: u8,
+    /// Which place it is going to, and how the way there has gone.
+    seek: Seek,
 }
 
 impl SleepGoal {
@@ -65,7 +69,12 @@ impl SleepGoal {
     /// Which bed the next stretch is in, or `None` when there is not one this
     /// unit will take — see the module docs for the order. Reads the crowd
     /// for the cells of beds and nothing else.
-    fn choose(&self, ctx: &GoalCtx<'_>) -> Option<Point> {
+    ///
+    /// Beds it gave up on getting to lately are passed over. When `rerouting`
+    /// — straight after giving up on one — that is the end of it; at the start
+    /// of a stretch, a remembered bed is still taken if no other will do, the
+    /// way [`super::choose_nearest`] treats a lone toilet.
+    fn choose(ctx: &GoalCtx<'_>, rerouting: bool) -> Option<Point> {
         let think = ctx.think;
         let here = ctx.body.center_position();
         let uid = ctx.body.uid();
@@ -75,29 +84,36 @@ impl SleepGoal {
             return Some(here);
         }
 
-        let free = |bed: Point| think.occupancy.is_free_for(bed, uid);
-
-        // Its own, by default.
-        if let Some(&Recall::Cell(home)) = ctx.memory.get(HOME_BED)
-            && free(home)
-        {
-            return Some(home);
-        }
-
-        // Anybody's, only when it cannot go on.
+        let now = think.clock.elapsed();
+        let places = ctx.memory.out_of_reach();
+        let home = match ctx.memory.get(HOME_BED) {
+            Some(&Recall::Cell(home)) => Some(home),
+            _ => None,
+        };
         let critical = ctx.biology.is_some_and(|biology| biology.stats().tiredness() >= CRITICALLY_TIRED);
-        if !critical {
-            return None;
-        }
-        let mut rng = tick_rng(uid, think.tick);
-        think.features.pick_where(FeatureKind::Bed, &mut rng, free)
+        let pick = |remembered_too: bool| {
+            let free = |bed: Point| think.occupancy.is_free_for(bed, uid) && (remembered_too || !places.contains(bed, now));
+            // Its own, by default.
+            if let Some(home) = home
+                && free(home)
+            {
+                return Some(home);
+            }
+            // Anybody's, only when it cannot go on.
+            if !critical {
+                return None;
+            }
+            let mut rng = tick_rng(uid, think.tick);
+            think.features.pick_where(FeatureKind::Bed, &mut rng, free)
+        };
+        pick(false).or_else(|| if rerouting { None } else { pick(true) })
     }
 
     /// Queue the rest **from what is true now**, on the back of the queue:
     /// walk beside the bed (unless already there or in it), sleep in it.
     /// `false` when there is nowhere to stand to get in.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
-        let Some(bed) = self.target else {
+        let Some(bed) = self.seek.target else {
             return false;
         };
         match stand_beside(ctx, bed) {
@@ -112,8 +128,7 @@ impl SleepGoal {
     }
 
     fn forget(&mut self) {
-        self.target = None;
-        self.retries = 0;
+        self.seek.forget();
     }
 
     /// One stretch done: say so, and start the next from scratch.
@@ -132,10 +147,10 @@ impl GoalExecutor for SleepGoal {
 
     /// The half-walked route is gone, the bed is not.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() {
+        if self.seek.target.is_none() {
             return;
         }
-        self.retries = 0;
+        self.seek.steady();
         if !self.plan(ctx) {
             self.forget();
         }
@@ -163,15 +178,13 @@ impl GoalExecutor for SleepGoal {
                 // when this one tried to get in — something a moving body
                 // caused, so it may move again.
                 ctx.tasks.clear();
-                if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    self.retries += 1;
-                    let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
-                    if self.plan(ctx) {
-                        return GoalProgress::Working;
-                    }
+                // A body in the way: wait and try again. No way there, or
+                // no end to the crowd: remember it as out of reach and try
+                // the next one (see `Seek`).
+                if self.seek.setback(ctx, |ctx| SleepGoal::choose(ctx, true)) && self.plan(ctx) {
+                    return GoalProgress::Working;
                 }
-                // No way to the bed, no end to the crowd round it, or it is
-                // still taken after waiting: give up on this bed rather than
+                // Nowhere left to try: give up on this visit rather than
                 // retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
@@ -187,7 +200,7 @@ impl GoalExecutor for SleepGoal {
                 self.slept(ctx, task.bed);
                 return GoalProgress::Achieved;
             }
-            (TaskResult::Success, Some(Task::MoveTo(_))) => self.retries = 0,
+            (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
             _ => {}
         }
 
@@ -196,10 +209,10 @@ impl GoalExecutor for SleepGoal {
         }
 
         // Nothing queued: start, or start again.
-        let Some(bed) = self.choose(ctx) else {
+        let Some(bed) = SleepGoal::choose(ctx, false) else {
             return GoalProgress::Blocked;
         };
-        self.target = Some(bed);
+        self.seek.choose(bed);
         if self.plan(ctx) {
             GoalProgress::Working
         } else {
@@ -211,7 +224,7 @@ impl GoalExecutor for SleepGoal {
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         vec![(
             "bed",
-            match self.target {
+            match self.seek.target {
                 Some(cell) => format!("{}, {}", cell.x, cell.y),
                 None => "none".to_string(),
             },

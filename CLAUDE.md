@@ -58,6 +58,7 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | `GameState`, passes, movement, entities, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
+| Drawing new art: hair, dresses, outfits, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
 
@@ -107,6 +108,7 @@ src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]
 src/debug.rs            env-var driven capture harness                      [debugger]
 src/awake.rs            macOS: hold the display awake during a run
 tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wiring
+tools/human_art.py      draws the paperdoll's hair and outfits     [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

@@ -1843,6 +1843,55 @@ mod tests {
     }
 
     #[test]
+    fn a_crowd_jammed_round_one_toilet_spreads_out_to_another_instead_of_waiting_on_it() {
+        // A dozen bursting humans round the near toilet, which takes one at a
+        // time; a second toilet across the room. Without a memory of where
+        // they gave up, every one of them would go back to the nearest after
+        // its cooldown and the far toilet would never be used.
+        let build = || {
+            let mut map = Map::new(Size::new(28, 12), FLOOR);
+            crate::sim::testing::prop_at(&mut map, "toilet", Point::new(4, 6));
+            crate::sim::testing::prop_at(&mut map, "toilet", Point::new(25, 6));
+            crate::map::utilities::serve_everything(&mut map, Point::new(0, 0), Point::new(27, 0));
+            let mut state = GameState::new(map, 7);
+            let mut uids = Vec::new();
+            for i in 0..12 {
+                uids.push(state.spawn(EntityType::Human, Point::new(2 + i % 6, 4 + (i / 6) * 4)));
+            }
+            for uid in uids {
+                let biology = state.entities.get_mut(uid).unwrap().biology_mut().unwrap();
+                biology.edit(|_| {
+                    crate::sim::biology::Stats::calm()
+                        .with_hunger(0.0)
+                        .with_thirst(0.0)
+                        .with_fun(100.0)
+                        .with_stamina(100.0)
+                        .with_bladder(95.0)
+                });
+            }
+            state
+        };
+        let mut state = build();
+        let mut lines = Vec::new();
+        for _ in 0..3000 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+        }
+        let count = |needle: &str| lines.iter().filter(|l| l.contains(needle)).count();
+        assert!(count("gave up on reaching 4, 6") > 0, "nobody gave up on the near toilet");
+        assert!(count("used the toilet at 25, 6") > 0, "nobody went on to the far toilet");
+        assert!(count("used the toilet at 4, 6") > 0, "and the near one still got used");
+
+        // ...and the same twice.
+        let mut again = build();
+        run(&mut again, 3000);
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect()
+        };
+        assert_eq!(positions(&state), positions(&again));
+    }
+
+    #[test]
     fn a_frozen_entity_does_not_plan_while_it_is_held() {
         // Its brain would find no action running every tick and ask for work
         // every tick; a search it can never walk is a search for nothing.
@@ -1884,7 +1933,8 @@ mod tests {
         // countdown and the time owed per priority — is 32 bytes more (608).
         // Perception keeps a heading and two counts inline and attention its
         // faces boxed, out of line, for exactly this; company in recent memory
-        // is one more familiarity.
+        // is one more familiarity. The places a unit gave up on reaching are
+        // boxed in its memory for the same reason (624 -> 632).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
         assert!(human <= 640, "a Human is {human} bytes, {brain} of them brain");

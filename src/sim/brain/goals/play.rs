@@ -21,7 +21,7 @@ use crate::sim::feature::FeatureKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
-use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
+use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 
 /// Half an hour at the computer — fifteen seconds of watching it, written in
 /// world units like every duration a body is watched standing through (see
@@ -40,10 +40,8 @@ pub const PLAY_SECONDS: f32 = watched(30.0 * MINUTE);
 /// walk there has been refused by a body in the way.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct PlayGoal {
-    /// The computer, by cell.
-    target: Option<Point>,
-    /// Walks to it blocked by a body so far, in a row.
-    retries: u8,
+    /// Which place it is going to, and how the way there has gone.
+    seek: Seek,
 }
 
 impl PlayGoal {
@@ -55,7 +53,7 @@ impl PlayGoal {
     /// walk beside the computer (unless already there), use it. `false` when
     /// there is nowhere to stand to use it.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
-        let Some(computer) = self.target else {
+        let Some(computer) = self.seek.target else {
             return false;
         };
         match stand_beside(ctx, computer) {
@@ -70,8 +68,7 @@ impl PlayGoal {
     }
 
     fn forget(&mut self) {
-        self.target = None;
-        self.retries = 0;
+        self.seek.forget();
     }
 
     /// The go is over: say so, and start the next one from scratch.
@@ -93,10 +90,10 @@ impl GoalExecutor for PlayGoal {
 
     /// The half-walked route is gone, the computer is not.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() {
+        if self.seek.target.is_none() {
             return;
         }
-        self.retries = 0;
+        self.seek.steady();
         if !self.plan(ctx) {
             self.forget();
         }
@@ -122,17 +119,14 @@ impl GoalExecutor for PlayGoal {
         match (last, ctx.finished) {
             (TaskResult::Failed, Some(Task::MoveTo(_))) => {
                 ctx.tasks.clear();
-                if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    // Somebody in the way of the desk: bodies move. Give them
-                    // a moment, then set off again.
-                    self.retries += 1;
-                    let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
-                    if self.plan(ctx) {
-                        return GoalProgress::Working;
-                    }
+                // A body in the way: wait and try again. No way there, or
+                // no end to the crowd: remember it as out of reach and try
+                // the next one (see `Seek`).
+                if self.seek.setback(ctx, |ctx| nearest_in_reach(ctx, FeatureKind::Entertainment)) && self.plan(ctx) {
+                    return GoalProgress::Working;
                 }
-                // No way there, or no end to the crowd round it: give up on
-                // this go rather than retrying every tick.
+                // Nowhere left to try: give up on this visit rather than
+                // retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
             }
@@ -147,7 +141,7 @@ impl GoalExecutor for PlayGoal {
                 self.played(ctx, task.computer);
                 return GoalProgress::Achieved;
             }
-            (TaskResult::Success, Some(Task::MoveTo(_))) => self.retries = 0,
+            (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
             _ => {}
         }
 
@@ -156,11 +150,10 @@ impl GoalExecutor for PlayGoal {
         }
 
         // Nothing queued: start, or start again.
-        let here = ctx.body.center_position();
-        let Some(computer) = ctx.think.features.nearest(FeatureKind::Entertainment, here) else {
+        let Some(computer) = choose_nearest(ctx, FeatureKind::Entertainment) else {
             return GoalProgress::Blocked;
         };
-        self.target = Some(computer);
+        self.seek.choose(computer);
         if self.plan(ctx) {
             GoalProgress::Working
         } else {
@@ -172,7 +165,7 @@ impl GoalExecutor for PlayGoal {
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         vec![(
             "computer",
-            match self.target {
+            match self.seek.target {
                 Some(cell) => format!("{}, {}", cell.x, cell.y),
                 None => "none".to_string(),
             },

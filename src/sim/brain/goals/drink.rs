@@ -18,7 +18,7 @@ use crate::sim::item::ItemKind;
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::super::tasks::{CLOSE_SECONDS, OPEN_SECONDS};
-use super::{stand_beside, Stand, PATIENCE, WAIT_FOR_A_GAP};
+use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 
 /// A world minute at the fridge getting a drink out of it: half as long as
 /// food. Drinking it takes [`SIP_SECONDS`](crate::sim::item::SIP_SECONDS).
@@ -80,10 +80,8 @@ impl Stage {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct DrinkGoal {
     stage: Stage,
-    /// The fridge, by cell.
-    target: Option<Point>,
-    /// Walks to the fridge blocked by a body so far, in a row.
-    retries: u8,
+    /// Which place it is going to, and how the way there has gone.
+    seek: Seek,
 }
 
 impl DrinkGoal {
@@ -109,7 +107,7 @@ impl DrinkGoal {
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
         let held = held(ctx);
         if held != Some(ItemKind::Water) {
-            let Some(fridge) = self.target else {
+            let Some(fridge) = self.seek.target else {
                 return false;
             };
             let stand = stand_beside(ctx, fridge);
@@ -125,7 +123,7 @@ impl DrinkGoal {
             let _ = ctx.tasks.push_back(Task::open_fridge(fridge, OPEN_SECONDS));
             let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Water, POUR_SECONDS));
             let _ = ctx.tasks.push_back(Task::close_fridge(fridge, CLOSE_SECONDS));
-        } else if let Some(fridge) = self.target
+        } else if let Some(fridge) = self.seek.target
             && ctx.body.center_position().manhattan_distance(fridge) <= 1
             && ctx.think.fridges.is_open(fridge)
         {
@@ -140,13 +138,12 @@ impl DrinkGoal {
 
     fn forget(&mut self) {
         self.stage = Stage::Finding;
-        self.target = None;
-        self.retries = 0;
+        self.seek.forget();
     }
 
     /// The drink is over: say so, and start the next one from scratch.
     fn drunk(&mut self, ctx: &GoalCtx<'_>) {
-        let line = match self.target {
+        let line = match self.seek.target {
             Some(fridge) => format!("{} drank at the fridge at {}, {}", ctx.body.uid(), fridge.x, fridge.y),
             None => format!("{} drank what it was carrying", ctx.body.uid()),
         };
@@ -173,10 +170,10 @@ impl GoalExecutor for DrinkGoal {
     /// The half-walked route is gone — the brain dropped it — but the fridge
     /// is not, so what is left of the drink goes back on the queue.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
-        if self.target.is_none() && held(ctx) != Some(ItemKind::Water) {
+        if self.seek.target.is_none() && held(ctx) != Some(ItemKind::Water) {
             return;
         }
-        self.retries = 0;
+        self.seek.steady();
         if !self.plan(ctx) {
             self.forget();
         }
@@ -201,16 +198,14 @@ impl GoalExecutor for DrinkGoal {
         match (last, ctx.finished) {
             (TaskResult::Failed, Some(Task::MoveTo(_))) => {
                 ctx.tasks.clear();
-                if ctx.blocked_by.is_some() && self.retries < PATIENCE && self.target.is_some() {
-                    // Somebody in the way of the fridge: bodies move. Give them
-                    // a moment, then set off again.
-                    self.retries += 1;
-                    let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
-                    if self.plan(ctx) {
-                        return GoalProgress::Working;
-                    }
+                // A body in the way: wait and try again. No way there, or
+                // no end to the crowd: remember it as out of reach and try
+                // the next one (see `Seek`).
+                if self.seek.setback(ctx, |ctx| nearest_in_reach(ctx, FeatureKind::Water)) && self.plan(ctx) {
+                    return GoalProgress::Working;
                 }
-                // No way to the fridge, or no end to the crowd round it.
+                // Nowhere left to try: give up on this visit rather than
+                // retrying every tick.
                 self.forget();
                 return GoalProgress::Blocked;
             }
@@ -227,7 +222,7 @@ impl GoalExecutor for DrinkGoal {
             }
             (TaskResult::Success, finished) => {
                 if let Some(Task::MoveTo(_)) = finished {
-                    self.retries = 0;
+                    self.seek.steady();
                 }
                 self.stage = Stage::of(ctx.tasks.front());
             }
@@ -240,11 +235,10 @@ impl GoalExecutor for DrinkGoal {
 
         // Nothing queued: start, or start again.
         if held(ctx) != Some(ItemKind::Water) {
-            let here = ctx.body.center_position();
-            let Some(fridge) = ctx.think.features.nearest(FeatureKind::Water, here) else {
+            let Some(fridge) = choose_nearest(ctx, FeatureKind::Water) else {
                 return GoalProgress::Blocked;
             };
-            self.target = Some(fridge);
+            self.seek.choose(fridge);
         }
         if self.plan(ctx) {
             GoalProgress::Working
@@ -259,7 +253,7 @@ impl GoalExecutor for DrinkGoal {
             ("stage", self.stage.name().to_string()),
             (
                 "fridge",
-                match self.target {
+                match self.seek.target {
                     Some(cell) => format!("{}, {}", cell.x, cell.y),
                     None => "none".to_string(),
                 },
@@ -459,8 +453,7 @@ mod tests {
 
         let mut goal = DrinkGoal {
             stage: Stage::Finding,
-            target: Some(fridge),
-            retries: 0,
+            seek: Seek::at(fridge),
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(4, 5));
         let mut memory = Memory::default();
@@ -498,8 +491,7 @@ mod tests {
 
         let mut goal = DrinkGoal {
             stage: Stage::Finding,
-            target: Some(fridge),
-            retries: 0,
+            seek: Seek::at(fridge),
         };
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut memory = Memory::default();

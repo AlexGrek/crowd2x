@@ -396,6 +396,11 @@ impl Brain {
         &self.memory
     }
 
+    #[cfg(test)]
+    pub(crate) fn memory_mut(&mut self) -> &mut Memory {
+        &mut self.memory
+    }
+
     /// Remember `bed` as this unit's own. What a goal that puts it to bed
     /// reads ([`memory::HOME_BED`]); handed out by the spawn pass and by
     /// nothing else, so two units are never given the same one.
@@ -484,6 +489,21 @@ impl Brain {
                     .collect::<Vec<_>>()
                     .join(", ")
             },
+        ));
+        // When each is forgiven, as a time of day: compare with the HUD clock
+        // (one that has passed is faded already).
+        let out_of_reach: Vec<String> = self
+            .memory
+            .out_of_reach()
+            .all()
+            .map(|(cell, until)| {
+                let until = crate::sim::clock::Clock::after_watching(until / crate::sim::clock::TIME_SCALE as f64);
+                format!("{}, {} until {}", cell.x, cell.y, until.time())
+            })
+            .collect();
+        fields.push((
+            "out of reach",
+            if out_of_reach.is_empty() { "nothing".to_string() } else { out_of_reach.join("; ") },
         ));
         fields
     }
