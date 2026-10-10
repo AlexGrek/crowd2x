@@ -28,6 +28,15 @@
 //! The cost is that clicking the overhanging half of somebody's art picks
 //! whoever is in the cell under the pointer, which may be nobody. That reads
 //! correctly on a tile grid, which is what this is.
+//!
+//! # A box can be selected too
+//!
+//! A click on a cell with nobody in it but a distribution box under it
+//! selects the box ([`SelectedBox`]), and [`super::boxpanel`] is its panel —
+//! the switch. Somebody standing on a box is picked first: the crowd is what
+//! a click is usually for, and the box is under the floor. One selection at a
+//! time, so selecting either clears the other, and the frame goes on
+//! whichever it is.
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -35,6 +44,7 @@ use bevy::window::PrimaryWindow;
 use crate::characters::{depth_for, upscale, ART_SCALE};
 use crate::editor::background;
 use crate::render::{cursor_world_pos, PixelZoom, WorldCamera, WORLD_LAYER};
+use crate::map::Point;
 use crate::sim::Uid;
 use crate::state::AppState;
 use crate::ui::nav::NavSystems;
@@ -94,6 +104,33 @@ impl Selected {
     }
 }
 
+/// The distribution box being looked at, if any — by its cell, since a box
+/// is a cell of the power layer and nothing more.
+#[derive(Resource, Default)]
+pub struct SelectedBox(Option<Point>);
+
+impl SelectedBox {
+    pub fn get(&self) -> Option<Point> {
+        self.0
+    }
+
+    /// What the box panel's `close` asks for.
+    pub fn clear(&mut self) {
+        self.0 = None;
+    }
+
+    /// Look at a box named directly, for the QA harness.
+    pub fn select(&mut self, at: Point) {
+        self.0 = Some(at);
+    }
+
+    fn set(this: &mut ResMut<SelectedBox>, at: Option<Point>) {
+        if this.0 != at {
+            this.0 = at;
+        }
+    }
+}
+
 /// The sprite that frames whoever is selected.
 #[derive(Component)]
 struct SelectionFrame;
@@ -103,6 +140,7 @@ pub struct SelectionPlugin;
 impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Selected>()
+            .init_resource::<SelectedBox>()
             .add_systems(OnEnter(AppState::Game), spawn_frame)
             .add_systems(OnExit(AppState::Game), clear)
             .add_systems(
@@ -122,8 +160,9 @@ impl Plugin for SelectionPlugin {
 /// the last visit would name somebody who no longer exists — and would name
 /// them convincingly, since ids are minted from a seeded RNG and the second
 /// world hands out the same ones.
-fn clear(mut selected: ResMut<Selected>) {
+fn clear(mut selected: ResMut<Selected>, mut selected_box: ResMut<SelectedBox>) {
     Selected::set(&mut selected, None);
+    SelectedBox::set(&mut selected_box, None);
 }
 
 /// The frame exists for the life of the screen and is moved and hidden, rather
@@ -159,6 +198,7 @@ fn pick(
     interactions: Query<&Interaction>,
     sim: Option<Res<Sim>>,
     mut selected: ResMut<Selected>,
+    mut selected_box: ResMut<SelectedBox>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) {
         return;
@@ -178,7 +218,10 @@ fn pick(
     };
 
     let cell = background::point_of(background::cell_of(world));
-    Selected::set(&mut selected, sim.0.occupancy().occupant(cell));
+    let unit = sim.0.occupancy().occupant(cell);
+    Selected::set(&mut selected, unit);
+    let a_box = (unit.is_none() && sim.0.has_box(cell)).then_some(cell);
+    SelectedBox::set(&mut selected_box, a_box);
 }
 
 /// Somebody who has left the world is nobody.
@@ -207,6 +250,7 @@ fn forget_the_departed(sim: Option<Res<Sim>>, mut selected: ResMut<Selected>) {
 /// a walker is between cells.
 fn follow_selection(
     selected: Res<Selected>,
+    selected_box: Res<SelectedBox>,
     sim: Option<Res<Sim>>,
     mut frames: Query<(&mut Transform, &mut Visibility), With<SelectionFrame>>,
 ) {
@@ -214,7 +258,12 @@ fn follow_selection(
         .0
         .zip(sim)
         .and_then(|(uid, sim)| sim.0.position_of(uid))
-        .map(world_pos);
+        .map(world_pos)
+        .or_else(|| {
+            selected_box
+                .0
+                .map(|cell| background::cell_centre(IVec2::new(cell.x, cell.y)))
+        });
 
     for (mut transform, mut visibility) in &mut frames {
         let wanted = match at {

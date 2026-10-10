@@ -544,7 +544,7 @@ mod tests {
         let toilet = Point::new(4, 2);
         map.set_terrain(toilet, FLOOR);
         crate::sim::testing::prop_at(&mut map, "toilet", toilet);
-        let features = Features::from_map(&map);
+        let features = Features::from_map(&map, &crate::map::utilities::Supply::everywhere(map.size()));
         assert!(features.is_enterable(toilet), "the fixture should have made a real toilet");
 
         let mut world = World::new(map);

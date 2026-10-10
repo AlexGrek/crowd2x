@@ -9,6 +9,7 @@
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 
+use crate::map::utilities::Supply;
 use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 
 use super::clock::Clock;
@@ -41,11 +42,26 @@ pub struct World {
 }
 
 impl World {
+    /// A world where everything on `map` works, plugged in or not: the
+    /// tests run here are about what a unit decides, and a fridge in one of
+    /// them is a fridge. [`World::as_built`] is the one that asks the wiring.
     pub fn new(map: Map) -> World {
+        let supply = Supply::everywhere(map.size());
+        World::with_supply(map, supply)
+    }
+
+    /// A world where only what `map`'s wiring and pipes reach works, as in a
+    /// game.
+    pub fn as_built(map: Map) -> World {
+        let supply = Supply::from_map(&map);
+        World::with_supply(map, supply)
+    }
+
+    fn with_supply(map: Map, supply: Supply) -> World {
         World {
             occupancy: Occupancy::new(map.size()),
-            features: Features::from_map(&map),
-            fridges: Fridges::from_map(&map),
+            features: Features::from_map(&map, &supply),
+            fridges: Fridges::from_map(&map, &supply),
             map,
             log: Log::new(),
             tick: 0,

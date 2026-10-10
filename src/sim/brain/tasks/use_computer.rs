@@ -34,6 +34,11 @@ impl TaskExecutor for UseComputer {
         if ctx.here().manhattan_distance(self.computer) > 1 || ctx.biology.is_none() {
             return TaskResult::Failed;
         }
+        // Its power is checked every tick too: a box switched off mid-go
+        // turns the screen off, and the go is over, unfinished.
+        if !ctx.think.features.has(crate::sim::feature::FeatureKind::Entertainment, self.computer) {
+            return TaskResult::Failed;
+        }
 
         if ctx.action.is_none() {
             *ctx.action = Action::interact(self.computer, self.seconds);
@@ -62,10 +67,29 @@ mod tests {
     use super::*;
     use crate::map::{Map, Size, FLOOR};
 
+    /// A unit in `cell` of a room with a computer at (6, 6), where every
+    /// test here aims — a working one: the rig's world serves everything.
     fn rig_at(cell: Point, fun: f32) -> Rig {
-        let mut rig = Rig::new(Map::new(Size::new(9, 9), FLOOR), cell);
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "computer", Point::new(6, 6));
+        let mut rig = Rig::new(map, cell);
         rig.biology.edit(|stats| stats.with_fun(fun));
         rig
+    }
+
+    /// A box switched off mid-go turns the screen off: the go ends there,
+    /// and half a go is no fun at all.
+    #[test]
+    fn losing_power_mid_session_ends_it_and_is_no_fun_at_all() {
+        let mut rig = rig_at(Point::new(5, 6), 20.0);
+        let mut task = Task::use_computer(Point::new(6, 6), 10.0);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+
+        let dead = crate::map::utilities::Supply::from_map(&rig.world.map);
+        rig.world.features = crate::sim::feature::Features::from_map(&rig.world.map, &dead);
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert_eq!(rig.biology.stats().fun(), 20.0, "no fun from a go cut short");
     }
 
     #[test]

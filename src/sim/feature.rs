@@ -11,6 +11,13 @@
 //! fridge, the toilet, the computer and the beds. A prop with two entries is
 //! two things at once: a fridge is food and water.
 //!
+//! **A feature that does not work is not one.** A fridge with no power, a
+//! computer with no power and a toilet with no drain
+//! ([`crate::map::utilities`]) are left out of the index, so a brain never
+//! walks to one — the same as a map without it. Whether something is
+//! connected cannot change during play, since nothing in a tick edits the
+//! map.
+//!
 //! **A fridge is the one feature with state of its own** — its door and its
 //! temperature, in [`crate::sim::fridge::Fridges`] rather than here. What
 //! this module answers never changes during a tick: a name is food, or it
@@ -20,6 +27,7 @@
 use rand::rngs::SmallRng;
 use rand::RngExt;
 
+use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 
 /// What a brain can get out of a feature.
@@ -159,10 +167,15 @@ pub struct Features {
 }
 
 impl Features {
-    pub fn from_map(map: &Map) -> Features {
+    /// Every prop on `map` a brain can use, *and that works*: one that needs
+    /// power or a drain `supply` does not give it is left out.
+    pub fn from_map(map: &Map, supply: &Supply) -> Features {
         let mut features = Features::default();
         for object in map.objects(ObjectLayer::Props) {
             let cell = object.cell();
+            if !supply.serves(object.kind.as_str(), cell) {
+                continue;
+            }
             for kind in kinds_of(object.kind.as_str()) {
                 match kind {
                     FeatureKind::Food => features.food.push(cell),
@@ -261,6 +274,31 @@ mod tests {
     use super::*;
     use crate::map::{Object, ObjectKind, Size, FLOOR, PIXELS_PER_CELL};
 
+    /// The index of a map whose wiring is not what these tests are about.
+    fn features_of(map: &Map) -> Features {
+        Features::from_map(map, &Supply::everywhere(map.size()))
+    }
+
+    #[test]
+    fn a_fridge_with_no_power_and_a_toilet_with_no_drain_are_not_somewhere_to_go() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        for (name, cell) in [("fridge", Point::new(3, 4)), ("toilet", Point::new(7, 2)), ("computer", Point::new(5, 8)), ("bed 1", Point::new(1, 1))] {
+            map.add_object(ObjectLayer::Props, prop(name, cell));
+        }
+        let features = Features::from_map(&map, &Supply::from_map(&map));
+        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment] {
+            assert_eq!(features.count(kind), 0, "{kind:?} works without being connected");
+        }
+        assert!(!features.is_enterable(Point::new(7, 2)), "a broken toilet is not entered either");
+        assert_eq!(features.count(FeatureKind::Bed), 1, "a bed needs nothing");
+
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 9), Point::new(9, 9));
+        let features = Features::from_map(&map, &Supply::from_map(&map));
+        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment] {
+            assert_eq!(features.count(kind), 1, "{kind:?}, once connected");
+        }
+    }
+
     fn prop(name: &str, cell: Point) -> Object {
         // In the middle of the cell, where the editor would have put it.
         Object {
@@ -278,7 +316,7 @@ mod tests {
         map.add_object(ObjectLayer::Props, prop("fridge", Point::new(3, 4)));
         map.add_object(ObjectLayer::Props, prop("crate", Point::new(6, 6)));
 
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         for kind in [FeatureKind::Food, FeatureKind::Water] {
             assert_eq!(features.count(kind), 1, "{kind:?}");
             assert_eq!(features.nearest(kind, Point::new(0, 0)), Some(Point::new(3, 4)), "{kind:?}");
@@ -296,7 +334,7 @@ mod tests {
             let mut map = Map::new(Size::new(10, 10), FLOOR);
             let cell = Point::new(5, 5);
             map.add_object(ObjectLayer::Props, prop(&name, cell));
-            let features = Features::from_map(&map);
+            let features = features_of(&map);
             assert_eq!(features.nearest(FeatureKind::Bed, Point::new(0, 0)), Some(cell), "{name}");
             assert!(features.is_enterable(cell), "{name} is slept in, so it is entered");
         }
@@ -309,7 +347,7 @@ mod tests {
         let (near, far) = (Point::new(2, 2), Point::new(15, 15));
         map.add_object(ObjectLayer::Props, prop("bed 1", near));
         map.add_object(ObjectLayer::Props, prop("bed 2", far));
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         let from = Point::new(0, 0);
 
         assert_eq!(features.nearest_where(FeatureKind::Bed, from, |_| true), Some(near));
@@ -326,7 +364,7 @@ mod tests {
         for (i, bed) in beds.iter().enumerate() {
             map.add_object(ObjectLayer::Props, prop(&format!("bed {}", i + 1), *bed));
         }
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         let mut rng = SmallRng::seed_from_u64(1);
 
         let mut seen = std::collections::BTreeSet::new();
@@ -348,7 +386,7 @@ mod tests {
             for &i in order {
                 map.add_object(ObjectLayer::Props, prop(&format!("bed {}", i + 1), beds[i]));
             }
-            Features::from_map(&map)
+            features_of(&map)
         };
         let (forwards, backwards) = (build(&[0, 1, 2, 3]), build(&[3, 2, 1, 0]));
         for seed in 0..50 {
@@ -364,7 +402,7 @@ mod tests {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         map.add_object(ObjectLayer::Props, prop("toilet", Point::new(7, 2)));
 
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         assert_eq!(features.nearest(FeatureKind::Toilet, Point::new(0, 0)), Some(Point::new(7, 2)));
         assert_eq!(features.count(FeatureKind::Food) + features.count(FeatureKind::Water), 0);
     }
@@ -375,7 +413,7 @@ mod tests {
         for cell in [Point::new(1, 1), Point::new(18, 18), Point::new(9, 8)] {
             map.add_object(ObjectLayer::Props, prop("fridge", cell));
         }
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         assert_eq!(features.nearest(FeatureKind::Food, Point::new(12, 12)), Some(Point::new(9, 8)));
     }
 
@@ -391,15 +429,15 @@ mod tests {
         backwards.add_object(ObjectLayer::Props, prop("fridge", a));
 
         assert_eq!(
-            Features::from_map(&forwards).nearest(FeatureKind::Food, from),
-            Features::from_map(&backwards).nearest(FeatureKind::Food, from),
+            features_of(&forwards).nearest(FeatureKind::Food, from),
+            features_of(&backwards).nearest(FeatureKind::Food, from),
         );
     }
 
     #[test]
     fn a_world_with_no_fridge_has_nowhere_to_eat() {
         let map = Map::new(Size::new(4, 4), FLOOR);
-        assert_eq!(Features::from_map(&map).nearest(FeatureKind::Food, Point::new(1, 1)), None);
+        assert_eq!(features_of(&map).nearest(FeatureKind::Food, Point::new(1, 1)), None);
     }
 
     #[test]
@@ -418,7 +456,7 @@ mod tests {
         let computer = Point::new(4, 8);
         map.add_object(ObjectLayer::Props, prop("computer", computer));
 
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         assert_eq!(features.count(FeatureKind::Entertainment), 1);
         assert_eq!(features.nearest(FeatureKind::Entertainment, Point::new(0, 0)), Some(computer));
         assert_eq!(FeatureKind::Entertainment.access(), Access::Beside);
@@ -434,7 +472,7 @@ mod tests {
         map.add_object(ObjectLayer::Props, prop("toilet", toilet));
         map.add_object(ObjectLayer::Props, prop("fridge", fridge));
 
-        let features = Features::from_map(&map);
+        let features = features_of(&map);
         assert!(features.is_enterable(toilet));
         assert!(!features.is_enterable(fridge));
         assert!(!features.is_enterable(Point::new(0, 0)), "a plain empty cell");

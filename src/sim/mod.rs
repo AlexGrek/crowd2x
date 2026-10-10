@@ -154,6 +154,7 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 
+use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 
 pub use biology::{Biology, ProcessId, Stats};
@@ -295,6 +296,10 @@ pub enum Command {
     /// oblige. Like [`Inventory::set_hand`] it refuses nothing, and what was in
     /// the hand is gone.
     Hold { uid: Uid, item: Option<ItemKind> },
+    /// Switch the distribution box in `at` on or off — a player at its
+    /// panel. Off, it feeds no wiring, and everything on that wiring stops
+    /// working: see [`GameState::switch_box`].
+    SwitchBox { at: Point, on: bool },
 }
 
 /// One frame's worth of input to the simulation.
@@ -322,6 +327,11 @@ impl Input {
 
     pub fn despawn(&mut self, uid: Uid) -> &mut Input {
         self.commands.push(Command::Despawn(uid));
+        self
+    }
+
+    pub fn switch_box(&mut self, at: Point, on: bool) -> &mut Input {
+        self.commands.push(Command::SwitchBox { at, on });
         self
     }
 
@@ -383,6 +393,17 @@ pub struct GameState {
     /// `features` — but unlike it, what is stored here changes every tick a
     /// door is open, through [`Effect::Fridge`] and [`world_step`].
     fridges: Fridges,
+    /// What the map's wiring and pipes reach ([`crate::map::utilities`]),
+    /// with [`GameState::boxes_off`] switched off. Derived from `map` like
+    /// `features`, which is built from it — and derived again, with the
+    /// features and the fridges' power, whenever a box is switched.
+    supply: Supply,
+    /// The distribution boxes switched off, sorted. Simulation state, not
+    /// the map's: a map is saved with every box on.
+    boxes_off: Vec<Point>,
+    /// Bumped every time `supply` changes, so a reader — the lighting, the
+    /// x-ray — knows to look again without comparing the whole thing.
+    supply_generation: u64,
     /// Which beds have been given to whom. Written by the spawn pass and read
     /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
     homes: Homes,
@@ -410,10 +431,14 @@ impl GameState {
     /// world is exactly what its caller asked for and nothing appears by
     /// default.
     pub fn new(map: Map, seed: u64) -> GameState {
+        let supply = Supply::from_map(&map);
         GameState {
             occupancy: Occupancy::new(map.size()),
-            features: Features::from_map(&map),
-            fridges: Fridges::from_map(&map),
+            features: Features::from_map(&map, &supply),
+            fridges: Fridges::from_map(&map, &supply),
+            supply,
+            boxes_off: Vec::new(),
+            supply_generation: 0,
             homes: Homes::new(),
             map,
             entities: Entities::new(),
@@ -437,6 +462,61 @@ impl GameState {
     }
 
     /// Every fridge's door and temperature. See [`fridge`].
+    /// What has power and what has a drain: what the features were indexed
+    /// from, and what lights a lamp.
+    pub fn supply(&self) -> &Supply {
+        &self.supply
+    }
+
+    /// Which [`GameState::supply`] this is: bumped on every change to it.
+    pub fn supply_generation(&self) -> u64 {
+        self.supply_generation
+    }
+
+    /// Whether there is a distribution box in `at` at all.
+    pub fn has_box(&self, at: Point) -> bool {
+        self.map.grid(crate::map::GridLayer::Power, at) == crate::map::grid::power::BOX
+    }
+
+    /// Whether the box in `at` is switched on. `false` where there is none.
+    pub fn box_is_on(&self, at: Point) -> bool {
+        self.has_box(at) && self.boxes_off.binary_search(&at).is_err()
+    }
+
+    /// Switch the box in `at` on or off, and work out again what has power:
+    /// the supply, the features a brain can go to — a fridge on a dead box
+    /// is not one — and every fridge's compressor. Returns `false`, changing
+    /// nothing, when there is no box there.
+    ///
+    /// Re-floods the whole map and rebuilds the feature index, which
+    /// allocates: it is applied in the spawn pass (through
+    /// [`Command::SwitchBox`]), the one pass allowed to, and it is a
+    /// player's click, not something a tick does.
+    pub fn switch_box(&mut self, at: Point, on: bool) -> bool {
+        if !self.has_box(at) {
+            return false;
+        }
+        match (self.boxes_off.binary_search(&at), on) {
+            (Ok(index), true) => {
+                self.boxes_off.remove(index);
+            }
+            (Err(index), false) => self.boxes_off.insert(index, at),
+            // Already the way it was asked to be.
+            _ => return true,
+        }
+        self.supply = Supply::with_boxes_off(&self.map, &self.boxes_off);
+        self.features = Features::from_map(&self.map, &self.supply);
+        self.fridges.set_power(&self.supply);
+        self.supply_generation += 1;
+        self.log.push(format!(
+            "the distribution box at {}, {} was switched {}",
+            at.x,
+            at.y,
+            if on { "on" } else { "off" }
+        ));
+        true
+    }
+
     pub fn fridges(&self) -> &Fridges {
         &self.fridges
     }
@@ -775,6 +855,11 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             Command::Despawn(uid) => {
                 if !state.despawn(*uid) {
                     state.log.push(format!("despawn: no such entity {uid}"));
+                }
+            }
+            Command::SwitchBox { at, on } => {
+                if !state.switch_box(*at, *on) {
+                    state.log.push(format!("switch: no distribution box at {}, {}", at.x, at.y));
                 }
             }
             Command::Freeze { uid, frozen } => {
@@ -1534,17 +1619,10 @@ mod tests {
             (Point::new(size / 2, size - 3), "computer"),
         ];
         for (cell, kind) in props {
-            map.add_object(
-                crate::map::ObjectLayer::Props,
-                crate::map::Object {
-                    at: Point::new(
-                        cell.x * crate::map::PIXELS_PER_CELL + 24,
-                        cell.y * crate::map::PIXELS_PER_CELL + 24,
-                    ),
-                    kind: crate::map::ObjectKind::new(kind),
-                },
-            );
+            crate::sim::testing::prop_at(&mut map, kind, cell);
         }
+        // Plumbed and wired, from two corners nobody needs.
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 0), Point::new(size - 1, 0));
         GameState::new(map, seed)
     }
 
@@ -2034,9 +2112,11 @@ mod tests {
         // it is not refused out of hand, only by whoever already holds it.
         // Two entities aimed at it on the same tick settle it exactly the way
         // two entities aimed at the same *empty* cell do.
-        let mut map = Map::new(Size::new(6, 1), FLOOR);
+        let mut map = Map::new(Size::new(6, 2), FLOOR);
         let toilet = Point::new(3, 0);
         crate::sim::testing::prop_at(&mut map, "toilet", toilet);
+        // Plumbed in from the row above, or it is not a toilet at all.
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 1), Point::new(3, 1));
         assert!(!map.is_passable(toilet), "a toilet blocks the terrain layer");
 
         let mut state = GameState::new(map, 7);
@@ -2252,6 +2332,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn switching_a_box_off_takes_its_fridges_away_and_switching_it_on_gives_them_back() {
+        let district = crate::map::district::generate(7);
+        let house = &district.houses[0];
+        let mut state = GameState::new(district.map.clone(), 7);
+        let fridge = state
+            .map
+            .objects(ObjectLayer::Props)
+            .iter()
+            .find(|prop| prop.kind.as_str() == "fridge" && house.walls.contains(prop.cell()))
+            .map(|prop| prop.cell())
+            .expect("every house has a fridge");
+        let at = house
+            .walls
+            .cells()
+            .find(|&cell| state.has_box(cell))
+            .expect("every house has a box");
+        let fed = state.features().count(FeatureKind::Food);
+        assert!(state.features().has(FeatureKind::Food, fridge));
+        assert!(state.box_is_on(at));
+
+        let mut input = Input::new();
+        input.switch_box(at, false);
+        spawn_pass(&mut state, &input);
+        assert!(!state.box_is_on(at));
+        assert!(!state.features().has(FeatureKind::Food, fridge), "a fridge on a dead box");
+        assert_eq!(state.features().count(FeatureKind::Food), fed - 1, "and only that one");
+        assert!(!state.supply().serves("fridge", fridge));
+        assert!(!state.fridges().get(fridge).unwrap().is_powered());
+        assert_eq!(state.supply_generation(), 1);
+
+        let mut input = Input::new();
+        input.switch_box(at, true);
+        spawn_pass(&mut state, &input);
+        assert!(state.features().has(FeatureKind::Food, fridge));
+        assert!(state.fridges().get(fridge).unwrap().is_powered());
+
+        assert!(!state.switch_box(Point::new(0, 0), false), "there is no box there");
     }
 
     #[test]

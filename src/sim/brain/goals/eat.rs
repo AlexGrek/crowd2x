@@ -339,6 +339,26 @@ mod tests {
         assert_eq!(world.drinks(), 0, "a meal is not a drink");
     }
 
+    /// A fridge nobody wired up is a cupboard: the same walk as above, as
+    /// the map is built, never ends in a meal — and plugged in, it does.
+    #[test]
+    fn a_fridge_with_no_power_feeds_nobody_until_it_is_wired_up() {
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "fridge", Point::new(11, 7));
+        let run = |map: Map| {
+            let mut world = World::as_built(map);
+            let mut human = hungry_human(Point::new(2, 2), 90.0);
+            for _ in 0..3000 {
+                world.step(&mut human);
+            }
+            world.meals()
+        };
+        assert_eq!(run(map.clone()), 0, "ate from a fridge with no power");
+
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 9), Point::new(13, 9));
+        assert!(run(map) > 0, "never ate once the fridge had power");
+    }
+
     #[test]
     fn a_hungry_human_keeps_eating_until_it_is_sated_and_then_wanders_again() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);

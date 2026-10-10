@@ -90,6 +90,17 @@
       "wait": 0.2
     },
     {
+      "note": "a lamp with no power lights nothing: a transformer in the corner, a box under it, wiring to the lamp"
+    },
+    { "tool": "transformer" },
+    { "cursor_cell": { "x": 0, "y": 0 } },
+    { "click": {} },
+    { "tool": "distribution box" },
+    { "click": {} },
+    { "tool": "wiring" },
+    { "drag": { "from": { "x": 1, "y": 0 }, "to": { "x": 3, "y": 3 } } },
+    { "wait": 0.2 },
+    {
       "tool": "floor"
     },
     {

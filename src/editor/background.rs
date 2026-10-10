@@ -82,6 +82,7 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::upscaled("wall purple", "wall_purple.png"),
     PaletteItem::upscaled("wall red", "wall_red.png"),
     PaletteItem::upscaled("block", "block.png"),
+    PaletteItem::upscaled("window", "window.png"),
 ];
 
 #[derive(Component)]

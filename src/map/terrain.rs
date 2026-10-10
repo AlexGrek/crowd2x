@@ -35,6 +35,9 @@ impl Passability {
 pub struct Terrain {
     pub name: &'static str,
     pub passability: Passability,
+    /// Whether sight and light cross it. True of everything walkable and of a
+    /// window; a wall is the one thing neither.
+    pub see_through: bool,
 }
 
 impl Terrain {
@@ -42,6 +45,7 @@ impl Terrain {
         Self {
             name,
             passability: Passability::Passable,
+            see_through: true,
         }
     }
 
@@ -49,6 +53,16 @@ impl Terrain {
         Self {
             name,
             passability: Passability::Impassable,
+            see_through: false,
+        }
+    }
+
+    /// Glass in a wall: nobody walks through it, but the view and the sun do.
+    const fn pane(name: &'static str) -> Self {
+        Self {
+            name,
+            passability: Passability::Impassable,
+            see_through: true,
         }
     }
 }
@@ -87,6 +101,7 @@ pub const TERRAIN: &[Terrain] = &[
     Terrain::blocked("wall red"),
     Terrain::blocked("block"),
     Terrain::walkable("wood cracked"),
+    Terrain::pane("window"),
 ];
 
 impl TerrainId {
@@ -114,6 +129,19 @@ impl TerrainId {
             .iter()
             .position(|terrain| terrain.name == name)
             .map(|index| TerrainId(index as u16))
+    }
+
+    /// Whether sight crosses this tile, and the sun: a window lets both in
+    /// though it cannot be walked through. Unknown terrain is opaque.
+    pub fn is_see_through(self) -> bool {
+        self.terrain().is_some_and(|terrain| terrain.see_through)
+    }
+
+    /// Whether the sun comes in through this tile even under a ceiling: a
+    /// window is a hole in the roof's shadow, however the wall around it is
+    /// roofed.
+    pub fn lets_sun_in(self) -> bool {
+        self.is_see_through() && !self.is_passable()
     }
 
     /// Unknown terrain is impassable: an agent that cannot be told what a tile
@@ -147,6 +175,17 @@ mod tests {
 
     /// Names are the key a map file stores a tile under, so two tiles sharing
     /// one would make a saved map ambiguous.
+    #[test]
+    fn a_window_is_seen_through_but_not_walked_through() {
+        let window = TerrainId::from_name("window").unwrap();
+        assert!(!window.is_passable());
+        assert!(window.is_see_through());
+        assert!(window.lets_sun_in());
+        assert!(!WALL.is_see_through());
+        assert!(!WALL.lets_sun_in());
+        assert!(!FLOOR.lets_sun_in());
+    }
+
     #[test]
     fn every_tile_has_its_own_name() {
         let mut names: Vec<&str> = TERRAIN.iter().map(|terrain| terrain.name).collect();

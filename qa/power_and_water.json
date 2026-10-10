@@ -1,0 +1,110 @@
+{
+  "name": "a fridge, a lamp and a toilet work once the editor wires and plumbs them in",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "utilities",
+        "map": {
+          "version": 1,
+          "size": { "width": 10, "height": 6 },
+          "terrain": {
+            "palette": ["floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,1",
+                  "1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 72, "y": 72 }, "kind": "transformer" },
+              { "at": { "x": 360, "y": 72 }, "kind": "fridge" },
+              { "at": { "x": 72, "y": 216 }, "kind": "toilet" },
+              { "at": { "x": 408, "y": 216 }, "kind": "sewer" }
+            ],
+            "lamps": [
+              { "at": { "x": 360, "y": 216 }, "kind": "ceiling lamp" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "utilities",
+  "steps": [
+    { "note": "transformer (1, 1), fridge (7, 1), ceiling lamp (7, 4), toilet (1, 4), sewer (8, 4); nothing under the floor" },
+    { "expect_connected": { "utility": "power", "served": 0, "of": 2 } },
+    { "expect_connected": { "utility": "water", "served": 0, "of": 1 } },
+    { "note": "a lamp with no power is not a light at all" },
+    { "expect_lighting": { "lights_on": 0 } },
+    { "xray": "all" },
+    { "shot": "nothing connected, every light red" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "press": "edit" },
+    { "expect_state": "editor" },
+
+    { "note": "high voltage from the transformer to a box, low voltage on to the fridge and up to the lamp" },
+    { "tool": "power line" },
+    { "drag": { "from": { "x": 1, "y": 1 }, "to": { "x": 3, "y": 1 } } },
+    { "tool": "distribution box" },
+    { "cursor_cell": { "x": 4, "y": 1 } },
+    { "click": {} },
+    { "tool": "wiring" },
+    { "drag": { "from": { "x": 5, "y": 1 }, "to": { "x": 7, "y": 1 } } },
+    { "drag": { "from": { "x": 7, "y": 2 }, "to": { "x": 7, "y": 4 } } },
+    { "note": "and a pipe from the sewer along the top row to the toilet, under the lamp" },
+    { "tool": "sewer pipe" },
+    { "drag": { "from": { "x": 8, "y": 4 }, "to": { "x": 1, "y": 4 } } },
+    { "shot": "the water layer being laid" },
+    { "key": "f5" },
+
+    { "expect_grid": { "map": "utilities", "layer": "power", "x": 2, "y": 1, "value": "=" } },
+    { "expect_grid": { "map": "utilities", "layer": "power", "x": 4, "y": 1, "value": "B" } },
+    { "expect_grid": { "map": "utilities", "layer": "power", "x": 7, "y": 3, "value": "-" } },
+    { "expect_grid": { "map": "utilities", "layer": "power", "x": 7, "y": 5, "value": "." } },
+    { "expect_grid": { "map": "utilities", "layer": "water", "x": 4, "y": 4, "value": "o" } },
+    { "expect_grid": { "map": "utilities", "layer": "water", "x": 4, "y": 1, "value": "." } },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "press": "utilities" },
+    { "expect_state": "game" },
+    { "expect_connected": { "utility": "power", "served": 2, "of": 2 } },
+    { "expect_connected": { "utility": "water", "served": 1, "of": 1 } },
+    { "xray": "power" },
+    { "shot": "the power layer, live and every light green" },
+    { "expect_lighting": { "lights_on": 1 } },
+    { "xray": "off" },
+    { "shot": "lit by its lamp" },
+
+    { "note": "the box is a switch: off, its wiring is dead, the lamp goes dark and the fridge is nowhere to eat" },
+    { "key": "p" },
+    { "select_box": { "x": 4, "y": 1 } },
+    { "xray": "power" },
+    { "shot": "the box's panel, switched on" },
+    { "press": "switch off" },
+    { "tick": 1 },
+    { "expect_log": "the distribution box at 4, 1 was switched off" },
+    { "expect_connected": { "utility": "power", "served": 0, "of": 2 } },
+    { "expect_connected": { "utility": "water", "served": 1, "of": 1 } },
+    { "expect_lighting": { "lights_on": 0 } },
+    { "shot": "switched off: dead wiring and red lights" },
+    { "press": "switch on" },
+    { "tick": 1 },
+    { "expect_connected": { "utility": "power", "served": 2, "of": 2 } },
+    { "expect_lighting": { "lights_on": 1 } },
+    { "press": "close" },
+    { "shot": "back on, and the panel closed" }
+  ]
+}

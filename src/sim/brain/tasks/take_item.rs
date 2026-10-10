@@ -44,8 +44,10 @@ impl TaskExecutor for TakeItem {
             if inventory.hand().is_some() {
                 return TaskResult::Failed;
             }
+            // A fridge has to be open — and working: one whose box was
+            // switched off on the way here is a cupboard (`sim::fridge`).
             if let Some(state) = ctx.think.fridges.get(self.from)
-                && !state.is_open()
+                && (!state.is_open() || !state.is_powered())
             {
                 return TaskResult::Failed;
             }
@@ -108,6 +110,22 @@ mod tests {
         assert_eq!(rig.hand(), None, "not yet: the fridge is still being opened");
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         assert_eq!(rig.hand(), Some(ItemKind::Food));
+    }
+
+    /// Its box switched off on the way there: open or not, a fridge with no
+    /// power is not somewhere food comes out of.
+    #[test]
+    fn taking_from_a_fridge_with_no_power_fails_without_starting() {
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        let dead = crate::map::utilities::Supply::from_map(&rig.world.map);
+        rig.world.fridges = crate::sim::fridge::Fridges::from_map(&rig.world.map, &dead);
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 0.5);
+
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert!(rig.action.is_none());
+        assert_eq!(rig.hand(), None);
     }
 
     #[test]

@@ -1,7 +1,12 @@
 //! The map editor.
 //!
-//! Two layers, built on two deliberately different sprite functions because
-//! they obey different rules:
+//! Every layer of the map is edited here, one at a time, and [`LAYERS`] is
+//! the list of them: what each is called, which part of the map it writes
+//! ([`Target`]) and the palette it paints from. A new layer is a row there
+//! and, if it is a new *kind* of layer, a match arm in [`edit`]; `tab` and
+//! the number keys, the HUD and the QA harness's `tool` step pick it up from
+//! the table. Three kinds, on three deliberately different sprite functions
+//! because they obey different rules:
 //!
 //! * [`background`] — one tile per grid cell, all at a single depth behind the
 //!   world. Painted by dragging, since filling a floor is the common case.
@@ -11,7 +16,12 @@
 //!   since only the release knows where the far corner landed.
 //! * [`props`] — objects placed freely at the cursor and depth-sorted by world
 //!   Y exactly like characters, so they interleave with the crowd. Placed one
-//!   per click, since dragging would bury a pile of beds in one spot.
+//!   per click, since dragging would bury a pile of beds in one spot. Lamps
+//!   are the same, on their own object layer.
+//! * [`grids`] — a value per cell that is not terrain: the ceiling, and under
+//!   the floor the wiring and the pipes. Drawn as overlays, since none of them
+//!   is part of the world anybody walks around in, and only while edited or
+//!   asked for (`o`).
 //!
 //! Only the background keeps an index (a cell can hold one tile, so painting
 //! has to find and replace it); props are just entities.
@@ -28,7 +38,7 @@
 //! Everything else — palette, layer, save, leave — has a button on both.
 
 pub mod background;
-pub mod ceiling;
+pub mod grids;
 pub mod props;
 
 use bevy::input::mouse::MouseWheel;
@@ -37,7 +47,7 @@ use bevy::window::{CursorMoved, PrimaryWindow};
 
 use crate::browser::Maps;
 use crate::characters::{upscale, ART_SCALE, CELL};
-use crate::map::{Map, ObjectLayer, Size, VOID};
+use crate::map::{GridLayer, Map, ObjectLayer, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
 use crate::view::ViewSystems;
@@ -60,7 +70,7 @@ const SCRATCH: (i32, i32) = (24, 16);
 /// `bevy_ui` and composited over the whole canvas, so it needs no depth.
 const CURSOR_Z: f32 = 100.0;
 
-const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y or 1-4 layer\n                         wasd or right stick pan   f5/start save   esc/B maps";
+const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y or 1-6 layer\n           wasd or right stick pan   o/r3 x-ray   f5/start save   esc/B maps";
 
 /// Corner brackets drawn at the cursor, at the 16px art size like the rest.
 const SELECTION_FRAME: &str = "selection.png";
@@ -165,54 +175,95 @@ impl PaletteItem {
     }
 }
 
-/// What is being edited. In the order `tab` steps through them and `1`-`4`
-/// pick them: the floor, what stands on it, what hangs over it, and the roof.
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Layer {
-    #[default]
-    Background,
-    Props,
-    Lamps,
-    Ceiling,
+/// Which part of the map a layer writes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Target {
+    /// The base terrain layer: a tile per cell.
+    Terrain,
+    /// An object layer: free placement, in whole pixels.
+    Objects(ObjectLayer),
+    /// A grid layer: a value per cell, painted from the palette's order.
+    Grid(GridLayer),
 }
 
+/// One editable layer of the map.
+pub struct LayerDef {
+    /// What the HUD calls it.
+    pub name: &'static str,
+    pub target: Target,
+    pub palette: &'static [PaletteItem],
+    /// What a press does on it, beyond placing and erasing.
+    pub hint: &'static str,
+}
+
+/// Every layer the editor edits, in the order `tab` steps through them and
+/// `1`-`6` pick them: the floor, what stands on it, what hangs over it, the
+/// roof, and what runs under the floor.
+pub const LAYERS: &[LayerDef] = &[
+    LayerDef { name: "background", target: Target::Terrain, palette: background::PALETTE, hint: "" },
+    LayerDef { name: "props", target: Target::Objects(ObjectLayer::Props), palette: props::PALETTE, hint: "" },
+    LayerDef { name: "lamps", target: Target::Objects(ObjectLayer::Lamps), palette: props::LAMP_PALETTE, hint: "" },
+    LayerDef {
+        name: "ceiling",
+        target: Target::Grid(GridLayer::Ceiling),
+        palette: grids::palette_of(GridLayer::Ceiling),
+        hint: "  drag corner to corner to roof it, rmb to open it to the sky",
+    },
+    LayerDef {
+        name: "power",
+        target: Target::Grid(GridLayer::Power),
+        palette: grids::palette_of(GridLayer::Power),
+        hint: "  drag to lay; transformer > line > box > wiring > lamp, fridge, computer",
+    },
+    LayerDef {
+        name: "water",
+        target: Target::Grid(GridLayer::Water),
+        palette: grids::palette_of(GridLayer::Water),
+        hint: "  drag to lay; sewer > pipes > toilet",
+    },
+];
+
+/// A layer being edited: an index into [`LAYERS`].
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Layer(usize);
+
 impl Layer {
-    const ALL: [Layer; 4] = [Layer::Background, Layer::Props, Layer::Lamps, Layer::Ceiling];
+    pub fn all() -> impl Iterator<Item = Layer> {
+        (0..LAYERS.len()).map(Layer)
+    }
+
+    fn def(self) -> &'static LayerDef {
+        &LAYERS[self.0]
+    }
 
     fn name(self) -> &'static str {
-        match self {
-            Layer::Background => "background",
-            Layer::Props => "props",
-            Layer::Lamps => "lamps",
-            Layer::Ceiling => "ceiling",
-        }
+        self.def().name
+    }
+
+    pub fn target(self) -> Target {
+        self.def().target
     }
 
     fn next(self) -> Self {
-        let at = Layer::ALL.iter().position(|&layer| layer == self).unwrap_or(0);
-        Layer::ALL[(at + 1) % Layer::ALL.len()]
+        Layer((self.0 + 1) % LAYERS.len())
     }
 
     fn palette(self) -> &'static [PaletteItem] {
-        match self {
-            Layer::Background => background::PALETTE,
-            Layer::Props => props::PALETTE,
-            Layer::Lamps => props::LAMP_PALETTE,
-            Layer::Ceiling => ceiling::PALETTE,
-        }
+        self.def().palette
     }
 
     /// Whether a press is a rectangle, corner to corner, rather than a
     /// single placement — for this layer and the item selected on it.
     fn instrument(self, item: &PaletteItem) -> Option<Instrument> {
-        match self {
-            Layer::Background => match Instrument::for_background_item(item.name) {
+        match self.target() {
+            Target::Terrain => match Instrument::for_background_item(item.name) {
                 Instrument::Brush => None,
                 rectangle => Some(rectangle),
             },
             // A room is roofed in one stroke.
-            Layer::Ceiling => Some(Instrument::Block),
-            Layer::Props | Layer::Lamps => None,
+            Target::Grid(GridLayer::Ceiling) => Some(Instrument::Block),
+            // A network is laid along a route, not over an area.
+            Target::Grid(_) | Target::Objects(_) => None,
         }
     }
 }
@@ -255,10 +306,8 @@ impl Instrument {
 #[derive(Resource, Default)]
 pub struct Tool {
     layer: Layer,
-    background: usize,
-    props: usize,
-    lamps: usize,
-    ceiling: usize,
+    /// One per entry of [`LAYERS`].
+    indices: [usize; LAYERS.len()],
 }
 
 impl Tool {
@@ -271,16 +320,7 @@ impl Tool {
     }
 
     fn index(&self) -> usize {
-        self.index_on(self.layer)
-    }
-
-    fn index_on(&self, layer: Layer) -> usize {
-        match layer {
-            Layer::Background => self.background,
-            Layer::Props => self.props,
-            Layer::Lamps => self.lamps,
-            Layer::Ceiling => self.ceiling,
-        }
+        self.indices[self.layer.0]
     }
 
     fn item(&self) -> &'static PaletteItem {
@@ -289,12 +329,7 @@ impl Tool {
 
     fn cycle(&mut self, step: i32) {
         let len = self.palette().len() as i32;
-        let index = match self.layer {
-            Layer::Background => &mut self.background,
-            Layer::Props => &mut self.props,
-            Layer::Lamps => &mut self.lamps,
-            Layer::Ceiling => &mut self.ceiling,
-        };
+        let index = &mut self.indices[self.layer.0];
         *index = (*index as i32 + step).rem_euclid(len) as usize;
     }
 
@@ -304,15 +339,10 @@ impl Tool {
     /// instead of pressing `e` nine times and hoping the palette order has not
     /// changed since it was written.
     pub fn select(&mut self, name: &str) -> bool {
-        for layer in Layer::ALL {
+        for layer in Layer::all() {
             if let Some(index) = layer.palette().iter().position(|item| item.name == name) {
                 self.layer = layer;
-                match layer {
-                    Layer::Background => self.background = index,
-                    Layer::Props => self.props = index,
-                    Layer::Lamps => self.lamps = index,
-                    Layer::Ceiling => self.ceiling = index,
-                }
+                self.indices[layer.0] = index;
                 return true;
             }
         }
@@ -320,14 +350,13 @@ impl Tool {
     }
 
     fn describe(&self) -> String {
-        let hint = match self.layer {
-            Layer::Background => match Instrument::for_background_item(self.item().name) {
+        let hint = match self.layer.target() {
+            Target::Terrain => match Instrument::for_background_item(self.item().name) {
                 Instrument::Wall => "  drag corner to corner for a room's walls",
                 Instrument::Block => "  drag corner to corner for a filled block",
                 Instrument::Brush => "",
             },
-            Layer::Ceiling => "  drag corner to corner to roof it, rmb to open it to the sky",
-            Layer::Props | Layer::Lamps => "",
+            _ => self.layer.def().hint,
         };
         format!(
             "layer  {}\nitem   {}  {}/{}{}",
@@ -520,7 +549,9 @@ impl Plugin for EditorPlugin {
             .init_resource::<RectangleDrag>()
             .init_resource::<background::TileWindow>()
             .init_resource::<props::PropWindow>()
-            .init_resource::<ceiling::CeilingOverlay>()
+            .init_resource::<grids::GridOverlay>()
+            .init_resource::<grids::LayerView>()
+            .init_resource::<BrushStroke>()
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
@@ -529,8 +560,15 @@ impl Plugin for EditorPlugin {
             // the palettes live; the game screen is a consumer of them.
             .add_systems(
                 Update,
-                (background::sync_tile_window, props::sync_prop_window)
+                (background::sync_tile_window, props::sync_prop_window, grids::sync_grid_overlay)
                     .after(ViewSystems)
+                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
+            )
+            .add_systems(
+                Update,
+                grids::cycle_view
+                    .after(NavSystems)
+                    .before(grids::sync_grid_overlay)
                     .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
             )
             .add_systems(
@@ -542,11 +580,8 @@ impl Plugin for EditorPlugin {
             // and closing the window skips `OnExit` entirely, so a window that
             // remembered them would come back pointing at entities that no
             // longer exist — and re-point them, silently, drawing nothing.
-            .add_systems(
-                OnEnter(AppState::Editor),
-                (reset_map_windows, ceiling::reset),
-            )
-            .add_systems(OnEnter(AppState::Game), reset_map_windows)
+            .add_systems(OnEnter(AppState::Editor), (reset_map_windows, grids::reset))
+            .add_systems(OnEnter(AppState::Game), (reset_map_windows, grids::reset))
             .add_systems(OnExit(AppState::Editor), leave_editor)
             // Saving has to survive the window being closed, which ends the
             // app without ever running `OnExit`.
@@ -560,7 +595,6 @@ impl Plugin for EditorPlugin {
                     cycle_item,
                     edit,
                     update_cursor,
-                    ceiling::sync_ceiling_overlay.after(ViewSystems),
                     update_hud,
                     save_on_demand,
                     leave,
@@ -813,8 +847,18 @@ fn switch_layer(
         tool.layer = tool.layer.next();
         return;
     }
-    let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
-    for (key, layer) in digits.into_iter().zip(Layer::ALL) {
+    let digits = [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+        KeyCode::Digit6,
+        KeyCode::Digit7,
+        KeyCode::Digit8,
+        KeyCode::Digit9,
+    ];
+    for (key, layer) in digits.into_iter().zip(Layer::all()) {
         if keys.just_pressed(key) {
             tool.layer = layer;
         }
@@ -860,9 +904,10 @@ fn edit(
     cursor: Res<Cursor>,
     mut window: ResMut<background::TileWindow>,
     mut prop_window: ResMut<props::PropWindow>,
-    mut overlay: ResMut<ceiling::CeilingOverlay>,
+    mut overlay: ResMut<grids::GridOverlay>,
     mut current: ResMut<CurrentMap>,
     mut rect: ResMut<RectangleDrag>,
+    mut stroke: ResMut<BrushStroke>,
     placed: Query<(Entity, &props::Prop, &Transform)>,
 ) {
     let Some(world) = cursor.world else {
@@ -914,9 +959,10 @@ fn edit(
             let erasing = rect.erasing;
             let item = rect.item;
             for cell in std::mem::take(&mut rect.cells) {
-                match (rect.layer, erasing) {
-                    (Layer::Ceiling, roofless) => {
-                        ceiling::set(&mut overlay, &mut current.map, cell, !roofless)
+                match (rect.layer.target(), erasing) {
+                    (Target::Grid(layer), erasing) => {
+                        let value = if erasing { 0 } else { grids::value_of(item) };
+                        grids::set(&mut overlay, &mut current.map, layer, cell, value)
                     }
                     (_, true) => background::erase(&mut window, &mut current.map, cell),
                     (_, false) => background::paint(&mut window, &mut current.map, cell, item),
@@ -927,28 +973,58 @@ fn edit(
         return;
     }
 
-    match tool.layer {
+    match tool.layer.target() {
         // Held rather than clicked: most tiles are painted by dragging over
         // cells.
-        Layer::Background => {
+        Target::Terrain => {
             if place_held {
-                background::paint(&mut window, &mut current.map, cell, tool.background);
+                background::paint(&mut window, &mut current.map, cell, tool.index());
             } else if erase_held {
                 background::erase(&mut window, &mut current.map, cell);
             }
         }
         // One press, one prop — or one lamp.
-        layer @ (Layer::Props | Layer::Lamps) => {
-            let objects = if layer == Layer::Props { ObjectLayer::Props } else { ObjectLayer::Lamps };
-            if place_once {
+        Target::Objects(objects) => {
+            let changed = if place_once {
                 props::place(&mut prop_window, &mut current.map, objects, world, tool.index());
+                true
             } else if erase_once {
                 props::erase_nearest(&mut prop_window, &mut current.map, objects, &placed, world);
+                true
+            } else {
+                false
+            };
+            // A fridge placed or taken away is a fridge plugged in or not.
+            if changed {
+                overlay.touch();
             }
         }
-        // Always a rectangle, handled above.
-        Layer::Ceiling => {}
+        // Held, like terrain, but every cell between this frame's and the
+        // last one's: a wire with a gap in it powers nothing.
+        // The frame it is let go counts too: a stroke ends where the button
+        // came up, however far the pointer moved since the last frame.
+        Target::Grid(layer) => {
+            let value = if place_held || (place_released && stroke.last.is_some()) {
+                Some(grids::value_of(tool.index()))
+            } else if erase_held || (erase_released && stroke.last.is_some()) {
+                Some(0)
+            } else {
+                None
+            };
+            if let Some(value) = value {
+                let from = stroke.last.unwrap_or(cell);
+                grids::stroke(&mut overlay, &mut current.map, layer, from, cell, value);
+            }
+            stroke.last = (place_held || erase_held).then_some(cell);
+        }
     }
+}
+
+/// The cell a grid brush was last over while held, so the next frame's
+/// paint joins up with it.
+#[derive(Resource, Default)]
+struct BrushStroke {
+    last: Option<IVec2>,
 }
 
 /// Move the ghost and frame to the cursor, snapping the way the active layer
@@ -976,9 +1052,9 @@ fn update_cursor(
             *visibility = Visibility::Hidden;
             continue;
         };
-        let snapped = match tool.layer {
-            Layer::Background | Layer::Ceiling => background::cell_centre(background::cell_of(pos)),
-            Layer::Props | Layer::Lamps => pos.round(),
+        let snapped = match tool.layer.target() {
+            Target::Terrain | Target::Grid(_) => background::cell_centre(background::cell_of(pos)),
+            Target::Objects(_) => pos.round(),
         };
         transform.translation.x = snapped.x;
         transform.translation.y = snapped.y;
@@ -989,19 +1065,23 @@ fn update_cursor(
 fn update_hud(
     tool: Res<Tool>,
     current: Res<CurrentMap>,
+    overlay: Res<grids::GridOverlay>,
+    view: Res<grids::LayerView>,
     mut hud: Query<&mut Text, With<Hud>>,
 ) {
-    if !tool.is_changed() && !current.is_changed() {
+    if !tool.is_changed() && !current.is_changed() && !overlay.is_changed() && !view.is_changed() {
         return;
     }
     let size = current.map.size();
     for mut text in &mut hud {
         **text = format!(
-            "map    {}  {}x{}\n{}",
+            "map    {}  {}x{}\n{}\nx-ray  {}   connected  {}",
             current.title(),
             size.width,
             size.height,
-            tool.describe()
+            tool.describe(),
+            view.label(),
+            overlay.summary(),
         );
     }
 }
@@ -1027,11 +1107,9 @@ mod tests {
     /// each of them.
     #[test]
     fn every_palette_item_is_one_cell_wide_once_scaled() {
-        let strips = background::PALETTE
+        let strips = LAYERS
             .iter()
-            .chain(props::PALETTE)
-            .chain(props::LAMP_PALETTE)
-            .chain(ceiling::PALETTE)
+            .flat_map(|layer| layer.palette)
             .flat_map(|item| {
                 [Some((item, item.art)), item.in_use.map(|strip| (item, strip))]
             })
@@ -1071,6 +1149,28 @@ mod tests {
     /// `"block"` and every `"wall..."` variant get the rectangle instruments;
     /// nothing else in the palette does, or a plain floor would start
     /// dragging rectangles instead of painting the cell under the cursor.
+    /// Every layer of the map that can be authored can be edited: each
+    /// object layer with a palette and each grid layer appears in
+    /// [`LAYERS`] exactly once, and every name in it is its own.
+    #[test]
+    fn every_layer_of_the_map_is_in_the_editor_once() {
+        for grid in GridLayer::ALL {
+            let count = LAYERS.iter().filter(|layer| layer.target == Target::Grid(grid)).count();
+            assert_eq!(count, 1, "{grid:?}");
+            let layer = LAYERS.iter().find(|layer| layer.target == Target::Grid(grid)).unwrap();
+            assert_eq!(layer.palette.len(), grids::palette_of(grid).len());
+        }
+        for objects in ObjectLayer::ALL {
+            let count = LAYERS.iter().filter(|layer| layer.target == Target::Objects(objects)).count();
+            assert_eq!(count, usize::from(!props::palette_of(objects).is_empty()), "{objects:?}");
+        }
+        let mut names: Vec<&str> = LAYERS.iter().map(|layer| layer.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), LAYERS.len());
+        assert!(LAYERS.len() <= 9, "the number keys pick a layer, and there are nine of them");
+    }
+
     #[test]
     fn only_wall_and_block_are_rectangle_instruments() {
         for item in background::PALETTE {

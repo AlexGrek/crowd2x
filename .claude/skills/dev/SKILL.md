@@ -78,9 +78,11 @@ src/ui/               UiPlugin (UiScale), shared widgets
   keyboard.rs         the on-screen keyboard and TextEntry
 src/menu.rs           MainMenuPlugin
 src/editor/           the map editor
-  mod.rs              EditorPlugin, Tool, palettes, cursor overlay, HUD
+  mod.rs              EditorPlugin, LAYERS (the table of editable layers), Tool,
+                      palettes, cursor overlay, HUD — see the `map-layers` skill
   background.rs       grid-snapped tile layer; TileWindow draws it a canvas at a time
   props.rs            free-placed, Y-sorted object layer; PropWindow, likewise
+  grids.rs            grid layers (ceiling, power, water) and the x-ray overlay
 src/browser.rs        BrowserPlugin - the saved-maps screen
 src/game/             GamePlugin - playing a map
   mod.rs              camera, zoom, clamp, HUD
@@ -88,7 +90,11 @@ src/game/             GamePlugin - playing a map
   pool.rs             bodies parked when they leave the view, bounded by the view
   logview.rs          drains the simulation's log onto the screen
   held.rs             draws what a unit's hand holds, in front of it
+  selection.rs        who (or which distribution box) was clicked
+  boxpanel.rs         a distribution box's on/off switch
 src/map/              the map + coordinates - PLAIN RUST, no bevy
+  grid.rs             per-cell grid layers: ceiling, power, water
+  utilities.rs        what the power and water networks reach (Supply)
 src/sim/              GameState + process_game_state - PLAIN RUST, no bevy
   uid.rs              Uid (type byte + 56 random bits), EntityType
   entity.rs           GameEntity, Body, Think

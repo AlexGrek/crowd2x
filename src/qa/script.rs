@@ -223,6 +223,9 @@ pub enum Step {
     Name(String),
     /// Select a palette entry by name, on whichever layer it lives.
     Tool(String),
+    /// Show the grid layers' x-ray: `off`, `ceiling`, `power`, `water` or
+    /// `all` — where pressing `o` would step to, without counting presses.
+    Xray(String),
     /// Put an entity in the world.
     ///
     /// The simulation starts empty and spawning is the only way in, so this is
@@ -457,6 +460,24 @@ pub enum Step {
         y: i32,
         roofed: bool,
     },
+    /// What one cell of a grid layer — `ceiling`, `power`, `water` — of a
+    /// *saved* map holds, as the character the file writes it with: `"B"`
+    /// for a distribution box, `"."` for nothing.
+    ExpectGrid {
+        map: String,
+        layer: String,
+        x: i32,
+        y: i32,
+        value: char,
+    },
+    /// How many of the things on the simulated map that need a utility —
+    /// `power` or `water` — have it, `served`, out of how many need it,
+    /// `of`.
+    ExpectConnected {
+        utility: String,
+        served: usize,
+        of: usize,
+    },
     /// How many objects a *saved* map has on one object layer: `props`,
     /// `spawners` or `lamps`, optionally only those of one `kind`.
     ExpectObjects {
@@ -534,6 +555,14 @@ pub enum Step {
     /// somebody is selected, and for the ones whose target has wandered since
     /// it was spawned.
     Select(usize),
+    /// Select the distribution box in a cell, opening its panel — what a
+    /// click on a box with nobody standing on it does.
+    SelectBox { x: i32, y: i32 },
+    /// Switch the distribution box in a cell on or off, on the command queue
+    /// the game uses — applied by the next tick, like `spawn`. The panel's
+    /// button is the way a player does it; this is for a test about what
+    /// follows.
+    SwitchBox { x: i32, y: i32, on: bool },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.
     ///

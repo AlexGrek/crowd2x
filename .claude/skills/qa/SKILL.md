@@ -87,6 +87,12 @@ fixture that has drifted fails at startup with the format's own error.
 
 Remember terrain rows are written **bottom-up**: row 0 of the document is y 0.
 
+**A fridge, a computer or a lamp needs power and a toilet a drain**, or the game treats it
+as not there (`src/map/utilities.rs`). A fixture that is about eating rather than wiring
+still has to be wired: `uv run tools/wire_map.py <file>` puts a transformer and a sewer on
+spare wall cells and runs wiring and pipes to everything, in a map file or in every inline
+map of a QA script. `qa/power_and_water.json` is the test about the wiring itself.
+
 `"open": "<name>"` starts with that map loaded, which is how to test the editor or the
 game without clicking through the browser first. Which screen it opens *in* is `state` —
 `editor` or `game`. A script asking for a screen this build does not have stops the run
@@ -118,6 +124,9 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
+| `{"select_box": {"x": 4, "y": 1}}` | Select the distribution box in a cell, opening its panel (`switch off`/`switch on`, `close`). Game screen. |
+| `{"switch_box": {"x": 4, "y": 1, "on": false}}` | Switch a box on the game's command queue; applied by the next tick, like `spawn`. |
+| `{"xray": "power"}` | Show the grid layers' x-ray: `off`, `ceiling`, `power`, `water` or `all` — where `o` would step to. Either map screen. |
 | `{"look_at": {"x": 128, "y": 128}}` | Point the game camera at the middle of a cell, through the map clamp. Takes effect next frame. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
@@ -207,6 +216,8 @@ the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
 | `{"expect_lighting": {"lights_on": 2}}` | The GPU's lightmap, read back once the latest change is baked, agrees with the CPU reference on every texel; `lights_on` (optional) counts lights switched on. Waits for the bake by re-running itself (`Next::Again`) until the script's timeout. Game screen only. |
 | `{"expect_ceiling": {"map": "loft", "x": 2, "y": 2, "roofed": true}}` | Whether a cell of the **saved** map has a ceiling over it. |
+| `{"expect_grid": {"map": "loft", "layer": "power", "x": 4, "y": 1, "value": "B"}}` | What a cell of a grid layer (`ceiling`, `power`, `water`) of the **saved** map holds, as the character the file writes: `.` nothing, `-` wiring, `=` power line, `B` box, `o` pipe, `#` roof. |
+| `{"expect_connected": {"utility": "power", "served": 2, "of": 2}}` | How many of the simulated map's things that need `power` or `water` have it, out of how many need it. Game screen only. |
 | `{"expect_objects": {"map": "loft", "layer": "lamps", "kind": "ceiling lamp", "count": 1}}` | How many objects the **saved** map has on an object layer (`props`, `spawners`, `lamps`), optionally of one kind. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
@@ -497,6 +508,17 @@ Common causes, in the order worth checking:
 ## Things this suite learned the hard way
 
 Each of these was a real bug the harness found, and each is now a rule:
+
+- **`tools/qa.py` does `cargo run` for every test.** Editing Rust while a suite runs makes
+  the later tests run whatever compiles at that moment — finish the change first, or run one
+  test. Killing a run mid-link can leave an incremental build that fails with `LNK2019`;
+  `cargo clean -p crowd2x` fixes it.
+- **`drag` presses, moves and releases within one frame or two.** An editor tool that acts
+  only while the button is *held* sees the first cell and nothing else; a tool must act on the
+  release frame too (the grid brush does, `editor::BrushStroke`).
+- **A fridge, computer, lamp or toilet needs power or a drain** or the game treats it as
+  absent — a fixture that "never eats" is usually unwired (`tools/wire_map.py`, `electrician` / `plumber`
+  skill).
 
 - **`main` returns `AppExit`.** Discarding it makes every failing test exit 0 and the whole
   suite pass vacuously. This happened.

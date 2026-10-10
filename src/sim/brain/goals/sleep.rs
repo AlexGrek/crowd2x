@@ -339,7 +339,7 @@ mod tests {
         let bed = Point::new(6, 5);
         let mut world = night_with_beds(&[bed]);
         prop_at(&mut world.map, "toilet", Point::new(10, 5));
-        world.features = crate::sim::feature::Features::from_map(&world.map);
+        world.features = crate::sim::feature::Features::from_map(&world.map, &crate::map::utilities::Supply::everywhere(world.map.size()));
         let mut human = owner(Point::new(5, 5), 70.0, bed);
         human.biology_mut().unwrap().set_running(ProcessId::Bladder, true);
         assert!(step_until(&mut world, &mut human, 600, |h| h.brain().is_asleep()), "never got to sleep");

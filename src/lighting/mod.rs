@@ -74,7 +74,7 @@ impl Plugin for LightingPlugin {
             .add_systems(OnExit(AppState::Game), drop_lighting)
             .add_systems(
                 Update,
-                (build_lighting, switch_lights_in_use, publish_dirty_chunks, light_the_canvas)
+                (build_lighting, follow_power, switch_lights_in_use, publish_dirty_chunks, light_the_canvas)
                     .chain()
                     .after(crate::game::CrowdSystems)
                     .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
@@ -120,6 +120,9 @@ pub struct Lighting {
     switchable: Vec<(usize, Point)>,
     /// Lights currently switched on because somebody is using their prop.
     in_use: Vec<usize>,
+    /// The [`GameState::supply_generation`](crate::sim::GameState::supply_generation)
+    /// the lights were last switched for.
+    supply_generation: u64,
 }
 
 impl Lighting {
@@ -156,7 +159,7 @@ fn build_lighting(
     if lighting.is_some() {
         return;
     }
-    let scene = LightScene::from_map(&sim.0.map);
+    let scene = LightScene::from_map(&sim.0.map, sim.0.supply());
     let mut image = Image::new_uninit(
         Extent3d { width: scene.width, height: scene.height, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -195,7 +198,8 @@ fn build_lighting(
         scene.lights.len(),
         scene.chunk_count()
     );
-    commands.insert_resource(Lighting { scene, image, baked, switchable, in_use: Vec::new() });
+    let supply_generation = sim.0.supply_generation();
+    commands.insert_resource(Lighting { scene, image, baked, switchable, in_use: Vec::new(), supply_generation });
 }
 
 /// A prop that lights up while it is used — a computer's screen — lights
@@ -234,6 +238,20 @@ fn switch_lights_in_use(sim: Res<Sim>, lighting: Option<ResMut<Lighting>>, mut w
         lighting.scene.set_enabled(id, true);
     }
     lighting.in_use.clone_from(&wanted);
+}
+
+/// A distribution box switched: lamps on it go dark or light up again.
+/// Nothing at all on a frame the power did not change, which is every
+/// frame but the one a player clicked on.
+fn follow_power(sim: Res<Sim>, lighting: Option<ResMut<Lighting>>) {
+    let Some(mut lighting) = lighting else { return };
+    let generation = sim.0.supply_generation();
+    if generation == lighting.supply_generation {
+        return;
+    }
+    lighting.supply_generation = generation;
+    let changed = lighting.scene.apply_supply(sim.0.supply());
+    info!("lighting: power changed, {changed} light(s) switched");
 }
 
 fn publish_dirty_chunks(lighting: Option<ResMut<Lighting>>, mut upload: ResMut<LightUpload>) {

@@ -38,6 +38,7 @@
 
 use bevy::prelude::*;
 
+use crate::editor::grids::{GridOverlay, LayerView};
 use crate::editor::{background, CurrentMap};
 use crate::map::{Map, Point};
 use crate::render::{CameraPan, PixelZoom, WorldCamera};
@@ -84,6 +85,7 @@ const KEY_HINTS: &str = "wasd/arrows/dpad/stick  move
             q/e or A/B  zoom
           -/+ or L1/R1  speed
                 p or Y  pause
+               o or R3  x-ray
              esc/start  menu";
 
 /// A button in one of the corners, and what pressing it asks for.
@@ -94,6 +96,9 @@ enum Control {
     Slower,
     Faster,
     Pause,
+    /// Step the x-ray over the layers under the floor and over the roofs
+    /// ([`LayerView`]).
+    XRay,
     Spawn,
     Menu,
 }
@@ -153,6 +158,8 @@ enum Readout {
     Pause,
     /// The map, the size of the crowd, the tick count and the time of day.
     Stats,
+    /// The x-ray button's own label: which layer it is showing.
+    XRay,
 }
 
 pub struct HudPlugin;
@@ -242,6 +249,10 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                         (Readout::Pause, label(speed.toggle_label(), FONT_BODY, TEXT)),
                         px(30),
                     ),
+                ),
+                (
+                    Control::XRay,
+                    labelled_button((Readout::XRay, label("x-ray off", FONT_BODY, TEXT)), px(58)),
                 ),
                 (Control::Spawn, plain_button("spawn", px(26))),
                 (Control::Menu, plain_button("menu", px(26))),
@@ -345,6 +356,7 @@ fn press_controls(
     mut menu: ResMut<SpawnMenu>,
     count: Res<SpawnCount>,
     sim: Option<Res<Sim>>,
+    mut view: ResMut<LayerView>,
 ) {
     for (control, interaction) in &clicked {
         if *interaction == Interaction::Pressed {
@@ -359,6 +371,7 @@ fn press_controls(
                 &mut menu,
                 count.get(),
                 sim.as_deref(),
+                &mut view,
             );
         }
     }
@@ -378,6 +391,7 @@ fn press_controls(
                 &mut menu,
                 count.get(),
                 sim.as_deref(),
+                &mut view,
             );
         }
     }
@@ -400,6 +414,7 @@ fn press(
     menu: &mut SpawnMenu,
     count: u32,
     sim: Option<&Sim>,
+    view: &mut LayerView,
 ) {
     match control {
         Control::ZoomOut => {
@@ -411,6 +426,7 @@ fn press(
         Control::Slower => speed::apply(Change::Slower, speed, sim),
         Control::Faster => speed::apply(Change::Faster, speed, sim),
         Control::Pause => speed::apply(Change::TogglePause, speed, sim),
+        Control::XRay => view.cycle(),
         Control::Spawn => open_spawn_menu(commands, scope, focus, menu, count),
         Control::Menu => next.set(AppState::Maps),
     }
@@ -663,6 +679,8 @@ fn update_readouts(
     speed: Res<GameSpeed>,
     current: Res<CurrentMap>,
     sim: Option<Res<Sim>>,
+    view: Res<LayerView>,
+    overlay: Res<GridOverlay>,
     mut texts: Query<(Ref<Readout>, &mut Text)>,
 ) {
     let world = sim.as_deref().map(|sim| &sim.0);
@@ -675,7 +693,8 @@ fn update_readouts(
             Readout::Zoom if fresh || zoom.is_changed() => format!("x{}", zoom.get()),
             Readout::Speed if fresh || speed.is_changed() => speed.label(),
             Readout::Pause if fresh || speed.is_changed() => speed.toggle_label().to_string(),
-            Readout::Stats => stats(&current, world),
+            Readout::Stats => stats(&current, world, overlay.summary()),
+            Readout::XRay if fresh || view.is_changed() => format!("x-ray {}", view.label()),
             // Nothing this readout is about has moved.
             _ => continue,
         };
@@ -693,15 +712,16 @@ fn update_readouts(
 /// ([`crate::sim::clock`]) — and it sits under the tick count rather than
 /// replacing it: a tick is what a QA script and a profile count in, and the
 /// time of day is what somebody watching a crowd get hungry wants.
-fn stats(current: &CurrentMap, world: Option<&GameState>) -> String {
+fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str) -> String {
     let size = current.map.size();
     format!(
-        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}",
+        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}\nwired  {}",
         current.title(),
         size.width,
         size.height,
         world.map_or(0, GameState::len),
         world.map_or(0, GameState::tick),
         world.map_or_else(|| Clock::after_watching(0.0), GameState::clock),
+        connected,
     )
 }

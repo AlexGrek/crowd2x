@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19. Art was imported
 wholesale from an earlier prototype; all code is new.
-What exists is the pixel-perfect render pipeline, a menu, a map browser, a four-layer map
-editor (floor, props, lamps, ceiling) backed by a saved map format, a game screen that loads a map and runs a simulation
+What exists is the pixel-perfect render pipeline, a menu, a map browser, a six-layer map
+editor (floor, props, lamps, ceiling, and under the floor the power grid and the sewer pipes)
+backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
 actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet,
@@ -20,7 +21,9 @@ does not yet show that it is slept in: it has no second strip of art to swap to.
 screen is **lit**: a day/night sun from the world's clock that reaches the streets whole and
 comes in under a ceiling only by the doors, and an RGB lightmap at five subtiles a cell,
 baked by compute shaders from the map's ceiling lamps, fires and computers in use, with
-walls casting shadows.
+walls casting shadows. And it is **wired**: a fridge, a computer or a lamp works only when
+wiring connects it through a distribution box and a power line to a transformer, and a
+toilet only when pipes drain it to a sewer (`map/utilities.rs`).
 
 ## Commands
 
@@ -68,13 +71,19 @@ A pure black capture almost always means the frame was grabbed before the first 
 presented, not that rendering broke — raise `CROWD2X_SHOT_DELAY`, and check the display is
 not asleep, before debugging.
 
-Five skills go deeper than the summary below and should be read before the work they
+Nine skills go deeper than the summary below and should be read before the work they
 cover: `qa` for the scripted test framework, `debugger` for the capture workflow, `dev` for
 Bevy API specifics, asset and animation conventions, and simulation-scaling architecture,
 `brain-engineer` for anything a unit decides or its body does (goals, tasks, features, items,
-stats, processes), and **`add-routine` for adding or changing a routine** — it names the exact
+stats, processes), **`add-routine` for adding or changing a routine** — it names the exact
 files to edit, which existing routine to copy, how to test, and which parts of the repository
-not to read.
+not to read — and **`map-layers` for anything about map layers, the editor's layer table and
+x-ray, the map file format, or wiring fixtures**, with recipes for a new layer or network.
+Three knowledge-base skills map one system each to the files and functions that own it:
+**`electrician`** (the power grid: transformers, lines, boxes and switching them, wiring, what
+needs power and how the brain, fridges, lighting and overlay follow it), **`plumber`** (the
+sewer, pipes and toilets) and **`map-generator`** (the seeded district: build order,
+invariants, tests, how to extend it).
 
 ## Architecture
 
@@ -135,7 +144,8 @@ parts, each a step further from the simulation:
   not), one ceiling bit per **cell** (`Map::has_ceiling`), the lights (`EMITTERS`, a
   catalogue keyed by object name like `PROPS`, read from the `Props` *and* `Lamps` layers —
   `"ceiling lamp"`, `"tube lamp"` and `"fire"` always on, `"computer"` only while somebody
-  is using it), and a CSR index from each
+  is using it — and a lamp or a computer with no power is not in the scene at all:
+  `LightScene::from_map` takes the map's `Supply`), and a CSR index from each
   `CHUNK` (40 subtiles, 8 cells) to the lights that can reach it. Switching a light dirties
   the chunks under its radius and no others. It also holds **the CPU reference,
   `LightScene::evaluate`**, which the shader is kept line for line with and checked against.
@@ -324,9 +334,13 @@ mutably on every frame it is held, whether or not a cell changed, and a prop win
 listened to it respawned every prop on screen — restarting every animation — 181 times in
 a second and a half of dragging. `qa/place_props.json` covers placing and erasing.
 
-`Tool` holds the active layer and a per-layer palette index. Four layers — `tab`/`Y`
-steps through them, `1`-`4` picks one — floor, props, lamps, ceiling; the first two exist
-to be different, and new placeable content should respect that split:
+**The layers are a table, `editor::LAYERS`**: each row a name, a `Target` — the terrain,
+an `ObjectLayer` or a `GridLayer` — and the palette it paints from. `Tool` holds the active
+row and a palette index per row; `tab`/`Y` steps through them and `1`-`6` picks one — floor,
+props, lamps, ceiling, power, water. A new layer of an existing kind is a row there (and,
+for a grid layer, a `GridLayer` variant, below); a new *kind* is a `Target` variant and a
+match arm in `edit`. The kinds exist to be different, and new placeable content should
+respect the split:
 
 - `editor/background.rs` — one tile per grid cell at a single depth behind everything,
   drawn only for the cells under the canvas: `TileWindow` re-points the sprites of the row
@@ -358,10 +372,20 @@ to be different, and new placeable content should respect that split:
   character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`
   is not asked). A lamp exists to light: each one's `EMITTERS` entry is a test. Erasing on
   one layer never takes the other's object, however near.
-- `editor/ceiling.rs` — which cells have a roof. A rectangle instrument, always (left drag
-  roofs it, right drag opens it to the sky), drawn as a translucent hatch over roofed cells
-  **only while the ceiling is the layer being edited** (`CeilingOverlay`), and never in the
-  game.
+- `editor/grids.rs` — the **grid layers**: a value per cell that is not terrain. The
+  ceiling is a rectangle instrument, always (left drag roofs it, right drag opens it to the
+  sky); power (`"wiring"`, `"power line"`, `"distribution box"`) and water (`"sewer pipe"`)
+  are a brush that paints **every cell between this frame's and the last one's** (`stroke`),
+  since a wire with a gap in it powers nothing. Palette entry `i` paints value `i + 1`.
+  None of them is part of the world anybody walks in, so each is drawn as an **x-ray
+  overlay** (`GridOverlay`): one sprite per layer, a texture painted on the CPU at a texel a
+  sixteenth of a cell and drawn at `ART_SCALE`, repainted when the view crosses a cell or
+  the map is edited (`touch()`, never the change flag). Wiring, lines and pipes are bright
+  where live and dim where not, and everything that needs a network has a green or red
+  light in its corner on that layer. **Every layer can be seen, on both screens**: the
+  layer being edited always, and `o` (or a click of the right stick; the game's `x-ray`
+  button) steps `LayerView` through off, each grid layer, and all of them. The editor's HUD
+  and the game's stats say how much is connected (`power 12/14  water 3/3`).
 
 **Art and data are linked by name, never by index.** A palette entry is called after the
 terrain it paints (`"wall brown"`) or the prop it places (`"bed 1"`), and that name is
@@ -479,6 +503,26 @@ selects nobody and the panel goes with them.
 Nothing here is `Focusable`, for the reason the corners are not (below), and every button
 still answers to `Activated` so a QA script can press it by name.
 
+#### Switching a box (`game/boxpanel.rs`, `GameState::switch_box`)
+
+A click on a cell with nobody in it but a distribution box under it selects the **box**
+(`selection::SelectedBox`, beside `Selected`; one at a time, and the green frame goes on
+whichever it is), and a panel along the bottom says where it is, whether it is on, what it
+feeds (`utilities::fed_by`: `feeds 1 fridge, 1 ceiling lamp`) and has a `switch off` /
+`switch on` button. Pressing it sends `Command::SwitchBox` on the usual queue, so it lands
+in the next spawn pass, which is allowed to allocate: `GameState::switch_box` re-floods
+the `Supply`, rebuilds the `Features` index (a fridge or computer on a dead box is not
+somewhere to go) and plugs each fridge in or out (`Fridges::set_power`: an unplugged one
+warms toward the room from wherever it was), then bumps `supply_generation`. Two readers
+follow that number rather than comparing anything: the lighting
+(`lighting::follow_power` → `LightScene::apply_supply`, which switches each powered lamp
+through the same dirty-chunk path a computer's screen uses — every light needing power is in
+the scene from the start, its power part of `enabled`) and the x-ray, which in the game
+paints from the simulation's supply, not the map's. A unit already on its way is stopped by
+its task: `TakeItem` refuses an unpowered fridge when it starts, and `UseComputer` checks
+every tick, so a box switched off mid-go turns the screen off and the go is worth nothing.
+QA: `select_box` and `switch_box` steps, and `press` on the panel's buttons.
+
 #### The two corners (`game/hud.rs`)
 
 The screen is laid out as **the view on the left and the world on the right**: `- x4 +`
@@ -516,9 +560,14 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
 - A map is dimensions plus layers: **terrain** layers where every cell of every layer is
   defined (there is no empty cell, only the `VOID` tile — so no consumer handles a hole),
   and sparse **object** layers, `Props`, `Spawners` and `Lamps`. Only the base terrain
-  layer exists so far. Beside them, **the ceiling**: one flag per cell, authored, read by
-  lighting alone — a roof is in nobody's way. A new map is open sky everywhere, which is
-  what every map made before ceilings existed still is. **A spawner names an entity kind** (`"human"`), and the game screen spawns one
+  layer exists so far. Beside them, **grid layers** (`map/grid.rs`, `GridLayer`): a byte
+  per cell, authored, from a short alphabet that is also how a file writes it, and in
+  nobody's way — `Ceiling` (`.#`, read by lighting), and under the floor `Power` (`.-=B`:
+  wiring, power line, distribution box) and `Water` (`.o`: a pipe). `Map::grid`/`set_grid`
+  are the whole interface (`has_ceiling` is a wrapper). A new map has nothing in any of
+  them, which is what every map made before them still is. Adding one is a variant, its
+  alphabet, a palette in `editor/grids.rs` and a row in `editor::LAYERS`; the file format
+  and the overlay pick it up from there. **A spawner names an entity kind** (`"human"`), and the game screen spawns one
   in its cell when the map is played (`GameState::spawn_from_spawners`, called by
   `game/actors.rs` — `GameState::new` itself still brings nobody). An unknown kind is
   logged and skipped. The editor has no spawner tool; it keeps the ones a map has.
@@ -536,6 +585,29 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   *from beside it*, never from its own cell (`goals::stand_beside`) — the toilet and the beds are the
   exceptions, used by entering, and "The brain" below says how a cell can stay impassable
   here and still be walked into by exactly one unit.
+- **Power and water are derived, never authored** (`map/utilities.rs`, `Supply`), from
+  the two networks and the props standing on them. A `"transformer"` feeds the **power
+  line** in its own cell; a **distribution box** the line reaches feeds the **wiring**; a
+  lamp, fridge or computer is powered when live wiring runs under its own cell. A line
+  straight into a fridge does not count, and neither does wiring no box feeds. A
+  `"sewer"` drains the pipes in its cell, and a toilet with a live pipe under it works.
+  The transformer and the sewer are props — they block their cell like any other — *and*
+  nodes of their networks in that same cell; a box and a pipe are only in the network.
+  `Supply::from_map` is three flood fills over the grid (the map's area, never what stands
+  on it), done once by `GameState::new` and again by the editor's overlay on an edit.
+  **A box can be switched off during play** (`Supply::with_boxes_off`): it still carries
+  the line through, but feeds no wiring. Which boxes are off is simulation state, not the
+  map's (a map is saved with every box on) — see "Switching a box" below.
+  `Supply::everywhere` serves everything, for a test whose wiring is beside the point
+  (`sim::testing::World::new` uses it; `World::as_built` asks the wiring). `CONSUMERS` and
+  `SOURCES` are the catalogue, by name. `serve_everything` wires a map the shortest way,
+  for tests; `tools/wire_map.py` does the same to a map file or the maps inside a QA script,
+  and is what wired the fixtures when the networks arrived.
+- **Windows** (`"window"` terrain, `Terrain::pane`) are impassable but see-through: `Map::sight`
+  follows `TerrainId::is_see_through`, not passability, so perception and light cross one. The
+  lightmap treats a window cell as roofless whatever the ceiling layer says
+  (`TerrainId::lets_sun_in`), so the sky propagates in from it. The district generator glazes
+  every building's outer wall (`glaze`, last, no seed drawn, so no district changed otherwise).
 - **Passability is derived, never authored.** `PassabilityMap` is one bit per cell: a cell
   is passable when its terrain is and no blocking prop stands in it. Kept in sync by
   `Map::set_terrain`, `add_object` and `remove_object` (floor painted under a fridge stays
@@ -563,7 +635,13 @@ spawner one step from its own bed and two from any other is what makes the neare
 rule hand each resident its own. **Every building is roofed, walls included, and the
 streets and yards are open sky**; a house and a shop get one `"ceiling lamp"` in the middle,
 the bank a grid of `"tube lamp"`s every `OFFICE_LAMP_SPACING` cells — laid out last, from the
-buildings, without drawing on the seed, so adding them changed no district. Reached from the browser's `district` button (a fresh
+buildings, without drawing on the seed, so adding them changed no district. **Power and water
+are laid the same way, after that**: a transformer in the bottom-right corner, a sewer in the
+top-left, a power line and a sewer main down the middle of every street (broken where the bank
+stands across one), and for each building a box and a pipe entry just inside the wall nearest
+a main, a straight run out to it, and wiring or pipes inside to everything that needs them. A
+line never runs indoors and wiring never outdoors; both are tested over 64 seeds, as is every
+consumer being served. Reached from the browser's `district` button (a fresh
 seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture
 `{"name": ..., "district": seed}`. **Known limit:** a brain goes to the nearest fridge or
 toilet as the crow flies and has no idea of a crowd, so the district's crowd — drawn to the
@@ -581,9 +659,11 @@ never reaches a file. Three things about the shape:
 - **A terrain row is a CSV string**, so pretty-printed JSON puts one map row on one line
   instead of one cell per line (Tiled encodes layers this way for the same reason). Rows
   run bottom-up: row 0 is y 0, since Y increases upward everywhere else.
-- **The ceiling is a row of `#` and `.` per map row**, bottom-up like the terrain, and
-  left out of a file with no roof at all — as is an empty `lamps` list — so a map saved
-  before either existed saves back byte for byte and `FORMAT_VERSION` stays 1.
+- **A grid layer is a row of characters per map row**, bottom-up like the terrain, at the
+  top level under its name (`"ceiling"`, `"power"`, `"water"`), one character of its
+  alphabet per cell. A layer with nothing on it is left out — as is an empty `lamps` list —
+  so a map saved before it existed saves back byte for byte and `FORMAT_VERSION` stays 1.
+  An unknown top-level key is `UnknownGridLayer`, not ignored.
 - **Nothing is repaired on load.** A short row, an unknown object layer, a size of zero,
   an object off the map — each is a `MapFormatError`, because padding or dropping produces
   a map that looks right and isn't. `FORMAT_VERSION` is checked first.
@@ -861,12 +941,22 @@ which a walk ends in the *middle* of. `path.rs` says why corner cutting can neve
 cell the search vetted.
 
 **Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
-a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell once.
+a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell — and
+indexes them again whenever a distribution box is switched (`GameState::switch_box`), the one
+thing during play that changes which features work.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
 `Toilet`, `"computer"` is `Entertainment` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never
 runs out of food or drink, and is used from one of the four cells beside it — it blocks its
 own. Adding a use for a prop is an entry there, a palette entry in `editor/props.rs` and a
-`map::PROPS` entry (tests fail without them), and a goal that queues the tasks.
+`map::PROPS` entry (tests fail without them), and a goal that queues the tasks. **A feature
+that does not work is not indexed**: `Features::from_map` takes the map's `Supply`, and a
+fridge or computer with no power, or a toilet with no drain, is left out — a brain never walks
+to one, exactly as if it were not there. If it needs power or water, add it to
+`map::utilities::CONSUMERS`. An unpowered fridge is still in `Fridges` (its door opens), but
+its compressor does not run: it starts at room temperature and stays there, and one that loses
+power warms toward the room from wherever it was (`Fridges::set_power`). Because the index can
+change under a goal's plan, a task that uses a powered feature re-checks it (`TakeItem` when it
+starts, `UseComputer` every tick). The `map-layers` skill has the whole picture.
 
 **A fridge has state of its own: it is open or closed, and it has a temperature**
 (`sim/fridge.rs`, `Fridges`, indexed the same way `Features` is — once, at `GameState::new`,
@@ -1146,8 +1236,8 @@ Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
 `expect_sprites`, `expect_drawn`, `expect_world_sprites`, `expect_held`, `expect_selected`,
 `expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time`, `expect_stat`,
-`expect_lighting`, `expect_ceiling`, `expect_objects` — and `expect_tile`, `expect_ceiling`
-and `expect_objects` read the **saved** map,
+`expect_lighting`, `expect_ceiling`, `expect_grid`, `expect_objects`, `expect_connected` —
+and `expect_tile`, `expect_ceiling`, `expect_grid` and `expect_objects` read the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -1237,9 +1327,11 @@ src/view.rs             VisibleArea - what is on the canvas, and near enough to 
                         matter; everything that culls reads it
 src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (typing)
 src/menu.rs             MainMenuPlugin
-src/editor/             EditorPlugin, background.rs + props.rs (props and lamps) +
-                        ceiling.rs; TileWindow and PropWindow draw the map a canvas
-                        at a time, on both screens
+src/editor/             EditorPlugin and LAYERS, the table of editable layers;
+                        background.rs + props.rs (props and lamps) + grids.rs
+                        (ceiling, power, water, and the x-ray that shows them);
+                        TileWindow, PropWindow and GridOverlay draw the map a
+                        canvas at a time, on both screens
 src/browser.rs          BrowserPlugin - the saved-maps screen
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
@@ -1248,8 +1340,11 @@ src/game/               GamePlugin - playing a map: camera, zoom, clamped to the
                         selection.rs is who was clicked; unitpanel.rs the bar about them
                         props.rs lights up a prop while somebody is using it
                         held.rs draws what a hand holds, in front of its carrier
+                        boxpanel.rs is a distribution box's switch
 src/map/                the map + coordinate system - plain Rust, no bevy
                         district.rs generates a seeded district: houses, bank, shops
+                        grid.rs is the per-cell layers: ceiling, power, water
+                        utilities.rs is what the networks reach: Supply
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
                         clock.rs is what a second is: 1s watched = 2min of world
@@ -1282,6 +1377,8 @@ src/debug.rs            screenshot/smoke-run harness, env-var driven
 tools/check_pixel_grid.py  verifies a frame is an exact integer upscale
 tools/art_scale.py         finds/reduces art that is stored pre-upscaled
 tools/qa.py                runs every qa/*.json against the real binary
+tools/wire_map.py          wires a map file's (or QA script's) consumers to a
+                           transformer and a sewer
 qa/                     scripted QA tests, one JSON file each; fixtures/ holds map JSON
 qa-screenshots/         what those tests photographed (gitignored)
 qa-perf/                what the perf tests measured (gitignored: one machine's evidence)

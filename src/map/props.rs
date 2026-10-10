@@ -51,6 +51,11 @@ pub const PROPS: &[Prop] = &[
     Prop::blocking("crate tall"),
     Prop::blocking("fridge"),
     Prop::blocking("computer"),
+    // The two ends of the networks under the floor (`super::utilities`):
+    // each stands on the street *and* in its network, a box of humming
+    // iron and a manhole cover nobody walks across.
+    Prop::blocking("transformer"),
+    Prop::blocking("sewer"),
 ];
 
 impl ObjectKind {

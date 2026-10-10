@@ -74,7 +74,7 @@ use crate::editor::props::{Prop, Usable};
 use crate::game::actors::{world_pos, Actor, Sim, SimInput};
 use crate::game::held::HeldItem;
 use crate::game::logview::LogView;
-use crate::game::selection::Selected;
+use crate::game::selection::{Selected, SelectedBox};
 use crate::game::speed::GameSpeed;
 use crate::sim::biology::ProcessId;
 use crate::sim::{process_pass, spawn_pass, EntityType, ItemKind};
@@ -536,6 +536,8 @@ struct Intents<'w> {
     focus: ResMut<'w, Focus>,
     entry: ResMut<'w, TextEntry>,
     tool: ResMut<'w, Tool>,
+    /// Which grid layers the x-ray is showing.
+    view: ResMut<'w, crate::editor::grids::LayerView>,
     cursor: ResMut<'w, EditorCursor>,
     next_state: ResMut<'w, NextState<AppState>>,
     /// Where a `spawn` step puts its request, so it travels the same route a
@@ -556,6 +558,8 @@ struct Intents<'w> {
     /// `sim` is: `select` writes it, and one system cannot take the same
     /// resource twice.
     selected: ResMut<'w, Selected>,
+    /// Which distribution box is selected, beside who.
+    selected_box: ResMut<'w, SelectedBox>,
     /// Where `look_at` points the camera. Asked for rather than written
     /// straight onto the transform, so the map clamp applies exactly as it
     /// does to panning there by hand.
@@ -774,7 +778,13 @@ fn perform(
             .tool
             .select(name)
             .then_some(Next::Now)
-            .ok_or(format!("nothing in either palette is called {name:?}")),
+            .ok_or(format!("nothing in any palette is called {name:?}")),
+
+        Step::Xray(label) => intents
+            .view
+            .set(label)
+            .then_some(Next::Now)
+            .ok_or(format!("the x-ray shows off, a layer's name or all, not {label:?}")),
 
         Step::CursorCell { x, y } => {
             intents
@@ -910,6 +920,25 @@ fn perform(
                 crowd.len()
             ))?;
             intents.selected.select(uid);
+            Ok(Next::Now)
+        }
+
+        Step::SelectBox { x, y } => {
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?;
+            let at = crate::map::Point::new(*x, *y);
+            if !sim.0.has_box(at) {
+                return Err(format!("there is no distribution box at ({x}, {y})"));
+            }
+            intents.selected.clear();
+            intents.selected_box.select(at);
+            Ok(Next::Now)
+        }
+
+        Step::SwitchBox { x, y, on } => {
+            intents.sim_input.0.switch_box(crate::map::Point::new(*x, *y), *on);
             Ok(Next::Now)
         }
 
@@ -1239,6 +1268,43 @@ fn perform(
                 if found { "has a ceiling" } else { "is open sky" },
                 if *roofed { "a ceiling" } else { "open sky" },
             ))
+        }
+
+        Step::ExpectGrid { map, layer, x, y, value } => {
+            let saved = checks.maps.0.load(map).map_err(|error| format!("{map}: {error}"))?;
+            let layer = crate::map::GridLayer::from_name(layer).ok_or(format!("no grid layer called {layer:?}"))?;
+            let at = crate::map::Point::new(*x, *y);
+            if !saved.contains(at) {
+                return Err(format!("({x}, {y}) is outside {map}"));
+            }
+            let found = layer.char_of(saved.grid(layer, at)).unwrap_or('?');
+            (found == *value)
+                .then_some(Next::Now)
+                .ok_or(format!("{map} {} ({x}, {y}) is {found:?}, expected {value:?}", layer.name()))
+        }
+
+        Step::ExpectConnected { utility, served, of } => {
+            use crate::map::utilities::Utility;
+            let wanted = match utility.as_str() {
+                "power" => Utility::Power,
+                "water" => Utility::Water,
+                other => return Err(format!("no utility called {other:?}, only power and water")),
+            };
+            let world = &intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0;
+            let (mut found, mut total) = (0, 0);
+            for (_, utility, is_served) in world.supply().consumers(&world.map) {
+                if utility == wanted {
+                    total += 1;
+                    found += usize::from(is_served);
+                }
+            }
+            (found == *served && total == *of)
+                .then_some(Next::Now)
+                .ok_or(format!("{found} of {total} have {utility}, expected {served} of {of}"))
         }
 
         Step::ExpectObjects { map, layer, kind, count } => {

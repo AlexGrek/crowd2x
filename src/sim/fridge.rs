@@ -6,7 +6,13 @@
 //! step ([`crate::sim::world_step`]) and [`crate::sim::Effect`] exist for: a
 //! task asks, and this is applied to sequentially, in slot order, once the
 //! whole crowd has reacted.
+//!
+//! **A fridge with no power is a cupboard.** Its compressor does not run, so
+//! it is as warm as the room, closed or open — and it is not somewhere to get
+//! food or a drink (`feature.rs` leaves it out). It is still indexed here,
+//! since its door still opens.
 
+use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 use crate::sim::clock::MINUTE;
 
@@ -35,14 +41,22 @@ const COOLING: f32 = 30.0 * MINUTE;
 pub struct FridgeState {
     open: bool,
     temperature: f32,
+    /// Whether it is plugged in to live wiring. Fixed at map load.
+    powered: bool,
 }
 
 impl FridgeState {
-    fn closed() -> FridgeState {
+    /// Closed, and as cold as its power lets it be.
+    fn closed(powered: bool) -> FridgeState {
         FridgeState {
             open: false,
-            temperature: COLDEST,
+            temperature: if powered { COLDEST } else { AMBIENT },
+            powered,
         }
+    }
+
+    pub fn is_powered(&self) -> bool {
+        self.powered
     }
 
     pub fn is_open(&self) -> bool {
@@ -68,7 +82,7 @@ pub struct Fridges {
 }
 
 impl Fridges {
-    pub fn from_map(map: &Map) -> Fridges {
+    pub fn from_map(map: &Map, supply: &Supply) -> Fridges {
         let mut cells: Vec<Point> = map
             .objects(ObjectLayer::Props)
             .iter()
@@ -76,7 +90,7 @@ impl Fridges {
             .map(|object| object.cell())
             .collect();
         cells.sort_unstable();
-        let states = vec![FridgeState::closed(); cells.len()];
+        let states = cells.iter().map(|&cell| FridgeState::closed(supply.serves(FRIDGE, cell))).collect();
         Fridges { cells, states }
     }
 
@@ -120,6 +134,15 @@ impl Fridges {
         }
     }
 
+    /// Plug every fridge in or out according to `supply` — a box switched.
+    /// Its temperature carries on from where it was: a fridge losing power
+    /// warms up from cold, it does not jump to the room.
+    pub fn set_power(&mut self, supply: &Supply) {
+        for (cell, state) in self.cells.iter().zip(&mut self.states) {
+            state.powered = supply.serves(FRIDGE, *cell);
+        }
+    }
+
     /// Time passing, in world seconds: every fridge's temperature moves
     /// toward what its door says — [`AMBIENT`] open, [`COLDEST`] closed —
     /// exponentially, at [`WARMING`] or [`COOLING`].
@@ -133,8 +156,11 @@ impl Fridges {
         for state in &mut self.states {
             let (target, factor) = if state.open {
                 (AMBIENT, open_factor)
-            } else {
+            } else if state.powered {
                 (COLDEST, closed_factor)
+            } else {
+                // No compressor: a shut door only slows the room getting in.
+                (AMBIENT, closed_factor)
             };
             state.temperature = (state.temperature + (target - state.temperature) * factor).clamp(COLDEST, AMBIENT);
         }
@@ -156,6 +182,25 @@ mod tests {
         }
     }
 
+    /// The fridges of a map whose wiring is not what the test is about.
+    fn plugged_in(map: &Map) -> Fridges {
+        Fridges::from_map(map, &Supply::everywhere(map.size()))
+    }
+
+    #[test]
+    fn a_fridge_with_no_power_is_as_warm_as_the_room_and_stays_that_way() {
+        let cell = Point::new(3, 4);
+        let map = map_with_fridges(&[cell]);
+        let mut fridges = Fridges::from_map(&map, &Supply::from_map(&map));
+        let state = fridges.get(cell).expect("indexed all the same: its door still opens");
+        assert!(!state.is_powered());
+        assert_eq!(state.temperature(), AMBIENT);
+        for _ in 0..1000 {
+            fridges.advance(60.0);
+        }
+        assert_eq!(fridges.temperature(cell), AMBIENT, "closed, and no colder");
+    }
+
     fn map_with_fridges(cells: &[Point]) -> Map {
         let mut map = Map::new(Size::new(20, 20), FLOOR);
         for &cell in cells {
@@ -167,7 +212,7 @@ mod tests {
     #[test]
     fn a_fridge_starts_closed_and_as_cold_as_it_gets() {
         let cell = Point::new(3, 4);
-        let fridges = Fridges::from_map(&map_with_fridges(&[cell]));
+        let fridges = plugged_in(&map_with_fridges(&[cell]));
         let state = fridges.get(cell).expect("just painted one there");
         assert!(!state.is_open());
         assert_eq!(state.temperature(), COLDEST);
@@ -178,7 +223,7 @@ mod tests {
     #[test]
     fn an_open_fridge_warms_on_every_tick_and_never_passes_room_temperature() {
         let cell = Point::new(3, 4);
-        let mut fridges = Fridges::from_map(&map_with_fridges(&[cell]));
+        let mut fridges = plugged_in(&map_with_fridges(&[cell]));
         assert!(fridges.set_open(cell, true));
 
         let mut last = COLDEST;
@@ -199,7 +244,7 @@ mod tests {
     #[test]
     fn a_closed_fridge_cools_back_down_and_never_below_the_coldest_it_gets() {
         let cell = Point::new(3, 4);
-        let mut fridges = Fridges::from_map(&map_with_fridges(&[cell]));
+        let mut fridges = plugged_in(&map_with_fridges(&[cell]));
         assert!(fridges.set_open(cell, true));
         for _ in 0..200 {
             fridges.advance(1.0);
@@ -224,7 +269,7 @@ mod tests {
     #[test]
     fn opening_a_fridge_for_a_meal_or_a_drink_warms_it_by_about_this_much() {
         let cell = Point::new(3, 4);
-        let mut fridges = Fridges::from_map(&map_with_fridges(&[cell]));
+        let mut fridges = plugged_in(&map_with_fridges(&[cell]));
         assert!(fridges.set_open(cell, true));
         fridges.advance(1.0 * MINUTE);
         assert!((fridges.temperature(cell) - 7.6).abs() < 0.1, "{}", fridges.temperature(cell));
@@ -234,7 +279,7 @@ mod tests {
 
     #[test]
     fn set_open_on_a_cell_with_no_fridge_in_it_refuses_and_changes_nothing() {
-        let mut fridges = Fridges::from_map(&map_with_fridges(&[Point::new(1, 1)]));
+        let mut fridges = plugged_in(&map_with_fridges(&[Point::new(1, 1)]));
         assert!(!fridges.set_open(Point::new(9, 9), true));
         assert_eq!(fridges.get(Point::new(9, 9)), None);
     }
@@ -242,8 +287,8 @@ mod tests {
     #[test]
     fn the_order_fridges_were_painted_in_does_not_change_the_lookup() {
         let cells = [Point::new(5, 5), Point::new(1, 1), Point::new(9, 2)];
-        let forwards = Fridges::from_map(&map_with_fridges(&cells));
-        let backwards = Fridges::from_map(&map_with_fridges(&[cells[2], cells[1], cells[0]]));
+        let forwards = plugged_in(&map_with_fridges(&cells));
+        let backwards = plugged_in(&map_with_fridges(&[cells[2], cells[1], cells[0]]));
         assert_eq!(forwards, backwards);
         for cell in cells {
             assert!(forwards.get(cell).is_some());
@@ -254,7 +299,7 @@ mod tests {
     fn a_prop_that_is_not_a_fridge_is_not_one_here() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         map.add_object(ObjectLayer::Props, prop("crate", Point::new(2, 2)));
-        let fridges = Fridges::from_map(&map);
+        let fridges = plugged_in(&map);
         assert_eq!(fridges.get(Point::new(2, 2)), None);
     }
 }

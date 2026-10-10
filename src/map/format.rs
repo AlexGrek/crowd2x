@@ -30,32 +30,31 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Map, Object, ObjectLayer, Point, Size, TerrainId, BASE};
+use super::{GridLayer, Map, Object, ObjectLayer, Point, Size, TerrainId, BASE};
 
 /// Bumped when a change to the shape below stops older files loading.
-/// Adding the ceiling did not: a file without one is open sky, which is what
-/// every map before it was.
+/// Adding the grid layers did not: a file without one has nothing painted on
+/// it — open sky, no wiring, no pipes — which is what every map before them
+/// was.
 pub const FORMAT_VERSION: u32 = 1;
-
-/// A ceiling row's two characters: a roof, and open sky. Characters rather
-/// than `1,0` because the layer is two-valued and a row of `#` and `.` reads
-/// as the building it is.
-const ROOFED: char = '#';
-const OPEN: char = '.';
 
 #[derive(Serialize, Deserialize)]
 struct MapFile {
     version: u32,
     size: SizeFile,
     terrain: TerrainFile,
-    /// One string per map row, bottom row first, [`ROOFED`] or [`OPEN`] per
-    /// cell. Left out of a file with no ceiling at all, so a map saved
-    /// before ceilings existed saves back byte for byte.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    ceiling: Option<Vec<String>>,
     /// Keyed by [`ObjectLayer::name`] so the file says which list is which,
     /// rather than depending on the order two arrays happen to be written in.
     objects: BTreeMap<String, Vec<Object>>,
+    /// Every [`GridLayer`] with anything painted on it, at the top level
+    /// under its [`GridLayer::name`] — `"ceiling"`, `"power"`, `"water"` —
+    /// as one string per map row, bottom row first, one character of its
+    /// [`GridLayer::alphabet`] per cell. Characters rather than numbers
+    /// because a row of `#` and `.` reads as the building it roofs. A layer
+    /// with nothing on it is left out, so a map saved before the layer
+    /// existed saves back byte for byte.
+    #[serde(flatten)]
+    grids: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -95,10 +94,12 @@ pub enum MapFormatError {
     /// written under.
     UnnameableTerrain(u16),
     UnknownObjectLayer(String),
+    /// A top-level key this build does not know as a grid layer.
+    UnknownGridLayer(String),
     WrongRowCount { expected: i32, found: usize },
-    WrongCeilingRowCount { expected: i32, found: usize },
-    WrongCeilingRowWidth { row: usize, expected: i32, found: usize },
-    MalformedCeiling { row: usize, found: char },
+    WrongGridRowCount { layer: &'static str, expected: i32, found: usize },
+    WrongGridRowWidth { layer: &'static str, row: usize, expected: i32, found: usize },
+    MalformedGrid { layer: &'static str, row: usize, found: char },
     WrongRowWidth { row: usize, expected: i32, found: usize },
     MalformedRow { row: usize, token: String },
     TileOutOfPalette { row: usize, column: usize, index: u16 },
@@ -125,19 +126,19 @@ impl fmt::Display for MapFormatError {
                 write!(f, "terrain id {id} is not in this build's catalogue")
             }
             Self::UnknownObjectLayer(name) => write!(f, "unknown object layer {name:?}"),
+            Self::UnknownGridLayer(name) => write!(f, "unknown map layer {name:?}"),
             Self::WrongRowCount { expected, found } => {
                 write!(f, "expected {expected} terrain rows, found {found}")
             }
-            Self::WrongCeilingRowCount { expected, found } => {
-                write!(f, "expected {expected} ceiling rows, found {found}")
+            Self::WrongGridRowCount { layer, expected, found } => {
+                write!(f, "expected {expected} {layer} rows, found {found}")
             }
-            Self::WrongCeilingRowWidth { row, expected, found } => {
-                write!(f, "ceiling row {row} has {found} cells, expected {expected}")
+            Self::WrongGridRowWidth { layer, row, expected, found } => {
+                write!(f, "{layer} row {row} has {found} cells, expected {expected}")
             }
-            Self::MalformedCeiling { row, found } => write!(
-                f,
-                "ceiling row {row} has {found:?}, expected {ROOFED:?} or {OPEN:?}"
-            ),
+            Self::MalformedGrid { layer, row, found } => {
+                write!(f, "{layer} row {row} has {found:?}, which is not one of its values")
+            }
             Self::WrongRowWidth {
                 row,
                 expected,
@@ -216,15 +217,11 @@ impl Map {
                 palette: palette.iter().map(|tile| tile.name().to_string()).collect(),
                 layers: vec![LayerFile { rows }],
             },
-            ceiling: (self.ceiling_count() > 0).then(|| {
-                (0..self.size.height)
-                    .map(|y| {
-                        (0..self.size.width)
-                            .map(|x| if self.has_ceiling(Point::new(x, y)) { ROOFED } else { OPEN })
-                            .collect()
-                    })
-                    .collect()
-            }),
+            grids: GridLayer::ALL
+                .into_iter()
+                .filter(|&layer| self.grid_count(layer) > 0)
+                .map(|layer| (layer.name().to_string(), self.encode_grid(layer)))
+                .collect(),
             // Lamps came later than the other two: an empty list of them is
             // left out, like an absent ceiling, so a map made before them
             // saves back unchanged.
@@ -274,8 +271,9 @@ impl Map {
         let tiles = decode_layer(layer, size, &palette)?;
 
         let mut map = Map::from_base_layer(size, tiles);
-        if let Some(rows) = &file.ceiling {
-            decode_ceiling(rows, &mut map)?;
+        for (name, rows) in &file.grids {
+            let layer = GridLayer::from_name(name).ok_or_else(|| MapFormatError::UnknownGridLayer(name.clone()))?;
+            decode_grid(layer, rows, &mut map)?;
         }
         for (name, objects) in file.objects {
             let layer = ObjectLayer::from_name(&name)
@@ -289,12 +287,28 @@ impl Map {
     }
 }
 
-/// The ceiling's rows onto a map, refusing anything but exactly one
-/// [`ROOFED`] or [`OPEN`] per cell — the same no-repair rule as the terrain.
-fn decode_ceiling(rows: &[String], map: &mut Map) -> Result<(), MapFormatError> {
+impl Map {
+    /// A grid layer's rows, bottom row first, one character per cell.
+    fn encode_grid(&self, layer: GridLayer) -> Vec<String> {
+        (0..self.size.height)
+            .map(|y| {
+                (0..self.size.width)
+                    .map(|x| layer.char_of(self.grid(layer, Point::new(x, y))).expect("a value set_grid accepted"))
+                    .collect()
+            })
+            .collect()
+    }
+}
+
+/// A grid layer's rows onto a map, refusing anything but exactly one
+/// character of its alphabet per cell — the same no-repair rule as the
+/// terrain.
+fn decode_grid(layer: GridLayer, rows: &[String], map: &mut Map) -> Result<(), MapFormatError> {
     let size = map.size();
+    let name = layer.name();
     if rows.len() != size.height as usize {
-        return Err(MapFormatError::WrongCeilingRowCount {
+        return Err(MapFormatError::WrongGridRowCount {
+            layer: name,
             expected: size.height,
             found: rows.len(),
         });
@@ -302,19 +316,16 @@ fn decode_ceiling(rows: &[String], map: &mut Map) -> Result<(), MapFormatError> 
     for (y, row) in rows.iter().enumerate() {
         let width = row.chars().count();
         if width != size.width as usize {
-            return Err(MapFormatError::WrongCeilingRowWidth {
+            return Err(MapFormatError::WrongGridRowWidth {
+                layer: name,
                 row: y,
                 expected: size.width,
                 found: width,
             });
         }
         for (x, c) in row.chars().enumerate() {
-            let roofed = match c {
-                ROOFED => true,
-                OPEN => false,
-                found => return Err(MapFormatError::MalformedCeiling { row: y, found }),
-            };
-            map.set_ceiling(Point::new(x as i32, y as i32), roofed);
+            let value = layer.value_of(c).ok_or(MapFormatError::MalformedGrid { layer: name, row: y, found: c })?;
+            map.set_grid(layer, Point::new(x as i32, y as i32), value);
         }
     }
     Ok(())
@@ -446,6 +457,30 @@ mod tests {
     }
 
     #[test]
+    fn the_wiring_and_the_pipes_survive_a_round_trip() {
+        use crate::map::grid::{power, water};
+        let mut before = sample();
+        before.set_grid(GridLayer::Power, Point::new(0, 0), power::LINE);
+        before.set_grid(GridLayer::Power, Point::new(1, 0), power::BOX);
+        before.set_grid(GridLayer::Power, Point::new(2, 0), power::WIRING);
+        before.set_grid(GridLayer::Water, Point::new(2, 1), water::PIPE);
+        let json = before.to_json().unwrap();
+        assert!(json.contains("\"=B-\""), "{json}");
+        assert!(!json.contains("ceiling"), "an empty layer is still left out: {json}");
+        let after = reload(&before);
+        for layer in GridLayer::ALL {
+            assert_eq!(after.grid_cells(layer), before.grid_cells(layer), "{layer:?}");
+        }
+    }
+
+    #[test]
+    fn a_grid_layer_this_build_does_not_have_is_refused() {
+        let json = sample().to_json().unwrap();
+        let with = json.replacen("\"terrain\"", "\"gas\": [\"...\", \"...\"],\n  \"terrain\"", 1);
+        assert!(matches!(Map::from_json(&with), Err(MapFormatError::UnknownGridLayer(name)) if name == "gas"));
+    }
+
+    #[test]
     fn a_map_with_no_ceiling_writes_none() {
         // So every map saved before ceilings existed saves back unchanged.
         assert!(!sample().to_json().unwrap().contains("ceiling"));
@@ -459,15 +494,15 @@ mod tests {
         };
         assert!(matches!(
             Map::from_json(&with(r##"["#.", "..."]"##)),
-            Err(MapFormatError::WrongCeilingRowWidth { row: 0, .. })
+            Err(MapFormatError::WrongGridRowWidth { layer: "ceiling", row: 0, .. })
         ));
         assert!(matches!(
             Map::from_json(&with(r##"["#x.", "..."]"##)),
-            Err(MapFormatError::MalformedCeiling { row: 0, found: 'x' })
+            Err(MapFormatError::MalformedGrid { layer: "ceiling", row: 0, found: 'x' })
         ));
         assert!(matches!(
             Map::from_json(&with(r##"["..."]"##)),
-            Err(MapFormatError::WrongCeilingRowCount { .. })
+            Err(MapFormatError::WrongGridRowCount { layer: "ceiling", .. })
         ));
         assert!(Map::from_json(&with(r##"["#..", "..#"]"##)).is_ok());
     }

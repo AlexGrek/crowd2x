@@ -194,6 +194,18 @@ FeatureKind::Bed => &self.bed,
 
 Goals then call `ctx.think.features.nearest(FeatureKind::Bed, here)`.
 
+**If it needs power or a drain, say so** in `map::utilities::CONSUMERS` — `Features::from_map`
+then leaves it out wherever the map's wiring or pipes do not reach it, so a brain never walks
+to a dead one. Brain tests on `testing::World::new` serve everything; use `World::as_built`
+for a test about the wiring, and `map::utilities::serve_everything` to wire a `GameState` map.
+
+**The index can change under a plan.** A player switching a distribution box off rebuilds
+`Features` (and unplugs `Fridges`) in the spawn pass, so a goal may have picked a feature that
+is gone by the time its task runs. A task that *uses* a powered feature re-checks it: `TakeItem`
+refuses `!fridges.get(cell).is_powered()` when it starts, `UseComputer` fails any tick
+`features.has(Entertainment, cell)` is false. Copy that for a new consumer task; the goal then
+replans from the rebuilt index on its next `process`. Details in the `electrician` and `plumber` skills.
+
 **The prop must be placeable in the editor.**
 `every_feature_the_simulation_knows_is_a_prop_the_editor_can_place` fails otherwise.
 

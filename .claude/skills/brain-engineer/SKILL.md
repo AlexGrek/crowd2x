@@ -25,7 +25,7 @@ writing any of them.
 | task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body, and its unit's own `Effect` | `brain/tasks/` |
 | effect / world step | *what does a task's request outside its own unit become?* | every entity's `Effect` for the tick | world state no single entity owns — so far, a fridge's door | `sim/mod.rs` (`Effect`, `world_step`), `sim/fridge.rs` |
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
-| feature | *what is this prop for?* | the map's props, once | nothing | `sim/feature.rs` |
+| feature | *what is this prop for, and does it work?* | the map's props and its `Supply` — at `GameState::new`, and again whenever a distribution box is switched | nothing | `sim/feature.rs`; power: `electrician` skill, water: `plumber` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
 | inventory | *what is being carried, and does it still fit?* | its own slots | only a task writes it | `sim/inventory.rs` |
 | process | *what does a body do by itself?* | its stats, **world** `dt`, events and how fresh each felt | **the only writer of stats** | `sim/biology/` |

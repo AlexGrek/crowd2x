@@ -63,6 +63,10 @@ pub const PALETTE: &[PaletteItem] = &[
     // on for as long as somebody is sitting at it — `game::props` is what
     // swaps between them, from what the simulation says that unit is doing.
     PaletteItem::animated("computer", "computer_idle.png", 10).used("computer.png", 11),
+    // Where the networks under the floor start (`map::utilities`): each is a
+    // prop in the street *and* a node of its network in the same cell.
+    PaletteItem::upscaled("transformer", "transformer.png"),
+    PaletteItem::upscaled("sewer", "sewer.png"),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

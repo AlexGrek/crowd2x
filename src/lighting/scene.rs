@@ -57,7 +57,8 @@
 //! near it. A change to a light dirties the chunks under its radius and no
 //! others, and only dirty chunks are dispatched.
 
-use crate::map::{Map, ObjectLayer, Point, PIXELS_PER_CELL};
+use crate::map::utilities::Supply;
+use crate::map::{Map, ObjectLayer, Point, TerrainId, PIXELS_PER_CELL};
 
 /// Lighting cells per map cell, on each axis.
 pub const SUBTILES: i32 = 5;
@@ -177,6 +178,12 @@ pub struct Light {
     pub color: [f32; 3],
     /// Switched by the game (a computer in use) rather than always on.
     pub switchable: bool,
+    /// Gives no light without power ([`crate::map::utilities::CONSUMERS`]):
+    /// a lamp or a computer, not a fire. Such a light is in the scene
+    /// whether it has power or not, and power is part of whether it is
+    /// enabled — so switching a box is switching lights, chunks and all,
+    /// and never a new scene.
+    pub needs_power: bool,
     /// The map cell of the prop it came from, so the game can switch the
     /// light of the computer somebody sat down at.
     pub cell: Point,
@@ -225,7 +232,11 @@ pub struct LightScene {
 }
 
 impl LightScene {
-    pub fn from_map(map: &Map) -> LightScene {
+    /// The scene a map lights: its walls, its roofs, and every light on it —
+    /// lit from the start if it is always on and `supply` gives it what it
+    /// needs. A lamp with no power is in the scene, dark; a fire needs
+    /// nothing. [`LightScene::apply_supply`] follows power changing.
+    pub fn from_map(map: &Map, supply: &Supply) -> LightScene {
         let size = map.size();
         let width = size.width as u32 * SUBTILES as u32;
         let height = size.height as u32 * SUBTILES as u32;
@@ -248,7 +259,10 @@ impl LightScene {
         let mut ceiling = vec![0u32; size.area().div_ceil(32)];
         for (i, cell) in size.points().enumerate() {
             debug_assert_eq!(size.index_of(cell), Some(i));
-            if map.has_ceiling(cell) {
+            // A window is open to the sky whatever roofs its wall, which is
+            // what lets the sun in through it.
+            let window = map.terrain(cell).is_some_and(TerrainId::lets_sun_in);
+            if map.has_ceiling(cell) && !window {
                 ceiling[i / 32] |= 1 << (i % 32);
             }
         }
@@ -263,9 +277,11 @@ impl LightScene {
                 Some(Light {
                     pos: [prop.at.x as f32 * to_subtiles, prop.at.y as f32 * to_subtiles],
                     radius: e.radius * SUBTILES as f32,
-                    enabled: e.always_on,
+                    enabled: e.always_on && supply.serves(prop.kind.as_str(), prop.cell()),
                     color: e.color,
                     switchable: !e.always_on,
+                    needs_power: crate::map::utilities::needs(prop.kind.as_str())
+                        == Some(crate::map::utilities::Utility::Power),
                     cell: prop.cell(),
                 })
             })
@@ -324,6 +340,23 @@ impl LightScene {
     }
 
     /// Switch a light; dirties the chunks it reaches if anything changed.
+    /// Power changed — a box switched: every always-on light that needs
+    /// power is lit exactly when its cell has it. A switchable one (a
+    /// computer's screen) is left to whoever switches it, since without
+    /// power nobody can be using it. Returns how many lights changed.
+    pub fn apply_supply(&mut self, supply: &Supply) -> usize {
+        let mut changed = 0;
+        for id in 0..self.lights.len() {
+            let light = &self.lights[id];
+            if !light.needs_power || light.switchable {
+                continue;
+            }
+            let powered = supply.is_live(crate::map::utilities::Network::Wiring, light.cell);
+            changed += usize::from(self.set_enabled(id, powered));
+        }
+        changed
+    }
+
     pub fn set_enabled(&mut self, id: usize, enabled: bool) -> bool {
         if self.lights[id].enabled == enabled {
             return false;
@@ -567,7 +600,7 @@ mod tests {
         let mut map = Map::new(Size::new(24, 20), FLOOR);
         // A room from (4, 2) to (16, 16), its door in the bottom wall at (10, 2).
         roofed_room(&mut map, 4, 2, 16, 16, Point::new(10, 2));
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         let field = scene.sky_field();
         let sky = |cell: Point| {
             let (x, y) = (cell.x * SUBTILES + 2, cell.y * SUBTILES + 2);
@@ -586,11 +619,27 @@ mod tests {
     }
 
     #[test]
+    fn the_sun_comes_in_through_a_window_in_a_roofed_wall() {
+        let window = TerrainId::from_name("window").unwrap();
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        roofed_room(&mut map, 2, 2, 6, 6, Point::new(2, 2));
+        map.set_terrain(Point::new(2, 2), WALL);
+        map.set_terrain(Point::new(4, 2), window);
+        assert!(map.has_ceiling(Point::new(4, 2)), "the wall stays roofed");
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
+        let field = scene.sky_field();
+        let sky = |x: i32, y: i32| scene.evaluate((x * SUBTILES + 2) as u32, (y * SUBTILES + 2) as u32, &field)[3];
+        assert!(sky(4, 3) > 0.4, "just inside the window: {}", sky(4, 3));
+        assert!(sky(4, 5) > 0.0 && sky(4, 5) < sky(4, 3));
+        assert_eq!(sky(3, 2), 0.0, "the wall beside it is still shade");
+    }
+
+    #[test]
     fn a_closed_room_has_no_sky_however_close_the_street() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         roofed_room(&mut map, 2, 2, 6, 6, Point::new(2, 2));
         map.set_terrain(Point::new(2, 2), WALL);
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         let field = scene.sky_field();
         for y in 3..6 {
             for x in 3..6 {
@@ -616,7 +665,7 @@ mod tests {
         }
         map.set_terrain(Point::new(5, 5), FLOOR);
         // (4, 5) and (5, 4) are wall; (5, 5) is open, diagonal from (4, 4).
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         let field = scene.sky_field();
         assert_eq!(field[(22 * scene.width + 22) as usize], 0.0);
     }
@@ -629,15 +678,37 @@ mod tests {
             ObjectLayer::Lamps,
             Object { at: Point::new(6 * 48 + 24, 6 * 48 + 24), kind: ObjectKind::new("ceiling lamp") },
         );
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         assert_eq!(scene.lights.len(), 1);
         assert!(scene.lights_at(sub(6), sub(7))[0] > 0.5, "under the lamp");
         assert_eq!(scene.lights_at(sub(6), sub(10))[0], 0.0, "beyond the top wall");
+
+        // The same lamp with no wiring to it is not a light.
+        let mut dark = LightScene::from_map(&map, &Supply::from_map(&map));
+        assert!(!dark.lights[0].enabled, "a lamp with no power lights nothing");
+        assert_eq!(dark.lights_at(sub(6), sub(7))[0], 0.0);
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 0), Point::new(15, 0));
+        let supply = Supply::from_map(&map);
+        let wired = LightScene::from_map(&map, &supply);
+        assert!(wired.lights[0].enabled, "until it is wired up");
+        // ...and a scene that was dark lights up when the power comes on,
+        // and goes dark again with its box switched off.
+        let generation = dark.generation();
+        assert_eq!(dark.apply_supply(&supply), 1);
+        assert!(dark.lights[0].enabled && dark.generation() > generation);
+        assert_eq!(dark.apply_supply(&supply), 0, "nothing more to change");
+        let boxes: Vec<Point> = map
+            .size()
+            .points()
+            .filter(|&cell| map.grid(crate::map::GridLayer::Power, cell) == crate::map::grid::power::BOX)
+            .collect();
+        assert_eq!(dark.apply_supply(&Supply::with_boxes_off(&map, &boxes)), 1);
+        assert!(!dark.lights[0].enabled);
     }
 
     #[test]
     fn a_lightmap_is_five_subtiles_to_a_cell() {
-        let scene = LightScene::from_map(&Map::new(Size::new(10, 4), FLOOR));
+        let scene = { let map = Map::new(Size::new(10, 4), FLOOR); LightScene::from_map(&map, &Supply::everywhere(map.size())) };
         assert_eq!((scene.width, scene.height), (50, 20));
     }
 
@@ -645,7 +716,7 @@ mod tests {
     fn light_falls_off_to_nothing_at_its_radius() {
         let mut map = Map::new(Size::new(20, 20), FLOOR);
         fire_at(&mut map, Point::new(10, 10));
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         let near = scene.lights_at(sub(10), sub(11))[0];
         let far = scene.lights_at(sub(10), sub(15))[0];
         assert!(near > far && far > 0.0, "{near} {far}");
@@ -659,7 +730,7 @@ mod tests {
             map.set_terrain(Point::new(12, y), WALL);
         }
         fire_at(&mut map, Point::new(10, 10));
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         let face = (12 * SUBTILES) as u32;
         assert!(scene.lights_at(face, sub(10))[0] > 0.0, "the face is lit");
         assert_eq!(scene.lights_at(face + 1, sub(10)), [0.0; 3], "inside the wall is not");
@@ -681,7 +752,7 @@ mod tests {
             map.set_terrain(Point::new(i, 5), WALL);
         }
         fire_at(&mut map, Point::new(3, 3));
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         // The fire is at subtile (17.5, 17.5); (32, 32) is on its diagonal,
         // through the corner at (30, 30).
         assert_eq!(scene.lights_at(32, 32), [0.0; 3]);
@@ -697,7 +768,7 @@ mod tests {
             let mut map = Map::new(Size::new(12, 12), FLOOR);
             map.set_terrain(wall, WALL);
             fire_at(&mut map, Point::new(3, 3));
-            LightScene::from_map(&map).lights_at(32, 32)
+            LightScene::from_map(&map, &Supply::everywhere(map.size())).lights_at(32, 32)
         };
         let beside = lit_past(Point::new(6, 5));
         let above = lit_past(Point::new(5, 6));
@@ -712,7 +783,7 @@ mod tests {
             ObjectLayer::Props,
             Object { at: Point::new(3 * 48 + 24, 3 * 48 + 24), kind: ObjectKind::new("computer") },
         );
-        let mut scene = LightScene::from_map(&map);
+        let mut scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         assert_eq!(scene.take_dirty().len(), scene.chunk_count(), "the first bake is everything");
         assert!(scene.take_dirty().is_empty());
         assert!(scene.set_enabled(0, true));
@@ -727,7 +798,7 @@ mod tests {
         for i in 0..12 {
             fire_at(&mut map, Point::new((i * 7) % 40, (i * 13) % 40));
         }
-        let scene = LightScene::from_map(&map);
+        let scene = LightScene::from_map(&map, &Supply::everywhere(map.size()));
         // Brute force: every lit texel's lights must be in its chunk's list,
         // which `evaluate` relies on.
         for (id, light) in scene.lights.iter().enumerate() {

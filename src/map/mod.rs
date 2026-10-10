@@ -21,11 +21,13 @@
 //!   kind (`"human"`), and playing the map spawns one of it where it stands
 //!   (`sim::GameState::spawn_from_spawners`).
 //!
-//! * **The ceiling** — one flag per cell: whether there is a roof over it.
-//!   Absent over the streets, present over every room. It decides nothing a
-//!   unit does; it is what lets the sun in (`crate::lighting`), and a map
-//!   with no ceiling anywhere — every map made before it existed — is open
-//!   sky everywhere.
+//! * **Grid layers** — a small value per cell, authored, one layer per
+//!   [`GridLayer`]: the ceiling (whether there is a roof over a cell, which
+//!   is what keeps the sun out — `crate::lighting`), and under the floor the
+//!   electrical grid and the sewer pipes, which decide whether a fridge has
+//!   power and a toilet a drain ([`utilities`]). None of them is in anybody's
+//!   way, and a map that never painted one — every map made before it
+//!   existed — has nothing in it: open sky, no wiring, no pipes.
 //!
 //! Maps serialise to JSON — see [`format`] for the on-disk shape, and
 //! [`Map::to_json`] / [`Map::from_json`].
@@ -46,13 +48,16 @@
 mod coords;
 pub mod district;
 mod format;
+pub mod grid;
 mod passability;
 mod props;
 mod storage;
 mod terrain;
+pub mod utilities;
 
 pub use coords::{Point, Size};
 pub use format::{MapFormatError, FORMAT_VERSION};
+pub use grid::GridLayer;
 pub use passability::PassabilityMap;
 pub use props::{Prop, PROPS};
 pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
@@ -184,6 +189,8 @@ impl std::fmt::Debug for Map {
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
             .field("lamps", &self.objects(ObjectLayer::Lamps).len())
             .field("ceiling", &self.ceiling_count())
+            .field("power", &self.grid_count(GridLayer::Power))
+            .field("water", &self.grid_count(GridLayer::Water))
             .finish()
     }
 }
@@ -205,10 +212,10 @@ pub struct Map {
     /// round asks it about every cell on a line of sight, and the catalogue
     /// behind a tile id is a lookup and a branch per cell where this is a bit.
     sight: PassabilityMap,
-    /// Which cells have a roof over them, row-major. Authored, like the
-    /// terrain, and read only by lighting: it is where the sun does not
-    /// reach directly.
-    ceiling: Vec<bool>,
+    /// One row-major byte per cell per [`GridLayer`], indexed by
+    /// `GridLayer as usize`: the ceiling, the wiring, the pipes. Authored,
+    /// like the terrain, and in nobody's way.
+    grids: Vec<Vec<u8>>,
 }
 
 impl Map {
@@ -229,7 +236,7 @@ impl Map {
             objects: ObjectLayer::ALL.map(|_| Vec::new()).into(),
             passability: PassabilityMap::new(size),
             sight: PassabilityMap::new(size),
-            ceiling: vec![false; size.area()],
+            grids: GridLayer::ALL.map(|_| vec![0; size.area()]).into(),
         };
         map.rebuild_passability();
         map
@@ -291,7 +298,7 @@ impl Map {
         for (index, tile) in self.terrain[BASE].tiles.iter().enumerate() {
             let point = self.size.point_at(index);
             self.passability.set(point, tile.is_passable());
-            self.sight.set(point, tile.is_passable());
+            self.sight.set(point, tile.is_see_through());
         }
         for prop in &self.objects[ObjectLayer::Props as usize] {
             if !prop.kind.prop_passability().is_passable() {
@@ -306,34 +313,61 @@ impl Map {
     /// Scans the props, which is the cost of an edit and never of a tick —
     /// nothing in the simulation changes the map.
     fn refresh_passability(&mut self, point: Point) {
-        let see_through = self.terrain(point).is_some_and(TerrainId::is_passable);
-        self.sight.set(point, see_through);
-        let passable = see_through
+        let terrain = self.terrain(point);
+        self.sight.set(point, terrain.is_some_and(TerrainId::is_see_through));
+        let passable = terrain.is_some_and(TerrainId::is_passable)
             && !self.objects(ObjectLayer::Props).iter().any(|prop| {
                 prop.cell() == point && !prop.kind.prop_passability().is_passable()
             });
         self.passability.set(point, passable);
     }
 
+    /// What `layer` holds at `point` — `0`, nothing, off the map.
+    pub fn grid(&self, layer: GridLayer, point: Point) -> u8 {
+        self.size.index_of(point).map_or(0, |index| self.grids[layer as usize][index])
+    }
+
+    /// Row-major, `size.area()` long — index it with [`Size::index_of`].
+    pub fn grid_cells(&self, layer: GridLayer) -> &[u8] {
+        &self.grids[layer as usize]
+    }
+
+    /// Paint one cell of a grid layer. Returns whether the point was on the
+    /// map and the value is one the layer has ([`GridLayer::alphabet`]);
+    /// nothing else about the cell changes, since no grid layer is in
+    /// anybody's way.
+    pub fn set_grid(&mut self, layer: GridLayer, point: Point, value: u8) -> bool {
+        let Some(index) = self.size.index_of(point) else {
+            return false;
+        };
+        if layer.char_of(value).is_none() {
+            return false;
+        }
+        self.grids[layer as usize][index] = value;
+        true
+    }
+
+    /// How many cells of `layer` hold anything at all.
+    pub fn grid_count(&self, layer: GridLayer) -> usize {
+        self.grids[layer as usize].iter().filter(|&&value| value != 0).count()
+    }
+
     /// Whether there is a ceiling over `point`. Off the map is open sky.
     pub fn has_ceiling(&self, point: Point) -> bool {
-        self.size.index_of(point).is_some_and(|index| self.ceiling[index])
+        self.grid(GridLayer::Ceiling, point) != grid::ceiling::OPEN
     }
 
     /// Roof a cell over, or open it to the sky. Returns whether the point was
     /// on the map. Nothing else about the cell changes: a ceiling is not in
     /// anybody's way.
     pub fn set_ceiling(&mut self, point: Point, roofed: bool) -> bool {
-        let Some(index) = self.size.index_of(point) else {
-            return false;
-        };
-        self.ceiling[index] = roofed;
-        true
+        let value = if roofed { grid::ceiling::ROOFED } else { grid::ceiling::OPEN };
+        self.set_grid(GridLayer::Ceiling, point, value)
     }
 
     /// How many cells have a ceiling.
     pub fn ceiling_count(&self) -> usize {
-        self.ceiling.iter().filter(|&&roofed| roofed).count()
+        self.grid_count(GridLayer::Ceiling)
     }
 
     /// The static passability map, for pathfinding and steering to hold on to.
@@ -341,8 +375,8 @@ impl Map {
         &self.passability
     }
 
-    /// Which cells can be seen through: passable terrain, whatever stands on
-    /// it. Off the map is opaque.
+    /// Which cells can be seen through: see-through terrain (floor, a window),
+    /// whatever stands on it. Off the map is opaque.
     pub fn sight(&self) -> &PassabilityMap {
         &self.sight
     }

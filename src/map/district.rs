@@ -42,6 +42,20 @@
 //! they are built, drawing nothing from the seed, so adding them changed no
 //! district: a seed is still the same streets, houses and people.
 //!
+//! # Power and water
+//!
+//! Laid last, like the lamps and for the same reason: from the buildings as
+//! built, without the seed. A [`TRANSFORMER`] stands in one corner of the
+//! district and a [`SEWER`] in the opposite one, and a power line and a sewer
+//! main run down the middle of every street, under the paving, skipping
+//! whatever a building stands on. Every building with something to power has
+//! a distribution box just inside its wall nearest a street, a line out to
+//! the main under the street, and wiring from the box to every lamp, fridge
+//! and computer inside; every building with a toilet has a pipe from its
+//! toilets out to the sewer main the same way. Underground, so it crosses
+//! walls and furniture freely and is in nobody's way. See
+//! [`super::utilities`] for what connects to what.
+//!
 //! # Residents
 //!
 //! A house has a bed for each of its residents, a fridge and a toilet — each
@@ -56,7 +70,9 @@ use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};
 
-use super::{Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, PIXELS_PER_CELL};
+use super::grid::{power, water};
+use super::utilities::{self, Utility};
+use super::{GridLayer, Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, PIXELS_PER_CELL};
 
 /// How many houses a district has.
 pub const HOUSES: usize = 32;
@@ -96,10 +112,20 @@ const BANK_FLOOR: &str = "floor white";
 const RESTROOM_FLOOR: &str = "tiles blue";
 const SHOP_WALL: &str = "wall brown";
 const SHOP_FLOORS: [&str; 3] = ["floor red", "tiles yellow", "floor colorful"];
+const WINDOW: &str = "window";
+/// Cells between the windows along a wall: one every third cell.
+const WINDOW_SPACING: i32 = 3;
 const BEDS: [&str; 6] = ["bed 1", "bed 2", "bed 3", "bed 4", "bed 5", "bed 6"];
 const FRIDGE: &str = "fridge";
 const TOILET: &str = "toilet";
 const COMPUTER: &str = "computer";
+/// What powers the district, in its bottom-right corner.
+pub const TRANSFORMER: &str = "transformer";
+/// What drains it, in its top-left corner.
+pub const SEWER: &str = "sewer";
+/// How far a building's line or pipe may run to reach the main under a
+/// street. A lot is never farther than this from one of its streets.
+const LONGEST_SPUR: i32 = 12;
 /// What a resident's spawner spawns: an `EntityType` name.
 pub const RESIDENT: &str = "human";
 
@@ -117,6 +143,7 @@ const TILES: &[&str] = &[
     SHOP_FLOORS[0],
     SHOP_FLOORS[1],
     SHOP_FLOORS[2],
+    WINDOW,
 ];
 
 /// A rectangle of cells: `x`, `y` is its lowest corner.
@@ -324,6 +351,12 @@ pub fn generate(seed: u64) -> District {
         map.add_object(ObjectLayer::Spawners, spawner);
     }
     roof_and_light(&mut map, &houses, bank, &shops);
+    let buildings: Vec<Rect> =
+        houses.iter().map(|house| house.walls).chain(shops.iter().copied()).chain([bank]).collect();
+    for &walls in &buildings {
+        glaze(&mut map, walls);
+    }
+    connect(&mut map, &buildings);
 
     District {
         seed,
@@ -363,6 +396,150 @@ fn roof_and_light(map: &mut Map, houses: &[House], bank: Rect, shops: &[Rect]) {
             hang(map, OFFICE_LAMP, Point::new(x, y));
         }
     }
+}
+
+/// Windows in the outer walls of `walls`: one every [`WINDOW_SPACING`] cells,
+/// never at a corner, never beside a door or another window (a post of wall
+/// is left between), and only where the cell inside is open floor, so a
+/// partition meeting the wall does not get one. The wall tile is replaced and
+/// the ceiling left alone: the lightmap lets the sun in through the glass.
+/// Last, from the buildings as built, and without the seed — see the module
+/// docs.
+fn glaze(map: &mut Map, walls: Rect) {
+    let window = tile(WINDOW);
+    let solid = |map: &Map, cell: Point| {
+        map.terrain(cell).is_some_and(|t| !t.is_passable() && !t.is_see_through())
+    };
+    let mut panes = Vec::new();
+    for (side, along) in [(Side::South, walls.w), (Side::North, walls.w), (Side::West, walls.h), (Side::East, walls.h)] {
+        let cell_at = |i: i32| match side {
+            Side::South => Point::new(walls.x + i, walls.y),
+            Side::North => Point::new(walls.x + i, walls.top()),
+            Side::West => Point::new(walls.x, walls.y + i),
+            Side::East => Point::new(walls.right(), walls.y + i),
+        };
+        let inward = side.outward();
+        for i in (WINDOW_SPACING / 2 + 1..along - 1).step_by(WINDOW_SPACING as usize) {
+            let cell = cell_at(i);
+            let room = cell.offset(-inward.x, -inward.y);
+            if solid(map, cell)
+                && solid(map, cell_at(i - 1))
+                && solid(map, cell_at(i + 1))
+                && map.sight().is_passable(room)
+            {
+                panes.push(cell);
+            }
+        }
+    }
+    for cell in panes {
+        map.set_terrain(cell, window);
+    }
+}
+
+/// The transformer, the sewer, the mains along the streets and every
+/// building's connection to them. Last, from the buildings as built, and
+/// without the seed — see the module docs.
+fn connect(map: &mut Map, buildings: &[Rect]) {
+    let inside_any = |cell: Point| buildings.iter().any(|walls| walls.contains(cell));
+
+    // The mains: down the middle of every street, both networks side by side
+    // in their own layers, broken wherever a building stands across a street
+    // (the bank does) — every street is in a ring of them, so a break is
+    // walked round.
+    let mains: Vec<Point> = (0..=BLOCKS_Y)
+        .flat_map(|k| {
+            let y = k * (BLOCK_H + STREET) + STREET / 2;
+            (STREET / 2..WIDTH - STREET / 2).map(move |x| Point::new(x, y))
+        })
+        .chain((0..=BLOCKS_X).flat_map(|k| {
+            let x = k * (BLOCK_W + STREET) + STREET / 2;
+            (STREET / 2..HEIGHT - STREET / 2).map(move |y| Point::new(x, y))
+        }))
+        .filter(|&cell| !inside_any(cell))
+        .collect();
+    for &cell in &mains {
+        map.set_grid(GridLayer::Power, cell, power::LINE);
+        map.set_grid(GridLayer::Water, cell, water::PIPE);
+    }
+
+    // The sources, in two corners of the street round the edge, each on its
+    // network and joined to the main.
+    let transformer = Point::new(WIDTH - 1, 0);
+    let sewer = Point::new(0, HEIGHT - 1);
+    map.add_object(ObjectLayer::Props, object(TRANSFORMER, transformer));
+    map.add_object(ObjectLayer::Props, object(SEWER, sewer));
+    utilities::lay(map, GridLayer::Power, power::LINE, transformer, Point::new(WIDTH - 1 - STREET / 2, STREET / 2));
+    utilities::lay(map, GridLayer::Water, water::PIPE, sewer, Point::new(STREET / 2, HEIGHT - 1 - STREET / 2));
+
+    for &walls in buildings {
+        let others = |cell: Point| buildings.iter().any(|&other| other != walls && other.contains(cell));
+        let wants = |utility: Utility| -> Vec<Point> {
+            [ObjectLayer::Props, ObjectLayer::Lamps]
+                .into_iter()
+                .flat_map(|layer| map.objects(layer).iter())
+                .filter(|object| {
+                    walls.contains(object.cell()) && utilities::needs(object.kind.as_str()) == Some(utility)
+                })
+                .map(Object::cell)
+                .collect()
+        };
+        let (powered, drained) = (wants(Utility::Power), wants(Utility::Water));
+        if !powered.is_empty() {
+            let entry = service_entry(map, GridLayer::Power, power::LINE, walls, &others);
+            map.set_grid(GridLayer::Power, entry, power::BOX);
+            for cell in powered {
+                utilities::lay_over_empty(map, GridLayer::Power, power::WIRING, entry, cell);
+            }
+        }
+        if !drained.is_empty() {
+            let entry = service_entry(map, GridLayer::Water, water::PIPE, walls, &others);
+            map.set_grid(GridLayer::Water, entry, water::PIPE);
+            for cell in drained {
+                utilities::lay(map, GridLayer::Water, water::PIPE, entry, cell);
+            }
+        }
+    }
+}
+
+/// Where a building takes a network in: the inside cell in the middle of
+/// whichever wall is nearest a `main` cell straight out from it, with that
+/// stretch laid — through the wall, across the yard, to the main — without
+/// crossing another building. Returns the inside cell, for the caller to put
+/// a box or a pipe in.
+fn service_entry(map: &mut Map, layer: GridLayer, main: u8, walls: Rect, others: &dyn Fn(Point) -> bool) -> Point {
+    let inside = walls.interior();
+    let middle = Point::new(inside.x + inside.w / 2, inside.y + inside.h / 2);
+    let sides = [
+        (Side::West, Point::new(inside.x, middle.y)),
+        (Side::East, Point::new(inside.right(), middle.y)),
+        (Side::South, Point::new(middle.x, inside.y)),
+        (Side::North, Point::new(middle.x, inside.top())),
+    ];
+    let spur = |side: Side, entry: Point| -> Option<Vec<Point>> {
+        let step = side.outward();
+        let mut cells = Vec::new();
+        let mut cell = entry.offset(step.x, step.y);
+        for _ in 0..LONGEST_SPUR {
+            if map.grid(layer, cell) == main {
+                return Some(cells);
+            }
+            if !map.contains(cell) || others(cell) {
+                return None;
+            }
+            cells.push(cell);
+            cell = cell.offset(step.x, step.y);
+        }
+        None
+    };
+    let (entry, cells) = sides
+        .into_iter()
+        .filter_map(|(side, entry)| Some((entry, spur(side, entry)?)))
+        .min_by_key(|(entry, cells)| (cells.len(), *entry))
+        .expect("district: a building with no street within reach");
+    for cell in cells {
+        map.set_grid(layer, cell, main);
+    }
+    entry
 }
 
 /// The bank, across two blocks and the street between them.
@@ -648,6 +825,42 @@ mod tests {
     }
 
     #[test]
+    fn every_building_has_windows_in_its_outer_walls_and_nowhere_else() {
+        let window = tile(WINDOW);
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let buildings: Vec<Rect> = district
+                .houses
+                .iter()
+                .map(|house| house.walls)
+                .chain(district.shops.iter().copied())
+                .chain([district.bank])
+                .collect();
+            for cell in map.size().points() {
+                if map.terrain(cell) == Some(window) {
+                    assert!(
+                        buildings.iter().any(|walls| walls.on_edge(cell)),
+                        "seed {seed}: a window at {cell:?} is not in a wall"
+                    );
+                    assert!(!map.is_passable(cell) && map.sight().is_passable(cell));
+                }
+            }
+            for walls in &buildings {
+                let count = walls.cells().filter(|&cell| map.terrain(cell) == Some(window)).count();
+                assert!(count >= 2, "seed {seed}: {walls:?} has {count} windows");
+            }
+            // Glazing took no way in away: everything is still reachable.
+            let seen = reachable(map);
+            for cell in map.size().points() {
+                if map.is_passable(cell) {
+                    assert!(seen[map.size().index_of(cell).unwrap()], "seed {seed}: {cell:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_building_is_roofed_and_the_streets_are_open_sky() {
         for seed in SEEDS {
             let district = generate(seed);
@@ -693,8 +906,50 @@ mod tests {
         for name in TILES {
             assert!(TerrainId::from_name(name).is_some(), "{name}");
         }
-        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER]) {
+        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER, TRANSFORMER, SEWER]) {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn everything_that_needs_power_or_water_in_a_district_has_it() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let supply = utilities::Supply::from_map(map);
+            let mut consumers = 0;
+            for (object, utility, served) in supply.consumers(map) {
+                assert!(served, "seed {seed}: the {} at {:?} has no {utility:?}", object.kind.as_str(), object.cell());
+                consumers += 1;
+            }
+            // Every house's fridge, toilet and lamp at least.
+            assert!(consumers >= 3 * HOUSES, "seed {seed}: {consumers}");
+        }
+    }
+
+    #[test]
+    fn a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one() {
+        // The voltages meet only in a box, and a box is just inside a wall:
+        // anything else is a line through somebody's kitchen or a cable
+        // across the street.
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let buildings: Vec<Rect> = district
+                .houses
+                .iter()
+                .map(|house| house.walls)
+                .chain(district.shops.iter().copied())
+                .chain([district.bank])
+                .collect();
+            for cell in map.size().points() {
+                let indoors = buildings.iter().any(|walls| walls.interior().contains(cell));
+                match map.grid(GridLayer::Power, cell) {
+                    power::LINE => assert!(!indoors, "seed {seed}: a line indoors at {cell:?}"),
+                    power::WIRING | power::BOX => assert!(indoors, "seed {seed}: wiring outdoors at {cell:?}"),
+                    _ => {}
+                }
+            }
         }
     }
 

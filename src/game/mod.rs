@@ -62,6 +62,7 @@ pub mod props;
 pub mod selection;
 pub mod speed;
 pub mod unitpanel;
+pub mod boxpanel;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -108,6 +109,7 @@ impl Plugin for GamePlugin {
             logview::LogViewPlugin,
             selection::SelectionPlugin,
             unitpanel::UnitPanelPlugin,
+            boxpanel::BoxPanelPlugin,
         ))
             .configure_sets(
                 Update,
