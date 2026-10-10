@@ -57,9 +57,23 @@ pub struct TaskCtx<'a> {
 }
 
 impl TaskCtx<'_> {
-    /// Advance the running action by one tick.
+    /// Advance the running action by one tick — and, walking, ask for the
+    /// door ahead to open, or to stay open while it is crossed. Here rather
+    /// than in each task that walks, so every walk does it: the walker stands
+    /// still at a shut door (`Walker::think`), and this is the other half,
+    /// the ask, which only the reaction round may make.
     pub fn advance_action(&mut self) -> ActionState {
-        self.action.advance(self.think, self.outcome, self.walk)
+        let state = self.action.advance(self.think, self.outcome, self.walk);
+        if matches!(self.action, Action::Move { .. })
+            && *self.effect == Effect::None
+            && let Some(at) = self.walk.door_ahead(self.think)
+        {
+            *self.effect = Effect::Door {
+                at,
+                key: self.walk.body().home(),
+            };
+        }
+        state
     }
 
     /// Where the unit is standing.

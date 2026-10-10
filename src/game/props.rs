@@ -1,5 +1,6 @@
 //! The props that answer to the simulation: a computer's screen comes on
-//! while somebody is sitting at it, and goes dark when they leave.
+//! while somebody is sitting at it, and goes dark when they leave; a door's
+//! leaf slides open and shut as the simulation moves it ([`swing_doors`]).
 //!
 //! The art is not this module's — a prop's pictures are both on its palette
 //! entry ([`PaletteItem::in_use`](crate::editor::PaletteItem::in_use)), drawn
@@ -35,7 +36,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::animation::StripAnimation;
-use crate::editor::props::{Prop, Usable};
+use crate::editor::props::{DoorLeaf, Prop, Usable};
 use crate::map::Point;
 use crate::state::AppState;
 
@@ -50,7 +51,7 @@ impl Plugin for PropsPlugin {
         // put right on the frame it appears rather than the one after.
         app.add_systems(
             Update,
-            light_up_props_in_use
+            (light_up_props_in_use, swing_doors)
                 .in_set(super::SpriteSync)
                 .after(crate::editor::props::sync_prop_window)
                 .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
@@ -99,6 +100,29 @@ fn light_up_props_in_use(
             // got to.
             anim.restart(frames);
             sprite.rect = Some(anim.rect());
+        }
+    }
+}
+
+/// Show every door on screen as open as the simulation says it is: one frame
+/// of its strip, shut first and gone last ([`DoorLeaf`]).
+///
+/// A fact about the door itself (`sim::door::Doors`), not about whoever is
+/// going through it, so unlike a computer's screen the crowd is not asked.
+/// Each leaf on the canvas is a binary search over the doors, and a write
+/// only on a frame it moved.
+fn swing_doors(sim: Res<Sim>, mut doors: Query<(&Prop, &mut DoorLeaf, &mut Sprite)>) {
+    let state = sim.0.doors();
+    for (prop, mut leaf, mut sprite) in &mut doors {
+        let last = leaf.frames.saturating_sub(1);
+        let frame = ((state.openness(prop.cell()) * last as f32).round() as u32).min(last);
+        if frame == leaf.showing {
+            continue;
+        }
+        leaf.showing = frame;
+        if let Some(rect) = sprite.rect.as_mut() {
+            let side = rect.width();
+            *rect = Rect::new(frame as f32 * side, 0.0, (frame + 1) as f32 * side, side);
         }
     }
 }

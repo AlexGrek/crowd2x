@@ -67,6 +67,13 @@ pub const PALETTE: &[PaletteItem] = &[
     // prop in the street *and* a node of its network in the same cell.
     PaletteItem::upscaled("transformer", "transformer.png"),
     PaletteItem::upscaled("sewer", "sewer.png"),
+    // A leaf sliding into the wall beside it, shut in the first frame and
+    // gone in the last; the game shows as much of it as the simulation says
+    // is still shut (`game::props`), and turns and mirrors it to fit its wall
+    // ([`DoorLeaf`]). Anybody's, and a house's, which is locked to whoever
+    // lives there. Drawn by `tools/door_art.py`.
+    PaletteItem::posed("door", "door.png", 6),
+    PaletteItem::posed("house door", "house_door.png", 6),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in
@@ -158,6 +165,55 @@ impl Usable {
     pub fn is_in_use(&self) -> bool {
         self.in_use
     }
+}
+
+/// A door's leaf: a [`PaletteItem::posed`] strip, of which the game screen
+/// shows the frame for how far open the simulation says it is.
+///
+/// The art is a leaf in a wall running left to right, sliding left. Which way
+/// a real one runs and slides is read off the map when it is spawned
+/// ([`DoorLeaf::pose`]): a quarter turn for a wall running up and down, and
+/// mirrored so that each leaf of a double door slides into the wall on its
+/// own side rather than into its partner.
+#[derive(Component)]
+pub struct DoorLeaf {
+    pub frames: u32,
+    /// The frame showing, so a door that has not moved costs no write.
+    pub showing: u32,
+}
+
+impl DoorLeaf {
+    /// How the leaf in `cell` sits: whether its wall runs up and down, and
+    /// whether it slides the other way from the art's (right, or up).
+    ///
+    /// Its wall runs up and down when what is above and below it is wall or
+    /// door; and it slides toward whichever side is wall, so away from a
+    /// partner leaf. A lone door between two walls slides the art's way.
+    pub fn pose(map: &Map, cell: Point, doors: &[Point]) -> (bool, bool) {
+        let shut = |c: Point| doors.contains(&c) || map.terrain(c).is_some_and(|t| !t.is_passable());
+        let vertical = shut(cell.offset(0, 1)) && shut(cell.offset(0, -1));
+        let (behind, ahead) = if vertical {
+            (cell.offset(0, -1), cell.offset(0, 1))
+        } else {
+            (cell.offset(-1, 0), cell.offset(1, 0))
+        };
+        // The art slides toward `behind` (left, or down once turned): mirror
+        // when that is a partner and the wall is the other way.
+        let mirrored = doors.contains(&behind) && !doors.contains(&ahead);
+        (vertical, mirrored)
+    }
+}
+
+/// Every cell with a door in it, sorted.
+fn door_cells(map: &Map) -> Vec<Point> {
+    let mut cells: Vec<Point> = map
+        .objects(ObjectLayer::Props)
+        .iter()
+        .filter(|object| crate::sim::door::is_door(object.kind.as_str()))
+        .map(Object::cell)
+        .collect();
+    cells.sort_unstable();
+    cells
 }
 
 /// The palette entry that draws an object kind on a layer, or `None` for one
@@ -315,6 +371,9 @@ pub fn sync_prop_window(
         false
     });
 
+    // Where the doors are, for a leaf to tell its partner from its wall: only
+    // asked for when one is about to be drawn, and only once a rebuild.
+    let mut doors: Option<Vec<Point>> = None;
     for (slot, &layer) in DRAWN.iter().enumerate() {
         for (index, object) in map.objects(layer).iter().enumerate() {
             if !on_canvas(object) || window.drawn.contains_key(&(slot, index)) {
@@ -325,7 +384,11 @@ pub fn sync_prop_window(
             // this runs every time the view moves, and a map with one unknown
             // prop would fill the log with it.
             if let Some(item) = item_of(layer, &object.kind) {
-                let prop = spawn_prop(&mut commands, &assets, layer, object.at, item, *state.get());
+                let pose = palette_of(layer)[item].posed.then(|| {
+                    let doors = doors.get_or_insert_with(|| door_cells(map));
+                    DoorLeaf::pose(map, object.cell(), doors)
+                });
+                let prop = spawn_prop(&mut commands, &assets, layer, object.at, item, pose, *state.get());
                 window.drawn.insert((slot, index), prop);
             }
         }
@@ -343,11 +406,16 @@ fn spawn_prop(
     layer: ObjectLayer,
     at: Point,
     item: usize,
+    pose: Option<(bool, bool)>,
     state: AppState,
 ) -> Entity {
     let item = &palette_of(layer)[item];
     let y = at.y as f32;
     let z = if layer == ObjectLayer::Lamps { LAMP_Z } else { depth_for(y) };
+    let (vertical, mirrored) = pose.unwrap_or((false, false));
+    // A quarter turn about the middle of a whole-pixel square, for a door in
+    // a wall running up and down: every texel still lands on the pixel grid.
+    let rotation = if vertical { Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
     let prop = commands
         .spawn((
             Name::new(if layer == ObjectLayer::Lamps { "lamp" } else { "prop" }),
@@ -360,15 +428,21 @@ fn spawn_prop(
                 image: assets.load(item.art.path),
                 // One frame of a strip; the whole PNG for a still picture.
                 rect: item.first_frame(),
+                flip_x: mirrored,
                 ..default()
             },
-            Transform::from_xyz(at.x as f32, y, z).with_scale(upscale(item.scale)),
+            Transform::from_xyz(at.x as f32, y, z).with_scale(upscale(item.scale)).with_rotation(rotation),
             WORLD_LAYER,
             DespawnOnExit(state),
         ))
         .id();
 
-    if item.art.frames > 1 {
+    if pose.is_some() {
+        commands.entity(prop).insert(DoorLeaf {
+            frames: item.art.frames,
+            showing: 0,
+        });
+    } else if item.art.frames > 1 {
         commands.entity(prop).insert(StripAnimation::new(
             item.frame(),
             item.art.frames,

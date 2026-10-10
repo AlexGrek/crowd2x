@@ -131,6 +131,7 @@ pub mod background;
 pub mod biology;
 pub mod brain;
 pub mod clock;
+pub mod door;
 pub mod entities;
 pub mod entity;
 pub mod feature;
@@ -143,6 +144,7 @@ pub mod kinds;
 pub mod log;
 pub mod occupancy;
 pub mod path;
+pub mod property;
 pub(crate) mod rng;
 pub mod talents;
 #[cfg(test)]
@@ -160,6 +162,7 @@ use crate::map::{Map, ObjectLayer, Point};
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
 pub use clock::Clock;
+pub use door::Doors;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
@@ -171,6 +174,7 @@ pub use kinds::{Dog, Facing, Human};
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{find_path, Path, PathFinder};
+pub use property::{Properties, PropertyId};
 pub use talents::{Talent, Talents};
 pub use uid::{EntityType, Uid};
 pub use walker::Walker;
@@ -251,6 +255,10 @@ pub enum Effect {
     None,
     /// Open or close the fridge at `at`.
     Fridge { at: Point, open: bool },
+    /// Open the door at `at`, or keep it open: somebody holding `key` is
+    /// about to go through it. Refused for a door locked to another key —
+    /// see [`door`].
+    Door { at: Point, key: Option<PropertyId> },
 }
 
 /// Something done *to* the world, from outside it.
@@ -393,6 +401,13 @@ pub struct GameState {
     /// `features` — but unlike it, what is stored here changes every tick a
     /// door is open, through [`Effect::Fridge`] and [`world_step`].
     fridges: Fridges,
+    /// Which cells are whose property: the rooms behind the house doors.
+    /// Derived from `map` once, like `features`. See [`property`].
+    properties: Properties,
+    /// Every door's leaf and lock. Derived from `map` once, like `fridges`,
+    /// and like it changed every tick a door moves, through [`Effect::Door`]
+    /// and [`world_step`]. See [`door`].
+    doors: Doors,
     /// What the map's wiring and pipes reach ([`crate::map::utilities`]),
     /// with [`GameState::boxes_off`] switched off. Derived from `map` like
     /// `features`, which is built from it — and derived again, with the
@@ -432,10 +447,13 @@ impl GameState {
     /// default.
     pub fn new(map: Map, seed: u64) -> GameState {
         let supply = Supply::from_map(&map);
+        let properties = Properties::from_map(&map);
         GameState {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map, &supply),
             fridges: Fridges::from_map(&map, &supply),
+            doors: Doors::from_map(&map, &properties),
+            properties,
             supply,
             boxes_off: Vec::new(),
             supply_generation: 0,
@@ -519,6 +537,16 @@ impl GameState {
 
     pub fn fridges(&self) -> &Fridges {
         &self.fridges
+    }
+
+    /// Every door's leaf and lock. See [`door`].
+    pub fn doors(&self) -> &Doors {
+        &self.doors
+    }
+
+    /// Which cells are whose property. See [`property`].
+    pub fn properties(&self) -> &Properties {
+        &self.properties
     }
 
     /// Which beds belong to whom. See [`homes`].
@@ -665,6 +693,11 @@ impl GameState {
     /// while it is free**: an arrival that finds every bed owned has none, and
     /// will sleep in one only when it is critically tired.
     ///
+    /// **A bed in a property comes with its key**: whoever is given one is
+    /// an owner of the house it stands in, may open its door and use what is
+    /// inside. Somebody with no bed, or one that is nobody's property, owns
+    /// nowhere.
+    ///
     /// One scan of the beds per arrival — a once-per-spawn cost, and the spawn
     /// pass is the one place that is allowed to have those.
     fn give_a_bed(&mut self, uid: Uid, near: Point) {
@@ -678,9 +711,13 @@ impl GameState {
         let Some(entity) = self.entities.get_mut(uid) else {
             return;
         };
-        if entity.set_home(bed) {
+        let property = self.properties.of(bed);
+        if entity.set_home(bed, property) {
             self.homes.claim(bed, uid);
-            self.log.push(format!("{uid} was given the bed at {}, {}", bed.x, bed.y));
+            self.log.push(match property {
+                Some(property) => format!("{uid} was given the bed at {}, {} and the key to {property}", bed.x, bed.y),
+                None => format!("{uid} was given the bed at {}, {}", bed.x, bed.y),
+            });
         }
     }
 
@@ -920,6 +957,8 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         log,
         features,
         fridges,
+        doors,
+        properties,
         tick,
         intents,
         moves,
@@ -949,6 +988,8 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             log,
             features,
             fridges,
+            doors,
+            properties,
             dt,
             tick: *tick,
             clock,
@@ -956,7 +997,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
     );
 
-    move_step(&mut table, map, occupancy, features, intents, moves);
+    move_step(&mut table, map, occupancy, features, doors, intents, moves);
 
     // ...and as it ends this one, which is the layer a detour is worth
     // planning against. Same struct, deliberately different moment.
@@ -968,6 +1009,8 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             log,
             features,
             fridges,
+            doors,
+            properties,
             dt,
             tick: *tick,
             clock,
@@ -977,12 +1020,12 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     );
 
     // **Step 4: the world settles what react asked of it, then the fridges
-    // move on.** Sequential, in slot order, for the same reason the move step
-    // is: two entities opening and closing one fridge on the same tick has to
-    // settle the same way on every run. `game_dt` because a fridge's
-    // temperature is on the world's clock, like everything biological — see
-    // `clock`.
-    world_step(fridges, effects, dt * clock::TIME_SCALE);
+    // and the doors move on.** Sequential, in slot order, for the same reason
+    // the move step is: two entities opening and closing one fridge on the
+    // same tick has to settle the same way on every run. A fridge's
+    // temperature is on the world's clock, like everything biological, and a
+    // door's leaf on the watched one, like a walk — see `clock`.
+    world_step(fridges, doors, occupancy, effects, dt);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1060,6 +1103,7 @@ fn move_step(
     map: &Map,
     occupancy: &mut Occupancy,
     features: &Features,
+    doors: &Doors,
     intents: &[Intent],
     moves: &mut [MoveOutcome],
 ) {
@@ -1087,6 +1131,11 @@ fn move_step(
             // so nobody walks through it as a shortcut) but is allowed
             // through to the claim below, which is what actually decides
             // whether this particular step is granted.
+            MoveOutcome::Blocked { by: None }
+        } else if doors.is_shut(into) {
+            // A door not open all the way is a wall. A walker never asks to
+            // step into one — it stands and waits (`Walker::think`) — so
+            // this is the guarantee rather than the mechanism.
             MoveOutcome::Blocked { by: None }
         } else if let Err(other) = occupancy.claim(into, uid) {
             // A refused claim writes nothing, so there is nothing to undo.
@@ -1178,14 +1227,26 @@ fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome)
 /// Then every fridge's temperature moves by `game_dt`, once, regardless of
 /// how many doors just changed — a fridge that was opened and closed in the
 /// same tick still ages by the tick's worth of world time.
-fn world_step(fridges: &mut Fridges, effects: &mut [Effect], game_dt: f32) {
+///
+/// Every [`Effect::Door`] holds its door open, or starts it opening, unless
+/// it is locked to somebody else; then every leaf moves by the **watched**
+/// `dt` — a door is seen to open, like a walk — and none shuts on a body
+/// standing in it, which is why the crowd as it ends the tick is handed in.
+fn world_step(fridges: &mut Fridges, doors: &mut Doors, occupancy: &Occupancy, effects: &mut [Effect], dt: f32) {
     for effect in effects.iter_mut() {
-        if let Effect::Fridge { at, open } = *effect {
-            let _ = fridges.set_open(at, open);
+        match *effect {
+            Effect::Fridge { at, open } => {
+                let _ = fridges.set_open(at, open);
+            }
+            Effect::Door { at, key } => {
+                let _ = doors.want(at, key);
+            }
+            Effect::None => {}
         }
         *effect = Effect::None;
     }
-    fridges.advance(game_dt);
+    fridges.advance(dt * clock::TIME_SCALE);
+    doors.advance(dt, occupancy);
 }
 
 #[cfg(test)]
@@ -2138,11 +2199,12 @@ mod tests {
             entities,
             occupancy,
             features,
+            doors,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, features, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -2183,11 +2245,12 @@ mod tests {
             entities,
             occupancy,
             features,
+            doors,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, features, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
 
         assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
         assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
@@ -2342,7 +2405,7 @@ mod tests {
 
         state.effects[first_slot] = Effect::Fridge { at: fridge, open: true };
         state.effects[second_slot] = Effect::Fridge { at: fridge, open: false };
-        world_step(&mut state.fridges, &mut state.effects, 0.0);
+        world_step(&mut state.fridges, &mut state.doors, &state.occupancy, &mut state.effects, 0.0);
 
         assert!(!state.fridges().is_open(fridge), "the later slot's request should have won");
         // The slots are drained either way, so nothing is replayed next tick.
@@ -2436,5 +2499,174 @@ mod tests {
         let mut state = GameState::new(map, 1);
         assert_eq!(state.spawn_from_spawners(), 1);
         assert_eq!(state.len(), 1);
+    }
+
+    /// A wall across the map with one door in it, a fridge on the far side
+    /// and a hungry human on the near side.
+    fn a_door_between_a_human_and_a_meal() -> (testing::World, kinds::Human, Point) {
+        let mut map = Map::new(Size::new(12, 7), FLOOR);
+        for y in 0..7 {
+            map.set_terrain(Point::new(6, y), WALL);
+        }
+        let door = Point::new(6, 3);
+        map.set_terrain(door, FLOOR);
+        testing::prop_at(&mut map, door::DOOR, door);
+        testing::prop_at(&mut map, "fridge", Point::new(10, 3));
+        let mut human = testing::needy_human(Point::new(2, 3), 90.0, 0.0, 0.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Thirst, false);
+        human.biology_mut().unwrap().set_running(ProcessId::Bladder, false);
+        (testing::World::new(map), human, door)
+    }
+
+    #[test]
+    fn a_unit_stands_still_at_a_shut_door_while_it_opens_and_then_walks_through() {
+        let (mut world, mut human, door) = a_door_between_a_human_and_a_meal();
+        assert!(world.doors.is_shut(door));
+        let mut waited = 0;
+        let mut was = human.position();
+        for _ in 0..4000 {
+            world.step(&mut human);
+            let now = human.position();
+            assert!(
+                human.center_position() != door || !world.doors.is_shut(door),
+                "stood in a doorway whose door was not open"
+            );
+            let opening = world.doors.openness(door);
+            if opening > 0.0 && opening < 1.0 && now == was && human.center_position() == Point::new(5, 3) {
+                waited += 1;
+            }
+            was = now;
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1, "it got through to the fridge");
+        // Opening takes `door::OPENING`, every tick of which it stood still.
+        let ticks = (door::OPENING / world.dt) as usize;
+        assert!(waited + 2 >= ticks, "waited {waited} ticks of an opening {ticks} long");
+    }
+
+    #[test]
+    fn a_door_nobody_is_going_through_shuts_behind_them() {
+        let (mut world, mut human, door) = a_door_between_a_human_and_a_meal();
+        for _ in 0..4000 {
+            world.step(&mut human);
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1);
+        assert_eq!(world.doors.openness(door), 0.0, "shut again by the time the meal was over");
+    }
+
+    /// The walled house from `property`'s tests with a fridge inside, and a
+    /// hungry human outside — given the key to it, or not.
+    fn a_house_with_a_fridge(owner: bool) -> (testing::World, kinds::Human) {
+        let mut map = property::tests::house();
+        testing::prop_at(&mut map, "fridge", Point::new(5, 5));
+        let world = testing::World::new(map);
+        let mut human = testing::needy_human(Point::new(5, 0), 90.0, 0.0, 0.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Thirst, false);
+        human.biology_mut().unwrap().set_running(ProcessId::Bladder, false);
+        if owner {
+            let home = world.properties.of(Point::new(5, 5));
+            assert!(home.is_some());
+            assert!(human.set_home(Point::new(3, 6), home));
+        }
+        (world, human)
+    }
+
+    #[test]
+    fn the_owner_of_a_house_lets_themselves_in_to_eat() {
+        let (mut world, mut human) = a_house_with_a_fridge(true);
+        for _ in 0..4000 {
+            world.step(&mut human);
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1);
+    }
+
+    #[test]
+    fn a_stranger_never_goes_into_somebody_else_s_house_nor_eats_from_their_fridge() {
+        let (mut world, mut human) = a_house_with_a_fridge(false);
+        let routes = walker::ROUTES_ASKED.with(|asked| asked.get());
+        for _ in 0..4000 {
+            world.step(&mut human);
+            let cell = human.center_position();
+            assert_eq!(world.properties.of(cell), None, "a stranger at {cell:?}");
+        }
+        assert_eq!(world.meals(), 0, "the only fridge is somebody else's");
+        assert!(world.doors.iter().all(|(_, door)| door.openness() == 0.0), "nor opened their door");
+        let asked = walker::ROUTES_ASKED.with(|asked| asked.get()) - routes;
+        assert!(asked < 400, "{asked} routes in 4000 ticks");
+    }
+
+    #[test]
+    fn in_a_district_everybody_holds_the_key_to_their_own_house_and_stays_out_of_the_others() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        assert_eq!(state.properties().len(), district.houses.len(), "every house is a property");
+
+        for house in &district.houses {
+            let home = state.properties().of(house.beds[0]).expect("a bed in a house is in its property");
+            for (cell, door) in state.doors().iter() {
+                if house.walls.contains(cell) {
+                    assert_eq!(door.lock(), Some(home), "the house door locks the house");
+                }
+            }
+            for &bed in &house.beds {
+                assert_eq!(state.properties().of(bed), Some(home));
+                let owner = state.homes().owner(bed).expect("everybody has a bed");
+                assert_eq!(state.entities().get(owner).unwrap().body().home(), Some(home));
+            }
+        }
+        for (cell, door) in state.doors().iter() {
+            let in_a_house = district.houses.iter().any(|house| house.walls.contains(cell));
+            assert_eq!(door.lock().is_some(), in_a_house, "{cell:?}: only a house's door is locked");
+        }
+
+        let mut opened = 0;
+        for _ in 0..1500 {
+            run(&mut state, 1);
+            for entity in state.entities().iter() {
+                let cell = entity.center_position();
+                let owner = state.properties().of(cell);
+                assert!(
+                    owner.is_none() || owner == entity.body().home(),
+                    "{} is in {owner:?} at {cell:?} and lives in {:?}",
+                    entity.uid(),
+                    entity.body().home()
+                );
+            }
+            opened = opened.max(state.doors().iter().filter(|(_, door)| door.openness() > 0.0).count());
+        }
+        assert!(opened > 0, "nobody went in or out of anywhere all day");
+    }
+
+    #[test]
+    fn determinism_survives_a_crowd_going_through_doors() {
+        let build = || {
+            let mut state = GameState::new(crate::map::district::generate(5).map, 5);
+            state.spawn_from_spawners();
+            // Past `PARALLEL_AT`, so the rounds that can run on threads do.
+            for y in 1..20 {
+                state.spawn(EntityType::Human, Point::new(1, y));
+            }
+            assert!(state.len() >= PARALLEL_AT);
+            state
+        };
+        let (mut a, mut b) = (build(), build());
+        run(&mut a, 900);
+        run(&mut b, 900);
+        let snapshot = |state: &GameState| {
+            let positions: Vec<(u64, (f32, f32))> =
+                state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect();
+            let doors: Vec<(Point, f32)> = state.doors().iter().map(|(cell, door)| (cell, door.openness())).collect();
+            (positions, doors)
+        };
+        assert_eq!(snapshot(&a), snapshot(&b));
     }
 }

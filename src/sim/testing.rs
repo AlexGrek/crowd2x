@@ -16,6 +16,8 @@ use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
 use super::fridge::Fridges;
+use super::door::Doors;
+use super::property::Properties;
 use super::kinds::Human;
 use super::log::Log;
 use super::occupancy::Occupancy;
@@ -32,6 +34,11 @@ pub struct World {
     /// [`Effect::Fridge`] and advances it, the same as
     /// [`super::world_step`] does in a real tick.
     pub fridges: Fridges,
+    /// Every door, and the properties the house doors lock. Built from `map`
+    /// once; [`World::step`] applies an [`Effect::Door`] and moves the
+    /// leaves on, as [`super::world_step`] does.
+    pub doors: Doors,
+    pub properties: Properties,
     pub tick: u64,
     pub dt: f32,
     /// What time it is. Opening time, until a test sets it: a test about
@@ -58,10 +65,13 @@ impl World {
     }
 
     fn with_supply(map: Map, supply: Supply) -> World {
+        let properties = Properties::from_map(&map);
         World {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map, &supply),
             fridges: Fridges::from_map(&map, &supply),
+            doors: Doors::from_map(&map, &properties),
+            properties,
             map,
             log: Log::new(),
             tick: 0,
@@ -78,6 +88,8 @@ impl World {
             log: &self.log,
             features: &self.features,
             fridges: &self.fridges,
+            doors: &self.doors,
+            properties: &self.properties,
             dt: self.dt,
             tick: self.tick,
             clock: self.clock,
@@ -105,6 +117,8 @@ impl World {
                     // docs for why the cell is let through to the claim
                     // below rather than refused outright.
                     MoveOutcome::Blocked { by: None }
+                } else if self.doors.is_shut(into) {
+                    MoveOutcome::Blocked { by: None }
                 } else if let Err(other) = self.occupancy.claim(into, uid) {
                     MoveOutcome::Blocked { by: Some(other) }
                 } else {
@@ -115,9 +129,16 @@ impl World {
             }
         };
         let effect = entity.react(&self.ctx(), outcome);
-        if let Effect::Fridge { at, open } = effect {
-            let _ = self.fridges.set_open(at, open);
+        match effect {
+            Effect::Fridge { at, open } => {
+                let _ = self.fridges.set_open(at, open);
+            }
+            Effect::Door { at, key } => {
+                let _ = self.doors.want(at, key);
+            }
+            Effect::None => {}
         }
+        self.doors.advance(self.dt, &self.occupancy);
         self.fridges.advance(self.dt * super::clock::TIME_SCALE);
         self.lines.extend(self.log.drain());
     }

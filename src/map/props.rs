@@ -31,11 +31,18 @@ impl Prop {
             passability: Passability::Impassable,
         }
     }
+
+    const fn walkable(name: &'static str) -> Self {
+        Self {
+            name,
+            passability: Passability::Passable,
+        }
+    }
 }
 
-/// Every prop the editor can place. Everything placeable today is furniture
-/// somebody would have to climb over, so everything blocks; a rug is the first
-/// thing that would not.
+/// Every prop the editor can place. Nearly everything placeable is furniture
+/// somebody would have to climb over, so it blocks; the doors are the
+/// exception.
 pub const PROPS: &[Prop] = &[
     Prop::blocking("bed 1"),
     Prop::blocking("bed 2"),
@@ -56,6 +63,12 @@ pub const PROPS: &[Prop] = &[
     // iron and a manhole cover nobody walks across.
     Prop::blocking("transformer"),
     Prop::blocking("sewer"),
+    // A door is walked through, so the map lets a route through one. Its
+    // leaf is what stops a body, and a leaf opens and shuts during play, so
+    // it is the simulation's (`sim::door`), not the map's; a house door is
+    // locked to whoever owns the room behind it (`sim::property`).
+    Prop::walkable("door"),
+    Prop::walkable("house door"),
 ];
 
 impl ObjectKind {
@@ -81,6 +94,13 @@ mod tests {
     #[test]
     fn a_fridge_blocks() {
         assert_eq!(ObjectKind::new("fridge").prop_passability(), Passability::Impassable);
+    }
+
+    #[test]
+    fn a_door_does_not_block_its_cell() {
+        for door in ["door", "house door"] {
+            assert_eq!(ObjectKind::new(door).prop_passability(), Passability::Passable, "{door}");
+        }
     }
 
     #[test]

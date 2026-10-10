@@ -115,6 +115,10 @@ pub struct PaletteItem {
     /// file's names come from. The editor simply never has a use for it —
     /// nothing is in use where nothing is simulated.
     pub in_use: Option<Strip>,
+    /// A strip whose frame is chosen by the game rather than a clock — a
+    /// door, drawn as open as the simulation says it is
+    /// (`game::props`). Never animated; the editor shows its first frame.
+    pub posed: bool,
 }
 
 impl PaletteItem {
@@ -125,6 +129,7 @@ impl PaletteItem {
             art: Strip { path, frames: 1 },
             scale: 1.0,
             in_use: None,
+            posed: false,
         }
     }
 
@@ -135,6 +140,7 @@ impl PaletteItem {
             art: Strip { path, frames: 1 },
             scale: ART_SCALE,
             in_use: None,
+            posed: false,
         }
     }
 
@@ -146,6 +152,19 @@ impl PaletteItem {
             art: Strip { path, frames },
             scale: ART_SCALE,
             in_use: None,
+            posed: false,
+        }
+    }
+
+    /// A strip of `frames` poses of [`characters::ART`], upscaled, of which the
+    /// game shows the one it is told to — see [`PaletteItem::posed`].
+    pub const fn posed(name: &'static str, path: &'static str, frames: u32) -> Self {
+        Self {
+            name,
+            art: Strip { path, frames },
+            scale: ART_SCALE,
+            in_use: None,
+            posed: true,
         }
     }
 

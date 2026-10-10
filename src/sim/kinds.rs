@@ -36,6 +36,7 @@ use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
 use super::item::ItemKind;
+use super::property::PropertyId;
 use super::talents::Talents;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
@@ -243,6 +244,10 @@ impl GameEntity for Human {
             ("name", self.identity.name().to_string()),
             ("gender", self.identity.gender().label().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
+            (
+                "home",
+                self.walk.body().home().map_or_else(|| "nowhere".to_string(), |home| home.to_string()),
+            ),
         ];
         fields.extend(self.walk.debug_fields());
         fields.extend(self.inventory.debug_fields());
@@ -267,8 +272,9 @@ impl GameEntity for Human {
         self.brain.action().interacting_with()
     }
 
-    fn set_home(&mut self, bed: Point) -> bool {
+    fn set_home(&mut self, bed: Point, property: Option<PropertyId>) -> bool {
         self.brain.set_home(bed);
+        self.walk.body_mut().set_home(property);
         true
     }
 

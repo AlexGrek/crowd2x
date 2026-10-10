@@ -147,6 +147,12 @@ impl Walker {
         let Some(step) = self.path.current() else {
             return Intent::Idle;
         };
+        // A door ahead that is not open all the way: stand and wait for it.
+        // Asking for it to open is the reaction round's
+        // (`TaskCtx::advance_action`), since think may not ask for anything.
+        if step != self.body.center_position() && ctx.doors.is_shut(step) {
+            return Intent::Idle;
+        }
 
         let (x, y) = self.body.position();
         let (tx, ty) = (step.x as f32 + 0.5, step.y as f32 + 0.5);
@@ -221,7 +227,8 @@ impl Walker {
         ROUTES_ASKED.with(|asked| asked.set(asked.get() + 1));
 
         let here = self.body.center_position();
-        match path::find_path(here, cell, FAR_LIMIT, |c| ctx.is_passable(c)) {
+        let key = self.body.home();
+        match path::find_path(here, cell, FAR_LIMIT, |c| ctx.is_passable_with(c, key)) {
             // Already in the cell, which still means walking to the middle of
             // it: a route of one step, ticked off by `advance` on arrival.
             Some(steps) if steps.is_empty() => {
@@ -309,9 +316,10 @@ impl Walker {
         let target = remaining[cells - 1];
 
         let uid = self.body.uid();
+        let key = self.body.home();
         let here = self.body.center_position();
         let detour = path::find_path(here, target, DETOUR_LIMIT, |cell| {
-            ctx.is_passable(cell) && (cell == target || ctx.occupancy.is_free_for(cell, uid))
+            ctx.is_passable_with(cell, key) && (cell == target || ctx.occupancy.is_free_for(cell, uid))
         });
 
         match detour {
@@ -324,6 +332,15 @@ impl Walker {
                 false
             }
         }
+    }
+
+    /// The door the route goes through next, when the next cell is one —
+    /// open or not, since asking for an open one is what holds it open while
+    /// this walker crosses. `None` standing in a doorway already: the door
+    /// does not shut on somebody in it.
+    pub fn door_ahead(&self, ctx: &Think<'_>) -> Option<Point> {
+        let step = self.path.current()?;
+        (step != self.body.center_position() && ctx.doors.is_door(step)).then_some(step)
     }
 
     /// Where the route ends, if there is one.
@@ -390,6 +407,8 @@ mod tests {
         log: Log,
         features: Features,
         fridges: Fridges,
+        doors: crate::sim::door::Doors,
+        properties: crate::sim::property::Properties,
     }
 
     impl World {
@@ -400,6 +419,8 @@ mod tests {
                 log: Log::new(),
                 features: Features::default(),
                 fridges: Fridges::default(),
+                doors: Default::default(),
+                properties: Default::default(),
             }
         }
 
@@ -410,6 +431,8 @@ mod tests {
                 log: &self.log,
                 features: &self.features,
                 fridges: &self.fridges,
+                doors: &self.doors,
+                properties: &self.properties,
                 dt: 1.0 / 60.0,
                 tick,
                 clock: crate::sim::clock::Clock::after_watching(0.0),

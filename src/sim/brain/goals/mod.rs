@@ -56,11 +56,17 @@ pub const MAX_REROUTES: u8 = 3;
 /// of reach ([`OutOfReach`](super::memory::OutOfReach)). `None` when there
 /// is none, not even one it gave up on: what a goal reroutes to straight
 /// after giving up, which must never be the place it just gave up on.
+///
+/// Only among the features this unit may use: one in somebody else's
+/// property is not there for it at all ([`Think::may_use`](crate::sim::Think::may_use)).
 pub(super) fn nearest_in_reach(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Point> {
     let here = ctx.body.center_position();
     let now = ctx.think.clock.elapsed();
     let places = ctx.memory.out_of_reach();
-    ctx.think.features.nearest_where(kind, here, |cell| !places.contains(cell, now))
+    let key = ctx.body.home();
+    ctx.think
+        .features
+        .nearest_where(kind, here, |cell| ctx.think.may_use(cell, key) && !places.contains(cell, now))
 }
 
 /// Where a visit *starts*: [`nearest_in_reach`], or — when it has given up on
@@ -77,7 +83,8 @@ pub(super) fn choose_nearest(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Poi
         let forgiven = |cell: Point| places.until(cell, now).unwrap_or(0.0);
         // Ties go to the nearer, then the lower cell, so the answer does not
         // depend on the order the memory was written in.
-        ctx.think.features.cells_of(kind).iter().copied().min_by(|&a, &b| {
+        let key = ctx.body.home();
+        ctx.think.features.cells_of(kind).iter().copied().filter(|&cell| ctx.think.may_use(cell, key)).min_by(|&a, &b| {
             forgiven(a)
                 .total_cmp(&forgiven(b))
                 .then((here.manhattan_distance(a), a).cmp(&(here.manhattan_distance(b), b)))

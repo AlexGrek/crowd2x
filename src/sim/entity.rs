@@ -18,6 +18,7 @@
 use crate::map::Point;
 
 use super::kinds::Facing;
+use super::property::PropertyId;
 use super::uid::{EntityType, Uid};
 use super::{Effect, Intent};
 
@@ -39,6 +40,11 @@ pub struct Body {
     /// "stop moving" means the same thing for everything that has a position,
     /// and [`super::think_step`] is the one place that reads it.
     frozen: bool,
+    /// The property whose locked doors this body may open and whose
+    /// furniture it may use — its key, handed over with a bed by the spawn
+    /// pass ([`super::property`]). `None` for a body that owns nowhere, which
+    /// may still go anywhere that is nobody's.
+    home: Option<PropertyId>,
 }
 
 impl Body {
@@ -47,6 +53,7 @@ impl Body {
             uid,
             position,
             frozen: false,
+            home: None,
         }
     }
 
@@ -87,6 +94,15 @@ impl Body {
 
     pub fn set_frozen(&mut self, frozen: bool) {
         self.frozen = frozen;
+    }
+
+    /// The property it holds the key to, if any.
+    pub fn home(&self) -> Option<PropertyId> {
+        self.home
+    }
+
+    pub fn set_home(&mut self, home: Option<PropertyId>) {
+        self.home = home;
     }
 }
 
@@ -296,14 +312,16 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
-    /// Make `bed` this entity's own, and say whether it took it.
+    /// Make `bed` this entity's own, and with it the key to `property`, the
+    /// one the bed stands in (`None` for a bed that is nobody's property) —
+    /// and say whether it took them.
     ///
     /// Called by the spawn pass, the only place a bed is handed out, for an
     /// entity that has just arrived. `false` — the default — for a kind that
     /// does not sleep: a dog has no use for a bed, and must not be holding one
     /// that a person could have had.
-    fn set_home(&mut self, bed: Point) -> bool {
-        let _ = bed;
+    fn set_home(&mut self, bed: Point, property: Option<PropertyId>) -> bool {
+        let _ = (bed, property);
         false
     }
 
@@ -373,6 +391,14 @@ pub struct Think<'a> {
     /// [`super::world_step`]. A task reads it to decide whether a door is
     /// open; nothing here may write it directly.
     pub fridges: &'a super::fridge::Fridges,
+    /// Every door's leaf and lock, as of the start of this tick — changed
+    /// only by [`super::world_step`], like `fridges`. A walker reads it to
+    /// know whether the doorway ahead is open, and a route which doors it
+    /// may plan through.
+    pub doors: &'a super::door::Doors,
+    /// Which cells are whose property. Built once with the world: what a
+    /// goal asks before choosing somewhere to go ([`Think::may_use`]).
+    pub properties: &'a super::property::Properties,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -420,6 +446,21 @@ impl Think<'_> {
     /// is asked — the crowd moves.
     pub fn is_clear_for(&self, cell: Point, uid: Uid) -> bool {
         self.is_passable(cell) && self.occupancy.is_free_for(cell, uid)
+    }
+
+    /// Whether a body holding `key` may plan a route through `cell`: the
+    /// terrain lets it, and no door there is locked to it. What both stages
+    /// of a walk are planned against. A door that is merely shut is no
+    /// obstacle here — it opens.
+    pub fn is_passable_with(&self, cell: Point, key: Option<PropertyId>) -> bool {
+        self.is_passable(cell) && self.doors.lets_through(cell, key)
+    }
+
+    /// Whether a body holding `key` may go to `cell` and use what is there:
+    /// it is nobody's property, or its own. Asked of a feature before it is
+    /// chosen, so nobody plans a meal from a stranger's fridge.
+    pub fn may_use(&self, cell: Point, key: Option<PropertyId>) -> bool {
+        self.properties.may_use(cell, key)
     }
 }
 

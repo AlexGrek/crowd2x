@@ -119,6 +119,14 @@ const BEDS: [&str; 6] = ["bed 1", "bed 2", "bed 3", "bed 4", "bed 5", "bed 6"];
 const FRIDGE: &str = "fridge";
 const TOILET: &str = "toilet";
 const COMPUTER: &str = "computer";
+/// The door of a shop, the bank and its restrooms: anybody may open it.
+const DOOR: &str = "door";
+/// A house's door, which only the people living there may open: the
+/// simulation reads the room behind it as their property (`sim::property`).
+const HOUSE_DOOR: &str = "house door";
+/// How wide every doorway is, in leaves: one person coming in and one going
+/// out of a one-cell door is a standoff neither of them can resolve.
+pub const DOOR_WIDTH: i32 = 2;
 /// What powers the district, in its bottom-right corner.
 pub const TRANSFORMER: &str = "transformer";
 /// What drains it, in its top-left corner.
@@ -331,7 +339,7 @@ pub fn generate(seed: u64) -> District {
     let (shop_x, shop_y) = blocks.remove(rng.random_range(0..blocks.len()));
 
     let bank = bank(&mut rng, &mut map, &mut props, bank_x, bank_y);
-    let shops = shops(&mut rng, &mut map, shop_x, shop_y);
+    let shops = shops(&mut rng, &mut map, &mut props, shop_x, shop_y);
 
     let mut lots: Vec<Lot> = blocks.iter().flat_map(|&(bx, by)| lots_of(bx, by)).collect();
     lots.shuffle(&mut rng);
@@ -574,10 +582,12 @@ fn bank(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by:
     let door = [wide / 2 - 1, wide / 2];
     for x in door {
         map.set_terrain(at(x, -1), floor);
+        props.push(object(DOOR, at(x, -1)));
     }
 
     // Two restrooms at each end: a partition wall across the bank, and one
-    // along the restrooms to split them, each with a doorway into the hall.
+    // along the restrooms to split them, each with a doorway into the hall
+    // as wide as every other door, and a door in it.
     const PARTITION: i32 = 5;
     let split = high / 2 - 1;
     let (wall, tiles) = (tile(BANK_WALL), tile(RESTROOM_FLOOR));
@@ -590,8 +600,9 @@ fn bank(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by:
             }
             map.set_terrain(at(from_end(PARTITION), y), wall);
         }
-        for y in [1, high - 3] {
+        for y in [1, 2, high - 4, high - 3] {
             map.set_terrain(at(from_end(PARTITION), y), tiles);
+            props.push(object(DOOR, at(from_end(PARTITION), y)));
         }
         for y in [0, 2, split + 2, split + 4] {
             props.push(object(TOILET, at(from_end(0), y)));
@@ -626,7 +637,7 @@ fn bank(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by:
 }
 
 /// Three empty shops in one block; the fourth lot is a paved square.
-fn shops(rng: &mut SmallRng, map: &mut Map, bx: i32, by: i32) -> Vec<Rect> {
+fn shops(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by: i32) -> Vec<Rect> {
     let mut lots = lots_of(bx, by).to_vec();
     lots.remove(rng.random_range(0..lots.len()));
     lots.into_iter()
@@ -635,8 +646,9 @@ fn shops(rng: &mut SmallRng, map: &mut Map, bx: i32, by: i32) -> Vec<Rect> {
             let floor = SHOP_FLOORS[rng.random_range(0..SHOP_FLOORS.len())];
             build(map, walls, SHOP_WALL, floor);
             let side = lot.outer[rng.random_range(0..2)];
-            for cell in door(rng, walls, side, 2) {
+            for cell in door(rng, walls, side, DOOR_WIDTH) {
                 map.set_terrain(cell, tile(floor));
+                props.push(object(DOOR, cell));
             }
             walls
         })
@@ -657,12 +669,12 @@ fn house(
     let walls = place_in(rng, lot, wide, high);
     let floor = HOUSE_FLOORS[rng.random_range(0..HOUSE_FLOORS.len())];
     build(map, walls, HOUSE_WALL, floor);
-    // Two wide, like every door here: one person coming in and one going
-    // out of a one-cell door is a standoff neither of them can resolve.
+    // Locked to the people who live here: the room behind it is theirs.
     let side = lot.outer[rng.random_range(0..2)];
-    let door = door(rng, walls, side, 2);
+    let door = door(rng, walls, side, DOOR_WIDTH);
     for &cell in &door {
         map.set_terrain(cell, tile(floor));
+        props.push(object(HOUSE_DOOR, cell));
     }
     let entry: Vec<Point> = door.iter().map(|&cell| cell - side.outward()).collect();
 
@@ -906,7 +918,7 @@ mod tests {
         for name in TILES {
             assert!(TerrainId::from_name(name).is_some(), "{name}");
         }
-        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER, TRANSFORMER, SEWER]) {
+        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR]) {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
         }
     }
@@ -986,7 +998,7 @@ mod tests {
                 assert_eq!(props_in(map, house.walls, TOILET), 1, "seed {seed} {house:?}");
             }
             for shop in &district.shops {
-                let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| shop.contains(prop.cell()));
+                let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| shop.interior().contains(prop.cell()));
                 assert_eq!(inside.count(), 0, "seed {seed}: a shop is empty for now");
             }
             assert!(props_in(map, district.bank, COMPUTER) >= 12, "seed {seed}");
@@ -1013,6 +1025,63 @@ mod tests {
                 });
                 assert!(usable, "seed {seed}: nobody can get to the {} at {:?}", prop.kind.as_str(), prop.cell());
             }
+        }
+    }
+
+    fn doors_of(map: &Map) -> Vec<(Point, &str)> {
+        map.objects(ObjectLayer::Props)
+            .iter()
+            .filter(|prop| [DOOR, HOUSE_DOOR].contains(&prop.kind.as_str()))
+            .map(|prop| (prop.cell(), prop.kind.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn every_doorway_is_a_door_at_least_two_leaves_wide() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let doors = doors_of(map);
+            let door_at = |cell: Point| doors.iter().find(|(at, _)| *at == cell).map(|&(_, name)| name);
+            let wall = |cell: Point| map.terrain(cell).is_some_and(|t| !t.is_passable());
+
+            // A doorway is no narrower than two: every leaf has another of
+            // the same kind beside it, in line with the wall.
+            for &(cell, name) in &doors {
+                assert!(map.is_passable(cell), "seed {seed}: a door in a wall at {cell:?}");
+                let partner = cell.cardinal_neighbours().into_iter().any(|beside| door_at(beside) == Some(name));
+                assert!(partner, "seed {seed}: the {name} at {cell:?} is one leaf wide");
+            }
+
+            let buildings: Vec<(Rect, &str)> = district
+                .houses
+                .iter()
+                .map(|house| (house.walls, HOUSE_DOOR))
+                .chain(district.shops.iter().map(|&shop| (shop, DOOR)))
+                .chain([(district.bank, DOOR)])
+                .collect();
+            for &(walls, kind) in &buildings {
+                // Every way through an outer wall has a door in it, of the
+                // building's kind: a house's locks, anybody else's does not.
+                for cell in walls.cells().filter(|&cell| walls.on_edge(cell) && map.is_passable(cell)) {
+                    assert_eq!(door_at(cell), Some(kind), "seed {seed}: an open doorway at {cell:?}");
+                }
+                // And no gap one cell wide between two walls, outer or inner,
+                // is left anywhere inside, door or no door.
+                for cell in walls.cells().filter(|&cell| map.is_passable(cell)) {
+                    for (a, b) in [(Point::new(-1, 0), Point::new(1, 0)), (Point::new(0, -1), Point::new(0, 1))] {
+                        let squeezed = wall(cell.offset(a.x, a.y)) && wall(cell.offset(b.x, b.y));
+                        assert!(!squeezed, "seed {seed}: a one-cell doorway at {cell:?}");
+                    }
+                }
+            }
+            for house in &district.houses {
+                let leaves = doors.iter().filter(|&&(cell, _)| house.walls.contains(cell)).count();
+                assert_eq!(leaves, DOOR_WIDTH as usize, "seed {seed}: {house:?}");
+            }
+            // The front door, and one into each of the four restrooms.
+            let bank = doors.iter().filter(|&&(cell, _)| district.bank.contains(cell)).count();
+            assert_eq!(bank, 5 * DOOR_WIDTH as usize, "seed {seed}");
         }
     }
 

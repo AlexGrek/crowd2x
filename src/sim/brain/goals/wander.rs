@@ -74,7 +74,10 @@ impl WanderGoal {
                 here.x + rng.random_range(-WANDER_RADIUS..=WANDER_RADIUS),
                 here.y + rng.random_range(-WANDER_RADIUS..=WANDER_RADIUS),
             );
-            if candidate != here && ctx.think.is_passable(candidate) {
+            if candidate != here
+                && ctx.think.is_passable(candidate)
+                && ctx.think.may_use(candidate, ctx.body.home())
+            {
                 return Some(candidate);
             }
         }

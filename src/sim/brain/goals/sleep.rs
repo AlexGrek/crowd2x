@@ -103,8 +103,12 @@ impl SleepGoal {
             if !critical {
                 return None;
             }
+            // ...and never one in somebody else's house.
+            let key = ctx.body.home();
             let mut rng = tick_rng(uid, think.tick);
-            think.features.pick_where(FeatureKind::Bed, &mut rng, free)
+            think
+                .features
+                .pick_where(FeatureKind::Bed, &mut rng, |bed| think.may_use(bed, key) && free(bed))
         };
         pick(false).or_else(|| if rerouting { None } else { pick(true) })
     }
@@ -272,7 +276,7 @@ mod tests {
     /// that arrives to find one free.
     fn owner(cell: Point, tiredness: f32, bed: Point) -> Human {
         let mut human = only_tired(cell, tiredness);
-        assert!(human.set_home(bed));
+        assert!(human.set_home(bed, None));
         human
     }
 
@@ -390,7 +394,7 @@ mod tests {
         let mut human = needy_human(Point::new(6, 6), 45.0, 45.0, 40.0);
         human.set_stamina(25.0);
         human.set_fun(55.0);
-        assert!(human.set_home(bed));
+        assert!(human.set_home(bed, None));
 
         let night = (8.0 * HOUR / TIME_SCALE / world.dt) as u32;
         let mut asleep = 0;
@@ -702,7 +706,7 @@ mod tests {
         let mut world = World::new(map);
         world.clock = midnight();
         let mut human = tired_human(Point::new(2, 3), 60.0);
-        assert!(human.set_home(bed));
+        assert!(human.set_home(bed, None));
         human.set_bladder(95.0);
 
         for _ in 0..8000 {
