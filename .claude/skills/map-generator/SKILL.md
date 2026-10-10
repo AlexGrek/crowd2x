@@ -69,7 +69,7 @@ not**, so adding or changing anything in 6-8 never changes a seed's streets, hou
 | Rule | Why | Test |
 | --- | --- | --- |
 | A door is in a wall facing a street side of its lot | nothing sealed off | `nothing_in_a_district_is_sealed_off` (BFS from (0,0); every prop has a reachable neighbour) |
-| Doors are 2 wide | one in, one out never deadlock | (by construction in `door`) |
+| Every doorway is `DOOR_WIDTH` (2) door leaves: `"house door"` on houses (locked to the residents), `"door"` on the bank, its restrooms and the shops | one in, one out never deadlock; see the `doors` skill | `every_doorway_is_a_door_at_least_two_leaves_wide` |
 | House furniture keeps `ROOM_AROUND` (2) free cells beside it | an occupant can leave past a waiter | `arrange` refuses otherwise |
 | Each spawner is beside its own bed and not beside another | nearest-free-bed gives everyone their own | `every_resident_starts_beside_a_bed_in_their_own_house`; sim `everybody_in_a_district_moves_into_a_bed_of_their_own_house` |
 | Buildings roofed, streets open sky | lighting | `every_building_is_roofed_and_the_streets_are_open_sky` |

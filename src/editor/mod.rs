@@ -40,6 +40,7 @@
 pub mod background;
 pub mod grids;
 pub mod props;
+mod saving;
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -574,6 +575,7 @@ impl Plugin for EditorPlugin {
             // Replaced by the browser when a real map is opened; this is only
             // what `CROWD2X_STATE=editor` lands in.
             .insert_resource(CurrentMap::scratch())
+            .add_plugins(saving::SavingPlugin)
             // Both map windows run on both screens that draw a map, after the
             // view they follow is known. Registered here because this is where
             // the palettes live; the game screen is a consumer of them.
@@ -602,9 +604,6 @@ impl Plugin for EditorPlugin {
             .add_systems(OnEnter(AppState::Editor), (reset_map_windows, grids::reset))
             .add_systems(OnEnter(AppState::Game), (reset_map_windows, grids::reset))
             .add_systems(OnExit(AppState::Editor), leave_editor)
-            // Saving has to survive the window being closed, which ends the
-            // app without ever running `OnExit`.
-            .add_systems(Last, save_before_exit)
             .add_systems(
                 Update,
                 (
@@ -615,7 +614,6 @@ impl Plugin for EditorPlugin {
                     edit,
                     update_cursor,
                     update_hud,
-                    save_on_demand,
                     leave,
                 )
                     .chain()
@@ -654,61 +652,18 @@ pub fn map_centre(map: &Map) -> Vec2 {
     background::map_extent(map) / 2.0
 }
 
-/// Leaving the editor saves. There is no unsaved-changes dialog because there
-/// is nothing to decide: every edit is already in the map, and writing it out
-/// is cheap.
+/// Cleanup after saving has succeeded and the transition has been allowed
+/// through by `saving::guard_transition`.
 fn leave_editor(
-    maps: Res<Maps>,
-    current: Res<CurrentMap>,
     mut cursor: ResMut<Cursor>,
     mut rect: ResMut<RectangleDrag>,
 ) {
-    save(&maps, &current);
     cursor.world = None;
     // Its preview sprites went with `DespawnOnExit` too — this just forgets
     // the entities so nothing here tries to despawn them a second time.
     rect.anchor = None;
     rect.cells.clear();
     rect.preview.clear();
-}
-
-fn save(maps: &Maps, current: &CurrentMap) {
-    let Some(name) = &current.name else {
-        return;
-    };
-    match maps.0.save(name, &current.map) {
-        Ok(()) => info!("editor: saved {name}"),
-        Err(error) => error!("editor: could not save {name}: {error}"),
-    }
-}
-
-/// Closing the window ends the app without a state transition, so `OnExit`
-/// never runs. This is the same save, hung off the exit itself.
-fn save_before_exit(
-    exit: MessageReader<AppExit>,
-    state: Res<State<AppState>>,
-    maps: Res<Maps>,
-    current: Res<CurrentMap>,
-) {
-    if exit.is_empty() || *state.get() != AppState::Editor {
-        return;
-    }
-    save(&maps, &current);
-}
-
-fn save_on_demand(
-    keys: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    maps: Res<Maps>,
-    current: Res<CurrentMap>,
-) {
-    let asked = keys.just_pressed(KeyCode::F5)
-        || gamepads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::Start));
-    if asked {
-        save(&maps, &current);
-    }
 }
 
 fn spawn_overlay(mut commands: Commands, assets: Res<AssetServer>, tool: Res<Tool>) {

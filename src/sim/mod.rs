@@ -1239,6 +1239,8 @@ fn world_step(fridges: &mut Fridges, doors: &mut Doors, occupancy: &Occupancy, e
                 let _ = fridges.set_open(at, open);
             }
             Effect::Door { at, key } => {
+                // Not logged: a crowd opens doors all day, and a line each
+                // would push everything else out of the log.
                 let _ = doors.want(at, key);
             }
             Effect::None => {}
@@ -2598,6 +2600,9 @@ mod tests {
             assert_eq!(world.properties.of(cell), None, "a stranger at {cell:?}");
         }
         assert_eq!(world.meals(), 0, "the only fridge is somebody else's");
+        // Not even tried for: it is not there for a stranger to choose, so no
+        // walk to it fails.
+        assert!(!world.log_contains("gave up on reaching"), "{:?}", world.lines());
         assert!(world.doors.iter().all(|(_, door)| door.openness() == 0.0), "nor opened their door");
         let asked = walker::ROUTES_ASKED.with(|asked| asked.get()) - routes;
         assert!(asked < 400, "{asked} routes in 4000 ticks");
@@ -2668,5 +2673,17 @@ mod tests {
             (positions, doors)
         };
         assert_eq!(snapshot(&a), snapshot(&b));
+    }
+
+    #[test]
+    fn a_route_goes_through_a_house_door_only_for_somebody_holding_its_key() {
+        let world = testing::World::new(property::tests::house());
+        let inside = Point::new(5, 5);
+        let home = world.properties.of(inside);
+        let mut walk = Walker::new(Uid::new(EntityType::Human, 5), Point::new(5, 0), 2.0);
+        assert!(!walk.route_to(&world.ctx(), inside), "a stranger has no way in");
+        walk.body_mut().set_home(home);
+        assert!(walk.route_to(&world.ctx(), inside), "its owner does");
+        assert!(walk.path_cells().contains(&Point::new(5, 2)) || walk.path_cells().contains(&Point::new(4, 2)));
     }
 }

@@ -54,6 +54,7 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
 | Power: transformers, lines, boxes, wiring, powered props | `electrician` |
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
+| Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator | `map-generator` |
 | `GameState`, passes, movement, entities, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
@@ -104,11 +105,13 @@ src/map/utilities.rs    power and water networks                            [ele
 src/map/district.rs     the district generator                              [map-generator]
 src/sim/                GameState, passes, entities, clock, items           [simulation]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
+src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
 src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]
 src/debug.rs            env-var driven capture harness                      [debugger]
 src/awake.rs            macOS: hold the display awake during a run
 tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wiring
 tools/human_art.py      draws the paperdoll's hair and outfits     [pixel-artist]
+tools/door_art.py       draws the door leaves                               [doors]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

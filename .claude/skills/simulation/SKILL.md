@@ -57,7 +57,7 @@ it are four steps:
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
    the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
-   request for a change outside itself, so far only `Effect::Fridge { at, open }` — into a
+   request for a change outside itself — `Effect::Fridge { at, open }`, or `Effect::Door { at, key }` (hold a door open; the `doors` skill) — into a
    third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
    door directly: that is a fact about the world, read by every entity beside it, not about
    the one entity that opened it.

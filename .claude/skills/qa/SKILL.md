@@ -216,6 +216,7 @@ the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
+| `{"expect_door": {"x": 5, "y": 3, "min": 0.2, "max": 0.8}}` | How far open (0 shut, 1 open) the simulation says the door in a cell is; either bound optional. Pause first. `qa/doors.json`. |
 | `{"expect_lighting": {"lights_on": 2}}` | The GPU's lightmap, read back once the latest change is baked, agrees with the CPU reference on every texel; `lights_on` (optional) counts lights switched on. Waits for the bake by re-running itself (`Next::Again`) until the script's timeout. Game screen only. |
 | `{"expect_ceiling": {"map": "loft", "x": 2, "y": 2, "roofed": true}}` | Whether a cell of the **saved** map has a ceiling over it. |
 | `{"expect_grid": {"map": "loft", "layer": "power", "x": 4, "y": 1, "value": "B"}}` | What a cell of a grid layer (`ceiling`, `power`, `water`) of the **saved** map holds, as the character the file writes: `.` nothing, `-` wiring, `=` power line, `B` box, `o` pipe, `#` roof. |

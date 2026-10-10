@@ -1283,6 +1283,21 @@ fn perform(
                 .ok_or(format!("{map} {} ({x}, {y}) is {found:?}, expected {value:?}", layer.name()))
         }
 
+        Step::ExpectDoor { x, y, min, max } => {
+            let world = &intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0;
+            let cell = crate::map::Point::new(*x, *y);
+            let door = world.doors().get(cell).ok_or(format!("there is no door at {x}, {y}"))?;
+            let open = door.openness();
+            let (low, high) = (min.unwrap_or(0.0), max.unwrap_or(1.0));
+            (open >= low && open <= high)
+                .then_some(Next::Now)
+                .ok_or(format!("the door at {x}, {y} is {open:.2} open, expected {low:.2} to {high:.2}"))
+        }
+
         Step::ExpectConnected { utility, served, of } => {
             use crate::map::utilities::Utility;
             let wanted = match utility.as_str() {

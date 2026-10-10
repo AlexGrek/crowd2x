@@ -55,6 +55,9 @@ respect the split:
   `.used(path, frames)` adds a
   **second** strip for what it looks like while somebody is using it, which only the game
   screen ever shows (`game/props.rs`).
+  `PaletteItem::posed(name, path, frames)` is a strip the game picks the frame of (no
+  `StripAnimation`): the doors, whose `DoorLeaf` is turned and mirrored to fit its wall at
+  spawn (`DoorLeaf::pose`) and set by `game::props::swing_doors` — the `doors` skill.
 - **lamps** (`props::LAMP_PALETTE`, the map's `Lamps` object layer) — placed and erased
   exactly like props, drawn by the same `PropWindow`, but at a fixed `LAMP_Z` above every
   character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`

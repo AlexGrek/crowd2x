@@ -159,10 +159,9 @@ pub struct Features {
     toilet: Vec<Point>,
     entertainment: Vec<Point>,
     bed: Vec<Point>,
-    /// Cells whose kind is [`Access::Entered`] — gathered once, across every
-    /// kind, so the move step can ask "can anyone at all step in here"
-    /// without knowing what the feature is for. A handful of cells on any
-    /// real map, so a linear scan is what asking it costs.
+    /// Cells with passable terrain and exactly one blocking prop, a working
+    /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
+    /// wall, the map boundary, or another piece of furniture stacked on it.
     entered: Vec<Point>,
 }
 
@@ -171,12 +170,30 @@ impl Features {
     /// power or a drain `supply` does not give it is left out.
     pub fn from_map(map: &Map, supply: &Supply) -> Features {
         let mut features = Features::default();
+        // Built once, not searched per feature or per move. Two means two or
+        // more: all we need to know is whether the feature is the sole blocker.
+        let mut blockers = vec![0u8; map.size().area()];
+        for object in map.objects(ObjectLayer::Props) {
+            if !object.kind.prop_passability().is_passable()
+                && let Some(index) = map.size().index_of(object.cell())
+            {
+                blockers[index] = (blockers[index] + 1).min(2);
+            }
+        }
         for object in map.objects(ObjectLayer::Props) {
             let cell = object.cell();
             if !supply.serves(object.kind.as_str(), cell) {
                 continue;
             }
             for kind in kinds_of(object.kind.as_str()) {
+                if kind.access() == Access::Entered {
+                    let can_enter = map.size().index_of(cell).is_some_and(|index| {
+                        map.terrain(cell).is_some_and(|tile| tile.is_passable()) && blockers[index] == 1
+                    });
+                    if !can_enter {
+                        continue;
+                    }
+                }
                 match kind {
                     FeatureKind::Food => features.food.push(cell),
                     FeatureKind::Water => features.water.push(cell),
@@ -200,7 +217,9 @@ impl Features {
     /// Whether `cell` is a feature that must be entered to use, and so may
     /// be stepped onto — by whoever currently holds it, via
     /// [`crate::sim::occupancy::Occupancy`] — despite being impassable to
-    /// ordinary movement. See [`Access::Entered`].
+    /// ordinary movement. This exempts only the feature itself: construction
+    /// excludes walls, off-map cells and any additional blocking prop.
+    /// See [`Access::Entered`].
     pub fn is_enterable(&self, cell: Point) -> bool {
         self.entered.contains(&cell)
     }

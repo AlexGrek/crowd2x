@@ -32,7 +32,7 @@ The first piece of simulation state, so it follows the simulation rule: **plain 
   is impassable rather than a panic.
 - **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
   `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
-  through, and today nothing can — beds, the fridge, the toilet, the computer, crates, fire.
+  through: furniture cannot — beds, the fridge, the toilet, the computer, crates, fire — and the two doors (`"door"`, `"house door"`) can, since a door's leaf is simulation state, not the map's (the `doors` skill).
   A blocking
   prop takes **the cell its centre falls in** (`Object::cell`) and no other: passability is
   a whole-cell fact, the rule bodies follow too, so tall art overhanging the cell above does

@@ -499,6 +499,17 @@ pub enum Step {
     /// true when **any** prop of that kind is in use, since a test that
     /// cares which one can put one computer on the map.
     ExpectPropInUse { kind: String, in_use: bool },
+    /// How far open the simulation says the door in cell `x`, `y` is, from 0
+    /// shut to 1 open — at least `min` and at most `max`, either optional.
+    /// Fails for a cell with no door. Pause first: a door moves every tick.
+    ExpectDoor {
+        x: i32,
+        y: i32,
+        #[serde(default)]
+        min: Option<f32>,
+        #[serde(default)]
+        max: Option<f32>,
+    },
     /// That the lightmap the GPU baked is the one the CPU reference says it
     /// should be, every texel of it — read back once the latest change has
     /// been baked, so the step waits for the bake rather than racing it.

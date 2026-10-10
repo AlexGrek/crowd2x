@@ -40,15 +40,19 @@ impl TaskExecutor for TakeItem {
         let Some(inventory) = ctx.inventory.as_deref() else {
             return TaskResult::Failed;
         };
+        // These must remain true throughout the take, including the tick
+        // that commits the item. A command can fill the hand mid-action.
+        if inventory.hand().is_some() {
+            return TaskResult::Failed;
+        }
+        let fridge = ctx.think.fridges.get(self.from);
+        if fridge.is_some_and(|state| !state.is_powered()) {
+            return TaskResult::Failed;
+        }
         if ctx.action.is_none() {
-            if inventory.hand().is_some() {
-                return TaskResult::Failed;
-            }
-            // A fridge has to be open — and working: one whose box was
-            // switched off on the way here is a cupboard (`sim::fridge`).
-            if let Some(state) = ctx.think.fridges.get(self.from)
-                && (!state.is_open() || !state.is_powered())
-            {
+            // Only the door is a start condition: another visitor closing
+            // it must not continually interrupt everybody else's take.
+            if fridge.is_some_and(|state| !state.is_open()) {
                 return TaskResult::Failed;
             }
             *ctx.action = Action::interact(self.from, self.seconds);
@@ -135,6 +139,32 @@ mod tests {
         let mut task = Task::take(Point::new(5, 5), ItemKind::Food, 0.5);
 
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+    }
+
+    #[test]
+    fn filling_the_hand_mid_take_fails_without_overwriting_what_arrived() {
+        for remaining in [0.5, 0.01] {
+            let mut rig = rig_at(Point::new(4, 5));
+            let mut task = Task::take(Point::new(5, 5), ItemKind::Food, remaining);
+            assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+            rig.set_hand(Some(ItemKind::Water));
+            // The short duration would finish on this very tick.
+            assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+            assert_eq!(rig.hand(), Some(ItemKind::Water));
+        }
+    }
+
+    #[test]
+    fn losing_power_mid_take_fails_without_delivering_an_item() {
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 0.01);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        let dead = crate::map::utilities::Supply::from_map(&rig.world.map);
+        rig.world.fridges.set_power(&dead);
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert_eq!(rig.hand(), None);
     }
 
     #[test]

@@ -151,3 +151,7 @@ widget in the scope that owns input. A kind is placed at the passable cell neare
 camera — `spawn_point` scans the map once per click rather than spiralling, which is what a
 once-per-click cost is allowed to do — and `leave` asks whether the menu is open before
 deciding whether `esc` closes it or leaves the game.
+
+**Doors swing on screen** (`game/props.rs` `swing_doors`): every `DoorLeaf` on the canvas
+shows the frame of its strip for `GameState::doors()` openness, written only when it changes.
+A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.

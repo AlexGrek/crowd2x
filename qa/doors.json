@@ -1,0 +1,76 @@
+{
+  "name": "a door slides open for somebody waiting at it, and shuts behind them",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "alcove",
+        "map": {
+          "version": 1,
+          "size": { "width": 11, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2",
+                  "2,2,2,2,2,2,1,1,1,1,2",
+                  "2,2,2,2,2,2,1,1,1,1,2",
+                  "2,2,2,2,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 264, "y": 168 }, "kind": "door" },
+              { "at": { "x": 264, "y": 216 }, "kind": "door" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "alcove",
+  "steps": [
+    { "note": "a two-leaf door at (5, 3) and (5, 4) in a wall running up and down; the alcove" },
+    { "note": "at (4, 3) is a dead end whose only way out is the lower leaf" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "expect_door": { "x": 5, "y": 3, "max": 0.0 } },
+    { "expect_door": { "x": 5, "y": 4, "max": 0.0 } },
+    { "shot": "a shut double door" },
+
+    { "note": "every need switched off, so the one thing it does is wander — and from the" },
+    { "note": "alcove, anywhere it can wander to is through the door" },
+    { "spawn": { "kind": "human", "x": 4, "y": 3 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "tick": 1 },
+
+    { "note": "a door takes a world minute (32 ticks) to open; the unit stands still in the" },
+    { "note": "alcove meanwhile, and only the leaf it is going through moves" },
+    { "tick": 16 },
+    { "expect_door": { "x": 5, "y": 3, "min": 0.2, "max": 0.8 } },
+    { "expect_door": { "x": 5, "y": 4, "max": 0.0 } },
+    { "shot": "half open, and somebody waiting at it" },
+
+    { "tick": 40 },
+    { "expect_door": { "x": 5, "y": 3, "min": 1.0 } },
+    { "shot": "open, and somebody going through" },
+
+    { "note": "held open a second of watching after the last ask, then half a second to shut" },
+    { "tick": 200 },
+    { "expect_door": { "x": 5, "y": 3, "max": 0.0 } },
+    { "shot": "shut again behind them" }
+  ]
+}

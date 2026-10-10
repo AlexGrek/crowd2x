@@ -13,7 +13,9 @@
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{Map, MapFormatError};
 
@@ -169,7 +171,8 @@ impl MapStore {
         fs::create_dir_all(&self.root)
             .map_err(|error| StorageError::Io(self.root.clone(), error))?;
         let path = self.path_of(name);
-        fs::write(&path, json).map_err(|error| StorageError::Io(path, error))
+        write_atomic(&path, |file| file.write_all(json.as_bytes()))
+            .map_err(|error| StorageError::Io(path, error))
     }
 
     pub fn delete(&self, name: &str) -> Result<(), StorageError> {
@@ -195,6 +198,35 @@ impl MapStore {
         fs::copy(&source, &destination).map_err(|error| StorageError::Io(destination, error))?;
         Ok(copy)
     }
+}
+
+/// Write beside the destination, flush it, then replace the old file in one
+/// rename. The old save remains intact if writing or replacement fails.
+/// `write` is also the fault-injection seam for a partial-write regression.
+fn write_atomic(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    let directory = path.parent().expect("a map file has a store directory");
+    let (temporary, mut file) = loop {
+        let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
+        let temporary = directory.join(format!(".crowd2x-{}-{serial}.tmp", std::process::id()));
+        match fs::OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(file) => break (temporary, file),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    };
+    let result = (|| {
+        write(&mut file)?;
+        file.sync_all()?;
+        // Close before rename, including on Windows. This closure owns the
+        // handle, so it also closes it before cleanup on an early error.
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn truncate_name(name: &str) -> String {
@@ -236,6 +268,45 @@ mod tests {
         let mut map = Map::new(Size::new(4, 3), FLOOR);
         map.set_terrain(Point::new(1, 1), WALL);
         map
+    }
+
+    #[test]
+    fn a_partial_save_failure_preserves_the_previous_file_and_cleans_up() {
+        let dir = TempDir::new("partial-save");
+        let store = dir.store();
+        store.save("office", &a_map()).unwrap();
+        let path = store.path_of("office");
+        let before = fs::read(&path).unwrap();
+        let result = write_atomic(&path, |file| {
+            file.write_all(b"{ partially written")?;
+            Err(io::Error::other("injected write failure"))
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read_dir(dir.0.as_path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_failed_replacement_cleans_up_without_removing_the_destination() {
+        let dir = TempDir::new("failed-replace");
+        let destination = dir.0.join("office.json");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("keep"), "old data").unwrap();
+        assert!(write_atomic(&destination, |file| file.write_all(b"new data")).is_err());
+        assert_eq!(fs::read_to_string(destination.join("keep")).unwrap(), "old data");
+        assert_eq!(fs::read_dir(dir.0.as_path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn saving_again_replaces_the_file_with_a_complete_map() {
+        let dir = TempDir::new("replace-save");
+        let store = dir.store();
+        let mut map = a_map();
+        store.save("office", &map).unwrap();
+        map.set_terrain(Point::new(2, 2), WALL);
+        store.save("office", &map).unwrap();
+        assert_eq!(store.load("office").unwrap().to_json().unwrap(), map.to_json().unwrap());
+        assert_eq!(fs::read_dir(dir.0.as_path()).unwrap().count(), 1);
     }
 
     #[test]

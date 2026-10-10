@@ -142,6 +142,14 @@ power warms toward the room from wherever it was (`Fridges::set_power`). Because
 change under a goal's plan, a task that uses a powered feature re-checks it (`TakeItem` when it
 starts, `UseComputer` every tick). The `map-layers` skill has the whole picture.
 
+**Doors and property** (the `doors` skill has the whole of it): a walker whose next cell is a
+door not fully open stands still, and every walk asks for the door ahead
+(`TaskCtx::advance_action` → `Effect::Door`), so goals and tasks never mention doors. A
+human's `Body::home` is the property its bed stands in, handed over with the bed; routes
+plan only through doors it may open (`Think::is_passable_with`), and **any goal that picks a
+destination must skip what is in somebody else's property** (`Think::may_use`) —
+`nearest_in_reach`, `choose_nearest`, `SleepGoal`'s any-bed pick and `WanderGoal::pick` do.
+
 **A fridge has state of its own: it is open or closed, and it has a temperature**
 (`sim/fridge.rs`, `Fridges`, indexed the same way `Features` is — once, at `GameState::new`,
 from the map's `"fridge"` props). The room is +24°C and a fridge cannot get colder than
