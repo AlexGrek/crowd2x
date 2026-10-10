@@ -141,6 +141,9 @@ pub struct LightUpload {
     pub generation: u64,
     /// Set when the game screen closed: drop everything.
     pub clear: bool,
+    /// Propagate the sky again as well as baking: what a stress run times,
+    /// since in play the sky is propagated once per scene.
+    pub resky: bool,
 }
 
 fn build_lighting(
@@ -237,6 +240,7 @@ fn publish_dirty_chunks(lighting: Option<ResMut<Lighting>>, mut upload: ResMut<L
     let Some(mut lighting) = lighting else { return };
     if std::env::var_os(ENV_STRESS).is_some() {
         lighting.scene.mark_all_dirty();
+        upload.resky = true;
     }
     let dirty = lighting.scene.take_dirty();
     if dirty.is_empty() {

@@ -1,0 +1,60 @@
+{
+  "name": "a generated district: the sun on the streets, roofs over the buildings, lamps inside",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "town",
+        "district": 7
+      }
+    ]
+  },
+  "open": "town",
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 1
+    },
+    {
+      "look_at": {
+        "x": 40,
+        "y": 27
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_lighting": {}
+    },
+    {
+      "shot": "noon: streets in the sun, the buildings shaded but by their doors"
+    },
+    {
+      "note": "1920 ticks a world hour: thirteen hours on is nine at night"
+    },
+    {
+      "tick": 24960
+    },
+    {
+      "expect_lighting": {}
+    },
+    {
+      "shot": "nine at night: every house lit by its lamp, the bank by its rows of tubes"
+    }
+  ]
+}

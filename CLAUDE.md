@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19. Art was imported
 wholesale from an earlier prototype; all code is new.
-What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
-editor backed by a saved map format, a game screen that loads a map and runs a simulation
+What exists is the pixel-perfect render pipeline, a menu, a map browser, a four-layer map
+editor (floor, props, lamps, ceiling) backed by a saved map format, a game screen that loads a map and runs a simulation
 on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
 actions. What those brains do so far is wander, eat and drink at a fridge, use a toilet,
@@ -17,9 +17,10 @@ bed restores, satisfaction that a treat or a friendly face lifts) that can be sw
 by a fading memory of what was done lately: the same treat twice in a day is less of one. The computer is also the first prop that
 is *watched* being used: its screen is on for as long as somebody is sitting at it. (A bed
 does not yet show that it is slept in: it has no second strip of art to swap to.) The game
-screen is **lit**: a day/night ambient from the world's clock, and an RGB lightmap at five
-subtiles a cell, baked by a compute shader from the map's fires and the computers in use,
-with walls casting shadows.
+screen is **lit**: a day/night sun from the world's clock that reaches the streets whole and
+comes in under a ceiling only by the doors, and an RGB lightmap at five subtiles a cell,
+baked by compute shaders from the map's ceiling lamps, fires and computers in use, with
+walls casting shadows.
 
 ## Commands
 
@@ -112,8 +113,8 @@ What keeps this exact, and easy to break:
 
 **The canvas quad is a lit material, not a sprite** (`CanvasMaterial`,
 `assets/shaders/lit_canvas.wgsl`). It fetches each canvas texel with `textureLoad` and
-multiplies it by the light at *that texel's* world position — ambient plus the lightmap,
-sampled bilinearly — so the light is smooth across texels and still one colour within one,
+multiplies it by the light at *that texel's* world position — the lightmap sampled
+bilinearly, `mix(indoor, ambient, sky) + lamps` — so the light is smooth across texels and still one colour within one,
 and the upscale stays exact (checked at 3x and 6x). What lights it is `CanvasLight`, a
 resource `src/lighting/` writes on the game screen; its default is unlit, which is every
 other screen, drawn exactly as rendered. `light_canvas` runs after the camera is snapped,
@@ -131,13 +132,16 @@ parts, each a step further from the simulation:
 
 - **`scene.rs` — plain Rust, no `bevy::`.** What the lightmap is computed *from*: one
   occlusion bit per subtile (from `Map::sight`, so walls block light and furniture does
-  not), the lights (`EMITTERS`, a catalogue keyed by prop name like `PROPS` — `"fire"`
-  always on, `"computer"` only while somebody is using it), and a CSR index from each
+  not), one ceiling bit per **cell** (`Map::has_ceiling`), the lights (`EMITTERS`, a
+  catalogue keyed by object name like `PROPS`, read from the `Props` *and* `Lamps` layers —
+  `"ceiling lamp"`, `"tube lamp"` and `"fire"` always on, `"computer"` only while somebody
+  is using it), and a CSR index from each
   `CHUNK` (40 subtiles, 8 cells) to the lights that can reach it. Switching a light dirties
   the chunks under its radius and no others. It also holds **the CPU reference,
   `LightScene::evaluate`**, which the shader is kept line for line with and checked against.
-  The `ambient` curve (white by day, so a day looks exactly as drawn; dusk; a dark blue
-  night from 21:00 to 05:00) lives here too.
+  The `ambient` curve (the sun: white by day, so a street by day looks exactly as drawn;
+  dusk; a dark blue night from 21:00 to 05:00) and `indoor` (what is left under a roof the
+  sky does not reach: a little of the sun and a floor, dark but legible) live here too.
 - **`mod.rs` — the main world.** Builds a `Lighting` from the simulated map on the game
   screen, switches computer lights by asking `Occupancy` about each computer's own cell and
   the four beside it — *not* the on-screen crowd `game/props.rs` asks, since a screen's
@@ -145,8 +149,9 @@ parts, each a step further from the simulation:
   hands each frame's dirty chunks over in a `LightUpload` that the extract system *takes*,
   so each change crosses to the render world once. A frame with no change uploads and
   dispatches nothing.
-- **`gpu.rs` — the render world.** Buffers, and one dispatch of `(5, 5, dirty chunks)`
-  workgroups in `RenderGraph`'s `Render` set **before `camera_driver`** — so a frame is
+- **`gpu.rs` — the render world.** Buffers, the sky's propagation passes (once per scene,
+  below), and one bake dispatch of `(5, 5, dirty chunks)` workgroups, all in one compute
+  pass in `RenderGraph`'s `Render` set **before `camera_driver`** — so a frame is
   drawn with what was baked for it, and so its GPU timestamp is recorded (in `Begin` it
   races `begin_diagnostics_frame` and the span is dropped). Bevy 0.19 has no render graph
   of nodes: a global compute pass is a system in the `RenderGraph` *schedule* taking
@@ -162,16 +167,34 @@ Attenuated by
 `(1 - d²/r²)²`, summed in `f32` and stored as `rgba16float` so overlapping lights do not
 saturate before they are drawn. The cap at full brightness is in the canvas shader.
 
+**The sky is the lightmap's alpha** — how much of the sun reaches a texel, independent of
+the time of day, so the sun moves all day without a re-bake and the canvas multiplies it in.
+1 under open sky; under a ceiling it is **propagated over the grid** (`assets/shaders/sky.wgsl`,
+reference `LightScene::sky_field`): from every roofless subtile it flows through anything
+not opaque in eight directions, losing `SKY_STEP` (1/30) a step — √2 that diagonally, never
+between two opaque subtiles meeting at a corner — so it comes in by a doorway, turns
+corners softly and is gone six cells in; alpha is that field squared, for a soft shoulder.
+It is `SKY_ITERATIONS` (30) ping-pong passes over the whole map, run once when a scene is
+first baked, and reproduced to the bit on the CPU (only subtraction and `max`, both
+correctly rounded; the step costs reach the shader in a uniform, not as WGSL constants,
+which are evaluated at higher precision). **Rays were tried first and discarded**: sixteen
+of them miss a doorway two cells away between two rays and a room comes out in streaks.
+The ceiling is never drawn in the game — the view is from above — only lit by.
+
 **How it is checked:** `LightProbe` reads the lightmap back once the scene's latest
 `generation` has been baked (`Lighting::is_baked`) and compares every texel with the
-reference — `expect_lighting` in a QA script, `CROWD2X_LIGHT_CHECK=1` by hand. It agrees to
-within f16 rounding (worst 0.0009) on every map tried, 1.6M texels included, and a shader
-deliberately broken fails it. **Measured** (`CROWD2X_LIGHT_STRESS=1` re-bakes everything
-every frame and logs GPU timestamps): a full bake of a 256x256 map with 2000 fires
-(1280x1280 texels, 1024 chunks) is **0.38 ms of GPU** and ~4 µs of CPU, on an RTX 5070 Ti.
+reference — all four channels, sky included — `expect_lighting` in a QA script,
+`CROWD2X_LIGHT_CHECK=1` by hand. It agrees to within f16 rounding (worst 0.001) on every map
+tried, 1.6M texels included, and a shader deliberately broken fails it. **Measured**
+(`CROWD2X_LIGHT_STRESS=1` re-bakes everything — and re-propagates the sky — every frame and
+logs GPU timestamps), on a 256x256 map (1280x1280 texels, 1024 chunks), RTX 5070 Ti: a
+full bake with 2000 fires is **0.38 ms of GPU** and ~4 µs of CPU; with half the map roofed
+and 128 lamps more, bake plus sky is **1.15 ms** — the sky ~0.8 ms of it, paid once per
+scene (`qa/perf_lighting.json`, `qa/perf_lighting_roofed.json`).
 
-Not done yet: lights only come from props, are never added or moved during play (that
-would rebuild the chunk index — `rebuild_index` — which is built for it), and a moving
+Not done yet: lights are never added or moved during play (that would rebuild the chunk
+index — `rebuild_index` — which is built for it; the ceiling cannot change during play
+either, which would re-propagate the sky), and a moving
 light would want a dynamic overlay rather than chunk re-bakes. The z dimension of one
 dispatch caps a frame at 65535 dirty chunks, a 4096x4096-cell map's worth.
 
@@ -287,7 +310,7 @@ somewhere else, which is what keeps a QA run from deleting real maps.
 The editor edits the open `CurrentMap`, not the screen: a click writes the tile or prop
 into the map **and nothing else**. What is on screen is drawn *from* the map, a canvas at a
 time, by two windows that follow the camera — `background::TileWindow` for terrain,
-`props::PropWindow` for props — so what is drawn cannot be something the saved file does
+`props::PropWindow` for props and lamps — so what is drawn cannot be something the saved file does
 not contain. Both run on the game screen too, which is why they are registered here, where
 the palettes live. Leaving writes the map back (`F5` saves too, and so does closing the
 window — that path never runs `OnExit`). Painting outside the map's dimensions is refused
@@ -301,8 +324,9 @@ mutably on every frame it is held, whether or not a cell changed, and a prop win
 listened to it respawned every prop on screen — restarting every animation — 181 times in
 a second and a half of dragging. `qa/place_props.json` covers placing and erasing.
 
-`Tool` holds the active layer and a per-layer palette index. The two layers exist to be
-different, and new placeable content should respect that split:
+`Tool` holds the active layer and a per-layer palette index. Four layers — `tab`/`Y`
+steps through them, `1`-`4` picks one — floor, props, lamps, ceiling; the first two exist
+to be different, and new placeable content should respect that split:
 
 - `editor/background.rs` — one tile per grid cell at a single depth behind everything,
   drawn only for the cells under the canvas: `TileWindow` re-points the sprites of the row
@@ -329,6 +353,15 @@ different, and new placeable content should respect that split:
   `.used(path, frames)` adds a
   **second** strip for what it looks like while somebody is using it, which only the game
   screen ever shows (`game/props.rs`).
+- **lamps** (`props::LAMP_PALETTE`, the map's `Lamps` object layer) — placed and erased
+  exactly like props, drawn by the same `PropWindow`, but at a fixed `LAMP_Z` above every
+  character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`
+  is not asked). A lamp exists to light: each one's `EMITTERS` entry is a test. Erasing on
+  one layer never takes the other's object, however near.
+- `editor/ceiling.rs` — which cells have a roof. A rectangle instrument, always (left drag
+  roofs it, right drag opens it to the sky), drawn as a translucent hatch over roofed cells
+  **only while the ceiling is the layer being edited** (`CeilingOverlay`), and never in the
+  game.
 
 **Art and data are linked by name, never by index.** A palette entry is called after the
 terrain it paints (`"wall brown"`) or the prop it places (`"bed 1"`), and that name is
@@ -482,8 +515,10 @@ The first piece of simulation state, so it follows the rule below: **plain Rust,
   layers and the passability grid cannot disagree about the layout.
 - A map is dimensions plus layers: **terrain** layers where every cell of every layer is
   defined (there is no empty cell, only the `VOID` tile — so no consumer handles a hole),
-  and sparse **object** layers, `Props` and `Spawners`. Only the base terrain layer exists
-  so far. **A spawner names an entity kind** (`"human"`), and the game screen spawns one
+  and sparse **object** layers, `Props`, `Spawners` and `Lamps`. Only the base terrain
+  layer exists so far. Beside them, **the ceiling**: one flag per cell, authored, read by
+  lighting alone — a roof is in nobody's way. A new map is open sky everywhere, which is
+  what every map made before ceilings existed still is. **A spawner names an entity kind** (`"human"`), and the game screen spawns one
   in its cell when the map is played (`GameState::spawn_from_spawners`, called by
   `game/actors.rs` — `GameState::new` itself still brings nobody). An unknown kind is
   logged and skipped. The editor has no spawner tool; it keeps the ones a map has.
@@ -525,7 +560,10 @@ nothing is sealed off), **doors are two wide** (one person in and one out of a o
 door wait for each other forever), and **house furniture keeps two free cells beside it**
 (whoever is in a toilet or bed cannot leave past somebody waiting in its only doorway). A
 spawner one step from its own bed and two from any other is what makes the nearest-free-bed
-rule hand each resident its own. Reached from the browser's `district` button (a fresh
+rule hand each resident its own. **Every building is roofed, walls included, and the
+streets and yards are open sky**; a house and a shop get one `"ceiling lamp"` in the middle,
+the bank a grid of `"tube lamp"`s every `OFFICE_LAMP_SPACING` cells — laid out last, from the
+buildings, without drawing on the seed, so adding them changed no district. Reached from the browser's `district` button (a fresh
 seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture
 `{"name": ..., "district": seed}`. **Known limit:** a brain goes to the nearest fridge or
 toilet as the crow flies and has no idea of a crowd, so the district's crowd — drawn to the
@@ -543,6 +581,9 @@ never reaches a file. Three things about the shape:
 - **A terrain row is a CSV string**, so pretty-printed JSON puts one map row on one line
   instead of one cell per line (Tiled encodes layers this way for the same reason). Rows
   run bottom-up: row 0 is y 0, since Y increases upward everywhere else.
+- **The ceiling is a row of `#` and `.` per map row**, bottom-up like the terrain, and
+  left out of a file with no roof at all — as is an empty `lamps` list — so a map saved
+  before either existed saves back byte for byte and `FORMAT_VERSION` stays 1.
 - **Nothing is repaired on load.** A short row, an unknown object layer, a size of zero,
   an object off the map — each is a `MapFormatError`, because padding or dropping produces
   a map that looks right and isn't. `FORMAT_VERSION` is checked first.
@@ -1028,7 +1069,9 @@ Steps come at two levels and a test is expected to mix them:
   they survive a button moving, a palette being reordered, or a list growing a row. Use
   these unless the input itself is what is under test. `press` refuses an ambiguous label
   rather than guessing, which is why walking a file list still uses arrow keys.
-- **Input** — `key`, `type`, `pad`, `stick`, `mouse`, `click`, `wheel`. The actual
+- **Input** — `key`, `type`, `pad`, `stick`, `mouse`, `click`, `drag`, `wheel`. `drag`
+  presses on one editor cell, moves the cursor to another and lets go there — the only way
+  to draw a rectangle, since a `click` holds the cursor still. The actual
   devices, and the only way to test that the devices work: that a gamepad reaches every
   button, that typing lands in the field and not in the palette.
 
@@ -1103,8 +1146,8 @@ Assertions are about outcomes — `expect_state`, `expect_focus`, `expect_map`,
 `expect_no_map`, `expect_tile`, `expect_zoom`, `expect_speed`, `expect_entities`,
 `expect_sprites`, `expect_drawn`, `expect_world_sprites`, `expect_held`, `expect_selected`,
 `expect_carrying`, `expect_prop_in_use`, `expect_log`, `expect_world_time`, `expect_stat`,
-`expect_lighting` — and
-`expect_tile` reads the **saved** map,
+`expect_lighting`, `expect_ceiling`, `expect_objects` — and `expect_tile`, `expect_ceiling`
+and `expect_objects` read the **saved** map,
 so "I painted a wall" is only true once the file says so. `expect_zoom` exists because
 zooming changes the size of the canvas rather than the scale of a camera, so a screenshot
 cannot be asked how far in it is without counting texels. `expect_speed` takes the string
@@ -1194,8 +1237,9 @@ src/view.rs             VisibleArea - what is on the canvas, and near enough to 
                         matter; everything that culls reads it
 src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (typing)
 src/menu.rs             MainMenuPlugin
-src/editor/             EditorPlugin, background.rs + props.rs; TileWindow and
-                        PropWindow draw the map a canvas at a time, on both screens
+src/editor/             EditorPlugin, background.rs + props.rs (props and lamps) +
+                        ceiling.rs; TileWindow and PropWindow draw the map a canvas
+                        at a time, on both screens
 src/browser.rs          BrowserPlugin - the saved-maps screen
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log

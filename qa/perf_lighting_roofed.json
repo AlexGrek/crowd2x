@@ -1,0 +1,37 @@
+{
+  "name": "lighting a huge roofed map",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "huge_lit",
+        "file": "qa/fixtures/huge_lit.json"
+      },
+      {
+        "name": "huge_roofed",
+        "file": "qa/fixtures/huge_roofed.json"
+      }
+    ]
+  },
+  "open": "huge_roofed",
+  "vsync": false,
+  "settle": 2.0,
+  "timeout": 300,
+  "required": false,
+  "steps": [
+    {
+      "note": "huge_lit with half its rooms roofed and a ceiling lamp in each: the sky propagates over 1.6M subtiles once, then the bake reads it"
+    },
+    {
+      "expect_lighting": {
+        "lights_on": 2128
+      }
+    },
+    {
+      "measure_frames": {
+        "name": "a huge roofed map (frames)",
+        "seconds": 3.0
+      }
+    }
+  ]
+}

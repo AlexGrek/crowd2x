@@ -168,6 +168,7 @@ typing lands in the field and not in the palette.
 | `{"stick": {"side": "left", "x": -1, "y": 0, "seconds": 0.4}}` | Push a stick, then let go. |
 | `{"mouse": {"x": 136, "y": 114}}` | Move the pointer, in **canvas** pixels from the top left. |
 | `{"click": {"button": "right", "seconds": 0.2}}` | Click; `button` defaults to left. |
+| `{"drag": {"from": {"x": 2, "y": 2}, "to": {"x": 6, "y": 5}, "button": "right"}}` | Press on one editor cell, move the cursor to another while held, release there: a rectangle (walls, a block, a roof). `button` defaults to left. |
 | `{"wheel": -3}` | Scroll, in list rows; positive is up. |
 | `{"wait": 0.5}` | Do nothing. |
 
@@ -205,6 +206,8 @@ the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
 | `{"expect_lighting": {"lights_on": 2}}` | The GPU's lightmap, read back once the latest change is baked, agrees with the CPU reference on every texel; `lights_on` (optional) counts lights switched on. Waits for the bake by re-running itself (`Next::Again`) until the script's timeout. Game screen only. |
+| `{"expect_ceiling": {"map": "loft", "x": 2, "y": 2, "roofed": true}}` | Whether a cell of the **saved** map has a ceiling over it. |
+| `{"expect_objects": {"map": "loft", "layer": "lamps", "kind": "ceiling lamp", "count": 1}}` | How many objects the **saved** map has on an object layer (`props`, `spawners`, `lamps`), optionally of one kind. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_stat": {"stat": "hunger", "max": 75, "of": "crowd"}}` | A stat in a range — `min`, `max` or both — of the selected unit (`"of": "selected"`, the default) or the crowd's average (`"crowd"`). Any name the debug menu shows. |

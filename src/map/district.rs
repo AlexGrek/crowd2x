@@ -343,7 +343,7 @@ fn roof_and_light(map: &mut Map, houses: &[House], bank: Rect, shops: &[Rect]) {
             map.set_ceiling(cell, true);
         }
     }
-    let mut hang = |map: &mut Map, name: &str, cell: Point| {
+    let hang = |map: &mut Map, name: &str, cell: Point| {
         // Not inside a wall: a lamp there would light nothing but the wall.
         if map.sight().is_passable(cell) {
             map.add_object(ObjectLayer::Lamps, object(name, cell));

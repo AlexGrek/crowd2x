@@ -116,6 +116,9 @@ fn extract_upload(mut main: ResMut<MainWorld>, mut bake: ResMut<LightBake>) {
     if let Some(lights) = upload.lights {
         buffers.lights_upload = Some(lights);
     }
+    if upload.resky {
+        buffers.sky_done = false;
+    }
     // Only an upload that carries a change says which generation it is: an
     // empty one is `Default`, generation 0, and taking that would roll a bake
     // still waiting on its pipeline back to a generation long gone.
