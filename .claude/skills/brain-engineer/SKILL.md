@@ -6,7 +6,7 @@ description: Add and change what crowd2x units decide and do - the unit brain in
 # Engineering the unit brain
 
 Every unit's decisions live in `src/sim/brain/`, run from `GameEntity::react`. It is plain
-Rust with **no `bevy::` imports**, and it is tested with `cargo test`, no `App`. CLAUDE.md
+Rust with **no `bevy::` imports**, and it is tested with `cargo test`, no `App`. [architecture.md](architecture.md)
 ("The brain") has the architecture. This skill is how to extend it without breaking the three
 things it exists to protect: **no per-agent per-tick search, no allocation in a tick,
 determinism**.
@@ -209,7 +209,7 @@ halfway there.
    with the previous run on the same machine. The perf test runs only 200 ticks, so a behaviour
    that triggers later is not measured there; add a `measure` step to a test that reaches it if
    the behaviour does real work.
-8. **Update CLAUDE.md "The brain"** if the change adds a layer member worth naming (a new goal,
+8. **Update `architecture.md` "The brain"** if the change adds a layer member worth naming (a new goal,
    task, feature kind or stat that moves).
 
 ## Testing tools that already exist

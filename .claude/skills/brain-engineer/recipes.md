@@ -212,7 +212,7 @@ replans from the rebuilt index on its next `process`. Details in the `electricia
 - Check `src/editor/props.rs` `PALETTE` for the name first; "toilet", the beds, "trash can"
   and the crates already exist.
 - A new prop needs a **16×16** PNG in `assets/` and `PaletteItem::upscaled("name", "file.png")`.
-  Never draw it pre-upscaled; CLAUDE.md "Characters" says why.
+  Never draw it pre-upscaled; the `renderer` skill ("Characters") says why.
 - A new prop also needs a `map::PROPS` entry (`src/map/props.rs`) saying whether it can be
   walked through; `every_palette_prop_is_in_the_map_s_prop_catalogue` fails otherwise.
 
@@ -501,7 +501,7 @@ Built, so read the real files. As a checklist for the next need:
    - `uv run tools/qa.py`;
    - `qa/perf_simulation.json` compared with the last run;
    - open **brains** on a unit and watch `relieve` climb, take over, and hand back.
-10. **Docs.** CLAUDE.md "The brain" and "Biology".
+10. **Docs.** `architecture.md` "The brain" and "Biology".
 
 ---
 

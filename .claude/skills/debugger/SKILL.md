@@ -150,3 +150,46 @@ Sanity checks worth making on a captured frame:
   when the command returns.
 - Do not leave debug systems in `main.rs`. Everything belongs in `src/debug.rs` behind
   the env vars, which is exactly why it was made permanent.
+
+## Cheat sheet (every env var in one place)
+
+
+`src/debug.rs` drives the app from environment variables so a frame can be captured and
+the process exited unattended:
+
+```sh
+CROWD2X_SHOT=/tmp/frame.png cargo run                          # capture, then exit
+CROWD2X_SHOT=/tmp/odd.png CROWD2X_WINDOW=1002x602 cargo run    # capture at a given window size
+CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
+CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
+CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
+CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run   # a generated district
+CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
+CROWD2X_LIGHT_CHECK=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run   # GPU lightmap vs CPU reference, logged
+CROWD2X_LIGHT_STRESS=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run --release  # full re-bake every frame, GPU time logged
+
+# check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
+# window resolution, so on-screen text is legitimately not on the pixel grid.
+# Its second argument is the zoom, and must match CROWD2X_ZOOM.
+CROWD2X_SHOT=/tmp/bare.png CROWD2X_HIDE_UI=1 cargo run
+uv run tools/check_pixel_grid.py /tmp/bare.png 4
+```
+
+A pure black capture almost always means the frame was grabbed before the first one was
+presented, not that rendering broke — raise `CROWD2X_SHOT_DELAY`, and check the display is
+not asleep, before debugging.
+
+Nine skills go deeper than the summary below and should be read before the work they
+cover: `qa` for the scripted test framework, `debugger` for the capture workflow, `dev` for
+Bevy API specifics, asset and animation conventions, and simulation-scaling architecture,
+`brain-engineer` for anything a unit decides or its body does (goals, tasks, features, items,
+stats, processes), **`add-routine` for adding or changing a routine** — it names the exact
+files to edit, which existing routine to copy, how to test, and which parts of the repository
+not to read — and **`map-layers` for anything about map layers, the editor's layer table and
+x-ray, the map file format, or wiring fixtures**, with recipes for a new layer or network.
+Three knowledge-base skills map one system each to the files and functions that own it:
+**`electrician`** (the power grid: transformers, lines, boxes and switching them, wiring, what
+needs power and how the brain, fridges, lighting and overlay follow it), **`plumber`** (the
+sewer, pipes and toilets) and **`map-generator`** (the seeded district: build order,
+invariants, tests, how to extend it).
+

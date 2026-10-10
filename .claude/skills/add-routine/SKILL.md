@@ -84,7 +84,7 @@ For a plain `Need`: only `routines.rs` (constant + tests) and `brain/mod.rs` (re
 
 ### Docs and QA (always, when the routine is visible)
 
-`CLAUDE.md` ("The brain" > routines bullet, and the biology/time sections if touched),
+`.claude/skills/brain-engineer/architecture.md` ("The brain" > routines bullet, and "Biology" if touched; the `simulation` skill for time),
 `.claude/skills/brain-engineer/SKILL.md` (priority table row), `qa/<name>.json`, and any
 existing `qa/*.json` that watches one need in isolation — it must switch the new process off.
 
@@ -177,4 +177,4 @@ the assertion to fail, restore). The `qa` skill documents the steps and fixtures
 - The routine appears in the brains menu (`routines` list, and its `debug_fields` line).
 - Existing QA tests still pass; those that isolate one need switch the new process off.
 - The perf run's per-entity cost has not grown with the crowd (`expect_scaling`).
-- `CLAUDE.md` and the `brain-engineer` priority table describe the new routine.
+- `brain-engineer/architecture.md` and the `brain-engineer` priority table describe the new routine.

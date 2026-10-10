@@ -5,6 +5,8 @@ description: Write and run scripted QA tests for crowd2x - JSON test definitions
 
 # Scripted QA for crowd2x
 
+[overview.md](overview.md) is a condensed tour of the harness and why it is built this way (intent vs input steps, perf and observe steps, culling-aware assertions, screenshots); read it first if you are new to it.
+
 `cargo test` covers the plain-Rust parts (map, coordinates, navigation maths) and the
 `debugger` skill photographs a frame. Neither answers the question that decides whether an
 interface works: *if someone presses these buttons in this order, does the right thing
