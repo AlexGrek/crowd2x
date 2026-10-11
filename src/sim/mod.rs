@@ -2261,6 +2261,28 @@ mod tests {
     }
 
     #[test]
+    fn entering_a_bed_cannot_override_a_wall_or_stacked_furniture() {
+        let bed = Point::new(3, 0);
+        for (terrain, stacked) in [(WALL, false), (FLOOR, true)] {
+            let mut map = Map::new(Size::new(6, 2), FLOOR);
+            map.set_terrain(bed, terrain);
+            crate::sim::testing::prop_at(&mut map, "bed 1", bed);
+            if stacked {
+                crate::sim::testing::prop_at(&mut map, "crate", bed);
+            }
+            let mut state = GameState::new(map, 7);
+            let uid = state.spawn(EntityType::Human, Point::new(2, 0));
+            let slot = state.entities.slot_of(uid).unwrap() as usize;
+            state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
+            let GameState { map, entities, occupancy, features, doors, intents, moves, .. } = &mut state;
+            move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
+            assert_eq!(state.last_move(uid), Some(MoveOutcome::Blocked { by: None }));
+            assert_eq!(state.entities().get(uid).unwrap().center_position(), Point::new(2, 0));
+            assert_eq!(state.occupancy().occupant(bed), None);
+        }
+    }
+
+    #[test]
     fn moving_never_puts_two_entities_in_one_cell() {
         // The headline property, over a crowd dense enough to keep bumping
         // into itself: twelve of them in a room of thirty-six cells.

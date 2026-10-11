@@ -46,7 +46,6 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
 
-use crate::browser::Maps;
 use crate::characters::{upscale, ART_SCALE, CELL};
 use crate::map::{GridLayer, Map, ObjectLayer, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};

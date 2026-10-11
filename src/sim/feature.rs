@@ -335,6 +335,33 @@ mod tests {
     }
 
     #[test]
+    fn entering_a_feature_bypasses_only_its_own_prop() {
+        use crate::map::{WALL, VOID};
+        let cell = Point::new(2, 2);
+        for (name, kind) in [("bed 1", FeatureKind::Bed), ("toilet", FeatureKind::Toilet)] {
+            for terrain in [WALL, VOID] {
+                let mut map = Map::new(Size::new(5, 5), FLOOR);
+                map.set_terrain(cell, terrain);
+                map.add_object(ObjectLayer::Props, prop(name, cell));
+                let features = features_of(&map);
+                assert!(!features.is_enterable(cell), "{name} on {terrain:?}");
+                assert_eq!(features.count(kind), 0, "an unusable feature is not a goal");
+            }
+            for obstacle in ["crate", "bed 2", "toilet", "unknown prop"] {
+                let mut map = Map::new(Size::new(5, 5), FLOOR);
+                map.add_object(ObjectLayer::Props, prop(name, cell));
+                map.add_object(ObjectLayer::Props, prop(obstacle, cell));
+                let features = features_of(&map);
+                assert!(!features.is_enterable(cell), "{name} stacked with {obstacle}");
+                assert_eq!(features.count(kind), 0);
+            }
+            let mut map = Map::new(Size::new(5, 5), FLOOR);
+            map.add_object(ObjectLayer::Props, prop(name, cell));
+            assert!(features_of(&map).is_enterable(cell), "{name} alone on floor");
+        }
+    }
+
+    #[test]
     fn a_fridge_on_the_map_is_food_and_water_in_the_index_and_is_not_a_bed() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         map.add_object(ObjectLayer::Props, prop("fridge", Point::new(3, 4)));

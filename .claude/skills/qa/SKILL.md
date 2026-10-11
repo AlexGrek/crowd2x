@@ -198,6 +198,12 @@ cell in the game, pin the camera first (`look_at` the cell, which puts it in the
 the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
 `cursor_cell` instead, which is what it is for.
 
+`{"save_blocked": {"map": "studio", "blocked": true}}` temporarily replaces a fixture's
+save destination with an empty directory, preserving its file under a backup name.
+Use `blocked: false` to restore it. `{"close_window": {}}` sends a real window-close
+request. Together they test the editor refusing to close on save failure; see
+`qa/save_failure.json`. Use only the runner's isolated maps directory.
+
 ### Assertions
 
 | Step | Checks |

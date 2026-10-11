@@ -471,6 +471,7 @@ fn park_cursor(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
 /// Everything a step might press.
 #[derive(SystemParam)]
 struct Devices<'w> {
+    close: MessageWriter<'w, bevy::window::WindowCloseRequested>,
     keys: ResMut<'w, ButtonInput<KeyCode>>,
     key_messages: MessageWriter<'w, KeyboardInput>,
     buttons: ResMut<'w, ButtonInput<MouseButton>>,
@@ -487,6 +488,7 @@ type DrawnInTheWorld = Or<(With<Sprite>, With<Text2d>)>;
 /// is aimed with.
 #[derive(SystemParam)]
 struct Checks<'w, 's> {
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     state: Res<'w, State<AppState>>,
     maps: Res<'w, Maps>,
     labels: Query<'w, 's, &'static Text>,
@@ -740,6 +742,35 @@ fn perform(
     windows: &mut Query<&mut Window, With<PrimaryWindow>>,
 ) -> Result<Next, String> {
     match step {
+        Step::CloseWindow {} => {
+            let window = checks.primary_window.single().map_err(|error| error.to_string())?;
+            devices.close.write(bevy::window::WindowCloseRequested { window });
+            Ok(Next::Now)
+        }
+        Step::SaveBlocked { map, blocked } => {
+            let name = crate::map::sanitize_name(map)
+                .filter(|name| name == map)
+                .ok_or_else(|| format!("invalid fixture map name {map:?}"))?;
+            let path = checks.maps.0.root().join(format!("{name}.json"));
+            let backup = checks.maps.0.root().join(format!(".{name}.qa-backup"));
+            let result = if *blocked {
+                if backup.exists() {
+                    return Err(format!("save already blocked for {name}"));
+                }
+                std::fs::rename(&path, &backup).and_then(|()| {
+                    std::fs::create_dir(&path).inspect_err(|_| {
+                        let _ = std::fs::rename(&backup, &path);
+                    })
+                })
+            } else {
+                if !backup.is_file() {
+                    return Err(format!("save was not blocked for {name}"));
+                }
+                std::fs::remove_dir(&path).and_then(|()| std::fs::rename(&backup, &path))
+            };
+            result.map_err(|error| format!("blocking save for {name}: {error}"))?;
+            Ok(Next::Now)
+        }
         Step::Wait(seconds) => Ok(Next::After(*seconds)),
 
         Step::Note(text) => {

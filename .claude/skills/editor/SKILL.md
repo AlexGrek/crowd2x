@@ -14,6 +14,13 @@ the palettes live. Leaving writes the map back (`F5` saves too, and so does clos
 window — that path never runs `OnExit`). Painting outside the map's dimensions is refused
 rather than growing it.
 
+`editor/saving.rs` guards leaving **before** `NextState` is applied, and consumes a
+window-close request before Bevy closes the window. A failed save keeps the editor and
+its edits open, shows the storage error, and allows another attempt with F5 / Start.
+`OnExit` only tears down editor state; it cannot cancel a transition. Successful
+programmatic exits also save; fatal exits retain their error code. `qa/save_failure.json`
+exercises failure, refused navigation/close, and recovery against real file I/O.
+
 **A window redraws when it is told to, never on `CurrentMap`'s change flag.** An edit that
 changed the map calls the window's `touch()`; loading a map needs no signal, because every
 load is a change of screen and `reset_map_windows` empties both windows on the way into

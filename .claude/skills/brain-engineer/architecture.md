@@ -139,8 +139,14 @@ to one, exactly as if it were not there. If it needs power or water, add it to
 `map::utilities::CONSUMERS`. An unpowered fridge is still in `Fridges` (its door opens), but
 its compressor does not run: it starts at room temperature and stays there, and one that loses
 power warms toward the room from wherever it was (`Fridges::set_power`). Because the index can
-change under a goal's plan, a task that uses a powered feature re-checks it (`TakeItem` when it
-starts, `UseComputer` every tick). The `map-layers` skill has the whole picture.
+change under a goal's plan, tasks using powered features re-check power every tick,
+including `TakeItem` and `UseComputer`. The `map-layers` skill has the whole picture.
+
+An entered feature (bed or toilet) is indexed only on passable terrain with exactly one
+blocking prop in its cell: the feature itself. Its entry exception cannot bypass a wall,
+void, another stacked piece of furniture, or the map boundary. Count blockers when building
+the feature index; keep movement checks free of prop scans. Crowd occupancy and doors
+still apply when a unit enters.
 
 **Doors and property** (the `doors` skill has the whole of it): a walker whose next cell is a
 door not fully open stands still, and every walk asks for the door ahead

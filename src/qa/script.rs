@@ -385,6 +385,11 @@ pub enum Step {
     Cursor { x: f32, y: f32 },
     /// Tap a key: `enter`, `esc`, `tab`, `f5`, `a`, `1`, `up`.
     Key(String),
+
+    /// Request an OS window close; a failed editor save must refuse it.
+    CloseWindow {},
+    /// Obstruct a fixture's save destination without deleting its saved bytes.
+    SaveBlocked { map: String, blocked: bool },
     /// Hold a key down — panning, or painting by dragging.
     HoldKey { key: String, seconds: f32 },
     /// Type text into whatever is listening, one character at a time.

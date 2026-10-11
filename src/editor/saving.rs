@@ -157,3 +157,56 @@ fn update_notice(status: Res<SaveStatus>, mut notices: Query<(&mut Node, &mut Te
         **text = status.error.clone().unwrap_or_default();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map::{Map, MapStore, Size, FLOOR};
+
+    fn app(root: &std::path::Path) -> App {
+        let mut app = App::new();
+        app.add_message::<WindowCloseRequested>()
+            .add_message::<AppExit>()
+            .insert_resource(Maps(MapStore::new(root)))
+            .insert_resource(CurrentMap::new("studio".into(), Map::new(Size::new(2, 2), FLOOR)))
+            .init_resource::<SaveStatus>()
+            .add_systems(Update, guard_app_exit);
+        app
+    }
+
+    #[test]
+    fn a_successful_window_close_saves_before_requesting_exit() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("crowd2x-save-close-{unique}"));
+        let mut app = app(&root);
+        app.world_mut().write_message(WindowCloseRequested { window: Entity::PLACEHOLDER });
+        app.update();
+        assert!(app.world().resource::<Maps>().0.load("studio").is_ok());
+        assert!(app.world().resource::<Messages<WindowCloseRequested>>().is_empty());
+        assert_eq!(app.should_exit(), Some(AppExit::Success));
+        std::fs::remove_file(root.join("studio.json")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_save_cancels_successful_exit_but_preserves_a_fatal_exit_code() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("crowd2x-save-blocked-{unique}"));
+        // A file where the store directory should be gives a portable I/O failure.
+        std::fs::write(&root, b"obstruction").unwrap();
+        let mut app = app(&root);
+        app.world_mut().write_message(WindowCloseRequested { window: Entity::PLACEHOLDER });
+        app.update();
+        assert_eq!(app.should_exit(), None);
+        assert!(app.world().resource::<Messages<WindowCloseRequested>>().is_empty());
+        app.world_mut().write_message(AppExit::Success);
+        app.update();
+        assert_eq!(app.should_exit(), None);
+        assert!(app.world().resource::<SaveStatus>().error.is_some());
+        let fatal = AppExit::error();
+        app.world_mut().write_message(fatal.clone());
+        app.update();
+        assert_eq!(app.should_exit(), Some(fatal));
+        std::fs::remove_file(root).unwrap();
+    }
+}

@@ -113,7 +113,9 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 
 7. **Task preconditions are checked every tick, not once.** A task must fail if the world
    stopped allowing it mid-action (walked away, hand emptied). Effects are applied only on
-   `ActionState::Finished`.
+   `ActionState::Finished`. `TakeItem` rechecks distance, an empty hand, and fridge power
+   through completion. Its open-door check alone is a start condition: another unit
+   closing the door must not interrupt an item already being taken.
 
 8. **A task does one thing and never walks.** `TakeItem` from two cells away fails; the goal
    should have queued a `MoveTo` first. One task, one action.

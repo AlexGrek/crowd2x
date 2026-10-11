@@ -212,9 +212,14 @@ somewhere else, which is what keeps a QA run from deleting real maps.
 
 The editor edits the open `CurrentMap`, not the screen: a click writes the tile or prop
 into the map and *then* spawns a sprite, so what is drawn cannot be something the saved
-file does not contain. Entering rebuilds the scene from the map; leaving despawns it and
-writes the map back (`F5` saves too, and so does closing the window — that path never runs
+file does not contain. Entering rebuilds the scene from the map; leaving saves the map
+before despawning it (`F5` saves too, and so does closing the window — that path never runs
 `OnExit`). Painting outside the map's dimensions is refused rather than growing it.
+
+Saving is guarded by `editor/saving.rs` before a screen transition or window close.
+On failure the editor stays open, displays the error, and retains the edits for an F5 /
+Start retry. `MapStore::save` syncs a temporary file beside the destination and atomically
+replaces the old save; a failed write never truncates the previous file.
 
 `Tool` holds the active layer and a per-layer palette index. The two layers exist to be
 different, and new placeable content should respect that split:
@@ -596,7 +601,8 @@ talking only to the one below:
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `Wait`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
-  from one step away), and applies what finishing means: food goes into a hand when a
+  from one step away, with an empty hand and a powered fridge), and applies what finishing
+  means: food goes into a hand when a
   `TakeItem` ends, not when a goal hears that it did. A task never writes a stat — it tells
   the body what happened (`Event::Ingested`, `Event::Relieved`), below.
 - **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
@@ -635,7 +641,10 @@ blocks its own. Adding a use for a prop is an entry there, a palette entry in
 queues the tasks.
 
 Every `FeatureKind` also has an `Access`: `Beside` (the fridge, touched from next to it) or
-`Entered` (the toilet, used by walking *into* it). An `Entered` cell stays impassable in
+`Entered` (beds and toilets, used by walking *into* them). The feature index admits an
+entered cell only on passable terrain with exactly one blocking prop: the feature itself.
+Walls, void and overlapping blocking furniture cannot be bypassed by entering a feature.
+An `Entered` cell stays impassable in
 `map::PassabilityMap` — nobody routes through it, and an ordinary walk refuses it exactly
 like a wall — but `sim::move_step` lets a `Move` straight onto it through to `Occupancy`,
 which is the taken/free state: whoever is standing there holds the claim, and the cell is

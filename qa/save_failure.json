@@ -1,0 +1,28 @@
+{
+  "name": "failed saves preserve the open editor and recover without losing changes",
+  "state": "editor",
+  "given": { "maps": ["studio"] },
+  "open": "studio",
+  "steps": [
+    { "tool": "wall brown" },
+    { "cursor_cell": { "x": 3, "y": 2 } },
+    { "click": { "seconds": 0.2 } },
+    { "save_blocked": { "map": "studio", "blocked": true } },
+    { "key": "f5" },
+    { "expect_text": "Could not save studio. Your changes are still open." },
+    { "key": "esc" },
+    { "expect_state": "editor" },
+    { "goto": "maps" },
+    { "expect_state": "editor" },
+    { "close_window": {} },
+    { "expect_state": "editor" },
+    { "shot": "save failed with changes retained" },
+    { "save_blocked": { "map": "studio", "blocked": false } },
+    { "expect_tile": { "map": "studio", "x": 3, "y": 2, "terrain": "void" } },
+    { "key": "f5" },
+    { "expect_tile": { "map": "studio", "x": 3, "y": 2, "terrain": "wall brown" } },
+    { "shot": "save recovered" },
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

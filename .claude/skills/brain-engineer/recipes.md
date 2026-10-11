@@ -202,7 +202,7 @@ for a test about the wiring, and `map::utilities::serve_everything` to wire a `G
 **The index can change under a plan.** A player switching a distribution box off rebuilds
 `Features` (and unplugs `Fridges`) in the spawn pass, so a goal may have picked a feature that
 is gone by the time its task runs. A task that *uses* a powered feature re-checks it: `TakeItem`
-refuses `!fridges.get(cell).is_powered()` when it starts, `UseComputer` fails any tick
+refuses an unpowered fridge every tick, including the completion tick; `UseComputer` fails any tick
 `features.has(Entertainment, cell)` is false. Copy that for a new consumer task; the goal then
 replans from the rebuilt index on its next `process`. Details in the `electrician` and `plumber` skills.
 

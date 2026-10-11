@@ -169,6 +169,12 @@ through `RawGamepadEvent`, so `bevy_input` builds the real `Gamepad` component. 
 pointer moves by setting the window's cursor position — the same field `bevy_ui`'s focus
 system reads — so a click goes through genuine hover-and-click.
 
+`{"save_blocked": {"map": "studio", "blocked": true}}` temporarily replaces a fixture's
+save destination with an empty directory, preserving its file under a backup name.
+Use `blocked: false` to restore it. `{"close_window": {}}` sends a real window-close
+request. Together they test the editor refusing to close on save failure; see
+`qa/save_failure.json`. Use only the runner's isolated maps directory.
+
 ### Assertions
 
 | Step | Checks |

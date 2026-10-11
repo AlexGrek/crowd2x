@@ -104,6 +104,12 @@ toilet as the crow flies and has no idea of a crowd, so the district's crowd —
 bank's computers — converges on one fridge and jams; `qa/district.json` observes a day and
 records the numbers instead of asserting on needs.
 
+`MapStore::save` writes to a unique temporary file in the same directory, syncs and
+closes it, then atomically renames it over the destination. A failed write or replacement
+preserves the previous save and removes the temporary file when possible. Never truncate
+the destination first. This protects replacement, not full power-loss durability of the
+directory entry. The editor must handle the returned error before leaving or closing.
+
 Maps serialise to JSON (`map/format.rs`, `Map::to_json` / `Map::from_json`), and the file
 is a different shape from the runtime map on purpose — `format.rs` is the only thing that
 knows both, so the in-memory layout stays free to change and the derived passability map
