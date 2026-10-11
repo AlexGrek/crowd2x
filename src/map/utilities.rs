@@ -27,6 +27,16 @@
 //! Which boxes are off is the simulation's state, not the map's, so it is
 //! handed in ([`Supply::with_boxes_off`]) rather than read off the map.
 //!
+//! **A street light controller switches a box by daylight.** A
+//! [`CONTROLLER`] is a prop, a cabinet with a photocell, standing on a
+//! distribution box: it is the box's switch, closed while it is dark and open
+//! while it is light. Whatever that box's wiring feeds — street lamps, as a
+//! district lays them — has power at night only. The map holds where the
+//! controllers are ([`controlled_boxes`]); whether it is dark is the
+//! simulation's clock (`sim::sun`), so a controlled box that is open is just
+//! one more box in the `off` list handed to [`Supply::with_boxes_off`]. A
+//! controller standing anywhere but on a box switches nothing.
+//!
 //! This is plain Rust like the rest of `map/`, and derived like
 //! passability: [`Supply::from_map`] floods both networks once, and the
 //! simulation keeps the answer, since nothing in a tick changes the map.
@@ -66,8 +76,29 @@ pub const CONSUMERS: &[(&str, Utility)] = &[
     ("computer", Utility::Power),
     ("ceiling lamp", Utility::Power),
     ("tube lamp", Utility::Power),
+    ("street lamp", Utility::Power),
     ("toilet", Utility::Water),
 ];
+
+/// The prop that switches the distribution box under it by daylight: on
+/// while it is dark, off while it is light. See the module docs.
+pub const CONTROLLER: &str = "street light controller";
+
+/// Every distribution box with a [`CONTROLLER`] standing on it, sorted.
+/// A controller on anything but a box is not in the list: it has nothing to
+/// switch.
+pub fn controlled_boxes(map: &Map) -> Vec<Point> {
+    let mut boxes: Vec<Point> = map
+        .objects(ObjectLayer::Props)
+        .iter()
+        .filter(|object| object.kind.as_str() == CONTROLLER)
+        .map(Object::cell)
+        .filter(|&cell| map.grid(GridLayer::Power, cell) == power::BOX)
+        .collect();
+    boxes.sort_unstable();
+    boxes.dedup();
+    boxes
+}
 
 /// The utility something called `name` cannot work without, if any.
 pub fn needs(name: &str) -> Option<Utility> {
@@ -205,6 +236,15 @@ pub fn fed_by(map: &Map, at: Point) -> Vec<&Object> {
                 && size.index_of(object.cell()).is_some_and(|index| wiring[index])
         })
         .collect()
+}
+
+/// The cells of the low-voltage circuit `at` is on: the wiring and boxes
+/// joined to it, whatever is switched. Empty if `at` is neither. For a test
+/// or a panel, not a tick: it floods the map.
+pub fn circuit(map: &Map, at: Point) -> Vec<Point> {
+    let size = map.size();
+    let joined = flood(size, vec![at], |cell| matches!(map.grid(GridLayer::Power, cell), power::WIRING | power::BOX));
+    size.points().filter(|&cell| joined[size.index_of(cell).unwrap()]).collect()
 }
 
 /// Every cell reachable from `seeds` by 4-neighbour steps through cells
@@ -360,6 +400,27 @@ mod tests {
         let fed: Vec<&str> = fed_by(&map, Point::new(2, 0)).iter().map(|o| o.kind.as_str()).collect();
         assert_eq!(fed, ["fridge"]);
         assert!(fed_by(&map, Point::new(1, 0)).is_empty(), "a line is not a box");
+    }
+
+    #[test]
+    fn a_controller_switches_the_box_it_stands_on_and_nothing_else() {
+        // Transformer, line, a box with a controller on it, wiring to a
+        // street lamp at the end.
+        let mut map = street("==B--");
+        map.remove_object(ObjectLayer::Props, &at("fridge", Point::new(4, 0)));
+        map.add_object(ObjectLayer::Props, at("street lamp", Point::new(4, 0)));
+        map.add_object(ObjectLayer::Props, at(CONTROLLER, Point::new(2, 0)));
+        let lamp = Point::new(4, 0);
+        assert_eq!(controlled_boxes(&map), [Point::new(2, 0)]);
+        assert!(Supply::from_map(&map).serves("street lamp", lamp), "at night: the box is closed");
+        let day = Supply::with_boxes_off(&map, &controlled_boxes(&map));
+        assert!(!day.serves("street lamp", lamp), "by day: open");
+        assert!(day.is_live(Network::Line, Point::new(2, 0)), "the line still runs through it");
+
+        // A controller beside the box, on the line, switches nothing.
+        let mut astray = street("==B--");
+        astray.add_object(ObjectLayer::Props, at(CONTROLLER, Point::new(1, 0)));
+        assert!(controlled_boxes(&astray).is_empty());
     }
 
     #[test]

@@ -69,7 +69,10 @@ respect the split:
   exactly like props, drawn by the same `PropWindow`, but at a fixed `LAMP_Z` above every
   character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`
   is not asked). A lamp exists to light: each one's `EMITTERS` entry is a test. Erasing on
-  one layer never takes the other's object, however near.
+  one layer never takes the other's object, however near. A **street lamp** is not a lamp
+  but a prop (`PALETTE`, `"street lamp"`): it stands on the ground and blocks its cell, and
+  lights through its `EMITTERS` entry like any prop does; its `"street light controller"`
+  is a prop placed on a distribution box cell (`electrician`).
 - `editor/grids.rs` — the **grid layers**: a value per cell that is not terrain. The
   ceiling is a rectangle instrument, always (left drag roofs it, right drag opens it to the
   sky); power (`"wiring"`, `"power line"`, `"distribution box"`) and water (`"sewer pipe"`)

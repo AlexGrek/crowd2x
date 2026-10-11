@@ -126,6 +126,14 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "computer",
         Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
     ),
+    // A sodium lamp on a post: an orange pool on the street. Always on as
+    // far as the lightmap knows — what puts it out by day is the street
+    // light controller on its box taking the power away
+    // (`crate::map::utilities::CONTROLLER`), which `apply_supply` follows.
+    (
+        "street lamp",
+        Emission { color: [1.0, 0.72, 0.38], radius: 6.5, always_on: true },
+    ),
 ];
 
 pub fn emission(name: &str) -> Option<Emission> {
@@ -133,30 +141,14 @@ pub fn emission(name: &str) -> Option<Emission> {
 }
 
 /// The light everywhere, before any lamp, at a time of day (hours since
-/// midnight, fractional): white by day, so a day looks exactly as the art was
-/// drawn; a warm dusk and dawn; a dark blue night, from 21:00 to 05:00, in
-/// which a lamp is what lights a room.
+/// midnight, fractional): the sun's, as strong and as coloured as
+/// [`crate::sim::sun`] says — white by day, so a day looks exactly as the art
+/// was drawn; golden low in the sky; a violet twilight; a dark blue
+/// moonlight at night, in which a lamp is what lights a room or a street.
+/// The street light controllers read the same sun, so the street lamps come
+/// on as this goes dark.
 pub fn ambient(hours: f32) -> [f32; 3] {
-    const NIGHT: [f32; 3] = [0.12, 0.14, 0.26];
-    const DAWN: [f32; 3] = [0.55, 0.48, 0.55];
-    const DAY: [f32; 3] = [1.0, 1.0, 1.0];
-    const DUSK: [f32; 3] = [0.75, 0.5, 0.38];
-    const KEYS: [(f32, [f32; 3]); 8] = [
-        (0.0, NIGHT),
-        (5.0, NIGHT),
-        (6.0, DAWN),
-        (7.0, DAY),
-        (19.0, DAY),
-        (20.0, DUSK),
-        (21.0, NIGHT),
-        (24.0, NIGHT),
-    ];
-    let h = hours.rem_euclid(24.0);
-    let i = KEYS.iter().rposition(|(at, _)| *at <= h).unwrap_or(0).min(KEYS.len() - 2);
-    let (h0, a) = KEYS[i];
-    let (h1, b) = KEYS[i + 1];
-    let t = ((h - h0) / (h1 - h0)).clamp(0.0, 1.0);
-    std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t)
+    crate::sim::Sun::at(hours).ambient()
 }
 
 /// The light under a ceiling no sky reaches, before any lamp: a little of
@@ -581,6 +573,34 @@ mod tests {
             }
             last = now;
         }
+    }
+
+    /// A street lamp on a box with a street light controller: dark under
+    /// the day's supply, lit under the night's — switched, not rebuilt.
+    #[test]
+    fn a_street_lamp_lights_when_its_controller_closes_its_box() {
+        use crate::map::utilities::{controlled_boxes, CONTROLLER};
+        let mut map = Map::new(Size::new(12, 3), FLOOR);
+        for (x, c) in "B--".chars().enumerate() {
+            let value = crate::map::GridLayer::Power.value_of(c).unwrap();
+            map.set_grid(crate::map::GridLayer::Power, Point::new(x as i32, 1), value);
+        }
+        let put = |map: &mut Map, name: &str, x: i32| {
+            map.add_object(ObjectLayer::Props, Object { at: Point::new(x * 48 + 24, 48 + 24), kind: ObjectKind::new(name) })
+        };
+        put(&mut map, "transformer", 0);
+        put(&mut map, CONTROLLER, 0);
+        put(&mut map, "street lamp", 2);
+        let day = Supply::with_boxes_off(&map, &controlled_boxes(&map));
+        let mut scene = LightScene::from_map(&map, &day);
+        assert_eq!(scene.lights.len(), 1);
+        assert!(!scene.lights[0].enabled && scene.lights[0].needs_power);
+        scene.take_dirty();
+        assert_eq!(scene.apply_supply(&Supply::from_map(&map)), 1, "night falls");
+        assert!(scene.lights[0].enabled);
+        assert!(!scene.take_dirty().is_empty());
+        let lit = scene.lights_at(sub(5), sub(1));
+        assert!(lit[0] > lit[2], "sodium is orange: {lit:?}");
     }
 
     fn roofed_room(map: &mut Map, x0: i32, y0: i32, x1: i32, y1: i32, door: Point) {

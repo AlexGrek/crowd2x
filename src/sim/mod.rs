@@ -146,6 +146,7 @@ pub mod occupancy;
 pub mod path;
 pub mod property;
 pub(crate) mod rng;
+pub mod sun;
 pub mod talents;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -162,6 +163,7 @@ use crate::map::{Map, ObjectLayer, Point};
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
 pub use clock::Clock;
+pub use sun::Sun;
 pub use door::Doors;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
@@ -416,6 +418,13 @@ pub struct GameState {
     /// The distribution boxes switched off, sorted. Simulation state, not
     /// the map's: a map is saved with every box on.
     boxes_off: Vec<Point>,
+    /// The boxes a street light controller stands on, sorted
+    /// ([`crate::map::utilities::controlled_boxes`]). Derived from `map`
+    /// once: on while it is dark, off while it is light.
+    controlled: Vec<Point>,
+    /// Whether the controllers' photocells last saw night — the state the
+    /// supply was flooded for. Followed by [`GameState::follow_daylight`].
+    street_lights_on: bool,
     /// Bumped every time `supply` changes, so a reader — the lighting, the
     /// x-ray — knows to look again without comparing the whole thing.
     supply_generation: u64,
@@ -446,7 +455,13 @@ impl GameState {
     /// world is exactly what its caller asked for and nothing appears by
     /// default.
     pub fn new(map: Map, seed: u64) -> GameState {
-        let supply = Supply::from_map(&map);
+        let controlled = crate::map::utilities::controlled_boxes(&map);
+        let street_lights_on = Clock::after_watching(0.0).sun().is_dark();
+        let supply = if street_lights_on || controlled.is_empty() {
+            Supply::from_map(&map)
+        } else {
+            Supply::with_boxes_off(&map, &controlled)
+        };
         let properties = Properties::from_map(&map);
         GameState {
             occupancy: Occupancy::new(map.size()),
@@ -456,6 +471,8 @@ impl GameState {
             properties,
             supply,
             boxes_off: Vec::new(),
+            controlled,
+            street_lights_on,
             supply_generation: 0,
             homes: Homes::new(),
             map,
@@ -522,10 +539,7 @@ impl GameState {
             // Already the way it was asked to be.
             _ => return true,
         }
-        self.supply = Supply::with_boxes_off(&self.map, &self.boxes_off);
-        self.features = Features::from_map(&self.map, &self.supply);
-        self.fridges.set_power(&self.supply);
-        self.supply_generation += 1;
+        self.refresh_supply();
         self.log.push(format!(
             "the distribution box at {}, {} was switched {}",
             at.x,
@@ -533,6 +547,59 @@ impl GameState {
             if on { "on" } else { "off" }
         ));
         true
+    }
+
+    /// Whether a street light controller stands on the box in `at`.
+    pub fn is_controlled(&self, at: Point) -> bool {
+        self.controlled.binary_search(&at).is_ok()
+    }
+
+    /// Whether the street light controllers have their boxes on: it is dark.
+    pub fn street_lights_on(&self) -> bool {
+        self.street_lights_on
+    }
+
+    /// The street light controllers look at the sky: if it has gone dark
+    /// since they last looked, every controlled box closes, and if it has
+    /// grown light, every one opens — and what has power is worked out
+    /// again, exactly as for a box switched by hand. A player's switch still
+    /// wins: a box switched off stays off at night.
+    ///
+    /// Called by the spawn pass, the one pass allowed to allocate. Nothing
+    /// at all happens on a tick the photocells see what they saw before,
+    /// which is every tick but two a world day — and every tick of a map
+    /// with no controller on it.
+    pub fn follow_daylight(&mut self) {
+        if self.controlled.is_empty() {
+            return;
+        }
+        let dark = self.clock().sun().is_dark();
+        if dark == self.street_lights_on {
+            return;
+        }
+        self.street_lights_on = dark;
+        self.refresh_supply();
+        self.log.push(format!(
+            "{} street light controller(s) switched {} at {}",
+            self.controlled.len(),
+            if dark { "on" } else { "off" },
+            self.clock().time()
+        ));
+    }
+
+    /// Flood the networks again with every box that is off — switched off by
+    /// hand, or opened by its controller in daylight — and rebuild what
+    /// follows from them: the features a brain can go to (a fridge on a dead
+    /// box is not one) and every fridge's compressor.
+    fn refresh_supply(&mut self) {
+        let mut off = self.boxes_off.clone();
+        if !self.street_lights_on {
+            off.extend_from_slice(&self.controlled);
+        }
+        self.supply = Supply::with_boxes_off(&self.map, &off);
+        self.features = Features::from_map(&self.map, &self.supply);
+        self.fridges.set_power(&self.supply);
+        self.supply_generation += 1;
     }
 
     pub fn fridges(&self) -> &Fridges {
@@ -872,6 +939,10 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// processing pass, so something spawned this tick thinks this tick — watching
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
+/// It is also where the street light controllers look at the sky
+/// ([`GameState::follow_daylight`]): switching their boxes re-floods the
+/// power networks, which allocates, so it belongs here and not in a tick.
+///
 /// [`Command::Freeze`], [`Command::SetProcess`], [`Command::GiveItem`],
 /// [`Command::Hold`] and [`Command::SetTalent`] are drained here too. They
 /// change nothing structural, but arrive on the same queue and want the same
@@ -884,6 +955,9 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// buffer sized to the arena as it goes, which is what lets
 /// [`process_pass`] index it without a bounds concern and without touching it.
 pub fn spawn_pass(state: &mut GameState, input: &Input) {
+    // Before the commands, so a box switched by hand this tick is switched
+    // in the light the controllers have just seen.
+    state.follow_daylight();
     for command in &input.commands {
         match command {
             Command::Spawn { kind, at } => {
@@ -2509,6 +2583,57 @@ mod tests {
         assert!(state.fridges().get(fridge).unwrap().is_powered());
 
         assert!(!state.switch_box(Point::new(0, 0), false), "there is no box there");
+    }
+
+    /// A street lamp on a box with a controller on it, and a fridge on a
+    /// box with none, both off one line: the lamp has power from dusk to
+    /// dawn, the fridge all day and all night.
+    #[test]
+    fn a_street_light_controller_powers_its_lamps_from_dusk_to_dawn() {
+        use crate::map::grid::power;
+        use crate::map::utilities::CONTROLLER;
+        let mut map = Map::new(Size::new(7, 1), FLOOR);
+        for (x, c) in "-B=B=B-".chars().enumerate() {
+            map.set_grid(crate::map::GridLayer::Power, Point::new(x as i32, 0), crate::map::GridLayer::Power.value_of(c).unwrap());
+        }
+        let put = |map: &mut Map, name: &str, x: i32| {
+            map.add_object(
+                ObjectLayer::Props,
+                crate::map::Object { at: Point::new(x * 48 + 24, 24), kind: crate::map::ObjectKind::new(name) },
+            )
+        };
+        // The transformer stands on the middle box; the lamp's box at the
+        // left end has the controller, the fridge's at the right does not.
+        put(&mut map, "transformer", 3);
+        put(&mut map, "street lamp", 0);
+        put(&mut map, CONTROLLER, 1);
+        put(&mut map, "fridge", 6);
+        assert_eq!(map.grid(crate::map::GridLayer::Power, Point::new(1, 0)), power::BOX);
+        let (lamp, fridge) = (Point::new(0, 0), Point::new(6, 0));
+
+        let mut state = GameState::new(map, 1);
+        assert!(state.is_controlled(Point::new(1, 0)) && !state.is_controlled(Point::new(5, 0)));
+        let at = |state: &mut GameState, hours_after_opening: f64| {
+            state.elapsed = hours_after_opening * clock::HOUR as f64 / clock::TIME_SCALE as f64;
+            spawn_pass(state, &Input::new());
+            (state.supply().serves("street lamp", lamp), state.supply().serves("fridge", fridge))
+        };
+        assert!(!state.street_lights_on(), "a world opens at eight in the morning");
+        assert_eq!(at(&mut state, 0.0), (false, true), "eight in the morning");
+        assert_eq!(state.supply_generation(), 0, "nothing changed, nothing re-flooded");
+        assert_eq!(at(&mut state, 11.0), (false, true), "seven in the evening: still light");
+        assert_eq!(at(&mut state, 15.0), (true, true), "eleven at night");
+        assert!(state.street_lights_on());
+        assert_eq!(state.supply_generation(), 1);
+        assert_eq!(at(&mut state, 20.0), (true, true), "four in the morning");
+        assert_eq!(at(&mut state, 24.0), (false, true), "eight the next morning");
+        assert_eq!(state.supply_generation(), 2);
+
+        // Switched off by hand, the controller cannot put it back on.
+        assert!(state.switch_box(Point::new(1, 0), false));
+        assert_eq!(at(&mut state, 39.0), (false, true), "eleven the next night, switched off");
+        assert!(state.switch_box(Point::new(1, 0), true));
+        assert!(state.supply().serves("street lamp", lamp));
     }
 
     #[test]

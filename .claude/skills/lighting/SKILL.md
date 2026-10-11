@@ -1,6 +1,6 @@
 ---
 name: lighting
-description: The crowd2x lightmap - day/night ambient and indoor light, the RGB lightmap at five subtiles a cell baked by compute shaders, emitters (ceiling and tube lamps, fire, computers in use), occlusion, the sky field propagated through doorways, dirty chunks, the GPU/CPU reference check and its measured cost. Use when touching src/lighting/, assets/shaders/lighting.wgsl, sky.wgsl or lit_canvas.wgsl, adding a light source, or when something is lit wrong, too dark or a light does not switch.
+description: The crowd2x lightmap - day/night ambient (the sun model in sim::sun - intensity and colour by hour) and indoor light, the RGB lightmap at five subtiles a cell baked by compute shaders, emitters (ceiling, tube and street lamps, fire, computers in use), occlusion, the sky field propagated through doorways, dirty chunks, the GPU/CPU reference check and its measured cost. Use when touching src/lighting/, assets/shaders/lighting.wgsl, sky.wgsl or lit_canvas.wgsl, adding a light source, or when something is lit wrong, too dark or a light does not switch.
 ---
 
 # Lighting
@@ -13,15 +13,26 @@ parts, each a step further from the simulation:
   occlusion bit per subtile (from `Map::sight`, so walls block light and furniture does
   not), one ceiling bit per **cell** (`Map::has_ceiling`), the lights (`EMITTERS`, a
   catalogue keyed by object name like `PROPS`, read from the `Props` *and* `Lamps` layers —
-  `"ceiling lamp"`, `"tube lamp"` and `"fire"` always on, `"computer"` only while somebody
-  is using it — and a lamp or a computer with no power is not in the scene at all:
-  `LightScene::from_map` takes the map's `Supply`), and a CSR index from each
+  `"ceiling lamp"`, `"tube lamp"`, `"street lamp"` and `"fire"` always on, `"computer"`
+  only while somebody is using it — and a lamp or a computer with no power is in the scene
+  but disabled: `LightScene::from_map` takes the map's `Supply`, `apply_supply` follows it
+  changing), and a CSR index from each
   `CHUNK` (40 subtiles, 8 cells) to the lights that can reach it. Switching a light dirties
   the chunks under its radius and no others. It also holds **the CPU reference,
   `LightScene::evaluate`**, which the shader is kept line for line with and checked against.
-  The `ambient` curve (the sun: white by day, so a street by day looks exactly as drawn;
-  dusk; a dark blue night from 21:00 to 05:00) and `indoor` (what is left under a roof the
-  sky does not reach: a little of the sun and a floor, dark but legible) live here too.
+  `ambient(hours)` is a wrapper over **the sun, which lives in the simulation**
+  (`src/sim/sun.rs`, `Sun::at(hours)` / `Clock::sun()`): an elevation cosine (sunrise 06:00,
+  noon 13:00, sunset 20:00), an intensity that is whole and white ~07:30–18:30 (so a day
+  looks exactly as drawn), golden near the horizon, a violet twilight below it, and the
+  moonlight `NIGHT` with no sun at all. It lives in `sim` because the street light
+  controllers' photocells read the same `Sun::is_dark` (`electrician`), so the street lamps
+  come on exactly as the street on screen goes dark. `indoor` (what is left under a roof
+  the sky does not reach: a little of the sun and a floor, dark but legible) stays here.
+  Change the sky's colours or timings in `sun.rs`, never by re-keying a curve here.
+- **Street lamps** (`"street lamp"`, sodium orange, radius 6.5) are ordinary always-on
+  powered emitters. What puts them out by day is the controller on their box taking the
+  power away: the sim re-floods its `Supply`, bumps `supply_generation`, and
+  `follow_power` → `apply_supply` switches them (dirty chunks only, never a new scene).
 - **`mod.rs` — the main world.** Builds a `Lighting` from the simulated map on the game
   screen, switches computer lights by asking `Occupancy` about each computer's own cell and
   the four beside it — *not* the on-screen crowd `game/props.rs` asks, since a screen's

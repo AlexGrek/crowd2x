@@ -274,6 +274,8 @@ fn publish_dirty_chunks(lighting: Option<ResMut<Lighting>>, mut upload: ResMut<L
 fn light_the_canvas(sim: Res<Sim>, lighting: Option<Res<Lighting>>, mut canvas: ResMut<CanvasLight>) {
     let Some(lighting) = lighting else { return };
     let clock = sim.0.clock();
+    // To the world minute: the sun moves no faster than that, and a value
+    // that changed every frame would re-upload the canvas uniform every frame.
     let hours = clock.hour() as f32 + clock.minute() as f32 / 60.0;
     let ambient = scene::ambient(hours);
     let wanted = CanvasLight {

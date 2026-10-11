@@ -129,6 +129,13 @@ const HOUSE_DOOR: &str = "house door";
 pub const DOOR_WIDTH: i32 = 2;
 /// What powers the district, in its bottom-right corner.
 pub const TRANSFORMER: &str = "transformer";
+/// What lights a street at night.
+pub const STREET_LAMP: &str = "street lamp";
+/// Cells between two street lamps along one side of a street: close enough
+/// that their pools meet (a street lamp reaches six and a half).
+pub const STREET_LAMP_SPACING: i32 = 8;
+/// The shortest stretch of a street's side worth a controller and a lamp.
+const SHORTEST_LIT_RUN: usize = 6;
 /// What drains it, in its top-left corner.
 pub const SEWER: &str = "sewer";
 /// How far a building's line or pipe may run to reach the main under a
@@ -365,6 +372,7 @@ pub fn generate(seed: u64) -> District {
         glaze(&mut map, walls);
     }
     connect(&mut map, &buildings);
+    light_streets(&mut map, &buildings);
 
     District {
         seed,
@@ -507,6 +515,143 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
             }
         }
     }
+}
+
+/// Street lamps along both sides of every street, each stretch on its own
+/// circuit: a [`utilities::CONTROLLER`] on a distribution box beside the
+/// power line under the middle of the street, and wiring along the side of
+/// the street from the box to the stretch's lamps. Last, after the mains and
+/// every building's spur, from the map as built and without the seed — see
+/// the module docs.
+///
+/// A street is three cells across with the main under the middle one, so
+/// its two **sides** — the rows (or columns) either side of the main — are
+/// where lamps go, leaving two of three cells to walk wherever one stands.
+/// A side is cut into **runs** wherever it cannot carry the street's own
+/// wiring: a main or a spur crossing it, a building, a prop, or a cell
+/// beside wiring that is already somebody's (a run's wiring touching another
+/// circuit would join them). Each run long enough gets lamps every
+/// [`STREET_LAMP_SPACING`] cells and one controller beside a lamp; neither
+/// stands next to a door.
+fn light_streets(map: &mut Map, buildings: &[Rect]) {
+    let inside_any = |cell: Point| buildings.iter().any(|walls| walls.contains(cell));
+    let doors: Vec<Point> = map
+        .objects(ObjectLayer::Props)
+        .iter()
+        .filter(|prop| [DOOR, HOUSE_DOOR].contains(&prop.kind.as_str()))
+        .map(Object::cell)
+        .collect();
+
+    // Every side of every street as a line of cells, rows first.
+    let mut sides: Vec<Vec<Point>> = Vec::new();
+    for k in 0..=BLOCKS_Y {
+        let y0 = k * (BLOCK_H + STREET);
+        for y in [y0, y0 + STREET - 1] {
+            sides.push((0..WIDTH).map(|x| Point::new(x, y)).collect());
+        }
+    }
+    for k in 0..=BLOCKS_X {
+        let x0 = k * (BLOCK_W + STREET);
+        for x in [x0, x0 + STREET - 1] {
+            sides.push((0..HEIGHT).map(|y| Point::new(x, y)).collect());
+        }
+    }
+
+    for side in sides {
+        // Judged against the map as it is now, so a side sees the wiring the
+        // sides before it laid.
+        let carries = |map: &Map, cell: Point| {
+            map.contains(cell)
+                && !inside_any(cell)
+                && map.is_passable(cell)
+                && map.grid(GridLayer::Power, cell) == power::NONE
+                && cell.cardinal_neighbours().into_iter().all(|next| {
+                    !matches!(map.grid(GridLayer::Power, next), power::WIRING | power::BOX)
+                })
+        };
+        let runs: Vec<Vec<Point>> = side
+            .split(|&cell| !carries(map, cell))
+            .filter(|run| run.len() >= SHORTEST_LIT_RUN)
+            .map(<[Point]>::to_vec)
+            .collect();
+        for run in runs {
+            light_run(map, &run, &doors);
+        }
+    }
+}
+
+/// Lamps, a controller and their wiring along one run of a street's side.
+/// Lays nothing if no cell of the run can take a controller.
+fn light_run(map: &mut Map, run: &[Point], doors: &[Point]) {
+    let clear_of_doors =
+        |cell: Point| doors.iter().all(|door| (door.x - cell.x).abs() > 1 || (door.y - cell.y).abs() > 1);
+    let len = run.len() as i32;
+    let count = ((len + STREET_LAMP_SPACING / 2) / STREET_LAMP_SPACING).max(1);
+    // Something solid may stand in a cell clear of every door, and where it
+    // cuts nobody off.
+    let can_stand = |map: &Map, cell: Point| map.is_passable(cell) && clear_of_doors(cell) && blocks_nothing(map, cell);
+    // Spread evenly, each nudged to the nearest cell that can take a post.
+    // Put up as they are found, so the next is judged with it standing.
+    let mut lamps: Vec<usize> = Vec::new();
+    for i in 0..count {
+        let want = ((2 * i + 1) * len / (2 * count)) as usize;
+        let found = (0..run.len())
+            .flat_map(|d| [want.checked_sub(d), Some(want + d)])
+            .flatten()
+            .find(|&at| at < run.len() && can_stand(map, run[at]));
+        if let Some(at) = found {
+            map.add_object(ObjectLayer::Props, object(STREET_LAMP, run[at]));
+            lamps.push(at);
+        }
+    }
+    // The controller: beside a lamp, on top of the main.
+    let on_the_main = |map: &Map, cell: Point| {
+        cell.cardinal_neighbours().into_iter().any(|next| map.grid(GridLayer::Power, next) == power::LINE)
+    };
+    let controller = lamps
+        .iter()
+        .flat_map(|&lamp| [lamp.checked_sub(1), Some(lamp + 1)])
+        .flatten()
+        .find(|&at| at < run.len() && on_the_main(map, run[at]) && can_stand(map, run[at]));
+    let Some(controller) = controller else {
+        // A lamp nothing switches would be a dead one: take them down.
+        for &lamp in &lamps {
+            map.remove_object(ObjectLayer::Props, &object(STREET_LAMP, run[lamp]));
+        }
+        return;
+    };
+
+    let from = lamps.iter().copied().chain([controller]).min().unwrap();
+    let to = lamps.iter().copied().chain([controller]).max().unwrap();
+    for &cell in &run[from..=to] {
+        map.set_grid(GridLayer::Power, cell, power::WIRING);
+    }
+    map.set_grid(GridLayer::Power, run[controller], power::BOX);
+    map.add_object(ObjectLayer::Props, object(utilities::CONTROLLER, run[controller]));
+}
+
+/// Whether something solid in `cell` would leave every way round it open:
+/// the walkable cells beside it still join up through the corners between
+/// them, so nobody who could walk through it is cut off by it. Local, and so
+/// stricter than it has to be — it never looks for a long way round — which
+/// is the safe side for a lamp post.
+fn blocks_nothing(map: &Map, cell: Point) -> bool {
+    // The eight cells round it, in order round the ring, cardinals at the
+    // even places.
+    const RING: [(i32, i32); 8] = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
+    let open = RING.map(|(dx, dy)| map.is_passable(cell.offset(dx, dy)));
+    if open.iter().all(|&o| o) {
+        return true;
+    }
+    // Two cardinals in a row round the ring are joined when the corner
+    // between them is open too. Count the open cardinals not joined to the
+    // one before: each is a separate stretch, and more than one is two
+    // sides only `cell` was joining.
+    let starts = (0..8)
+        .step_by(2)
+        .filter(|&i| open[i] && !(open[(i + 7) % 8] && open[(i + 6) % 8]))
+        .count();
+    starts <= 1
 }
 
 /// Where a building takes a network in: the inside cell in the middle of
@@ -918,7 +1063,7 @@ mod tests {
         for name in TILES {
             assert!(TerrainId::from_name(name).is_some(), "{name}");
         }
-        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR]) {
+        for name in BEDS.iter().chain(&[FRIDGE, TOILET, COMPUTER, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER]) {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
         }
     }
@@ -954,14 +1099,82 @@ mod tests {
                 .chain(district.shops.iter().copied())
                 .chain([district.bank])
                 .collect();
+            // Outdoors, wiring is the street lights' and nobody else's: every
+            // outdoor circuit has a controlled box in it and nothing indoors.
+            let controlled = utilities::controlled_boxes(map);
+            let indoors = |cell: Point| buildings.iter().any(|walls| walls.interior().contains(cell));
             for cell in map.size().points() {
-                let indoors = buildings.iter().any(|walls| walls.interior().contains(cell));
                 match map.grid(GridLayer::Power, cell) {
-                    power::LINE => assert!(!indoors, "seed {seed}: a line indoors at {cell:?}"),
-                    power::WIRING | power::BOX => assert!(indoors, "seed {seed}: wiring outdoors at {cell:?}"),
+                    power::LINE => assert!(!indoors(cell), "seed {seed}: a line indoors at {cell:?}"),
+                    power::WIRING | power::BOX if !indoors(cell) => {
+                        let circuit = utilities::circuit(map, cell);
+                        assert!(
+                            circuit.iter().any(|at| controlled.contains(at)),
+                            "seed {seed}: wiring outdoors at {cell:?} that no street light controller switches"
+                        );
+                        assert!(
+                            circuit.iter().all(|&at| !indoors(at)),
+                            "seed {seed}: the street lights at {cell:?} are wired into a building"
+                        );
+                    }
                     _ => {}
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_street_lamps_have_power_at_night_only_and_everything_else_all_day() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let day = utilities::Supply::with_boxes_off(map, &utilities::controlled_boxes(map));
+            let night = utilities::Supply::from_map(map);
+            let mut lamps = 0;
+            for (object, _, served) in day.consumers(map) {
+                if object.kind.as_str() == STREET_LAMP {
+                    lamps += 1;
+                    assert!(!served, "seed {seed}: the street lamp at {:?} is on by day", object.cell());
+                    assert!(night.serves(STREET_LAMP, object.cell()));
+                } else {
+                    assert!(
+                        served,
+                        "seed {seed}: the {} at {:?} has power only at night",
+                        object.kind.as_str(),
+                        object.cell()
+                    );
+                }
+            }
+            assert!(lamps >= 30, "seed {seed}: {lamps} street lamps");
+            assert!(utilities::controlled_boxes(map).len() >= 10, "seed {seed}");
+        }
+    }
+
+    /// Most of the street is in a lamp's reach: a cell of the main under the
+    /// middle of a street is nearer a lamp than its radius.
+    #[test]
+    fn the_streets_are_lit() {
+        let radius = crate::lighting::scene::emission(STREET_LAMP).expect("a street lamp gives off light").radius;
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let lamps: Vec<Point> = map
+                .objects(ObjectLayer::Props)
+                .iter()
+                .filter(|o| o.kind.as_str() == STREET_LAMP)
+                .map(Object::cell)
+                .collect();
+            let mains: Vec<Point> =
+                map.size().points().filter(|&cell| map.grid(GridLayer::Power, cell) == power::LINE).collect();
+            let lit = mains
+                .iter()
+                .filter(|cell| {
+                    lamps
+                        .iter()
+                        .any(|lamp| (((lamp.x - cell.x).pow(2) + (lamp.y - cell.y).pow(2)) as f32).sqrt() < radius)
+                })
+                .count();
+            assert!(lit * 10 >= mains.len() * 9, "seed {seed}: {lit} of {} cells of main lit", mains.len());
         }
     }
 

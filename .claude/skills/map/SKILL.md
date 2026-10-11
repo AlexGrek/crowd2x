@@ -54,6 +54,9 @@ The first piece of simulation state, so it follows the simulation rule: **plain 
   **A box can be switched off during play** (`Supply::with_boxes_off`): it still carries
   the line through, but feeds no wiring. Which boxes are off is simulation state, not the
   map's (a map is saved with every box on) — see "Switching a box" in the `game-screen` skill.
+  A `"street light controller"` prop standing on a box is that box's daylight switch
+  (`utilities::controlled_boxes`); the sim opens it by day, so the `"street lamp"`s on its
+  wiring are lit at night only (`electrician`).
   `Supply::everywhere` serves everything, for a test whose wiring is beside the point
   (`sim::testing::World::new` uses it; `World::as_built` asks the wiring). `CONSUMERS` and
   `SOURCES` are the catalogue, by name. `serve_everything` wires a map the shortest way,
@@ -95,7 +98,9 @@ buildings, without drawing on the seed, so adding them changed no district. **Po
 are laid the same way, after that**: a transformer in the bottom-right corner, a sewer in the
 top-left, a power line and a sewer main down the middle of every street (broken where the bank
 stands across one), and for each building a box and a pipe entry just inside the wall nearest
-a main, a straight run out to it, and wiring or pipes inside to everything that needs them. A
+a main, a straight run out to it, and wiring or pipes inside to everything that needs them.
+Last, street lamps along both sides of every street, each run on its own controlled box
+(`light_streets`). A
 line never runs indoors and wiring never outdoors; both are tested over 64 seeds, as is every
 consumer being served. Reached from the browser's `district` button (a fresh
 seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture

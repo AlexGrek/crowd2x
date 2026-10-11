@@ -37,6 +37,10 @@ A tick is **two passes**, and which one may write the entity table is the design
 
 The **spawn pass** drains `Input`'s spawns and despawns. It runs first, so an entity
 spawned this tick thinks this tick, and it is the only pass that may resize the table.
+It begins with `GameState::follow_daylight`: the street light controllers look at the sun
+and, on the tick it turns dark or light, the power supply is re-flooded (`electrician`).
+Anything else that re-derives world state on a schedule belongs here too, never in
+`process_pass`.
 
 The **processing pass** advances every entity and adds or removes none. It is handed a
 `FrozenEntities` — the table with its membership frozen, offering no `insert` and no
@@ -151,7 +155,10 @@ world watched faster.
 
 `Think` also carries the time of day, `Think::clock` — one reading of the world's clock per
 pass, shared by the whole crowd — and `Clock::is_night` (22:00 to 06:00, across midnight) is
-the one question a routine asks of it so far.
+the one question a routine asks of it so far. **The sun** is a function of the clock too:
+`Clock::sun()` / `sim::sun::Sun::at(hours)` gives elevation, intensity and colour
+(`Clock::hours()` is the fractional hour). The canvas is lit by it (`lighting`) and the street
+light controllers switch by `Sun::is_dark`; nothing about it is stored.
 
 
 Freezing membership is what makes the rest work. The intent buffer is indexed by slot and

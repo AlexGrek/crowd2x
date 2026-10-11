@@ -8,7 +8,9 @@
 //! unit does: the screen still has exactly one writer of the world. Off, the
 //! box feeds nothing, so its lamps go dark, its fridges stop being somewhere
 //! to eat and start warming, and a go on its computers ends
-//! (`map::utilities`, `sim::GameState::switch_box`).
+//! (`map::utilities`, `sim::GameState::switch_box`). A box with a street
+//! light controller on it says so, and whether the controller has it open
+//! for the day; switched off here, it stays off at night too.
 //!
 //! Built like the unit panel and for the same reasons: not focusable, since
 //! the arrows pan the camera on this screen, and every button still answers
@@ -190,8 +192,14 @@ fn update_readouts(
     for (readout, mut text) in &mut texts {
         let wanted = match readout {
             BoxReadout::State => match (on, fed) {
-                (true, true) => "on".to_string(),
                 (true, false) => "on, but no power line reaches it".to_string(),
+                (true, true) if world.is_controlled(at) => if world.street_lights_on() {
+                    "on: its street light controller sees night"
+                } else {
+                    "on, but its street light controller holds it open until dark"
+                }
+                .to_string(),
+                (true, true) => "on".to_string(),
                 (false, _) => "off".to_string(),
             },
             BoxReadout::Toggle => if on { "switch off" } else { "switch on" }.to_string(),

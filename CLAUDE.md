@@ -46,13 +46,13 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | --- | --- |
 | Bevy APIs, assets, animations, performance, architecture decisions | `dev` |
 | `src/render.rs`, window setup, zoom, sprites, art files, `src/characters/`, pixel grid | `renderer` (+ `debugger` to look) |
-| `src/lighting/`, shaders, lamps, day/night, something lit wrong | `lighting` |
+| `src/lighting/`, shaders, lamps, day/night, the sun (`src/sim/sun.rs`), something lit wrong | `lighting` |
 | Screens, menus, buttons, focus/navigation, text entry, the map browser | `interface` |
 | The map editor, palettes, map windows, placing terrain/props/lamps | `editor` (+ `map-layers`) |
 | The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD | `game-screen` |
 | The map data model, passability, catalogues, spawners, the file format | `map` |
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
-| Power: transformers, lines, boxes, wiring, powered props | `electrician` |
+| Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers | `electrician` |
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator | `map-generator` |
@@ -112,6 +112,7 @@ src/awake.rs            macOS: hold the display awake during a run
 tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wiring
 tools/human_art.py      draws the paperdoll's hair and outfits     [pixel-artist]
 tools/door_art.py       draws the door leaves                               [doors]
+tools/street_art.py     draws the street lamp and its controller            [electrician]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

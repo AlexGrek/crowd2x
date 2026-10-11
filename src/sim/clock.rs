@@ -127,6 +127,17 @@ impl Clock {
         hour >= BEDTIME || hour < GETTING_UP
     }
 
+    /// Hours since midnight, fractional: what the sun is a function of
+    /// ([`super::sun::Sun::at`]).
+    pub fn hours(&self) -> f32 {
+        (self.seconds_today() / HOUR as f64) as f32
+    }
+
+    /// The sun at this moment.
+    pub fn sun(&self) -> super::sun::Sun {
+        super::sun::Sun::at(self.hours())
+    }
+
     /// The minute of the hour, 0 to 59. Two of these a second.
     pub fn minute(&self) -> u32 {
         (self.seconds_today() / MINUTE as f64) as u32 % 60

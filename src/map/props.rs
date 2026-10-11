@@ -63,6 +63,11 @@ pub const PROPS: &[Prop] = &[
     // iron and a manhole cover nobody walks across.
     Prop::blocking("transformer"),
     Prop::blocking("sewer"),
+    // Street lighting: a lamp post, and the cabinet with a photocell that
+    // switches the distribution box it stands on by daylight
+    // (`super::utilities::CONTROLLER`). Both solid, both on the street.
+    Prop::blocking("street lamp"),
+    Prop::blocking("street light controller"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

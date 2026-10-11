@@ -67,6 +67,12 @@ pub const PALETTE: &[PaletteItem] = &[
     // prop in the street *and* a node of its network in the same cell.
     PaletteItem::upscaled("transformer", "transformer.png"),
     PaletteItem::upscaled("sewer", "sewer.png"),
+    // Street lighting, drawn by `tools/street_art.py`: a lamp post that needs
+    // power like any lamp, and the cabinet whose photocell switches the
+    // distribution box it stands on — on at dusk, off at dawn
+    // (`map::utilities::CONTROLLER`).
+    PaletteItem::upscaled("street lamp", "street_lamp.png"),
+    PaletteItem::upscaled("street light controller", "street_light_controller.png"),
     // A leaf sliding into the wall beside it, shut in the first frame and
     // gone in the last; the game shows as much of it as the simulation says
     // is still shut (`game::props`), and turns and mirrors it to fit its wall

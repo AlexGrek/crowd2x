@@ -1,6 +1,6 @@
 ---
 name: map-generator
-description: Knowledge base for crowd2x's procedural district generator - the seeded 79x54 district of blocks, lots and streets, the 32 houses with beds, fridges, toilets and resident spawners, the bank, the shops, roofs, lamps, windows, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
+description: Knowledge base for crowd2x's procedural district generator - the seeded 79x54 district of blocks, lots and streets, the 32 houses with beds, fridges, toilets and resident spawners, the bank, the shops, roofs, lamps, windows, street lamps and their controllers, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
 ---
 
 # Map generator: `map::district`
@@ -63,6 +63,16 @@ not**, so adding or changing anything in 6-8 never changes a seed's streets, hou
    crossing another building (`LONGEST_SPUR`), lays that spur as `LINE`, puts a `BOX` at the
    entry and `lay_over_empty` wiring to every consumer inside. The same for toilets with
    `PIPE` and `lay`.
+9. **`light_streets`** (street lamps, no RNG, so seeds are unchanged): each street's two
+   **sides** (the rows/columns either side of the main) are cut into **runs** of cells that can
+   carry the street's own wiring (outside buildings, passable, no grid value, not beside
+   existing wiring/box); mains and house spurs crossing a side cut it. Each run of at least
+   `SHORTEST_LIT_RUN` (6) gets `STREET_LAMP`s every `STREET_LAMP_SPACING` (8) cells and one
+   `utilities::CONTROLLER` beside a lamp and on the main, with a `BOX` under it and `WIRING`
+   along the run (`light_run`). Posts and cabinets keep clear of doors (Chebyshev 1) and only
+   go where `blocks_nothing` says the cells round them still join up through their corners;
+   a run with no controller cell takes its lamps down again. Seed 7: ~110 lamps, ~47
+   controllers.
 
 ## Invariants (each is a test over `SEEDS` = 0..64)
 
@@ -76,7 +86,9 @@ not**, so adding or changing anything in 6-8 never changes a seed's streets, hou
 | Lamps: one per house/shop, a grid (>= 12) in the bank | lighting | `every_house_and_shop_has_a_lamp_and_the_bank_a_grid_of_them` |
 | Windows only in outer walls, spaced | lighting | `every_building_has_windows_in_its_outer_walls_and_nowhere_else` |
 | Every consumer has power/water | a dead fridge starves a house | `everything_that_needs_power_or_water_in_a_district_has_it` |
-| No line indoors, no wiring outdoors | voltages meet only in a box | `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` |
+| No line indoors; outdoor wiring only on circuits with a controlled box and nothing indoors | voltages meet only in a box; street lights never share a house's circuit | `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` |
+| Street lamps powered at night only (controlled boxes off = day), everything else all day; >= 30 lamps, >= 10 controllers | street lights | `the_street_lamps_have_power_at_night_only_and_everything_else_all_day` |
+| >= 90% of main cells within a street lamp's radius | the streets are lit | `the_streets_are_lit` |
 | Counts: 32 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank | the brief | `a_district_has_what_it_was_asked_for` |
 | Every name used exists in the catalogues | no panic in `tile` | `every_tile_and_prop_the_generator_uses_exists` (`TILES`, `BEDS`, `FRIDGE`, ...) |
 | Same seed same bytes; different seed different | reproducible | `the_same_seed_builds_the_same_district`, `a_district_survives_being_saved` |
@@ -100,7 +112,8 @@ on the bank's nearest fridge, a known limit), `qa/district_browser.json` (the bu
 
 ## Traps
 
-- Anything placed on a street cell blocks it (the transformer and sewer take two corners);
+- Anything placed on a street cell blocks it (the transformer and sewer take two corners;
+  street lamps and controllers take side cells, leaving two of three to walk);
   `nothing_in_a_district_is_sealed_off` starts its BFS at `(0, 0)`, which must stay passable.
 - Painting terrain checks props already in the map; that is why props are collected and added
   after the terrain (step 5) - `glaze` runs after them and only changes wall cells.

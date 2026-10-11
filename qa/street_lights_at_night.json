@@ -1,0 +1,76 @@
+{
+  "name": "street lamps come on at dusk and go off at dawn, switched by their street light controller",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "street",
+        "map": {
+          "version": 1,
+          "size": { "width": 20, "height": 7 },
+          "terrain": {
+            "palette": ["floor"],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "....................",
+            "....................",
+            "..---B---------.....",
+            "====================",
+            "..........B.........",
+            "..........-.........",
+            "...................."
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 168 }, "kind": "transformer" },
+              { "at": { "x": 264, "y": 120 }, "kind": "street light controller" },
+              { "at": { "x": 120, "y": 120 }, "kind": "street lamp" },
+              { "at": { "x": 696, "y": 120 }, "kind": "street lamp" }
+            ],
+            "lamps": [
+              { "at": { "x": 504, "y": 264 }, "kind": "ceiling lamp" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "street",
+  "steps": [
+    {
+      "note": "a power line down the middle; two street lamps on a box with a controller on it, a lamp on a box without one"
+    },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "look_at": { "x": 10, "y": 3 } },
+    { "wait": 0.3 },
+    { "expect_lighting": { "lights_on": 1 } },
+    { "shot": "eight in the morning: the street lamps are off, the other lamp on" },
+    { "note": "1920 ticks a world hour: fifteen hours on is eleven at night" },
+    { "tick": 28800 },
+    { "expect_world_time": { "hours": 15 } },
+    { "expect_lighting": { "lights_on": 3 } },
+    { "shot": "eleven at night: two sodium pools along the street" },
+    { "note": "nine hours more is eight the next morning" },
+    { "tick": 17280 },
+    { "expect_world_time": { "hours": 24 } },
+    { "expect_lighting": { "lights_on": 1 } }
+  ]
+}
