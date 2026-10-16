@@ -152,6 +152,122 @@ impl Size {
     }
 }
 
+/// A rectangle of cells anywhere in the world: a [`Size`] that does not start
+/// at the origin.
+///
+/// The authored map — the *site* — is a [`Size`] from `(0, 0)`, and most
+/// layers are laid out over exactly that. The world round it is not: the
+/// wasteland ([`super::wasteland`]) runs off in every direction, negative
+/// coordinates included, so anything that has to cover some of it — a route
+/// search's window, the area reachability is worked out over, a camera's view
+/// — is one of these. Like [`Size::index_of`], [`Bounds::index_of`] is the
+/// one place a cell becomes an offset into an array laid over it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Bounds {
+    /// The bottom-left cell, inside.
+    pub origin: Point,
+    pub size: Size,
+}
+
+impl From<Size> for Bounds {
+    fn from(size: Size) -> Bounds {
+        Bounds { origin: Point::ORIGIN, size }
+    }
+}
+
+impl Bounds {
+    pub const fn new(origin: Point, size: Size) -> Bounds {
+        Bounds { origin, size }
+    }
+
+    /// The smallest bounds holding every one of `cells`; `None` for none.
+    pub fn around(cells: impl IntoIterator<Item = Point>) -> Option<Bounds> {
+        let mut cells = cells.into_iter();
+        let first = cells.next()?;
+        let (min, max) = cells.fold((first, first), |(min, max), cell| {
+            (
+                Point::new(min.x.min(cell.x), min.y.min(cell.y)),
+                Point::new(max.x.max(cell.x), max.y.max(cell.y)),
+            )
+        });
+        Some(Bounds::from_corners(min, max))
+    }
+
+    /// From the bottom-left and top-right cells, both inside.
+    pub fn from_corners(min: Point, max: Point) -> Bounds {
+        Bounds {
+            origin: min,
+            size: Size::new(max.x - min.x + 1, max.y - min.y + 1),
+        }
+    }
+
+    /// The top-right cell, inside.
+    pub const fn max(self) -> Point {
+        Point::new(self.origin.x + self.size.width - 1, self.origin.y + self.size.height - 1)
+    }
+
+    pub const fn area(self) -> usize {
+        self.size.area()
+    }
+
+    pub const fn contains(self, point: Point) -> bool {
+        self.size.contains(Point::new(point.x - self.origin.x, point.y - self.origin.y))
+    }
+
+    /// Row-major index of a cell, or `None` outside.
+    pub const fn index_of(self, point: Point) -> Option<usize> {
+        self.size.index_of(Point::new(point.x - self.origin.x, point.y - self.origin.y))
+    }
+
+    /// Inverse of [`Bounds::index_of`].
+    pub const fn point_at(self, index: usize) -> Point {
+        let local = self.size.point_at(index);
+        Point::new(local.x + self.origin.x, local.y + self.origin.y)
+    }
+
+    /// Every cell, row-major.
+    pub fn points(self) -> impl Iterator<Item = Point> {
+        let origin = self.origin;
+        self.size.points().map(move |p| p + origin)
+    }
+
+    /// Grown by `margin` cells on every side.
+    pub fn grown(self, margin: i32) -> Bounds {
+        Bounds::from_corners(self.origin.offset(-margin, -margin), self.max().offset(margin, margin))
+    }
+
+    /// The smallest bounds holding both.
+    pub fn union(self, other: Bounds) -> Bounds {
+        let (a, b) = (self.max(), other.max());
+        Bounds::from_corners(
+            Point::new(self.origin.x.min(other.origin.x), self.origin.y.min(other.origin.y)),
+            Point::new(a.x.max(b.x), a.y.max(b.y)),
+        )
+    }
+
+    /// Whether the two share a cell.
+    pub fn overlaps(self, other: Bounds) -> bool {
+        let (a, b) = (self.max(), other.max());
+        self.origin.x <= b.x && other.origin.x <= a.x && self.origin.y <= b.y && other.origin.y <= a.y
+    }
+
+    /// Whether `cell` is on the outermost ring of cells inside.
+    pub fn on_edge(self, cell: Point) -> bool {
+        let max = self.max();
+        self.contains(cell)
+            && (cell.x == self.origin.x || cell.y == self.origin.y || cell.x == max.x || cell.y == max.y)
+    }
+
+    /// How many steps a king would take from `cell` to the nearest cell
+    /// inside: 0 inside, 1 on the ring just outside.
+    pub fn chebyshev_distance(self, cell: Point) -> i32 {
+        let max = self.max();
+        let dx = (self.origin.x - cell.x).max(cell.x - max.x).max(0);
+        let dy = (self.origin.y - cell.y).max(cell.y - max.y).max(0);
+        dx.max(dy)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +317,32 @@ mod tests {
                 Point::new(2, 2),
             ]
         );
+    }
+
+    #[test]
+    fn bounds_index_their_own_cells_wherever_they_start() {
+        let bounds = Bounds::new(Point::new(-3, 5), Size::new(4, 3));
+        assert_eq!(bounds.max(), Point::new(0, 7));
+        for index in 0..bounds.area() {
+            assert_eq!(bounds.index_of(bounds.point_at(index)), Some(index));
+        }
+        assert_eq!(bounds.points().count(), 12);
+        assert!(bounds.contains(Point::new(-3, 5)) && bounds.contains(Point::new(0, 7)));
+        assert_eq!(bounds.index_of(Point::new(1, 5)), None);
+        assert_eq!(bounds.index_of(Point::new(-4, 5)), None);
+    }
+
+    #[test]
+    fn bounds_grow_join_and_measure_distance() {
+        let site = Bounds::from(Size::new(10, 5));
+        assert_eq!(site.grown(2), Bounds::from_corners(Point::new(-2, -2), Point::new(11, 6)));
+        let far = Bounds::around([Point::new(20, -4), Point::new(22, -1)]).unwrap();
+        assert!(!site.overlaps(far));
+        assert_eq!(site.union(far), Bounds::from_corners(Point::new(0, -4), Point::new(22, 4)));
+        assert_eq!(site.chebyshev_distance(Point::new(3, 3)), 0);
+        assert_eq!(site.chebyshev_distance(Point::new(-1, 2)), 1);
+        assert_eq!(site.chebyshev_distance(Point::new(12, 9)), 5);
+        assert!(site.on_edge(Point::new(0, 3)) && !site.on_edge(Point::new(1, 3)));
     }
 
     #[test]

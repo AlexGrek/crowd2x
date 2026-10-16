@@ -130,7 +130,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"switch_box": {"x": 4, "y": 1, "on": false}}` | Switch a box on the game's command queue; applied by the next tick, like `spawn`. |
 | `{"switch_light": {"x": 7, "y": 4, "on": false}}` | Flip the light switch in a cell (and so its whole room) on the command queue; applied by the next tick. The player's way is a click on it: `look_at` its cell, then `mouse {"x": 160, "y": 90}` + `click` (`qa/light_switch.json`). |
 | `{"xray": "power"}` | Show the grid layers' x-ray: `off`, `ceiling`, `power`, `water` or `all` — where `o` would step to. Either map screen. |
-| `{"look_at": {"x": 128, "y": 128}}` | Point the game camera at the middle of a cell, through the map clamp. Takes effect next frame. |
+| `{"look_at": {"x": 128, "y": 128}}` | Point the camera at the middle of a cell, through the map clamp — on either map screen. A map in the wasteland (every map from a file) has no clamp but the world's reach, so the cell lands in the middle of the canvas, (160, 90). Takes effect next frame. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |
 
 `press` **refuses an ambiguous label** rather than guessing — every row of the file list
@@ -196,7 +196,7 @@ That is the canvas only at the default zoom: the step does not follow `PixelZoom
 a `q` or `e` the same `mouse` lands on a different part of the world. Nor is it world
 units or cells — world Y points up, and the camera decides where cell (0, 0) is. To hit a
 cell in the game, pin the camera first (`look_at` the cell, which puts it in the middle of
-the canvas, (160, 90), unless the map clamp moved the camera); in the editor use
+the canvas, (160, 90) — always, on a map in the wasteland); in the editor use
 `cursor_cell` instead, which is what it is for.
 
 `{"save_blocked": {"map": "studio", "blocked": true}}` temporarily replaces a fixture's
@@ -218,7 +218,8 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites are drawn **right now** — culled to the view, so pin the camera. |
 | `{"expect_drawn": {}}` | Every unit on the canvas has a sprite, and no sprite draws somebody off it or gone. |
-| `{"expect_world_sprites": {"min": 40, "max": 400}}` | How many sprites of any kind are on the world layer, as a range. |
+| `{"expect_world_sprites": {"min": 40, "max": 400}}` | How many sprites of any kind are on the world layer, as a range. The wasteland fills whatever the map does not: about 400 tiles at zoom 1. |
+| `{"expect_chunks": {"min": 4, "max": 30}}` | How many wasteland chunks the open map has loaded, and that the one under the camera is among them: `max` is what says chunks the camera left were dropped (`qa/wasteland.json`). |
 | `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
@@ -327,9 +328,10 @@ and for the click that puts them back, since `null` is a claim of its own.
 
 **A click on a panel is not a click on the map.** Every panel on the game screen carries an
 `Interaction` so `bevy_ui` absorbs the press, which means a `mouse`/`click` pair aimed at a
-cell under the HUD selects nothing. The canvas is 320x180: the top-left corner runs to
-about (130, 95), the top-right from about (150, 4) to (316, 75), and the unit panel across
-the bottom from about y 130. Aim at the band in between, or move the camera first.
+cell under the HUD selects nothing. The canvas is 320x180: the top-left info panel runs to
+about (117, 112), the button row along the top from x 72 to 316 down to y 21, the log
+under it from x 166 down to y 60-90 (by how many lines it holds), and the unit panel
+across the bottom from about y 130. Aim at the band in between, or move the camera first.
 
 `expect_tile` reads the file, not the scene, so "I painted a wall" is only true once it has
 been saved. The editor saves on leaving and on `f5`.

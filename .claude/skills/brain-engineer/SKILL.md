@@ -94,8 +94,9 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 
 2. **Every `process` call ends in one of these:** it queued a task; it returned `Blocked`
    (expensive miss, so the goal is held off 32 ticks, doubling); it returned `Achieved`; or it
-   returned `Working` after a *cheap* miss (a few random candidates landed on walls). Anything
-   else is polled every tick.
+   returned `Working` after a *cheap* miss (a few random candidates landed on walls, or on
+   cells `Map::navigation().may_reach` says there is no getting to — an O(1) component
+   lookup, so ask it before routing to a random pick). Anything else is polled every tick.
 
 3. **Tell the two failures of a walk apart with `ctx.blocked_by`.**
    - `Some(uid)`: a body was in the way, and bodies move. Queue `Task::wait(WAIT_FOR_A_GAP)`,
@@ -263,7 +264,7 @@ and the top executor's `debug_fields`.
 
 | Symptom | Likely cause |
 | --- | --- |
-| Stands still, goal `idle`, `held off wander …t` | wander was `Blocked`; its target cells are unreachable |
+| Stands still, goal `idle`, `held off wander …t` | wander was `Blocked`: a target the components call reachable and the route could not find — a pocket far out in the wasteland (`wasteland`), or a detour past the search window. Near the site, unreachable cells are never picked |
 | Flips between two goals every few ticks | routine lacks hysteresis, or a goal returns `Blocked` and is retried the moment its cooldown ends |
 | Walks halfway, turns round | the routine released because the goal's own progress changed the stat; add hysteresis |
 | `result` flickers `in progress`, no task | `process` returns `Working` with nothing queued, every tick |

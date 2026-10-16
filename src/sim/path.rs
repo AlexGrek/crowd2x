@@ -4,8 +4,34 @@
 //! uses generation-stamped grid slots: beginning a small search never clears
 //! the capacity retained by an earlier large one. Ordinary searches reuse one
 //! finder per thread; only unfinished searches keep their finder with a walker.
+//!
+//! A search runs inside a **window**, the cells its scratch is laid over. On a
+//! bounded map that is the map. On an endless one — the wasteland round the
+//! site goes on for ever — it is the start and the goals with
+//! [`SEARCH_MARGIN`] round them, joined with the map's navigation area when
+//! they are near it, so a route about the site can swing out round anything
+//! in the way and a route out in the wasteland costs what its own stretch of
+//! ground costs. Unreachable is then "not inside the window", which is what
+//! keeps a search for a cell on a lake island from flooding the world.
 
-use crate::map::{MIN_WALK_COST, Map, Point, Size};
+use crate::map::{Bounds, MIN_WALK_COST, Map, Point};
+
+/// How far past the start and the goals a search on an endless map may go.
+/// A chunk: any detour that wants more than that is round something the size
+/// of a lake, and near the site the navigation area is bigger anyway.
+pub const SEARCH_MARGIN: i32 = crate::map::CHUNK;
+
+/// The cells a search from `start` to `goals` is allowed to cover.
+pub fn window(map: &Map, start: Point, goals: &[Point]) -> Bounds {
+    if !map.is_endless() {
+        return map.site();
+    }
+    let span = Bounds::around(goals.iter().copied().chain([start]))
+        .expect("the start at least")
+        .grown(SEARCH_MARGIN);
+    let area = map.navigation_area();
+    if span.overlaps(area) { span.union(area) } else { span }
+}
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -159,7 +185,7 @@ pub struct PathFinder {
     open: BinaryHeap<Candidate>,
     seen: Vec<Visit>,
     generation: u32,
-    size: Option<Size>,
+    window: Option<Bounds>,
     start: Point,
     goals: Option<Destinations>,
     minimum: u32,
@@ -183,10 +209,10 @@ impl PathFinder {
             .min()
             .unwrap_or(0)
     }
-    pub fn begin(&mut self, size: Size, start: Point, goals: Destinations, minimum: u32) {
+    pub fn begin(&mut self, window: Bounds, start: Point, goals: Destinations, minimum: u32) {
         self.open.clear();
-        self.size = Some(size);
-        self.seen.resize(size.area(), Visit::default());
+        self.window = Some(window);
+        self.seen.resize(window.area(), Visit::default());
         self.generation = self.generation.wrapping_add(1);
         if self.generation == 0 {
             self.seen.fill(Visit::default());
@@ -199,11 +225,11 @@ impl PathFinder {
         {
             self.expanded = 0;
         }
-        // Starts outside the grid are not valid simulation positions.
+        // Starts outside the window are not valid simulation positions.
         if goals.first().is_none() {
             return;
         }
-        let Some(index) = size.index_of(start) else {
+        let Some(index) = window.index_of(start) else {
             return;
         };
         self.seen[index] = Visit {
@@ -226,7 +252,7 @@ impl PathFinder {
         cost: impl Fn(Point) -> Option<u32>,
         output: &mut Vec<Point>,
     ) -> SearchStatus {
-        let size = self.size.expect("begin before advance");
+        let size = self.window.expect("begin before advance");
         let goals = self.goals.unwrap();
         let mut expanded = 0;
         while let Some(candidate) = self.open.peek() {
@@ -285,7 +311,7 @@ impl PathFinder {
     #[cfg(test)]
     fn find(
         &mut self,
-        size: Size,
+        window: impl Into<Bounds>,
         start: Point,
         goal: Point,
         limit: usize,
@@ -294,7 +320,7 @@ impl PathFinder {
         if start != goal && cost(goal).is_none() {
             return None;
         }
-        self.begin(size, start, Destinations::one(goal), MIN_WALK_COST as u32);
+        self.begin(window.into(), start, Destinations::one(goal), MIN_WALK_COST as u32);
         let mut output = Vec::new();
         matches!(
             self.advance(limit, cost, &mut output),
@@ -320,7 +346,9 @@ pub fn search(
     output: &mut Vec<Point>,
 ) -> SearchStatus {
     if pending.as_ref().is_some_and(|p| {
-        p.revision != map.navigation_revision() || p.size != Some(map.size()) || p.start != start
+        p.revision != map.navigation_revision()
+            || p.start != start
+            || p.window != Some(window(map, start, goals.as_slice()))
     }) {
         recycle(pending);
     }
@@ -345,7 +373,7 @@ pub fn search(
         .unwrap();
     SCRATCH.with(|slot| {
         let mut finder = slot.borrow_mut();
-        finder.begin(map.size(), start, goals, minimum);
+        finder.begin(window(map, start, goals.as_slice()), start, goals, minimum);
         finder.revision = map.navigation_revision();
         let status = finder.advance(limit, cost, output);
         if status == SearchStatus::BudgetExhausted {
@@ -371,7 +399,7 @@ pub fn search_local(
     SCRATCH.with(|slot| {
         let mut finder = slot.borrow_mut();
         finder.begin(
-            map.size(),
+            window(map, start, &[goal]),
             start,
             Destinations::one(goal),
             map.navigation().minimum_cost(goal),
@@ -394,13 +422,13 @@ pub fn recycle(pending: &mut Option<Box<PathFinder>>) {
 
 #[cfg(test)]
 pub fn find_path(
-    size: Size,
+    window: impl Into<Bounds>,
     start: Point,
     goal: Point,
     limit: usize,
     cost: impl Fn(Point) -> Option<u32>,
 ) -> Option<Vec<Point>> {
-    SCRATCH.with(|finder| finder.borrow_mut().find(size, start, goal, limit, cost))
+    SCRATCH.with(|finder| finder.borrow_mut().find(window, start, goal, limit, cost))
 }
 
 #[cfg(test)]
@@ -450,7 +478,7 @@ mod tests {
         let start = Point::ORIGIN;
         let goals = Destinations::one(Point::new(34, 34));
         let mut sliced = PathFinder::new();
-        sliced.begin(map.size(), start, goals, 1);
+        sliced.begin(map.site(), start, goals, 1);
         let mut output = Vec::new();
         assert_eq!(
             sliced.advance(7, walkable(&map), &mut output),
@@ -1032,5 +1060,81 @@ mod tests {
         let detour = vec![Point::new(1, 1), Point::new(2, 1), Point::new(2, 0)];
         path.splice(50, &mut detour.clone());
         assert_eq!(path.remaining().collect::<Vec<_>>(), detour);
+    }
+
+    /// A wall across the whole site, on an endless map: the way round is out
+    /// through the wasteland.
+    fn walled_across() -> Map {
+        let mut map = open(9, 6);
+        for y in 0..6 {
+            map.set_terrain(Point::new(4, y), WALL);
+        }
+        map.with_wasteland(1)
+    }
+
+    fn search_once(map: &Map, start: Point, goal: Point) -> (SearchStatus, Vec<Point>) {
+        let mut pending = None;
+        let mut output = Vec::new();
+        let status = search(
+            &mut pending,
+            map,
+            start,
+            Destinations::one(goal),
+            crate::sim::walker::FAR_LIMIT,
+            walkable(map),
+            &mut output,
+        );
+        assert!(pending.is_none(), "a windowed search never runs out of budget");
+        (status, output)
+    }
+
+    #[test]
+    fn on_an_endless_map_a_route_goes_out_round_the_site() {
+        let map = walled_across();
+        let (from, to) = (Point::new(1, 2), Point::new(7, 2));
+        let (status, route) = search_once(&map, from, to);
+        assert_eq!(status, SearchStatus::Found(to));
+        assert!(is_a_walk(from, to, &route));
+        assert!(route.iter().any(|&cell| !map.contains(cell)), "it left the site");
+        assert!(route.iter().all(|&cell| map.is_passable(cell)));
+        // ...and on the same map with nothing round it there is no way.
+        let mut bounded = walled_across();
+        bounded.set_wasteland(None);
+        assert_eq!(search_once(&bounded, from, to).0, SearchStatus::Unreachable);
+    }
+
+    #[test]
+    fn a_route_far_out_in_the_wasteland_is_searched_in_a_window_of_its_own() {
+        let map = walled_across();
+        let from = Point::new(5000, -3000);
+        let to = from.offset(25, 10);
+        let window = window(&map, from, &[to]);
+        assert!(!window.overlaps(map.navigation_area()));
+        assert!(window.area() < 100 * 100, "{window:?}");
+        // The far wasteland may not be dry ground just there: walk from the
+        // nearest dry cells.
+        let dry = |near: Point| {
+            Bounds::new(near.offset(-8, -8), crate::map::Size::new(17, 17))
+                .points()
+                .find(|&cell| map.is_passable(cell))
+                .unwrap()
+        };
+        let (from, to) = (dry(from), dry(to));
+        let (status, route) = search_once(&map, from, to);
+        if status == SearchStatus::Found(to) {
+            assert!(is_a_walk(from, to, &route));
+        } else {
+            assert_eq!(status, SearchStatus::Unreachable, "a lake between them, at worst");
+        }
+    }
+
+    #[test]
+    fn water_is_never_a_destination_and_never_floods_the_world() {
+        let map = walled_across();
+        let water = Bounds::new(Point::new(-2000, -2000), crate::map::Size::new(400, 400))
+            .points()
+            .find(|&cell| map.terrain(cell) == Some(crate::map::WATER))
+            .expect("a lake somewhere in a big square");
+        assert_eq!(search_once(&map, Point::new(1, 1), water).0, SearchStatus::Unreachable);
     }
 }

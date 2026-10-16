@@ -33,7 +33,21 @@
 //! cannot evict anybody and the original's departure cannot hand the cell to
 //! it either. A cell that never held an unregistered entity can therefore
 //! never come to hold two.
+//!
+//! # Off the site
+//!
+//! The world round an endless map's site goes on for ever
+//! ([`crate::map::wasteland`]), and a unit can walk out into it, so this layer
+//! covers every cell there is: the site densely, as it always has, and the
+//! wasteland a [`crate::map::chunk`] at a time, a chunk coming into being the
+//! first time somebody stands in it. The spawn pass makes the chunks round
+//! everybody out there ahead of them ([`Occupancy::prepare`]), so the move
+//! step — which must not allocate — finds the chunk it claims in already
+//! there; a unit that outran that (a long run of ticks with no spawn pass
+//! between, which only a test does) costs one allocation, never a wrong
+//! answer.
 
+use crate::map::chunk::{local_index, ChunkGrid, ChunkPos, CHUNK_AREA};
 use crate::map::{Point, Size};
 
 use super::uid::Uid;
@@ -56,6 +70,31 @@ pub struct Occupancy {
     /// a crowd-sized array — and most of them are empty, which is all the
     /// look needs to know about them.
     occupied: Vec<u64>,
+    /// Everybody off the site, a chunk at a time.
+    wild: ChunkGrid<WildCells>,
+}
+
+/// One chunk of [`Occupancy`] off the site: the same two arrays as the site's,
+/// for one chunk's cells.
+#[derive(Clone)]
+struct WildCells {
+    cells: [Option<Uid>; CHUNK_AREA],
+    occupied: [u64; CHUNK_AREA / 64],
+}
+
+impl WildCells {
+    fn empty() -> Box<WildCells> {
+        Box::new(WildCells { cells: [None; CHUNK_AREA], occupied: [0; CHUNK_AREA / 64] })
+    }
+
+    fn set(&mut self, index: usize, uid: Option<Uid>) {
+        self.cells[index] = uid;
+        if uid.is_some() {
+            self.occupied[index / 64] |= 1 << (index % 64);
+        } else {
+            self.occupied[index / 64] &= !(1 << (index % 64));
+        }
+    }
 }
 
 impl Occupancy {
@@ -65,7 +104,27 @@ impl Occupancy {
             size,
             cells: vec![None; size.area()],
             occupied: vec![0; size.area().div_ceil(64)],
+            wild: ChunkGrid::new(),
         }
+    }
+
+    /// Make the chunks within one chunk of `cell`, if it is off the site, so
+    /// a unit standing there can step anywhere near without the move step
+    /// having to allocate. The spawn pass's job; cheap when they are there.
+    pub fn prepare(&mut self, cell: Point) {
+        if self.size.contains(cell) {
+            return;
+        }
+        for pos in ChunkPos::of(cell).around(1) {
+            if !self.wild.contains(pos) {
+                self.wild.get_or_insert_with(pos, WildCells::empty);
+            }
+        }
+    }
+
+    /// How many chunks of the wasteland this layer holds.
+    pub fn wild_chunks(&self) -> usize {
+        self.wild.len()
     }
 
     pub fn size(&self) -> Size {
@@ -74,10 +133,14 @@ impl Occupancy {
 
     /// Who is standing in `cell`, if anybody.
     ///
-    /// Off the map is nobody, so callers need no bounds check of their own —
-    /// the same rule [`crate::map::PassabilityMap::is_passable`] follows.
+    /// Every cell in the world can be asked: off the site, a chunk nobody
+    /// has stood in holds nobody.
+    #[inline]
     pub fn occupant(&self, cell: Point) -> Option<Uid> {
-        self.cells[self.size.index_of(cell)?]
+        match self.size.index_of(cell) {
+            Some(index) => self.cells[index],
+            None => self.wild.at(cell)?.cells[local_index(cell)],
+        }
     }
 
     /// Who is standing at a row-major index the caller has already worked
@@ -118,11 +181,16 @@ impl Occupancy {
     /// as it found it, so the caller can cancel the move without unwinding
     /// anything.
     ///
-    /// Off the map there is nothing to claim and nothing is recorded. That is
-    /// not reachable from the tick, which asks the terrain first and every
-    /// cell outside the map is impassable.
+    /// Off the site the claim is recorded in the cell's chunk, made now if
+    /// nobody has stood in it before.
     pub fn claim(&mut self, cell: Point, uid: Uid) -> Result<(), Uid> {
         let Some(index) = self.size.index_of(cell) else {
+            if let Some(other) = self.occupant(cell).filter(|&other| other != uid) {
+                return Err(other);
+            }
+            self.wild
+                .get_or_insert_with(ChunkPos::of(cell), WildCells::empty)
+                .set(local_index(cell), Some(uid));
             return Ok(());
         };
         match self.cells[index] {
@@ -142,7 +210,15 @@ impl Occupancy {
     /// must not be able to evict the entity that did.
     pub fn release(&mut self, cell: Point, uid: Uid) -> bool {
         let Some(index) = self.size.index_of(cell) else {
-            return false;
+            let Some(chunk) = self.wild.get_mut(ChunkPos::of(cell)) else {
+                return false;
+            };
+            let index = local_index(cell);
+            if chunk.cells[index] != Some(uid) {
+                return false;
+            }
+            chunk.set(index, None);
+            return true;
         };
         if self.cells[index] == Some(uid) {
             self.cells[index] = None;
@@ -156,12 +232,21 @@ impl Occupancy {
     /// How many cells have somebody in them. Not the number of entities —
     /// entities sharing a cell after a spawn are counted once.
     pub fn count_occupied(&self) -> usize {
-        self.cells.iter().filter(|cell| cell.is_some()).count()
+        let wild: usize = self
+            .wild
+            .iter()
+            .map(|(_, chunk)| chunk.occupied.iter().map(|word| word.count_ones() as usize).sum::<usize>())
+            .sum();
+        self.cells.iter().filter(|cell| cell.is_some()).count() + wild
     }
 
     pub fn clear(&mut self) {
         self.cells.fill(None);
         self.occupied.fill(0);
+        for chunk in self.wild.iter_mut() {
+            chunk.cells.fill(None);
+            chunk.occupied.fill(0);
+        }
     }
 }
 
@@ -247,15 +332,36 @@ mod tests {
     }
 
     #[test]
-    fn cells_off_the_map_hold_nobody_and_swallow_a_claim() {
+    fn cells_off_the_site_are_held_like_any_other() {
+        // The wasteland round an endless map is walked on, so somebody out
+        // there is in somebody else's way exactly as on the site.
         let mut occupancy = layer();
-        for outside in [Point::new(-1, 0), Point::new(4, 0), Point::new(0, 3)] {
-            assert_eq!(occupancy.claim(outside, uid(1)), Ok(()));
-            assert_eq!(occupancy.occupant(outside), None);
-            assert!(!occupancy.release(outside, uid(1)));
+        let outside = [Point::new(-1, 0), Point::new(4, 0), Point::new(0, 3), Point::new(-5000, 12000)];
+        for (i, &cell) in outside.iter().enumerate() {
+            assert_eq!(occupancy.occupant(cell), None);
+            assert_eq!(occupancy.claim(cell, uid(i as u64 + 1)), Ok(()));
+            assert_eq!(occupancy.occupant(cell), Some(uid(i as u64 + 1)));
+            assert_eq!(occupancy.claim(cell, uid(99)), Err(uid(i as u64 + 1)));
         }
-        // ...and asking did not quietly widen the layer.
+        assert_eq!(occupancy.count_occupied(), outside.len());
+        assert!(!occupancy.release(outside[0], uid(99)), "not theirs to give up");
+        for (i, &cell) in outside.iter().enumerate() {
+            assert!(occupancy.release(cell, uid(i as u64 + 1)));
+            assert_eq!(occupancy.occupant(cell), None);
+        }
         assert_eq!(occupancy.count_occupied(), 0);
+        assert!(!occupancy.release(Point::new(900, 900), uid(1)), "a chunk nobody stood in");
+    }
+
+    #[test]
+    fn preparing_makes_the_chunks_round_somebody_and_nothing_on_the_site() {
+        let mut occupancy = layer();
+        occupancy.prepare(Point::new(1, 1));
+        assert_eq!(occupancy.wild_chunks(), 0, "the site needs no chunks");
+        occupancy.prepare(Point::new(-40, 10));
+        assert_eq!(occupancy.wild_chunks(), 9);
+        occupancy.prepare(Point::new(-41, 11));
+        assert_eq!(occupancy.wild_chunks(), 9, "the same chunks");
     }
 
     #[test]

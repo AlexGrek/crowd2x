@@ -216,7 +216,20 @@ impl Light {
     }
 }
 
+/// How far past the site's edge an endless map's lightmap reaches, in cells.
+/// More than the widest light's radius (a street lamp's 6.5), so a lamp at
+/// the edge of a district lights the wasteland beside it as it lights the
+/// street, rather than stopping in a straight line at the map's edge. Past
+/// this the world is open sky with no lamp in it, which is what the canvas
+/// shader draws off the lightmap.
+pub const LIGHT_MARGIN: i32 = 8;
+
 pub struct LightScene {
+    /// The cell at the lightmap's bottom-left corner: `(0, 0)` on a bounded
+    /// map, [`LIGHT_MARGIN`] out from it on an endless one. Everything else
+    /// here — subtiles, chunks, the ceiling's cells, the lights' positions —
+    /// counts from it.
+    pub origin: Point,
     /// Lightmap size in subtiles.
     pub width: u32,
     pub height: u32,
@@ -224,7 +237,7 @@ pub struct LightScene {
     pub occlusion: Vec<u32>,
     /// One bit per **cell**, row-major, set where there is a ceiling.
     pub ceiling: Vec<u32>,
-    /// The map's width in cells, which is what `ceiling` is indexed by.
+    /// The lightmap's width in cells, which is what `ceiling` is indexed by.
     pub map_width: u32,
     pub lights: Vec<Light>,
     /// CSR: chunk `c`'s lights are `chunk_lights[chunk_offsets[c]..chunk_offsets[c + 1]]`.
@@ -242,19 +255,22 @@ impl LightScene {
     /// needs. A lamp with no power is in the scene, dark; a fire needs
     /// nothing. [`LightScene::apply_supply`] follows power changing.
     pub fn from_map(map: &Map, supply: &Supply) -> LightScene {
-        let size = map.size();
+        let bounds = if map.is_endless() { map.site().grown(LIGHT_MARGIN) } else { map.site() };
+        let origin = bounds.origin;
+        let size = bounds.size;
         let width = size.width as u32 * SUBTILES as u32;
         let height = size.height as u32 * SUBTILES as u32;
 
         let mut occlusion = vec![0u32; (width * height).div_ceil(32) as usize];
-        for cell in size.points() {
-            if map.sight().is_passable(cell) {
+        for cell in bounds.points() {
+            if map.is_see_through(cell) {
                 continue;
             }
+            let local = cell - origin;
             for sy in 0..SUBTILES {
                 for sx in 0..SUBTILES {
-                    let x = (cell.x * SUBTILES + sx) as u32;
-                    let y = (cell.y * SUBTILES + sy) as u32;
+                    let x = (local.x * SUBTILES + sx) as u32;
+                    let y = (local.y * SUBTILES + sy) as u32;
                     let i = y * width + x;
                     occlusion[(i / 32) as usize] |= 1 << (i % 32);
                 }
@@ -262,8 +278,8 @@ impl LightScene {
         }
 
         let mut ceiling = vec![0u32; size.area().div_ceil(32)];
-        for (i, cell) in size.points().enumerate() {
-            debug_assert_eq!(size.index_of(cell), Some(i));
+        for (i, cell) in bounds.points().enumerate() {
+            debug_assert_eq!(bounds.index_of(cell), Some(i));
             // A window is open to the sky whatever roofs its wall, which is
             // what lets the sun in through it.
             let window = map.terrain(cell).is_some_and(TerrainId::lets_sun_in);
@@ -273,6 +289,7 @@ impl LightScene {
         }
 
         let to_subtiles = SUBTILES as f32 / PIXELS_PER_CELL as f32;
+        let (left, bottom) = (origin.x * PIXELS_PER_CELL, origin.y * PIXELS_PER_CELL);
         let lights = map
             .objects(ObjectLayer::Props)
             .iter()
@@ -280,7 +297,7 @@ impl LightScene {
             .filter_map(|prop| {
                 let (name, e) = emitter(prop.kind.as_str())?;
                 Some(Light {
-                    pos: [prop.at.x as f32 * to_subtiles, prop.at.y as f32 * to_subtiles],
+                    pos: [(prop.at.x - left) as f32 * to_subtiles, (prop.at.y - bottom) as f32 * to_subtiles],
                     radius: e.radius * SUBTILES as f32,
                     enabled: e.always_on && supply.serves(prop.kind.as_str(), prop.cell()),
                     color: e.color,
@@ -294,6 +311,7 @@ impl LightScene {
             .collect();
 
         let mut scene = LightScene {
+            origin,
             width,
             height,
             occlusion,
@@ -616,6 +634,31 @@ mod tests {
         assert!(!scene.take_dirty().is_empty());
         let lit = scene.lights_at(sub(5), sub(1));
         assert!(lit[0] > lit[2], "sodium is orange: {lit:?}");
+    }
+
+    #[test]
+    fn an_endless_maps_lightmap_reaches_out_into_the_wasteland() {
+        // A fire on the site's left edge: on a bounded map its light stops
+        // there; with the wasteland round it, the cells off the edge are lit
+        // too, and the scene counts from the margin's corner.
+        let mut bounded = Map::new(Size::new(6, 4), FLOOR);
+        fire_at(&mut bounded, Point::new(0, 2));
+        let scene = LightScene::from_map(&bounded, &Supply::everywhere(bounded.size()));
+        assert_eq!(scene.origin, Point::ORIGIN);
+        assert_eq!(scene.width, 6 * SUBTILES as u32);
+
+        let endless = bounded.clone().with_wasteland(1);
+        let scene = LightScene::from_map(&endless, &Supply::everywhere(endless.size()));
+        assert_eq!(scene.origin, Point::new(-LIGHT_MARGIN, -LIGHT_MARGIN));
+        assert_eq!(scene.width, (6 + 2 * LIGHT_MARGIN) as u32 * SUBTILES as u32);
+        assert_eq!(scene.map_width, (6 + 2 * LIGHT_MARGIN) as u32);
+        // Two cells west of the site, in the fire's row.
+        let off_the_edge = scene.lights_at(sub(LIGHT_MARGIN - 2), sub(LIGHT_MARGIN + 2));
+        assert!(off_the_edge[0] > 0.0, "{off_the_edge:?}");
+        // ...and the fire is where it was, in the scene's own subtiles.
+        let on_it = scene.lights_at(sub(LIGHT_MARGIN), sub(LIGHT_MARGIN + 2));
+        assert!(on_it[0] > off_the_edge[0]);
+        assert!(!scene.is_roofed(sub(1) as i32, sub(1) as i32), "the wasteland is open sky");
     }
 
     fn roofed_room(map: &mut Map, x0: i32, y0: i32, x1: i32, y1: i32, door: Point) {

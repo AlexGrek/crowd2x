@@ -3,7 +3,7 @@
 //!
 //! A lamp is an object like a prop — free-placed in whole pixels, stored by
 //! its palette name — but on the map's `Lamps` layer, from [`LAMP_PALETTE`],
-//! and drawn at [`LAMP_Z`] rather than by depth: it hangs from the ceiling,
+//! and drawn [`LAMP_DEPTH`] over everybody's depth: it hangs from the ceiling,
 //! so everybody walks under it. What it is for is light
 //! (`crate::lighting::scene::EMITTERS`, by the same name).
 //!
@@ -47,7 +47,7 @@ const ERASE_RADIUS: f32 = CELL as f32 / 2.0;
 
 /// A lamp is above everything in the world — it is on the ceiling — and
 /// under the editor's cursor and rectangle preview.
-const LAMP_Z: f32 = 50.0;
+const LAMP_DEPTH: f32 = 500.0;
 
 /// How fast a prop's art cycles, for the ones that move. Fast enough that a
 /// screen reads as flickering rather than as stepping through pictures.
@@ -482,7 +482,7 @@ fn spawn_prop(
     let item = &palette_of(layer)[item];
     // Deep by where it is kept, even when drawn elsewhere: a switch on the
     // far wall of a cell is behind whoever stands in it.
-    let z = if layer == ObjectLayer::Lamps { LAMP_Z } else { depth_for(at.y as f32) };
+    let z = depth_for(at.y as f32) + if layer == ObjectLayer::Lamps { LAMP_DEPTH } else { 0.0 };
     // A quarter turn about the middle of a whole-pixel square, for a door in
     // a wall running up and down or a switch on a wall beside it: every texel
     // still lands on the pixel grid.

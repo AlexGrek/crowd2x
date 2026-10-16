@@ -74,8 +74,8 @@ respect the split:
   cursor's ghost shows it turned onto its wall, or red (`REFUSED_TINT`) where a press would
   place nothing (`electrician`).
 - **lamps** (`props::LAMP_PALETTE`, the map's `Lamps` object layer) — placed and erased
-  exactly like props, drawn by the same `PropWindow`, but at a fixed `LAMP_Z` above every
-  character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`
+  exactly like props, drawn by the same `PropWindow`, but `LAMP_DEPTH` above `depth_for`
+  of where it is, so above every character on the canvas, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`
   is not asked). A lamp exists to light: each one's `EMITTERS` entry is a test. Erasing on
   one layer never takes the other's object, however near. A **street lamp** is not a lamp
   but a prop (`PALETTE`, `"street lamp"`): it stands on the ground and blocks its cell, and

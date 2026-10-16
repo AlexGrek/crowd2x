@@ -628,15 +628,33 @@ fn spawn_menu_actions(
 /// two cells on the grid are ever any closer than that, so a set of distinct
 /// cells is spacing for free without anything having to check for it.
 ///
-/// A full scan rather than a search that spirals outward from `near`: this
-/// runs once per click rather than once per tick, and even a large map is
-/// cheap to walk once.
+/// On a bounded map, a full scan: this runs once per click rather than once
+/// per tick, and even a large map is cheap to walk once. An endless one cannot
+/// be scanned — the wasteland goes on — so there it is a square round `near`,
+/// doubled until it holds enough ground, which also means a camera out in the
+/// wasteland spawns out there and not back on the site.
 fn spawn_points(map: &Map, near: Point, count: u32) -> Vec<Point> {
-    let mut cells: Vec<Point> = map
-        .size()
-        .points()
-        .filter(|point| map.is_passable(*point))
-        .collect();
+    let mut cells: Vec<Point> = if map.is_endless() {
+        // Off the site, only ground joined to the rest of the world: a
+        // pocket of dry land a lake has closed in is somewhere a unit could
+        // be put and never leave.
+        let (site, navigation) = (map.site(), map.navigation());
+        let open = |point: Point| map.is_passable(point) && (site.contains(point) || navigation.is_outside(point));
+        let mut reach = 8;
+        loop {
+            let square = crate::map::Bounds::from_corners(near.offset(-reach, -reach), near.offset(reach, reach));
+            let cells: Vec<Point> = square.points().filter(|point| open(*point)).collect();
+            // Enough within `reach` steps that nothing outside the square
+            // could be nearer than the last one taken.
+            let close = cells.iter().filter(|point| point.manhattan_distance(near) <= reach).count();
+            if close >= count as usize || reach >= 512 {
+                break cells;
+            }
+            reach *= 2;
+        }
+    } else {
+        map.size().points().filter(|point| map.is_passable(*point)).collect()
+    };
     cells.sort_by_key(|point| (point.x - near.x).abs() + (point.y - near.y).abs());
     cells.truncate(count as usize);
     cells
@@ -681,9 +699,11 @@ fn update_readouts(
     sim: Option<Res<Sim>>,
     view: Res<LayerView>,
     overlay: Res<GridOverlay>,
+    cameras: Query<&CameraPan, With<WorldCamera>>,
     mut texts: Query<(Ref<Readout>, &mut Text)>,
 ) {
     let world = sim.as_deref().map(|sim| &sim.0);
+    let looking_at = cameras.single().ok().map(|pan| background::point_of(background::cell_of(pan.0)));
 
     for (kind, mut text) in &mut texts {
         // `is_added` matters on a second visit: the HUD is respawned empty and
@@ -693,7 +713,7 @@ fn update_readouts(
             Readout::Zoom if fresh || zoom.is_changed() => format!("x{}", zoom.get()),
             Readout::Speed if fresh || speed.is_changed() => speed.label(),
             Readout::Pause if fresh || speed.is_changed() => speed.toggle_label().to_string(),
-            Readout::Stats => stats(&current, world, overlay.summary()),
+            Readout::Stats => stats(&current, world, overlay.summary(), looking_at),
             Readout::XRay if fresh || view.is_changed() => format!("x-ray {}", view.label()),
             // Nothing this readout is about has moved.
             _ => continue,
@@ -712,10 +732,15 @@ fn update_readouts(
 /// ([`crate::sim::clock`]) — and it sits under the tick count rather than
 /// replacing it: a tick is what a QA script and a profile count in, and the
 /// time of day is what somebody watching a crowd get hungry wants.
-fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str) -> String {
+///
+/// `where` is the cell the camera is over, and how many chunks of the
+/// wasteland the screen has loaded round it — on an endless map the one way
+/// to tell how far out into it the view has gone.
+fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: Option<Point>) -> String {
     let size = current.map.size();
+    let at = at.unwrap_or(Point::ORIGIN);
     format!(
-        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}\nwired  {}",
+        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}\nwired  {}\nwhere  {}, {}  chunks {}",
         current.title(),
         size.width,
         size.height,
@@ -723,5 +748,8 @@ fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str) -> St
         world.map_or(0, GameState::tick),
         world.map_or_else(|| Clock::after_watching(0.0), GameState::clock),
         connected,
+        at.x,
+        at.y,
+        current.map.loaded_chunks(),
     )
 }

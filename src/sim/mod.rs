@@ -477,7 +477,12 @@ impl GameState {
     /// No entities: [`GameState::spawn`] is the only way one arrives, so a
     /// world is exactly what its caller asked for and nothing appears by
     /// default.
-    pub fn new(map: Map, seed: u64) -> GameState {
+    pub fn new(mut map: Map, seed: u64) -> GameState {
+        // The wasteland a route about the site may swing out into, in memory
+        // before anybody asks: what reachability is worked out over, and the
+        // window of every search that starts near the site. Further out is
+        // loaded as the crowd gets there (`follow_the_crowd_out`).
+        map.load_chunks(map.navigation_area());
         let _ = map.navigation();
         let controlled = crate::map::utilities::controlled_boxes(&map);
         let street_lights_on = Clock::after_watching(0.0).sun().is_dark();
@@ -519,6 +524,33 @@ impl GameState {
 
     pub fn entities(&self) -> &Entities {
         &self.entities
+    }
+
+    /// Load the wasteland round everybody out in it: the chunk each one
+    /// stands in and the eight round it, both the ground and the occupancy
+    /// layer's, so the processing pass reads the ground from memory and the
+    /// move step claims a cell without allocating.
+    ///
+    /// Spawn-pass work, since it allocates; and it may lag a unit by however
+    /// many ticks a frame runs without changing anything — a chunk not loaded
+    /// reads the same, only slower ([`crate::map::chunk`]), so what is loaded
+    /// when is never part of what happens. Nothing is unloaded: the crowd's
+    /// chunks stay for the life of the world.
+    fn follow_the_crowd_out(&mut self) {
+        if !self.map.is_endless() {
+            return;
+        }
+        let site = self.map.site();
+        for entity in self.entities.iter() {
+            let cell = entity.center_position();
+            if site.contains(cell) {
+                continue;
+            }
+            for pos in crate::map::ChunkPos::of(cell).around(1) {
+                self.map.load_chunk(pos);
+            }
+            self.occupancy.prepare(cell);
+        }
     }
 
     /// What the map's props are for, and where. See [`feature`].
@@ -1088,6 +1120,7 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
         }
     }
+    state.follow_the_crowd_out();
 }
 
 /// **The processing pass: advances every entity, and adds or removes none.**
@@ -1812,6 +1845,135 @@ mod tests {
                 .collect()
         };
         assert_eq!(positions(&a), positions(&b));
+    }
+
+    /// The `count` dry cells nearest `near`, for spawning out in the
+    /// wasteland, where a given cell might be a lake.
+    /// The `count` cells nearest `near` that are open wasteland, never a
+    /// pocket of dry ground a lake has walled in: from there nothing is
+    /// reachable, which is the right answer and not what these tests are about.
+    fn dry_cells(map: &Map, near: Point, count: usize) -> Vec<Point> {
+        let mut cells: Vec<Point> = crate::map::Bounds::from_corners(near.offset(-20, -20), near.offset(20, 20))
+            .points()
+            .filter(|&cell| map.is_passable(cell) && map.navigation().is_outside(cell))
+            .collect();
+        cells.sort_by_key(|cell| (cell.manhattan_distance(near), *cell));
+        cells.truncate(count);
+        assert_eq!(cells.len(), count, "dry ground near {near:?}");
+        cells
+    }
+
+    #[test]
+    fn a_crowd_out_in_the_wasteland_walks_it_and_the_ground_loads_round_them() {
+        let build = || {
+            let map = Map::new(Size::new(8, 8), FLOOR).with_wasteland(5);
+            let far = Point::new(-700, 450);
+            let cells = dry_cells(&map, far, 12);
+            let mut state = GameState::new(map, 3);
+            assert!(!state.map.is_chunk_loaded(crate::map::ChunkPos::of(far)), "nobody has been out there");
+            for (i, &cell) in cells.iter().enumerate() {
+                state.spawn(if i % 2 == 0 { EntityType::Dog } else { EntityType::Human }, cell);
+            }
+            (state, cells)
+        };
+        let (mut a, start) = build();
+        run(&mut a, 1500);
+        let mut moved = 0;
+        for (entity, &from) in a.entities().iter().zip(&start) {
+            let here = entity.center_position();
+            assert!(a.map.is_passable(here), "{here:?} is not ground");
+            assert!(!a.map.contains(here), "nobody walked the 700 cells back");
+            assert_eq!(a.occupancy().occupant(here), Some(entity.uid()), "{here:?}");
+            for pos in crate::map::ChunkPos::of(here).around(1) {
+                assert!(a.map.is_chunk_loaded(pos) || a.map.site().contains(pos.origin()), "{pos:?} round {here:?}");
+            }
+            moved += usize::from(here != from);
+        }
+        assert!(moved > start.len() / 2, "only {moved} of {} moved", start.len());
+
+        let (mut b, _) = build();
+        run(&mut b, 1500);
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect()
+        };
+        assert_eq!(positions(&a), positions(&b));
+    }
+
+    #[test]
+    fn what_is_loaded_never_changes_what_happens() {
+        // The same world twice, one with the wasteland loaded far and wide
+        // before anybody moves and one loading it as the crowd gets there:
+        // a chunk is a cache, so the two must not differ by a single step.
+        let build = |preload: bool| {
+            let mut map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(9);
+            if preload {
+                map.load_chunks(crate::map::Bounds::from_corners(Point::new(-200, -200), Point::new(200, 200)));
+            }
+            let cells = dry_cells(&map, Point::new(-30, 5), 10);
+            let mut state = GameState::new(map, 4);
+            for &cell in &cells {
+                state.spawn(EntityType::Dog, cell);
+            }
+            state
+        };
+        let (mut cold, mut warm) = (build(false), build(true));
+        assert!(warm.map.loaded_chunks() > cold.map.loaded_chunks());
+        run(&mut cold, 800);
+        run(&mut warm, 800);
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect()
+        };
+        assert_eq!(positions(&cold), positions(&warm));
+    }
+
+    #[test]
+    fn a_wanderer_shut_in_at_the_edge_of_the_site_still_walks_its_room() {
+        // A sealed 5x3 room in the site's corner, the wasteland just past its
+        // walls: most of the square a wanderer picks from is ground it cannot
+        // reach. Picking those anyway is a failed route each time, and a
+        // failed route holds wandering off, so it would mostly stand still.
+        let mut map = Map::new(Size::new(8, 6), WALL);
+        for cell in crate::map::Bounds::from_corners(Point::new(1, 1), Point::new(5, 3)).points() {
+            map.set_terrain(cell, FLOOR);
+        }
+        let mut state = GameState::new(map.with_wasteland(3), 7);
+        let uid = state.spawn(EntityType::Human, Point::new(1, 1));
+        state.entities.get_mut(uid).unwrap().biology_mut().unwrap().edit(|_| crate::sim::biology::Stats::calm());
+        let mut visited = std::collections::HashSet::new();
+        for _ in 0..2000 {
+            run(&mut state, 1);
+            visited.insert(state.entities().get(uid).unwrap().center_position());
+        }
+        assert!(visited.len() >= 10, "walked only {} of the room's 15 cells: {visited:?}", visited.len());
+    }
+
+    #[test]
+    fn a_hungry_human_out_in_the_wasteland_walks_home_to_the_fridge() {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "fridge", Point::new(6, 6));
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 0), Point::new(11, 0));
+        let map = map.with_wasteland(2);
+        let out = dry_cells(&map, Point::new(-45, 20), 1)[0];
+        let mut state = GameState::new(map, 7);
+        let uid = state.spawn(EntityType::Human, out);
+        state.entities.get_mut(uid).unwrap().biology_mut().unwrap().edit(|_| {
+            crate::sim::biology::Stats::calm()
+                .with_hunger(95.0)
+                .with_thirst(0.0)
+                .with_fun(100.0)
+                .with_stamina(100.0)
+                .with_bladder(0.0)
+        });
+        let mut lines = Vec::new();
+        for _ in 0..6000 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if lines.iter().any(|line| line.contains("ate at the fridge at 6, 6")) {
+                return;
+            }
+        }
+        let tail: Vec<&String> = lines.iter().rev().take(25).collect();
+        panic!("never got back to eat; ended at {:?}; {tail:#?}", state.entities().get(uid).unwrap().center_position());
     }
 
     #[test]

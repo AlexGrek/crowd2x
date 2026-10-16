@@ -426,7 +426,10 @@ fn run_actions(
                 // Never silently over-write: a name already in use becomes
                 // "<name> 2" rather than replacing somebody's map.
                 let name = maps.0.unique_name(&name);
-                let map = Map::new(Size::new(NEW_MAP.0, NEW_MAP.1), VOID);
+                // In the default wasteland, like every map that comes from a
+                // file: a new map is a clearing in it.
+                let map = Map::new(Size::new(NEW_MAP.0, NEW_MAP.1), VOID)
+                    .with_wasteland(crate::map::wasteland::DEFAULT_SEED);
                 match maps.0.save(&name, &map) {
                     Ok(()) => {
                         entry.clear();

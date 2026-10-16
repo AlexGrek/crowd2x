@@ -429,6 +429,10 @@ pub fn generate(seed: u64) -> District {
     }
     connect(&mut map, &buildings);
     light_streets(&mut map, &buildings);
+    // Last, and from the seed without drawing on it: everything above was
+    // laid out on a bounded map, so the wasteland round the district changes
+    // nothing in it, and each district has a wasteland of its own.
+    map.set_wasteland(Some(crate::map::Wasteland::new(seed)));
 
     District {
         seed,

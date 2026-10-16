@@ -52,10 +52,16 @@ here — it is `src/sim/` (the `simulation` skill) — and `game/actors.rs` is t
   paused world appears standing still instead of looking lost. Pause is a flag beside the
   speed rather than a rung at the bottom of the ladder, so resuming goes back to the
   speed being watched; both reset on the way out, as the zoom does.
-- **The camera is kept inside the map** (`clamp_to_map`). A map has edges and nothing
-  outside them, so flying off into the void is getting lost rather than navigating; an
-  axis with less map than view is centred, since there is nothing there to scroll to.
-  Pan speed scales with the zoom so crossing the window always takes the same time.
+- **The camera goes anywhere over an endless map** — every map from a file stands in the
+  wasteland — and stops only at `map::WORLD_REACH` (`clamp_to_reach`). A map with nothing
+  round it is still kept inside its edges (`clamp_to_map`): flying off into the void is
+  getting lost rather than navigating, and an axis with less map than view is centred.
+  Pan speed scales with the zoom so crossing the window always takes the same time. Far
+  from the origin, see `wasteland` (depth, streaming).
+- **The spawn menu** puts what it spawns on the passable cells nearest the camera
+  (`hud::spawn_points`); off the site only on open wasteland (`Navigation::is_outside`),
+  never in a pocket a lake has walled in. The HUD's `where x, y  chunks n` line is the
+  camera's cell and how many wasteland chunks are loaded.
 
 **What a hand holds is drawn in front of whoever holds it** (`game/held.rs`, art from
 `characters::item`). A unit whose `Inventory::hand` is full gets one sprite of its own, in

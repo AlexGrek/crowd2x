@@ -23,8 +23,8 @@
     { "expect_selected": "human" },
     { "shot": "a selected human, framed, with the panel under it" },
 
-    { "note": "clicking empty ground selects nobody, and the panel goes with it" },
-    { "mouse": { "x": 100, "y": 110 } },
+    { "note": "clicking empty ground selects nobody, and the panel goes with it: cell (4, 3), at canvas (100, 120) - under the top-left panel, which reaches y 112, and above the unit panel" },
+    { "mouse": { "x": 100, "y": 120 } },
     { "click": {} },
     { "expect_selected": null },
 

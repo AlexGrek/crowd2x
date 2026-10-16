@@ -55,6 +55,24 @@
     },
     {
       "shot": "nine at night: every house lit by its lamp, the bank by its rows of tubes"
+    },
+    {
+      "note": "the district's corner: the lightmap reaches past the edge, so the street lamps light the wasteland beside them"
+    },
+    {
+      "look_at": {
+        "x": 2,
+        "y": 4
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_lighting": {}
+    },
+    {
+      "shot": "the corner at night: street lamps over the edge of the wasteland"
     }
   ]
 }

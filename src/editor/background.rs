@@ -38,14 +38,27 @@
 //! screen. That is the same invariant this module always had — the screen
 //! cannot show a floor no saved map contains — arrived at from the other end,
 //! and it is why painting no longer needs an index of its own.
+//!
+//! # The world past the map's edge
+//!
+//! A map is a finite site in an endless wasteland ([`crate::map::wasteland`]),
+//! and the window draws whatever is under the canvas — the site, or the dirt
+//! and lakes round it — since [`Map::terrain`] answers for every cell. The
+//! wasteland is streamed in a chunk at a time as the view moves
+//! ([`stream_chunks`]): the chunks under the canvas and one round them are
+//! loaded before the window reads them, and the ones the camera has left far
+//! behind are dropped, so however far a camera flies the map holds a few
+//! dozen chunks. In the editor, the wasteland is drawn dimmed
+//! ([`OFF_SITE_TINT`]): it cannot be painted, and the dimming is what says
+//! where the map you are editing ends.
 
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 
 use super::{CurrentMap, PaletteItem};
-use crate::characters::upscale;
-use crate::map::{Map, Point, TerrainId, VOID};
+use crate::characters::{depth_for, upscale};
+use crate::map::{Bounds, ChunkPos, Map, Point, Size, TerrainId, CHUNK, VOID};
 use crate::render::WORLD_LAYER;
 use crate::state::AppState;
 use crate::game::pool::park_budget;
@@ -59,10 +72,9 @@ use crate::view::{CellRect, VisibleArea};
 /// object positions are measured against, so the two cannot drift.
 pub const TILE: f32 = crate::map::PIXELS_PER_CELL as f32;
 
-/// Depth of every background tile. `characters::depth_for` is `-y * 0.01`, so
-/// it would take a character at y = 10000 to reach this — far outside anything
-/// the editor can place.
-const BACKGROUND_Z: f32 = -100.0;
+/// How far under [`depth_for`] of its own centre a background tile is drawn:
+/// under everything that stands anywhere on the canvas with it.
+const BACKGROUND_DEPTH: f32 = -1000.0;
 
 /// Every paintable tile. Each name must be a terrain in `map::terrain`, which
 /// `every_palette_entry_names_a_terrain` checks — a typo here would
@@ -86,7 +98,29 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::upscaled("pavement", "pavement.png"),
     PaletteItem::upscaled("road", "road.png"),
     PaletteItem::upscaled("grass", "grass.png"),
+    // The wasteland's ground (`tools/wasteland_art.py`), paintable on a map
+    // like any other.
+    PaletteItem::upscaled("dirt", "dirt.png"),
+    PaletteItem::upscaled("dirt stones", "dirt_stones.png"),
+    PaletteItem::upscaled("dirt cracked", "dirt_cracked.png"),
+    PaletteItem::upscaled("scrub", "scrub.png"),
+    PaletteItem::upscaled("meadow", "meadow.png"),
+    PaletteItem::upscaled("mud", "mud.png"),
+    PaletteItem::upscaled("water", "water.png"),
 ];
+
+/// What the wasteland is multiplied by in the editor: dimmed and a little
+/// cool, so the site you can paint stands out from the world round it.
+pub const OFF_SITE_TINT: Color = Color::srgb(0.55, 0.56, 0.62);
+
+/// Chunks loaded past the canvas on every side, so a pan never reaches a
+/// chunk the window has to work out cell by cell.
+pub const STREAM_AHEAD: i32 = 1;
+
+/// Chunks kept past the canvas before they are dropped. Bigger than
+/// [`STREAM_AHEAD`], so a camera pacing back and forth over a chunk border
+/// does not load and drop the same chunks every crossing.
+pub const STREAM_KEEP: i32 = 4;
 
 #[derive(Component)]
 pub struct BackgroundTile;
@@ -177,6 +211,45 @@ pub fn map_extent(map: &Map) -> Vec2 {
 /// types differ, because one side of the fence has no `bevy` in it.
 pub fn point_of(cell: IVec2) -> Point {
     Point::new(cell.x, cell.y)
+}
+
+/// The chunks a view of `tiles` wants loaded: under it and [`STREAM_AHEAD`]
+/// round it.
+pub fn chunks_wanted(tiles: CellRect) -> Bounds {
+    view_bounds(tiles).grown(STREAM_AHEAD * CHUNK)
+}
+
+/// The cells of a non-empty [`CellRect`] as [`Bounds`].
+fn view_bounds(tiles: CellRect) -> Bounds {
+    Bounds::new(
+        point_of(tiles.min),
+        Size::new(tiles.max.x - tiles.min.x + 1, tiles.max.y - tiles.min.y + 1),
+    )
+}
+
+/// Load the wasteland under and round the canvas into the open map, and drop
+/// what the camera has left [`STREAM_KEEP`] chunks behind.
+///
+/// Before [`sync_tile_window`], so the window reads loaded chunks. Behind
+/// `bypass_change_detection`: what is loaded never changes a cell, and the
+/// screens read `CurrentMap`'s change flag as "the map was edited". The game
+/// screen's simulation has its own copy of the map, which streams round the
+/// crowd rather than round the camera (`sim::GameState`), so this costs it
+/// nothing.
+pub fn stream_chunks(area: Res<VisibleArea>, mut current: ResMut<CurrentMap>) {
+    if !area.ready || area.tiles.is_empty() || !current.map.is_endless() {
+        return;
+    }
+    let view = view_bounds(area.tiles);
+    let keep = view.grown(STREAM_KEEP * CHUNK);
+    let (keep_min, keep_max) = (ChunkPos::of(keep.origin), ChunkPos::of(keep.max()));
+    let map = &mut current.bypass_change_detection().map;
+    if map.loaded_chunks() > 0 {
+        map.unload_chunks(|pos| {
+            pos.x >= keep_min.x && pos.y >= keep_min.y && pos.x <= keep_max.x && pos.y <= keep_max.y
+        });
+    }
+    map.load_chunks(chunks_wanted(area.tiles));
 }
 
 /// The terrain a palette entry paints.
@@ -279,6 +352,10 @@ pub fn sync_tile_window(
     let wanted = area.tiles;
     let budget = park_budget(wanted.area());
     let window = &mut *window;
+    let editing = *state.get() == AppState::Editor;
+    let tint = |cell: IVec2| {
+        if editing && !current.map.contains(point_of(cell)) { OFF_SITE_TINT } else { Color::WHITE }
+    };
 
     // 1. Cells that left the view give their sprite back.
     window.drawn.retain(|cell, painted| {
@@ -306,7 +383,7 @@ pub fn sync_tile_window(
             // Painted over, or the map changed underneath.
             (Some(painted), Some(item)) => {
                 let entity = painted.entity;
-                dress(&mut tiles, &assets, entity, cell, item);
+                dress(&mut tiles, &assets, entity, cell, item, tint(cell));
                 window.drawn.insert(cell, Painted { entity, item });
             }
             // Erased to void: the cell keeps no sprite at all.
@@ -318,10 +395,10 @@ pub fn sync_tile_window(
             (None, Some(item)) => {
                 let entity = match window.free.pop() {
                     Some(entity) => {
-                        dress(&mut tiles, &assets, entity, cell, item);
+                        dress(&mut tiles, &assets, entity, cell, item, tint(cell));
                         entity
                     }
-                    None => spawn_tile(&mut commands, &assets, cell, item, *state.get()),
+                    None => spawn_tile(&mut commands, &assets, cell, item, *state.get(), tint(cell)),
                 };
                 window.drawn.insert(cell, Painted { entity, item });
             }
@@ -349,6 +426,7 @@ fn dress(
     entity: Entity,
     cell: IVec2,
     item: usize,
+    tint: Color,
 ) {
     let Ok((mut sprite, mut transform, mut visibility)) = tiles.get_mut(entity) else {
         return;
@@ -361,9 +439,12 @@ fn dress(
     if sprite.image != image {
         sprite.image = image;
     }
+    if sprite.color != tint {
+        sprite.color = tint;
+    }
 
     let centre = cell_centre(cell);
-    let at = Vec3::new(centre.x, centre.y, BACKGROUND_Z);
+    let at = Vec3::new(centre.x, centre.y, depth_for(centre.y) + BACKGROUND_DEPTH);
     // Compared before writing throughout: a mutable borrow marks a component
     // changed whether or not its value moved.
     if transform.translation != at {
@@ -405,14 +486,15 @@ fn spawn_tile(
     cell: IVec2,
     item: usize,
     state: AppState,
+    tint: Color,
 ) -> Entity {
     let centre = cell_centre(cell);
     commands
         .spawn((
             Name::new("tile"),
             BackgroundTile,
-            Sprite::from_image(assets.load(PALETTE[item].art.path)),
-            Transform::from_xyz(centre.x, centre.y, BACKGROUND_Z)
+            Sprite { color: tint, ..Sprite::from_image(assets.load(PALETTE[item].art.path)) },
+            Transform::from_xyz(centre.x, centre.y, depth_for(centre.y) + BACKGROUND_DEPTH)
                 .with_scale(upscale(PALETTE[item].scale)),
             WORLD_LAYER,
             DespawnOnExit(state),
@@ -480,6 +562,17 @@ mod tests {
             }
             assert!(item_of(id).is_some(), "no palette entry paints {:?}", terrain.name);
         }
+    }
+
+    #[test]
+    fn the_view_loads_the_chunks_under_it_and_one_round() {
+        let view = CellRect::new(IVec2::new(-3, -2), IVec2::new(3, 2));
+        let wanted = chunks_wanted(view);
+        let chunks: Vec<ChunkPos> = ChunkPos::covering(wanted).collect();
+        // The view straddles the four chunks round the origin; one more round
+        // that is a square of four by four.
+        assert_eq!(chunks.len(), 16);
+        assert!(chunks.contains(&ChunkPos::new(-2, -2)) && chunks.contains(&ChunkPos::new(1, 1)));
     }
 
     #[test]

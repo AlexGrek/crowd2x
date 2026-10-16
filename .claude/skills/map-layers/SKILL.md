@@ -36,7 +36,7 @@ always `.` (nothing).
 | `Water` | `.o` | `NONE`, `PIPE` |
 
 One value per cell, so wiring and a line cannot share a cell; they meet only in a box.
-`is_underground()` is everything but the ceiling (drawn at `UNDERGROUND_Z` 60, the ceiling at 40).
+`is_underground()` is everything but the ceiling (drawn `UNDERGROUND_DEPTH` 600 over `depth_for` of the overlay's middle, the ceiling 400; `renderer` has the rule).
 
 ## The editor's layer table (`src/editor/mod.rs`)
 

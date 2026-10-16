@@ -126,7 +126,31 @@ pub const TERRAIN: &[Terrain] = &[
     // step over the road.
     Terrain::ground("road", 5),
     Terrain::ground("grass", 3),
+    // The wasteland round every map (`map::wasteland`). Bare earth costs a
+    // little more than a pavement, so a crowd at the edge of a district keeps
+    // to the street rather than wandering the dirt beside it for nothing.
+    Terrain::ground("dirt", 2),
+    Terrain::ground("dirt stones", 2),
+    Terrain::ground("dirt cracked", 2),
+    Terrain::ground("scrub", 2),
+    Terrain::ground("meadow", 3),
+    Terrain::ground("mud", 4),
+    // Seen across, never walked: a pane on the ground.
+    Terrain::pane("water"),
 ];
+
+/// The wasteland's tiles, by the index the catalogue above gives them — named
+/// constants like [`FLOOR`], because the generator asks for one of these for
+/// every cell it makes and a name lookup there would be a string compare per
+/// cell. `the_named_tiles_are_the_catalogue_entries_they_claim_to_be` holds
+/// them to the names.
+pub const DIRT: TerrainId = TerrainId(19);
+pub const DIRT_STONES: TerrainId = TerrainId(20);
+pub const DIRT_CRACKED: TerrainId = TerrainId(21);
+pub const SCRUB: TerrainId = TerrainId(22);
+pub const MEADOW: TerrainId = TerrainId(23);
+pub const MUD: TerrainId = TerrainId(24);
+pub const WATER: TerrainId = TerrainId(25);
 
 impl TerrainId {
     /// The catalogue entry, or `None` for an id this build does not know.
@@ -196,6 +220,21 @@ mod tests {
         assert_eq!(VOID.name(), "void");
         assert_eq!(FLOOR.name(), "floor");
         assert_eq!(WALL.name(), "wall brown");
+        assert_eq!(DIRT.name(), "dirt");
+        assert_eq!(DIRT_STONES.name(), "dirt stones");
+        assert_eq!(DIRT_CRACKED.name(), "dirt cracked");
+        assert_eq!(SCRUB.name(), "scrub");
+        assert_eq!(MEADOW.name(), "meadow");
+        assert_eq!(MUD.name(), "mud");
+        assert_eq!(WATER.name(), "water");
+    }
+
+    #[test]
+    fn water_is_seen_across_and_never_walked() {
+        assert!(!WATER.is_passable());
+        assert!(WATER.is_see_through());
+        assert_eq!(WATER.walk_cost(), 0);
+        assert!(DIRT.walk_cost() > TerrainId::from_name("pavement").unwrap().walk_cost());
     }
 
     #[test]

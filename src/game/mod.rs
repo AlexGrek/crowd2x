@@ -173,12 +173,26 @@ fn clamp_to_map(centre: Vec2, half: Vec2, extent: Vec2) -> Vec2 {
     )
 }
 
+/// Where the camera may be over an endless map: anywhere within
+/// [`crate::map::WORLD_REACH`] of the origin, which is the one limit the
+/// world has — the precision of an `f32`, not an edge.
+fn clamp_to_reach(centre: Vec2) -> Vec2 {
+    let reach = crate::map::WORLD_REACH as f32 * background::TILE;
+    centre.clamp(Vec2::splat(-reach), Vec2::splat(reach))
+}
+
 /// WASD, the arrows, the d-pad and the left stick all move the camera; the
 /// clamp then keeps it over the map.
 ///
 /// One system rather than a move and a separate clamp, because the clamp has
 /// to run after a zoom as well as after a move: zooming out at the edge of the
 /// map widens the view past it, and the camera has to come back in.
+///
+/// **An endless map has no edge to keep it over.** The wasteland round the
+/// site goes on in every direction, streamed in as the view reaches it
+/// (`editor::background::stream_chunks`), so there the camera goes wherever
+/// it is pushed, bar the [`clamp_to_reach`] no one will pan to. Only a map
+/// with nothing round it — one built in code and saved so — is still clamped.
 ///
 /// This writes [`CameraPan`] and never the transform — `render` owns that and
 /// keeps it snapped to whole pixels.
@@ -234,8 +248,14 @@ fn move_camera(
     let half = half_view(window, zoom.get());
     let extent = background::map_extent(&current.map);
 
+    let endless = current.map.is_endless();
+
     for mut pan in &mut cameras {
-        let wanted = clamp_to_map(pan.0 + velocity, half, extent);
+        let wanted = if endless {
+            clamp_to_reach(pan.0 + velocity)
+        } else {
+            clamp_to_map(pan.0 + velocity, half, extent)
+        };
         if wanted != pan.0 {
             pan.0 = wanted;
         }
@@ -342,6 +362,17 @@ mod tests {
         let extent = HALF * 2.0;
         assert_eq!(clamp_to_map(Vec2::ZERO, HALF, extent), HALF);
         assert_eq!(clamp_to_map(extent, HALF, extent), HALF);
+    }
+
+    #[test]
+    fn over_an_endless_map_the_camera_goes_anywhere_but_the_edge_of_float_precision() {
+        let far = Vec2::new(-90_000.0, 1_234_567.0);
+        assert_eq!(clamp_to_reach(far), far);
+        let reach = crate::map::WORLD_REACH as f32 * background::TILE;
+        assert_eq!(clamp_to_reach(Vec2::new(1e9, -1e9)), Vec2::new(reach, -reach));
+        // ...and that far out a pan step is still a pan step.
+        let step = 140.0 / 60.0;
+        assert!(reach + step - reach > step * 0.9);
     }
 
     /// Crossing the screen should take the same time at every zoom, or the

@@ -30,14 +30,17 @@ const STUCK_LOG_TICKS: u64 = 64;
 /// Two ways to miss, and they are deliberately treated differently — the
 /// distinction `Walker::plan` used to draw, kept:
 ///
-/// * **The cheap miss.** A few random candidates all landed on a wall or off
-///   the map. No search ran, so it costs nothing to try again next tick, and
-///   this returns [`GoalProgress::Working`] with nothing queued. Holding off
-///   for an unlucky dice roll would make a wanderer stand still for half a
-///   second on a map with plenty to walk to.
-/// * **The expensive miss.** The candidate *was* passable, and the route to it
-///   flooded everything reachable before finding out there was none. That is
-///   [`GoalProgress::Blocked`], which holds the goal off.
+/// * **The cheap miss.** A few random candidates all landed on a wall, off
+///   the map, or somewhere the map's components say there is no getting to
+///   — the wasteland past the wall of a building at the map's edge. No search
+///   ran, so it costs nothing to try again next tick, and this returns
+///   [`GoalProgress::Working`] with nothing queued. Holding off for an unlucky
+///   dice roll would make a wanderer stand still for half a second on a map
+///   with plenty to walk to.
+/// * **The expensive miss.** The candidate looked reachable, and the route to
+///   it ran out before finding a way — a locked door, or a detour wider than
+///   the search may go. That is [`GoalProgress::Blocked`], which holds the
+///   goal off.
 ///
 /// And a third thing that is not a miss at all: blocked by a *body*. Bodies
 /// move, so it waits a moment and walks the same route again — up to
@@ -60,15 +63,19 @@ impl WanderGoal {
         self.target
     }
 
-    /// A passable cell within [`WANDER_RADIUS`], or `None` if a few tries
-    /// found nothing.
+    /// A passable cell within [`WANDER_RADIUS`] that the unit can get to, or
+    /// `None` if a few tries found nothing.
     ///
     /// Bounded tries rather than a scan: this runs per idle entity, and a
     /// bounded miss costs one wasted tick while a scan of the neighbourhood
-    /// would cost the frame. Reachability is not checked here and cannot
-    /// cheaply be — that is what the route asked for next is for.
+    /// would cost the frame. Reachability is the map's component lookup,
+    /// which is a read: without it a unit in a walled building at the edge of
+    /// a map picks the wasteland past the wall most of the time, and spends
+    /// its idle hours on routes that fail. A locked door is still the route's
+    /// to find out.
     fn pick(ctx: &GoalCtx<'_>, rng: &mut SmallRng) -> Option<Point> {
         let here = ctx.body.center_position();
+        let navigation = ctx.think.map.navigation();
         for _ in 0..WANDER_TRIES {
             let candidate = Point::new(
                 here.x + rng.random_range(-WANDER_RADIUS..=WANDER_RADIUS),
@@ -76,6 +83,7 @@ impl WanderGoal {
             );
             if candidate != here
                 && ctx.think.is_passable(candidate)
+                && navigation.may_reach(here, candidate)
                 && ctx.think.may_use(candidate, ctx.body.home())
             {
                 return Some(candidate);

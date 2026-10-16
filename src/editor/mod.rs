@@ -46,7 +46,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
 
-use crate::characters::{upscale, ART_SCALE, CELL};
+use crate::characters::{depth_for, upscale, ART_SCALE, CELL};
 use crate::map::{GridLayer, Map, ObjectLayer, Size, VOID};
 use crate::render::{cursor_world_pos, CameraPan, CameraTarget, PixelZoom, WorldCamera, WORLD_LAYER};
 use crate::state::AppState;
@@ -66,9 +66,10 @@ const STICK_DEADZONE: f32 = 0.2;
 /// `CROWD2X_STATE=editor`, and nothing else.
 const SCRATCH: (i32, i32) = (24, 16);
 
-/// The cursor overlay sits above every prop and character. The HUD is
-/// `bevy_ui` and composited over the whole canvas, so it needs no depth.
-const CURSOR_Z: f32 = 100.0;
+/// The cursor overlay sits above every prop and character, by this much over
+/// [`depth_for`] of where it is. The HUD is `bevy_ui` and composited over the
+/// whole canvas, so it needs no depth.
+const CURSOR_DEPTH: f32 = 1000.0;
 
 const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y or 1-6 layer\n           wasd or right stick pan   o/r3 x-ray   f5/start save   esc/B maps";
 
@@ -435,7 +436,8 @@ impl CurrentMap {
     fn scratch() -> Self {
         Self {
             name: None,
-            map: Map::new(Size::new(SCRATCH.0, SCRATCH.1), VOID),
+            map: Map::new(Size::new(SCRATCH.0, SCRATCH.1), VOID)
+                .with_wasteland(crate::map::wasteland::DEFAULT_SEED),
         }
     }
 
@@ -522,7 +524,7 @@ impl RectangleDrag {
             let entity = if self.erasing {
                 commands.spawn((
                     Sprite::from_color(ERASE_TINT, Vec2::splat(background::TILE)),
-                    Transform::from_xyz(centre.x, centre.y, RECT_PREVIEW_Z),
+                    Transform::from_xyz(centre.x, centre.y, depth_for(centre.y) + RECT_PREVIEW_DEPTH),
                     WORLD_LAYER,
                     DespawnOnExit(AppState::Editor),
                 ))
@@ -535,7 +537,7 @@ impl RectangleDrag {
                         color: GHOST_TINT,
                         ..default()
                     },
-                    Transform::from_xyz(centre.x, centre.y, RECT_PREVIEW_Z)
+                    Transform::from_xyz(centre.x, centre.y, depth_for(centre.y) + RECT_PREVIEW_DEPTH)
                         .with_scale(upscale(item.scale)),
                     WORLD_LAYER,
                     DespawnOnExit(AppState::Editor),
@@ -558,10 +560,11 @@ impl RectangleDrag {
     }
 }
 
-/// Depth of a rectangle-drag preview sprite — under the single-tile cursor
-/// ghost at [`CURSOR_Z`], but well clear of any background tile or prop so it
-/// always reads as an overlay rather than as something already placed.
-const RECT_PREVIEW_Z: f32 = 90.0;
+/// Depth of a rectangle-drag preview sprite over [`depth_for`] of its cell —
+/// under the single-tile cursor ghost ([`CURSOR_DEPTH`]), but well clear of
+/// any background tile or prop so it always reads as an overlay rather than
+/// as something already placed.
+const RECT_PREVIEW_DEPTH: f32 = 900.0;
 /// Tint for a cell an in-progress erase would clear. Plain colour rather than
 /// the tile's own texture: erasing does not leave that texture behind, so
 /// showing it would say the wrong thing about what release does.
@@ -590,6 +593,15 @@ impl Plugin for EditorPlugin {
                 Update,
                 (background::sync_tile_window, props::sync_prop_window, grids::sync_grid_overlay)
                     .after(ViewSystems)
+                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
+            )
+            // The wasteland under the canvas, loaded before the tile window
+            // reads it.
+            .add_systems(
+                Update,
+                background::stream_chunks
+                    .after(ViewSystems)
+                    .before(background::sync_tile_window)
                     .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
             )
             .add_systems(
@@ -678,7 +690,7 @@ fn spawn_overlay(mut commands: Commands, assets: Res<AssetServer>, tool: Res<Too
         .spawn((
             Name::new("editor cursor"),
             EditorCursor,
-            Transform::from_xyz(0.0, 0.0, CURSOR_Z),
+            Transform::from_xyz(0.0, 0.0, CURSOR_DEPTH),
             // Shown once the cursor is known to be over the window.
             Visibility::Hidden,
             DespawnOnExit(AppState::Editor),
@@ -1060,8 +1072,7 @@ fn update_cursor(
                 }
             }
         };
-        transform.translation.x = snapped.x;
-        transform.translation.y = snapped.y;
+        transform.translation = snapped.extend(depth_for(snapped.y) + CURSOR_DEPTH);
         *visibility = Visibility::Visible;
         // Only the picture turns, not the frame round the cell.
         for (mut sprite, mut ghost) in &mut ghosts {

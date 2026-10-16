@@ -26,7 +26,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::{CurrentMap, PaletteItem, Target, Tool};
-use crate::characters::{upscale, ART, ART_SCALE};
+use crate::characters::{depth_for, upscale, ART, ART_SCALE};
 use crate::map::grid::{power, water};
 use crate::map::utilities::{needs, Network, Supply, Utility};
 use crate::map::{GridLayer, Map, ObjectLayer, Point};
@@ -62,12 +62,14 @@ pub fn value_of(item: usize) -> u8 {
 }
 
 /// The ceiling is above every tile and prop, under the lamps hanging below
-/// it and the cursor.
-const CEILING_Z: f32 = 40.0;
+/// it and the cursor. Over [`depth_for`] of the overlay's middle: one sprite
+/// covers the whole rectangle, so this is what keeps it over a character at
+/// either end of one up to 1600 cells tall.
+const CEILING_DEPTH: f32 = 400.0;
 /// What is under the floor is drawn over everything in the world — it is an
 /// x-ray — lamps included, and under the editor's cursor and rectangle
 /// preview.
-const UNDERGROUND_Z: f32 = 60.0;
+const UNDERGROUND_DEPTH: f32 = 600.0;
 
 /// Texels to a cell side: the art grid an overlay is painted on.
 const TEXELS: i32 = ART as i32;
@@ -251,7 +253,7 @@ pub fn sync_grid_overlay(
         // whole number of cells and a cell is an even number of pixels.
         let cells = (rect.max - rect.min + IVec2::ONE).as_vec2();
         let centre = (rect.min.as_vec2() + cells / 2.0) * crate::map::PIXELS_PER_CELL as f32;
-        let z = if layer.is_underground() { UNDERGROUND_Z } else { CEILING_Z };
+        let z = depth_for(centre.y) + if layer.is_underground() { UNDERGROUND_DEPTH } else { CEILING_DEPTH };
         let entity = commands
             .spawn((
                 Name::new(layer.name()),

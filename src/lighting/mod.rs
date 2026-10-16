@@ -281,6 +281,10 @@ fn light_the_canvas(sim: Res<Sim>, lighting: Option<Res<Lighting>>, mut canvas: 
     let wanted = CanvasLight {
         lightmap: Some(lighting.image.clone()),
         lightmap_size: UVec2::new(lighting.scene.width, lighting.scene.height),
+        lightmap_origin: Vec2::new(
+            (lighting.scene.origin.x * PIXELS_PER_CELL) as f32,
+            (lighting.scene.origin.y * PIXELS_PER_CELL) as f32,
+        ),
         subtiles_per_unit: scene::SUBTILES as f32 / PIXELS_PER_CELL as f32,
         ambient: Vec3::from(ambient),
         indoor: Vec3::from(scene::indoor(ambient)),

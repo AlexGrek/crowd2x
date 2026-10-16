@@ -507,21 +507,26 @@ mod tests {
     }
 
     #[test]
-    fn a_wander_target_that_turns_out_walled_off_holds_wandering_off() {
+    fn a_wander_target_walled_off_is_a_cheap_miss_and_never_holds_wandering_off() {
         // Two cells the wander radius can see, but only one is reachable:
-        // `(2, 0)` sits behind a wall with no way round, so picking it is the
-        // *expensive* miss — a full flood of the reachable region before the
-        // route can say no — and that is the one that holds the goal off.
+        // `(2, 0)` sits behind a wall with no way round. The map's components
+        // say so for nothing, so it is never picked — a cheap miss, tried
+        // again next tick — rather than routed to, failed, and held off for:
+        // the expensive miss is for a cell that only *looks* reachable, a
+        // pocket a lake walls in far out in the wasteland.
         let mut map = Map::new(Size::new(3, 1), FLOOR);
         map.set_terrain(Point::new(1, 0), WALL);
         let mut world = World::new(map);
 
         let mut walker = human(Point::new(0, 0));
-        let held = (0..2000).any(|_| {
+        for t in 0..2000 {
             world.step(&mut walker);
-            walker.brain.goals().cooldown(GoalId::Wander) > 0
-        });
-        assert!(held, "should eventually roll the unreachable candidate and back off");
+            assert_eq!(
+                walker.brain.goals().cooldown(GoalId::Wander),
+                0,
+                "tick {t}: a cell with no way to it should never be routed to"
+            );
+        }
     }
 
     #[test]

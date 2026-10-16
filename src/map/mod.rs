@@ -38,6 +38,25 @@
 //! and [`Map::remove_object`], so a map cannot end up claiming a wall or a
 //! fridge can be walked through. See [`PassabilityMap`] for why it is a
 //! separate structure at all.
+//!
+//! # The site and the world round it
+//!
+//! Everything above is the **site**: the finite rectangle from `(0, 0)` to
+//! [`Map::size`] that was authored, saved and edited. A map from a file, the
+//! district generator or the browser does not stop at its edge — it is
+//! surrounded by the endless [`wasteland`], dirt and scrub and lakes running
+//! off in every direction, which is terrain and nothing else: no props, no
+//! roof, no wiring. [`Map::terrain`], [`Map::is_passable`],
+//! [`Map::is_see_through`] and [`Map::walk_cost`] answer for any cell in the
+//! world; the site's own layers and everything derived from them (the supply,
+//! the features, the lightmap) stay the size of the site, there being nothing
+//! out there for them. The wasteland is a pure function of a seed, cached a
+//! [`chunk`] at a time ([`Map::load_chunks`]) by whatever reads it often — a
+//! camera, the simulation — and loading never changes what a cell is.
+//!
+//! A map built in code ([`Map::new`]) has no wasteland: off the site is
+//! nothing, impassable and opaque, which is the bounded box every unit test
+//! was written against. [`Map::with_wasteland`] gives it one.
 
 // The map is the foundation for a simulation that does not exist yet, so most
 // of it is reached only from tests until there is something to walk around on
@@ -46,6 +65,7 @@
 // callers happen to touch.
 #![allow(dead_code, unused_imports)]
 
+pub mod chunk;
 mod coords;
 pub mod district;
 mod format;
@@ -58,14 +78,20 @@ mod props;
 mod storage;
 mod terrain;
 pub mod utilities;
+pub mod wasteland;
 
-pub use coords::{Point, Size};
+pub use chunk::{Chunk, ChunkGrid, ChunkPos, CHUNK};
+pub use coords::{Bounds, Point, Size};
+pub use wasteland::Wasteland;
 pub use format::{MapFormatError, FORMAT_VERSION};
 pub use grid::GridLayer;
 pub use passability::PassabilityMap;
 pub use props::{Prop, PROPS};
 pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
-pub use terrain::{Passability, Terrain, TerrainId, FLOOR, MIN_WALK_COST, TERRAIN, VOID, WALL};
+pub use terrain::{
+    Passability, Terrain, TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, FLOOR, MEADOW, MIN_WALK_COST, MUD, SCRUB,
+    TERRAIN, VOID, WALL, WATER,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +108,23 @@ pub const PIXELS_PER_CELL: i32 = 48;
 /// The terrain layer every map has. Overlay layers, when they arrive, are
 /// indices above this one.
 pub const BASE: usize = 0;
+
+/// How far past the site's edge reachability is worked out cell by cell
+/// ([`Navigation`]), and so how far a route can swing out into the wasteland
+/// round an obstacle before a search's window would have to grow. Two
+/// chunks: a lake near a district fits inside it.
+pub const NAV_MARGIN: i32 = 2 * CHUNK;
+
+/// How far from the origin, in cells, the world is guaranteed to behave.
+///
+/// The wasteland has no end, and cells are `i32`, but positions are `f32` —
+/// a unit's in cells, a sprite's and the camera's in canvas pixels — and an
+/// `f32` loses precision as it grows: fifty thousand cells out a camera
+/// position is still good to a quarter of a pixel and a unit's to under a
+/// hundredth of a cell, ten times that and a walk's per-tick step starts to
+/// round away. So the camera stops here (`game::move_camera`) — four hours of
+/// panning at the default zoom, which is endless in every way that matters.
+pub const WORLD_REACH: i32 = 50_000;
 
 /// One terrain layer: exactly one tile per cell, row-major.
 #[derive(Clone)]
@@ -188,6 +231,8 @@ impl std::fmt::Debug for Map {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Map")
             .field("size", &self.size)
+            .field("wasteland", &self.wasteland.map(Wasteland::seed))
+            .field("loaded_chunks", &self.chunks.len())
             .field("terrain_layers", &self.terrain.len())
             .field("props", &self.objects(ObjectLayer::Props).len())
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
@@ -222,10 +267,24 @@ pub struct Map {
     /// `GridLayer as usize`: the ceiling, the wiring, the pipes. Authored,
     /// like the terrain, and in nobody's way.
     grids: Vec<Vec<u8>>,
+    /// What is off the site: the endless wasteland, or `None` — nothing at
+    /// all, which is what a map built in code starts with.
+    wasteland: Option<Wasteland>,
+    /// The wasteland, a chunk at a time, for whoever reads it often. A
+    /// cache: a cell reads the same loaded or not.
+    chunks: ChunkGrid<Chunk>,
+}
+
+/// Whether every cell of the chunk at `pos` is on the site, so it would
+/// never be read.
+fn chunk_is_all_site(pos: ChunkPos, site: Bounds) -> bool {
+    let chunk = pos.bounds();
+    site.contains(chunk.origin) && site.contains(chunk.max())
 }
 
 impl Map {
-    /// A map of `size` with its base terrain layer filled with `tile`.
+    /// A map of `size` with its base terrain layer filled with `tile`, and
+    /// nothing round it.
     pub fn new(size: Size, tile: TerrainId) -> Self {
         Self::from_base_layer(size, vec![tile; size.area()])
     }
@@ -245,9 +304,98 @@ impl Map {
             navigation_revision: 0,
             sight: PassabilityMap::new(size),
             grids: GridLayer::ALL.map(|_| vec![0; size.area()]).into(),
+            wasteland: None,
+            chunks: ChunkGrid::new(),
         };
         map.rebuild_passability();
         map
+    }
+
+    /// The same map, surrounded by the wasteland of `seed`.
+    pub fn with_wasteland(mut self, seed: u64) -> Self {
+        self.set_wasteland(Some(Wasteland::new(seed)));
+        self
+    }
+
+    /// What is off the site: the wasteland, or nothing.
+    pub fn wasteland(&self) -> Option<Wasteland> {
+        self.wasteland
+    }
+
+    /// Surround the site with a wasteland, or with nothing. Forgets every
+    /// loaded chunk, which was the other wasteland's ground.
+    pub fn set_wasteland(&mut self, wasteland: Option<Wasteland>) {
+        if self.wasteland != wasteland {
+            self.wasteland = wasteland;
+            self.chunks = ChunkGrid::new();
+            self.invalidate_navigation();
+        }
+    }
+
+    /// Whether the world goes on past the site.
+    pub fn is_endless(&self) -> bool {
+        self.wasteland.is_some()
+    }
+
+    /// The cells the site covers, as [`Bounds`].
+    pub fn site(&self) -> Bounds {
+        Bounds::from(self.size)
+    }
+
+    /// Where reachability is worked out cell by cell: the site, and on an
+    /// endless map [`NAV_MARGIN`] of the wasteland round it. Past it, every
+    /// cell counts as joined to everything that reaches its edge.
+    pub fn navigation_area(&self) -> Bounds {
+        if self.is_endless() { self.site().grown(NAV_MARGIN) } else { self.site() }
+    }
+
+    /// Load the chunk at `pos`, so its cells are read from memory rather
+    /// than worked out again. Returns whether it was loaded now — not when it
+    /// already was, the map has no wasteland, or the chunk is all site.
+    pub fn load_chunk(&mut self, pos: ChunkPos) -> bool {
+        let Some(wasteland) = self.wasteland else {
+            return false;
+        };
+        let site = self.site();
+        if self.chunks.contains(pos) || chunk_is_all_site(pos, site) {
+            return false;
+        }
+        self.chunks
+            .get_or_insert_with(pos, || Chunk::generate(pos, |cell| wasteland.tile(cell, site)));
+        true
+    }
+
+    /// Load every chunk with a cell in `area`; returns how many were loaded
+    /// now.
+    pub fn load_chunks(&mut self, area: Bounds) -> usize {
+        ChunkPos::covering(area).filter(|&pos| self.load_chunk(pos)).count()
+    }
+
+    /// Drop every loaded chunk `keep` says no to; returns how many went.
+    /// Nothing about any cell changes — they are worked out from the seed
+    /// again until something loads them back.
+    pub fn unload_chunks(&mut self, keep: impl FnMut(ChunkPos) -> bool) -> usize {
+        self.chunks.retain(keep)
+    }
+
+    /// How many chunks of wasteland are in memory.
+    pub fn loaded_chunks(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub fn is_chunk_loaded(&self, pos: ChunkPos) -> bool {
+        self.chunks.contains(pos)
+    }
+
+    /// The wasteland's tile at `cell`, off the site: the loaded chunk's, or
+    /// the generator's. `None` with no wasteland.
+    #[inline]
+    fn ground(&self, cell: Point) -> Option<TerrainId> {
+        let wasteland = self.wasteland?;
+        Some(match self.chunks.at(cell) {
+            Some(chunk) => chunk.tile(cell),
+            None => wasteland.tile(cell, self.site()),
+        })
     }
 
     /// An unbuilt map: every cell [`VOID`], and so nothing walkable anywhere.
@@ -271,6 +419,9 @@ impl Map {
         self.size
     }
 
+    /// Whether `point` is on the site — the authored part, which is all an
+    /// edit can touch. The world round it may go on regardless
+    /// ([`Map::is_endless`]).
     pub fn contains(&self, point: Point) -> bool {
         self.size.contains(point)
     }
@@ -286,11 +437,14 @@ impl Map {
         &self.terrain[BASE]
     }
 
-    /// The base-layer tile at `point`, or `None` off the map.
+    /// The base-layer tile at `point`: the site's own, the wasteland's off
+    /// it, or `None` off the site of a map with no wasteland.
+    #[inline]
     pub fn terrain(&self, point: Point) -> Option<TerrainId> {
-        self.size
-            .index_of(point)
-            .map(|index| self.terrain[BASE].tiles[index])
+        match self.size.index_of(point) {
+            Some(index) => Some(self.terrain[BASE].tiles[index]),
+            None => self.ground(point),
+        }
     }
 
     /// Paint a base-layer cell, keeping the passability map in step. Returns
@@ -392,21 +546,46 @@ impl Map {
         self.grid_count(GridLayer::Ceiling)
     }
 
-    /// The static passability map, for pathfinding and steering to hold on to.
+    /// The site's static passability map, for a scan that has already
+    /// worked out an index into it. Off the site it answers "impassable"
+    /// whatever is there: ask [`Map::is_passable`] about the world.
     pub fn passability(&self) -> &PassabilityMap {
         &self.passability
     }
 
-    /// Which cells can be seen through: see-through terrain (floor, a window),
-    /// whatever stands on it. Off the map is opaque.
+    /// Which of the site's cells can be seen through: see-through terrain
+    /// (floor, a window), whatever stands on it. Like [`Map::passability`],
+    /// the site only — [`Map::is_see_through`] answers for the world.
     pub fn sight(&self) -> &PassabilityMap {
         &self.sight
     }
 
     /// Whether an agent can stand at `point`: the terrain allows it and no
-    /// prop is in the way. Off the map is not passable.
+    /// prop is in the way. Off the site, whether the wasteland's ground
+    /// there can be walked; with no wasteland, never.
+    #[inline]
     pub fn is_passable(&self, point: Point) -> bool {
-        self.passability.is_passable(point)
+        match self.size.index_of(point) {
+            Some(index) => self.passability.is_passable_at(index),
+            None => match self.chunks.at(point) {
+                Some(chunk) => chunk.is_passable(point),
+                None => self.ground(point).is_some_and(TerrainId::is_passable),
+            },
+        }
+    }
+
+    /// Whether sight and light cross `point`: [`Map::sight`] on the site,
+    /// the ground off it — which is all of it, the wasteland having no
+    /// walls. Off a map with no wasteland, opaque.
+    #[inline]
+    pub fn is_see_through(&self, point: Point) -> bool {
+        match self.size.index_of(point) {
+            Some(index) => self.sight.is_passable_at(index),
+            None => match self.chunks.at(point) {
+                Some(chunk) => chunk.is_see_through(point),
+                None => self.ground(point).is_some_and(TerrainId::is_see_through),
+            },
+        }
     }
 
     /// What a route pays to step into `point` when it is [passable]: the
@@ -417,6 +596,7 @@ impl Map {
     /// anything that cannot be walked; ask [`Map::is_passable`] first.
     ///
     /// [passable]: Map::is_passable
+    #[inline]
     pub fn walk_cost(&self, point: Point) -> u8 {
         self.terrain(point).map_or(0, TerrainId::walk_cost)
     }

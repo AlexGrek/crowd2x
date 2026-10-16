@@ -526,6 +526,8 @@ struct Checks<'w, 's> {
     /// Likewise the pictures of what is held, counted off the world.
     held: Query<'w, 's, &'static HeldItem>,
     log: Res<'w, LogView>,
+    /// The open map, for how much of the wasteland it has loaded.
+    current: Res<'w, CurrentMap>,
     /// So a scripted tick is the same size as one the game takes, read rather
     /// than written down twice.
     fixed: Res<'w, Time<Fixed>>,
@@ -1466,6 +1468,22 @@ fn perform(
         }
 
         Step::ExpectDrawn {} => expect_drawn(intents, checks),
+
+        Step::ExpectChunks { min, max } => {
+            let map = &checks.current.map;
+            let loaded = map.loaded_chunks();
+            if loaded < *min || loaded > *max {
+                return Err(format!("expected between {min} and {max} chunks loaded, found {loaded}"));
+            }
+            if !checks.area.ready || checks.area.tiles.is_empty() {
+                return Err("nothing is on the canvas to have loaded chunks for".to_string());
+            }
+            let middle = (checks.area.tiles.min + checks.area.tiles.max) / 2;
+            let under = crate::map::ChunkPos::of(background::point_of(middle));
+            (map.is_chunk_loaded(under) || map.site().contains(under.origin()))
+                .then_some(Next::Now)
+                .ok_or(format!("the chunk under the camera, {under:?}, is not loaded"))
+        }
 
         Step::ExpectSelected(wanted) => {
             let actual = intents.selected.get().map(|uid| match uid.kind() {

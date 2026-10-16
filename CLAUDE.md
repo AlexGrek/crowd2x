@@ -12,10 +12,12 @@ when it applies; if two match, load both.
 crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19 (art imported from an earlier
 prototype; all code is new): a pixel-perfect render pipeline, a menu, a map browser, a
 six-layer map editor (floor, props, lamps, ceiling, power grid, sewer pipes), a saved map
-format, a seeded district generator, a lit and wired game screen that runs a simulation, and
-a scripted QA harness that drives all of it. The simulation is one `GameState` advanced by one
-function; every unit runs a brain (routines, goals, tasks, actions) over a body of switchable
-biological processes (hunger, thirst, bladder, fun, energy, satisfaction).
+format, a seeded district generator, an endless procedural wasteland round every map
+(streamed in chunks as the camera and the crowd reach it), a lit and wired game screen that
+runs a simulation, and a scripted QA harness that drives all of it. The simulation is one
+`GameState` advanced by one function; every unit runs a brain (routines, goals, tasks,
+actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
+energy, satisfaction).
 
 ## Commands
 
@@ -56,6 +58,7 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator | `map-generator` |
+| The endless world past a map's edge: the wasteland generator, chunks and streaming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
 | `GameState`, passes, movement, entities, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
@@ -105,6 +108,7 @@ src/map/                map model, format, grid layers, Supply              [map
 src/map/utilities.rs    power and water networks                            [electrician, plumber]
 src/map/mount.rs, src/sim/light_switch.rs  wall-mounted props; light switches and their rooms  [electrician]
 src/map/district.rs     the district generator                              [map-generator]
+src/map/wasteland.rs, chunk.rs  the endless ground round every map; chunks    [wasteland]
 src/sim/                GameState, passes, entities, clock, items           [simulation]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
@@ -117,6 +121,7 @@ tools/door_art.py       draws the door leaves                               [doo
 tools/street_art.py     draws the street lamp and its controller            [electrician]
 tools/switch_art.py     draws the light switch (on and off)                 [electrician]
 tools/ground_art.py     draws the pavement, road and grass tiles            [pixel-artist]
+tools/wasteland_art.py  draws the wasteland's dirt, scrub, meadow, mud, water [wasteland]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

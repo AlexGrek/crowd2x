@@ -165,9 +165,13 @@ pub struct CameraTarget(pub Option<Vec2>);
 #[derive(Resource, Clone, PartialEq)]
 pub struct CanvasLight {
     /// The baked lightmap, `rgba16float` at `subtiles_per_unit` texels per
-    /// world unit, its origin at world (0, 0). `None` draws the canvas unlit.
+    /// world unit, its bottom-left corner at `lightmap_origin`. `None` draws
+    /// the canvas unlit.
     pub lightmap: Option<Handle<Image>>,
     pub lightmap_size: UVec2,
+    /// Where the lightmap starts, in world units: the origin on a bounded
+    /// map, a margin out into the wasteland on an endless one.
+    pub lightmap_origin: Vec2,
     pub subtiles_per_unit: f32,
     /// Linear RGB light under open sky, before any lamp: daylight is white.
     pub ambient: Vec3,
@@ -181,6 +185,7 @@ impl Default for CanvasLight {
         Self {
             lightmap: None,
             lightmap_size: UVec2::ZERO,
+            lightmap_origin: Vec2::ZERO,
             subtiles_per_unit: 0.0,
             ambient: Vec3::ONE,
             indoor: Vec3::ONE,
@@ -208,6 +213,7 @@ struct CanvasParams {
     ambient: Vec4,
     indoor: Vec4,
     lightmap_size: Vec2,
+    lightmap_origin: Vec2,
     subtiles_per_unit: f32,
     lit: f32,
 }
@@ -235,6 +241,14 @@ pub struct PixelCanvas {
 /// Camera that renders the world into the canvas.
 #[derive(Component)]
 pub struct WorldCamera;
+
+/// How far either side of zero the world camera sees in depth. Bevy's 2D
+/// default is 1000, which `characters::depth_for` leaves 100000 pixels from
+/// the origin — a walk into the wasteland, after which everything there is
+/// clipped away. The camera goes no further than `map::WORLD_REACH` (50000
+/// cells, a depth of 24000), and a position is exact to the pixel only up to
+/// 2^24 (a depth under 170000), so this covers every place that can be drawn.
+pub const WORLD_DEPTH: f32 = 1.0e6;
 
 /// Camera that blits the canvas to the window.
 #[derive(Component)]
@@ -363,6 +377,11 @@ fn setup_pipeline(
             ..default()
         },
         RenderTarget::Image(image.clone().into()),
+        Projection::Orthographic(OrthographicProjection {
+            near: -WORLD_DEPTH,
+            far: WORLD_DEPTH,
+            ..OrthographicProjection::default_2d()
+        }),
         Msaa::Off,
         WORLD_LAYER,
         WorldCamera,
@@ -522,6 +541,7 @@ fn light_canvas(
         ambient: light.ambient.extend(1.0),
         indoor: light.indoor.extend(1.0),
         lightmap_size: light.lightmap_size.as_vec2(),
+        lightmap_origin: light.lightmap_origin,
         subtiles_per_unit: light.subtiles_per_unit,
         lit: if light.lightmap.is_some() { 1.0 } else { 0.0 },
     };

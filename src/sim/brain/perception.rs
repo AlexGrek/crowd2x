@@ -323,10 +323,11 @@ fn line_checks(to: Point, mut check: impl FnMut(Check) -> bool) -> bool {
 /// between two walls that meet only at a corner, which would be seeing through
 /// a wall at its seam.
 ///
-/// Terrain and not passability ([`Map::sight`]): a fridge or a bed stops a
-/// walk but not a look over it. Off the map is opaque.
+/// Terrain and not passability ([`Map::is_see_through`]): a fridge or a bed
+/// stops a walk but not a look over it, and neither does a lake. Off a map
+/// with nothing round it is opaque.
 pub fn in_sight(map: &Map, from: Point, to: Point) -> bool {
-    let clear = |(x, y): (i8, i8)| map.sight().is_passable(from.offset(x as i32, y as i32));
+    let clear = |(x, y): (i8, i8)| map.is_see_through(from.offset(x as i32, y as i32));
     line_checks(to - from, |check| clear(check.a) || clear(check.b))
 }
 
@@ -392,8 +393,8 @@ impl Perception {
     /// Two scans with one body. Far enough from every edge that the whole cone
     /// is on the map — nearly every look, on any map worth a crowd — a cell is
     /// one row-major offset from the viewer's own index, read with no bounds
-    /// checks of its own; near an edge, every cell is asked by its coordinates,
-    /// and off the map answers nobody and opaque.
+    /// checks of its own; near an edge — or out in the wasteland past it —
+    /// every cell is asked by its coordinates, of the whole world.
     pub fn look(&mut self, ctx: &Think<'_>, body: &Body) -> Sightings {
         let here = body.center_position();
         let me = body.uid();
@@ -418,7 +419,7 @@ impl Perception {
                 here,
                 |offset| occupancy.is_occupied(here + offset),
                 |offset| occupancy.occupant(here + offset),
-                |(x, y)| sight.is_passable(here.offset(x as i32, y as i32)),
+                |(x, y)| ctx.map.is_see_through(here.offset(x as i32, y as i32)),
             )
         };
         let near = sightings.iter().filter(|seen| seen.range == Range::Near).count();

@@ -91,6 +91,15 @@ pub struct Character;
 /// Painter's-order depth from a world position: characters lower on the screen
 /// are drawn in front. The step per pixel is large enough that a character can
 /// never be interleaved with another character's layers.
+///
+/// **Everything in the world is drawn at a depth from this, never at a fixed
+/// z** — the flat layers too: the ground a long way under it, the x-ray, the
+/// lamps and the editor's cursor hundreds over it, each by its own y. The
+/// world is endless, so a fixed z is one this crosses somewhere: at 10000
+/// pixels up a fixed ground at -100 would be drawn over the people walking on
+/// it. What a canvas shows spans a few dozen of depth at most (a 4320-pixel
+/// canvas at zoom 1 spans 43), so offsets a hundred apart never interleave.
+/// The world camera sees as deep as `render::WORLD_DEPTH` either way.
 pub fn depth_for(y: f32) -> f32 {
     -y * 0.01
 }

@@ -68,6 +68,15 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
   and the toilet stops being recognisable. They are art debt to redraw at 16x16, not a
   second supported resolution, and until then a palette entry has to declare which it is.
   New art is always 16x16 and always `PaletteItem::upscaled`.
+- **Nothing in the world is drawn at a fixed z.** The world is endless (`wasteland`), and
+  `depth_for` grows without bound with it, so a fixed layer is one it crosses somewhere:
+  with the ground at -100, people past cell y 208 walked under it. Every flat layer is an
+  offset from `depth_for` of its own y — ground -1000 (`background::BACKGROUND_DEPTH`),
+  x-ray 400/600, lamps 500, rectangle preview 900, editor cursor 1000 — a hundred apart,
+  more than any canvas spans (0.01 a pixel: 43 for a 4320-pixel canvas at zoom 1). A sprite
+  that moves gets its z recomputed with its x and y (`editor::track_cursor`). The world
+  camera sees `render::WORLD_DEPTH` (1e6) either side; Bevy's 2D default of 1000 clipped
+  everything past cell |y| 2083.
 - `depth_for(y)` gives painter's-order depth from world Y (lower on screen = drawn in
   front); per-character layer offsets are small enough that one character's layers can
   never interleave with another's.

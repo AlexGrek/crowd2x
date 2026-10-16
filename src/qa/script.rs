@@ -647,6 +647,16 @@ pub enum Step {
     /// despawned under it shows an empty map, and an empty map satisfies every
     /// ceiling there is.
     ExpectWorldSprites { min: usize, max: usize },
+    /// How many chunks of the wasteland the open map has loaded, as a range,
+    /// and that the one under the camera is among them.
+    ///
+    /// The endless world is streamed a chunk at a time round the view
+    /// (`editor::background::stream_chunks`). `min` and the chunk under the
+    /// camera say the view's ground was loaded at all; `max` says the chunks
+    /// the camera left behind were dropped, so flying a long way out keeps
+    /// the map the size of a view and not the size of the trip. A map with
+    /// no wasteland loads none and fails any `min` above zero.
+    ExpectChunks { min: usize, max: usize },
 }
 
 fn default_tap() -> f32 {

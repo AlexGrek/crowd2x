@@ -1,0 +1,74 @@
+{
+  "name": "the endless wasteland: every map stands in it, the camera goes out over it, and its ground is streamed a chunk at a time",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "timeout": 120,
+  "steps": [
+    { "note": "a walled yard from before the wasteland existed: it loads standing in the default one" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "look_at": { "x": 6, "y": 4 } },
+    { "wait": 0.3 },
+    { "expect_chunks": { "min": 4, "max": 40 } },
+    { "shot": "the yard in the wasteland" },
+
+    { "note": "an endless map does not clamp the camera: twenty cells off its edge is ground, and it is drawn" },
+    { "look_at": { "x": -20, "y": 4 } },
+    { "wait": 0.3 },
+    { "expect_world_sprites": { "min": 20, "max": 400 } },
+
+    { "note": "a thousand cells out; every chunk round the yard is far behind and has been dropped" },
+    { "look_at": { "x": -1000, "y": 600 } },
+    { "wait": 0.3 },
+    { "expect_world_sprites": { "min": 20, "max": 400 } },
+    { "expect_chunks": { "min": 4, "max": 30 } },
+    { "note": "a dog let loose here, on dry ground near the camera: 28800 pixels up, which is past where a fixed-depth ground was drawn over the people on it" },
+    { "press": "spawn" },
+    { "press": "dog" },
+    { "tick": 1 },
+    { "expect_entities": 1 },
+    { "expect_sprites": 1 },
+    { "shot": "a thousand cells out, a dog on the ground and not under it" },
+
+    { "note": "and on across the world: still the size of a view, not of the trip; the first dog is far behind and not drawn" },
+    { "look_at": { "x": 4000, "y": -3000 } },
+    { "wait": 0.3 },
+    { "expect_chunks": { "min": 4, "max": 30 } },
+
+    { "note": "zoomed right out the view takes in more ground, so more chunks, still bounded by the canvas" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 1 },
+    { "wait": 0.3 },
+    { "expect_world_sprites": { "min": 300, "max": 1200 } },
+    { "expect_chunks": { "min": 9, "max": 60 } },
+    { "shot": "zoomed out over the wasteland: dirt, scrub, meadow and lakes" },
+
+    { "note": "a second dog, 144000 pixels down: past the 1000 of depth a default 2D camera sees, where it was clipped away" },
+    { "press": "spawn" },
+    { "press": "dog" },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+    { "expect_sprites": 1 },
+    { "shot": "a dog out in the wasteland, drawn" },
+    { "note": "both walk the dirt" },
+    { "tick": 600 },
+    { "expect_entities": 2 },
+    { "expect_drawn": {} },
+
+    { "note": "the editor draws the wasteland too, dimmed: the bright part is the map that can be painted" },
+    { "goto": "editor" },
+    { "expect_state": "editor" },
+    { "wait": 0.3 },
+    { "look_at": { "x": 0, "y": 0 } },
+    { "wait": 0.3 },
+    { "expect_chunks": { "min": 4, "max": 40 } },
+    { "shot": "the editor: the yard bright, the wasteland round it dimmed" }
+  ]
+}

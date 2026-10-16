@@ -19,6 +19,9 @@ struct CanvasParams {
     indoor: vec4<f32>,
     // Lightmap size in subtiles; zero when there is no lightmap.
     lightmap_size: vec2<f32>,
+    // World position of the lightmap's bottom-left corner: the origin, or a
+    // margin out into the wasteland round an endless map.
+    lightmap_origin: vec2<f32>,
     // Subtiles per world unit (5 / 48).
     subtiles_per_unit: f32,
     // 0: draw the canvas as it is (the editor), 1: light it.
@@ -57,8 +60,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // uv runs down the canvas; world Y runs up.
     let world = params.camera + vec2<f32>(texel.x + 0.5 - size.x * 0.5, size.y * 0.5 - texel.y - 0.5);
-    let subtile = world * params.subtiles_per_unit;
-    // Off the map is open sky with no lamp in it.
+    let subtile = (world - params.lightmap_origin) * params.subtiles_per_unit;
+    // Off the lightmap is open sky with no lamp in it: the wasteland.
     var baked = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     let inside = all(subtile >= vec2<f32>(0.0)) && all(subtile < params.lightmap_size);
     if (inside) {

@@ -8,6 +8,11 @@ description: The crowd2x map model (src/map/) - Point/Size addressing, terrain c
 The first piece of simulation state, so it follows the simulation rule: **plain Rust, no
 `bevy::` imports**, testable with `cargo test` and no `App`.
 
+The map is a finite **site** standing in an endless **wasteland** (`map::wasteland`,
+`map::chunk`): every cell in the world answers `is_passable`, `terrain` and the rest, and
+`navigation()` folds everything joined to the site's surroundings into one outside
+(`Navigation::is_outside`). All of that is the `wasteland` skill.
+
 - All addressing is `Point { x: i32, y: i32 }` in whole cells — not `usize` (neighbours
   and deltas go negative constantly) and not `f32` (a cell is a hash key and a path node,
   so it has to compare exactly). Y increases upward like world Y, so the eventual drawing

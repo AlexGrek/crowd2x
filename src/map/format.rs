@@ -30,7 +30,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{GridLayer, Map, Object, ObjectLayer, Point, Size, TerrainId, BASE};
+use super::{wasteland, GridLayer, Map, Object, ObjectLayer, Point, Size, TerrainId, Wasteland, BASE};
 
 /// Bumped when a change to the shape below stops older files loading.
 /// Adding the grid layers did not: a file without one has nothing painted on
@@ -42,6 +42,13 @@ pub const FORMAT_VERSION: u32 = 1;
 struct MapFile {
     version: u32,
     size: SizeFile,
+    /// What lies round the site: the seed of its wasteland, or `false` for
+    /// nothing at all (a map built in code and saved). Left out for the
+    /// default seed, so a map made before the wasteland existed saves back
+    /// byte for byte — and loads surrounded by the default wasteland, as
+    /// every map now is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wasteland: Option<serde_json::Value>,
     terrain: TerrainFile,
     /// Keyed by [`ObjectLayer::name`] so the file says which list is which,
     /// rather than depending on the order two arrays happen to be written in.
@@ -96,6 +103,8 @@ pub enum MapFormatError {
     UnknownObjectLayer(String),
     /// A top-level key this build does not know as a grid layer.
     UnknownGridLayer(String),
+    /// `"wasteland"` holding something other than a seed or `false`.
+    MalformedWasteland(String),
     WrongRowCount { expected: i32, found: usize },
     WrongGridRowCount { layer: &'static str, expected: i32, found: usize },
     WrongGridRowWidth { layer: &'static str, row: usize, expected: i32, found: usize },
@@ -127,6 +136,9 @@ impl fmt::Display for MapFormatError {
             }
             Self::UnknownObjectLayer(name) => write!(f, "unknown object layer {name:?}"),
             Self::UnknownGridLayer(name) => write!(f, "unknown map layer {name:?}"),
+            Self::MalformedWasteland(found) => {
+                write!(f, "\"wasteland\" is {found}, expected a seed or false")
+            }
             Self::WrongRowCount { expected, found } => {
                 write!(f, "expected {expected} terrain rows, found {found}")
             }
@@ -213,6 +225,11 @@ impl Map {
                 width: self.size.width,
                 height: self.size.height,
             },
+            wasteland: match self.wasteland() {
+                Some(land) if land.seed() == wasteland::DEFAULT_SEED => None,
+                Some(land) => Some(serde_json::Value::from(land.seed())),
+                None => Some(serde_json::Value::Bool(false)),
+            },
             terrain: TerrainFile {
                 palette: palette.iter().map(|tile| tile.name().to_string()).collect(),
                 layers: vec![LayerFile { rows }],
@@ -271,6 +288,13 @@ impl Map {
         let tiles = decode_layer(layer, size, &palette)?;
 
         let mut map = Map::from_base_layer(size, tiles);
+        map.set_wasteland(match &file.wasteland {
+            None => Some(Wasteland::new(wasteland::DEFAULT_SEED)),
+            Some(serde_json::Value::Bool(false)) => None,
+            Some(value) => Some(Wasteland::new(
+                value.as_u64().ok_or_else(|| MapFormatError::MalformedWasteland(value.to_string()))?,
+            )),
+        });
         for (name, rows) in &file.grids {
             let layer = GridLayer::from_name(name).ok_or_else(|| MapFormatError::UnknownGridLayer(name.clone()))?;
             decode_grid(layer, rows, &mut map)?;
@@ -383,9 +407,10 @@ mod tests {
     use super::*;
     use crate::map::{ObjectKind, FLOOR, VOID, WALL};
 
-    /// A 3x2 room: floor with one wall, a prop and a spawner on it.
+    /// A 3x2 room: floor with one wall, a prop and a spawner on it, in the
+    /// default wasteland like any map from a file.
     fn sample() -> Map {
-        let mut map = Map::new(Size::new(3, 2), FLOOR);
+        let mut map = Map::new(Size::new(3, 2), FLOOR).with_wasteland(wasteland::DEFAULT_SEED);
         map.set_terrain(Point::new(1, 1), WALL);
         map.add_object(
             ObjectLayer::Props,
@@ -684,6 +709,43 @@ mod tests {
             matches!(&error, MapFormatError::UnknownObjectLayer(name) if name == "hazards"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_map_saved_before_the_wasteland_loads_surrounded_by_it() {
+        // `sample` is in the default wasteland, which writes no key — the
+        // shape of every file made before there was one.
+        let json = sample().to_json().unwrap();
+        assert!(!json.contains("wasteland"), "{json}");
+        let map = Map::from_json(&json).unwrap();
+        assert_eq!(map.wasteland(), Some(Wasteland::new(wasteland::DEFAULT_SEED)));
+        assert!(map.is_passable(Point::new(-1, 0)), "dry ground off the edge");
+    }
+
+    #[test]
+    fn a_wasteland_seed_or_none_at_all_survives_a_round_trip() {
+        let seeded = sample().with_wasteland(40500);
+        let json = seeded.to_json().unwrap();
+        assert!(json.contains("\"wasteland\": 40500"), "{json}");
+        assert_eq!(reload(&seeded).wasteland(), Some(Wasteland::new(40500)));
+
+        let mut bounded = sample();
+        bounded.set_wasteland(None);
+        let json = bounded.to_json().unwrap();
+        assert!(json.contains("\"wasteland\": false"), "{json}");
+        let back = reload(&bounded);
+        assert_eq!(back.wasteland(), None);
+        assert!(!back.is_passable(Point::new(-1, 0)), "nothing off the edge");
+        assert_eq!(back.to_json().unwrap(), json);
+    }
+
+    #[test]
+    fn a_wasteland_that_is_neither_a_seed_nor_false_is_refused() {
+        let json = sample()
+            .to_json()
+            .unwrap()
+            .replacen("\"terrain\"", "\"wasteland\": \"lots\",\n  \"terrain\"", 1);
+        assert!(matches!(Map::from_json(&json), Err(MapFormatError::MalformedWasteland(_))));
     }
 
     #[test]

@@ -5,6 +5,12 @@ description: The crowd2x lightmap - day/night ambient (the sun model in sim::sun
 
 # Lighting
 
+The lightmap covers the site and, round a map in the wasteland, `scene::LIGHT_MARGIN` (8
+cells, past a street lamp's reach) of the ground beyond it, so a lamp at the edge lights
+both sides of it. `LightScene::origin` is the cell at its corner and every subtile, chunk,
+ceiling bit and light position counts from there; `light.cell` stays a world cell, for
+switching. The canvas gets `lightmap_origin`; off the lightmap is open sky with no lamp.
+
 An RGB lightmap at **five subtiles a cell** (`scene::SUBTILES`), computed on the GPU by a
 compute shader (`assets/shaders/lighting.wgsl`), **only where something changed**. Three
 parts, each a step further from the simulation:

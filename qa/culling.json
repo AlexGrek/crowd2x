@@ -96,17 +96,17 @@
       "note": "picking goes through the simulation's occupancy grid, not through sprites."
     },
     {
-      "note": "looking at (9,6) clamps the camera to world (416, 312), so the canvas spans"
+      "note": "the yard stands in the wasteland, so nothing clamps the camera: looking at (9,6) puts it on world (456, 312)"
     },
     {
-      "note": "x 256..576 and y 222..402, and the unit at world (456, 312) is at canvas"
+      "note": "and the unit there at the middle of the canvas, (160, 90) - left of the log panel and"
     },
     {
-      "note": "(200, 90) - the middle, clear of the corner panels, which absorb clicks."
+      "note": "below the top one, both of which absorb clicks."
     },
     {
       "mouse": {
-        "x": 200,
+        "x": 160,
         "y": 90
       }
     },
@@ -180,7 +180,7 @@
       "note": "zooming out makes the canvas bigger, so it shows more world and draws more:"
     },
     {
-      "note": "at zoom 1 the whole 576x432 yard is inside a 1280x720 canvas and both are drawn"
+      "note": "at zoom 1 the whole 576x432 yard is inside a 1280x720 canvas and both are drawn, and the wasteland round it fills the rest"
     },
     {
       "key": "q"
@@ -205,8 +205,8 @@
     },
     {
       "expect_world_sprites": {
-        "min": 40,
-        "max": 400
+        "min": 300,
+        "max": 1200
       }
     },
     {
