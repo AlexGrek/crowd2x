@@ -126,7 +126,12 @@ pub enum Task {
 impl Task {
     /// Walk until standing in the middle of `cell`.
     pub const fn move_to(cell: Point) -> Task {
-        Task::MoveTo(MoveTo { cell })
+        Task::MoveTo(MoveTo { cell, beside: false })
+    }
+
+    /// Walk to any of a feature's valid approach cells.
+    pub const fn move_beside(cell: Point) -> Task {
+        Task::MoveTo(MoveTo { cell, beside: true })
     }
 
     /// Take `item` out of whatever is in `from`, from a cell beside it.

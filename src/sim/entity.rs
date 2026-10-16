@@ -456,6 +456,14 @@ impl Think<'_> {
         self.is_passable(cell) && self.doors.lets_through(cell, key)
     }
 
+    /// What stepping into `cell` costs a body holding `key`, or `None` where
+    /// [`Think::is_passable_with`] says it cannot go: the terrain's walk cost,
+    /// so a route keeps to the pavement and crosses the road
+    /// ([`crate::sim::path`]).
+    pub fn step_cost_with(&self, cell: Point, key: Option<PropertyId>) -> Option<u32> {
+        self.is_passable_with(cell, key).then(|| self.map.walk_cost(cell) as u32)
+    }
+
     /// Whether a body holding `key` may go to `cell` and use what is there:
     /// it is nobody's property, or its own. Asked of a feature before it is
     /// chosen, so nobody plans a meal from a stranger's fridge.

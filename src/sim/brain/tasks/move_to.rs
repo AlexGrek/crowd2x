@@ -8,6 +8,7 @@ use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MoveTo {
     pub cell: Point,
+    pub beside: bool,
 }
 
 impl TaskExecutor for MoveTo {
@@ -17,7 +18,17 @@ impl TaskExecutor for MoveTo {
     /// the step.
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         if ctx.action.is_none() {
-            return match Action::walk_to(ctx.walk, ctx.think, self.cell) {
+            let destinations = if self.beside {
+                crate::sim::path::Destinations::from_cells(
+                    self.cell
+                        .cardinal_neighbours()
+                        .into_iter()
+                        .filter(|&c| ctx.think.is_passable_with(c, ctx.walk.body().home())),
+                )
+            } else {
+                crate::sim::path::Destinations::one(self.cell)
+            };
+            return match Action::walk_to_any(ctx.walk, ctx.think, destinations) {
                 Some(walk) => {
                     *ctx.action = walk;
                     TaskResult::Executing
@@ -29,26 +40,50 @@ impl TaskExecutor for MoveTo {
     }
 
     fn describe(&self) -> String {
-        format!("move to {}, {}", self.cell.x, self.cell.y)
+        format!(
+            "move {} {}, {}",
+            if self.beside { "beside" } else { "to" },
+            self.cell.x,
+            self.cell.y
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::rig::Rig;
     use super::super::super::task::Task;
+    use super::super::rig::Rig;
     use super::*;
-    use crate::map::{Map, Size, FLOOR};
+    use crate::map::{FLOOR, Map, Size};
+
+    #[test]
+    fn a_feature_approach_excludes_a_door_locked_to_this_unit() {
+        let map = crate::sim::property::tests::house();
+        let world = crate::sim::testing::World::new(map.clone());
+        assert!(!world.ctx().is_passable_with(Point::new(5, 2), None));
+        let mut rig = Rig::new(map, Point::new(5, 0));
+        let mut task = Task::move_beside(Point::new(5, 1));
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert_ne!(rig.walk.destination(), Some(Point::new(5, 2)));
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
+    }
 
     #[test]
     fn a_move_to_task_succeeds_standing_in_the_middle_of_its_cell() {
         let mut rig = Rig::new(Map::new(Size::new(9, 9), FLOOR), Point::new(1, 1));
         let mut task = Task::move_to(Point::new(5, 3));
 
-        assert_eq!(rig.tick(&mut task), TaskResult::Executing, "the walk starts at once");
+        assert_eq!(
+            rig.tick(&mut task),
+            TaskResult::Executing,
+            "the walk starts at once"
+        );
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         let (x, y) = rig.walk.body().position();
-        assert!((x - 5.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3, "stopped at {x}, {y}");
+        assert!(
+            (x - 5.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3,
+            "stopped at {x}, {y}"
+        );
     }
 
     #[test]

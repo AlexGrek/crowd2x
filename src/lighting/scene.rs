@@ -136,8 +136,17 @@ pub const EMITTERS: &[(&str, Emission)] = &[
     ),
 ];
 
+/// What something called `name` gives off, if anything. The scene asks
+/// [`emitter`]; this is for the tests that hold the catalogues to it.
+#[cfg(test)]
 pub fn emission(name: &str) -> Option<Emission> {
-    EMITTERS.iter().find(|(n, _)| *n == name).map(|(_, e)| *e)
+    emitter(name).map(|(_, e)| e)
+}
+
+/// What something called `name` gives off, and the name it is listed under
+/// for as long as the program runs — which is what a [`Light`] keeps.
+fn emitter(name: &str) -> Option<(&'static str, Emission)> {
+    EMITTERS.iter().find(|(n, _)| *n == name).copied()
 }
 
 /// The light everywhere, before any lamp, at a time of day (hours since
@@ -179,6 +188,10 @@ pub struct Light {
     /// The map cell of the prop it came from, so the game can switch the
     /// light of the computer somebody sat down at.
     pub cell: Point,
+    /// What it is, by the name the map stores — what the supply is asked
+    /// about it by, since a ceiling lamp can be switched off at its room's
+    /// light switch and a fridge's wiring cannot.
+    pub name: &'static str,
 }
 
 impl Light {
@@ -265,7 +278,7 @@ impl LightScene {
             .iter()
             .chain(map.objects(ObjectLayer::Lamps))
             .filter_map(|prop| {
-                let e = emission(prop.kind.as_str())?;
+                let (name, e) = emitter(prop.kind.as_str())?;
                 Some(Light {
                     pos: [prop.at.x as f32 * to_subtiles, prop.at.y as f32 * to_subtiles],
                     radius: e.radius * SUBTILES as f32,
@@ -275,6 +288,7 @@ impl LightScene {
                     needs_power: crate::map::utilities::needs(prop.kind.as_str())
                         == Some(crate::map::utilities::Utility::Power),
                     cell: prop.cell(),
+                    name,
                 })
             })
             .collect();
@@ -331,11 +345,11 @@ impl LightScene {
         }
     }
 
-    /// Switch a light; dirties the chunks it reaches if anything changed.
-    /// Power changed — a box switched: every always-on light that needs
-    /// power is lit exactly when its cell has it. A switchable one (a
-    /// computer's screen) is left to whoever switches it, since without
-    /// power nobody can be using it. Returns how many lights changed.
+    /// Power changed — a box switched, or a room's light switch: every
+    /// always-on light that needs power is lit exactly when the supply
+    /// serves it. A switchable one (a computer's screen) is left to whoever
+    /// switches it, since without power nobody can be using it. Returns how
+    /// many lights changed.
     pub fn apply_supply(&mut self, supply: &Supply) -> usize {
         let mut changed = 0;
         for id in 0..self.lights.len() {
@@ -343,12 +357,13 @@ impl LightScene {
             if !light.needs_power || light.switchable {
                 continue;
             }
-            let powered = supply.is_live(crate::map::utilities::Network::Wiring, light.cell);
+            let powered = supply.serves(light.name, light.cell);
             changed += usize::from(self.set_enabled(id, powered));
         }
         changed
     }
 
+    /// Switch a light; dirties the chunks it reaches if anything changed.
     pub fn set_enabled(&mut self, id: usize, enabled: bool) -> bool {
         if self.lights[id].enabled == enabled {
             return false;
@@ -724,6 +739,31 @@ mod tests {
             .collect();
         assert_eq!(dark.apply_supply(&Supply::with_boxes_off(&map, &boxes)), 1);
         assert!(!dark.lights[0].enabled);
+    }
+
+    /// A room's light switch off: its lamp goes dark and the street lamp
+    /// on the same wiring outside stays lit.
+    #[test]
+    fn a_lamp_goes_dark_at_its_light_switch_and_nothing_else_does() {
+        let mut map = Map::new(Size::new(16, 12), FLOOR);
+        roofed_room(&mut map, 2, 2, 10, 9, Point::new(6, 2));
+        let (lamp, post) = (Point::new(6, 6), Point::new(13, 6));
+        map.add_object(ObjectLayer::Lamps, Object { at: Point::new(6 * 48 + 24, 6 * 48 + 24), kind: ObjectKind::new("ceiling lamp") });
+        map.add_object(ObjectLayer::Props, Object { at: Point::new(13 * 48 + 24, 6 * 48 + 24), kind: ObjectKind::new("street lamp") });
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 0), Point::new(15, 0));
+        let mut scene = LightScene::from_map(&map, &Supply::from_map(&map));
+        assert_eq!(scene.lights.iter().filter(|light| light.enabled).count(), 2);
+        scene.take_dirty();
+
+        let room: Vec<Point> = (3..10).flat_map(|x| (3..9).map(move |y| Point::new(x, y))).collect();
+        assert!(room.contains(&lamp) && !room.contains(&post));
+        assert_eq!(scene.apply_supply(&Supply::from_map(&map).with_lights_off(room)), 1);
+        let ceiling = scene.lights.iter().find(|light| light.cell == lamp).unwrap();
+        assert!(!ceiling.enabled && ceiling.name == "ceiling lamp");
+        assert!(scene.lights.iter().find(|light| light.cell == post).unwrap().enabled);
+        assert!(!scene.take_dirty().is_empty(), "switched, not rebuilt: its chunks re-bake");
+        assert_eq!(scene.lights_at(sub(6), sub(7))[0], 0.0, "the room is dark");
+        assert_eq!(scene.apply_supply(&Supply::from_map(&map)), 1, "and lit again");
     }
 
     #[test]

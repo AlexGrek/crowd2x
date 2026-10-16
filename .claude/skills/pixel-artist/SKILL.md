@@ -18,6 +18,7 @@ why). Art is linked to code and map files **by name, never by index**.
 | Clothes | `assets/human/clothes_<style>_<colour>[_<trousers>].png` | `human::CLOTHES` (generated, plus the imported swimsuits) |
 | Eyes | `assets/human/eyes_<colour>.png` | `human::EYES` |
 | Floors / walls | `assets/<name>.png` | `src/editor/background.rs` palette, `PaletteItem::upscaled("name", "file.png")` |
+| Outdoor ground | `assets/pavement.png`, `road.png`, `grass.png`, drawn by `uv run tools/ground_art.py` from masks (must tile seamlessly) | the same palette; the walk cost is the terrain's (`map` skill) |
 | Props | `assets/<name>.png` | `src/editor/props.rs` palette; `animated(name, path, frames)` for a strip, `.used(path, frames)` for an in-use look |
 | Held items | `assets/<name>.png` (any size) | `src/characters/item.rs` `art()` → `ItemArt::Texture` |
 | Dog | `assets/dog_idle*.png`, 4 frames side by side | `src/characters/dog.rs` |

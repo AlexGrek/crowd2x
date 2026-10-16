@@ -579,6 +579,11 @@ pub enum Step {
     /// button is the way a player does it; this is for a test about what
     /// follows.
     SwitchBox { x: i32, y: i32, on: bool },
+    /// Flip the light switch in a cell on or off, on the command queue the
+    /// game uses — applied by the next tick. A click on the switch is the way
+    /// a player does it (`mouse` and `click`); this is for a test that cannot
+    /// know where on screen the switch is.
+    SwitchLight { x: i32, y: i32, on: bool },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.
     ///

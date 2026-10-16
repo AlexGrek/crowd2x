@@ -65,6 +65,14 @@ respect the split:
   `PaletteItem::posed(name, path, frames)` is a strip the game picks the frame of (no
   `StripAnimation`): the doors, whose `DoorLeaf` is turned and mirrored to fit its wall at
   spawn (`DoorLeaf::pose`) and set by `game::props::swing_doors` — the `doors` skill.
+  **A wall-mounted prop** (`map::PROPS` `wall_mounted`: the `"light switch"`) is not free
+  placement: `props::placement` sends it through `map::mount::mount`, so `place` refuses it
+  (returns `false`) on a cell with no wall beside it or with anything standing in it, and
+  otherwise stores it on the edge of the wall nearest the pointer. It is drawn at its cell's
+  centre turned onto that wall (`props::on_wall`, private `Fit::Wall`), deep by its stored
+  `at.y`; its posed frames are a `SwitchPlate` set by `game::props::flip_switches`. The
+  cursor's ghost shows it turned onto its wall, or red (`REFUSED_TINT`) where a press would
+  place nothing (`electrician`).
 - **lamps** (`props::LAMP_PALETTE`, the map's `Lamps` object layer) — placed and erased
   exactly like props, drawn by the same `PropWindow`, but at a fixed `LAMP_Z` above every
   character, since a lamp hangs from the ceiling, and **blocking nothing** (`map::PROPS`

@@ -56,7 +56,7 @@ impl RelieveGoal {
             Stand::Nowhere => return false,
             Stand::Here => {}
             Stand::At(cell) => {
-                let _ = ctx.tasks.push_back(Task::move_to(cell));
+                let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
         }
         let _ = ctx.tasks.push_back(Task::use_toilet(toilet, TOILET_SECONDS));

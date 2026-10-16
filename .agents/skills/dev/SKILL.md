@@ -287,7 +287,7 @@ This is the first question to answer, and mostly the compiler answers it for you
 | | writes the entity table | allocates | parallelisable |
 | --- | --- | --- | --- |
 | `spawn_pass` | **yes** — the only thing that does | yes | no |
-| `process_pass` | **no** | no | that is what it is for |
+| `process_pass` | **no** | route-buffer growth only | that is what it is for |
 
 `process_pass` is handed a `FrozenEntities`: the table with its membership frozen. It
 derefs to `&Entities` so every read works unchanged, and it deliberately has **no
@@ -305,8 +305,11 @@ is a type and not a comment:
 - Structural mutation is the one thing that genuinely cannot be parallelised. Two threads
   moving different entities never conflict; two threads pushing to one `Vec` always do.
 
-The payoff is concrete: `process_pass` touches no allocator at all, and it is the pass that
-can be handed to a thread pool without changing shape.
+The entity table and tick buffers never grow in `process_pass`, and the parallel rounds
+can run on a thread pool without changing shape. Routing reuses generation-stamped scratch
+and walker buffers; warming those buffers or retaining an exhausted search can allocate.
+A completed far route fills its retained buffer directly, and a detour replaces a short
+prefix without copying the far tail. There is no shared per-tick search budget yet.
 
 #### Why `&mut` rather than `-> GameState`
 

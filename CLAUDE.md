@@ -52,7 +52,7 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD | `game-screen` |
 | The map data model, passability, catalogues, spawners, the file format | `map` |
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
-| Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers | `electrician` |
+| Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator | `map-generator` |
@@ -71,8 +71,9 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
   an `Intent`, a `Command` or an `Effect`; never a Bevy system that decides something or a
   `Component` holding agent state. An earlier prototype died at ~100 actors from violating
   this (`dev` skill, "Scaling to thousands of actors").
-- **No per-agent scan of other agents, no allocation in a tick, determinism** (same seed,
-  same world).
+- **No per-agent scan of other agents; keep hot loops allocation-free; preserve determinism**
+  (same seed, same world). Routing reuses scratch and route buffers, with allocation only
+  when those buffers grow or an exhausted search retains its continuation (`brain-engineer`).
 - **Anything that should render carries `WORLD_LAYER`**, and nothing may land on a fractional
   pixel; verify with `tools/check_pixel_grid.py` after touching rendering (`renderer`).
 - **Art is 16x16 and never stored pre-upscaled**; the engine scales it (`renderer`).
@@ -102,6 +103,7 @@ src/editor/             the editor, LAYERS, map windows, grid overlay       [edi
 src/game/               the game screen: actors, pool, speed, hud, panels   [game-screen]
 src/map/                map model, format, grid layers, Supply              [map, map-layers]
 src/map/utilities.rs    power and water networks                            [electrician, plumber]
+src/map/mount.rs, src/sim/light_switch.rs  wall-mounted props; light switches and their rooms  [electrician]
 src/map/district.rs     the district generator                              [map-generator]
 src/sim/                GameState, passes, entities, clock, items           [simulation]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
@@ -113,6 +115,8 @@ tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wir
 tools/human_art.py      draws the paperdoll's hair and outfits     [pixel-artist]
 tools/door_art.py       draws the door leaves                               [doors]
 tools/street_art.py     draws the street lamp and its controller            [electrician]
+tools/switch_art.py     draws the light switch (on and off)                 [electrician]
+tools/ground_art.py     draws the pavement, road and grass tiles            [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

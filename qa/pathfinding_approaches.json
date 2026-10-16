@@ -1,0 +1,119 @@
+{
+  "name": "a fridge with a sealed near side is still reachable from another side",
+  "state": "game",
+  "open": "approaches",
+  "given": {
+    "maps": [
+      {
+        "name": "approaches",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 8,
+            "height": 6
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1",
+                  "1,1,1,2,1,1,1,1",
+                  "1,1,2,1,1,1,1,1",
+                  "1,1,1,2,1,1,1,1",
+                  "1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B----...",
+            "....-...",
+            "....-...",
+            "........",
+            "........",
+            "........"
+          ],
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 24,
+                  "y": 24
+                },
+                "kind": "transformer"
+              },
+              {
+                "at": {
+                  "x": 216,
+                  "y": 120
+                },
+                "kind": "fridge"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 1,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "tick": 20000
+    },
+    {
+      "expect_log": "ate at the fridge at 4, 2"
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "reachable side of the fridge"
+    }
+  ]
+}

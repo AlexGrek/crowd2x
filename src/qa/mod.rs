@@ -973,6 +973,11 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::SwitchLight { x, y, on } => {
+            intents.sim_input.0.switch_light(crate::map::Point::new(*x, *y), *on);
+            Ok(Next::Now)
+        }
+
         Step::Spawn { kind, x, y } => {
             let kind = entity_kind(kind)?;
             intents

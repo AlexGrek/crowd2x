@@ -128,6 +128,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
 | `{"select_box": {"x": 4, "y": 1}}` | Select the distribution box in a cell, opening its panel (`switch off`/`switch on`, `close`). Game screen. |
 | `{"switch_box": {"x": 4, "y": 1, "on": false}}` | Switch a box on the game's command queue; applied by the next tick, like `spawn`. |
+| `{"switch_light": {"x": 7, "y": 4, "on": false}}` | Flip the light switch in a cell (and so its whole room) on the command queue; applied by the next tick. The player's way is a click on it: `look_at` its cell, then `mouse {"x": 160, "y": 90}` + `click` (`qa/light_switch.json`). |
 | `{"xray": "power"}` | Show the grid layers' x-ray: `off`, `ceiling`, `power`, `water` or `all` — where `o` would step to. Either map screen. |
 | `{"look_at": {"x": 128, "y": 128}}` | Point the game camera at the middle of a cell, through the map clamp. Takes effect next frame. |
 | `{"note": "..."}` | Say what the next steps are for; goes to the log. |

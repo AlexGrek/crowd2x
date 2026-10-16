@@ -10,14 +10,17 @@
 //! # Two stages, and the difference between them is what they can see
 //!
 //! * **Far** — [`Walker::route_to`], point to point over the *static*
-//!   passability map. It does not know the crowd exists. The terrain does not
+//!   passability map, the cheapest way by the terrain's walk costs — along
+//!   the pavement and over the road, not down it. It does not know the crowd
+//!   exists. The terrain does not
 //!   move, so a route over the terrain stays true for as long as the walker
 //!   takes to walk it, and nothing this stage reads changes while the round
 //!   runs — which is what lets every walker in the world plan at the same
 //!   time, on every thread there is.
 //! * **Near** — [`Walker::detour`], on a move the world refused. The next
 //!   [`DETOUR_CELLS`] cells of the plan are thrown away and re-planned against
-//!   passability **as it is at this moment**, crowd included, ending at the
+//!   passability **as it is at this moment**, crowd included and by the same
+//!   costs — a detour steps onto the road only when it has to — ending at the
 //!   same cell they ended at. The far route past that point is untouched,
 //!   because it is still right: whatever was in the way is a body, and bodies
 //!   move.
@@ -45,14 +48,14 @@ use crate::map::Point;
 
 use super::brain::ActionState;
 use super::entity::{Body, Think};
-use super::path::{self, Path};
+use super::path::{self, Destinations, Path, PathFinder, SearchStatus};
 use super::uid::Uid;
 use super::{Intent, MoveOutcome};
 
 /// The far stage's budget, in cells expanded. Deliberately large: a walker
 /// crossing a real map should be limited by the map and not by this, and the
-/// number is here to bound the *unreachable* case rather than the long one.
-/// See [`path::PathFinder::find`].
+/// number bounds one tick of work; unfinished static searches resume next tick.
+/// See [`path::PathFinder::advance`].
 pub const FAR_LIMIT: usize = 65_536;
 
 /// How many cells of the plan the near stage throws away and replaces.
@@ -92,16 +95,15 @@ pub const MAX_STEP: f32 = 0.5;
 /// position, a route, and somewhere that route ends" is not specific to any of
 /// them.
 ///
-/// Not `Copy`, and that is the [`Path`]: a route is a `Vec`, and one per
-/// walker is the cost of the whole feature. It is paid once per route and not
-/// per tick — walking a path allocates nothing, and neither does being blocked
-/// on one that a detour happens to fit inside.
+/// Route storage is boxed once at spawn. Its far and repair buffers retain
+/// capacity across walks. Only unfinished static searches retain their own
+/// search scratch between ticks.
 #[derive(Clone, Debug)]
 pub struct Walker {
     body: Body,
     /// How to get where it is going, cell by cell, orthogonally. Empty means
     /// it is not going anywhere.
-    path: Path,
+    route: Box<Route>,
     /// Cells per second.
     speed: f32,
 }
@@ -115,11 +117,29 @@ thread_local! {
     pub(crate) static ROUTES_ASKED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// Route buffers live together, allocated once at spawn rather than inflating
+/// every unit's hot body/brain data or allocating a task queue per walk.
+#[derive(Clone, Debug, Default)]
+struct Route {
+    path: Path,
+    repair: Vec<Point>,
+    pending: Option<Box<PathFinder>>,
+    request: Option<RouteRequest>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RouteRequest {
+    start: Point,
+    goals: Destinations,
+    fallback: Option<Destinations>,
+    key: Option<super::property::PropertyId>,
+}
+
 impl Walker {
     pub fn new(uid: Uid, cell: Point, speed: f32) -> Walker {
         Walker {
             body: Body::at_cell(uid, cell),
-            path: Path::none(),
+            route: Box::default(),
             speed,
         }
     }
@@ -144,7 +164,7 @@ impl Walker {
     /// lives. What remains is arithmetic, which is exactly the shape the read
     /// phase wants — no RNG, no search, no branch on the crowd.
     pub fn think(&self, ctx: &Think<'_>) -> Intent {
-        let Some(step) = self.path.current() else {
+        let Some(step) = self.route.path.current() else {
             return Intent::Idle;
         };
         // A door ahead that is not open all the way: stand and wait for it.
@@ -186,16 +206,17 @@ impl Walker {
             return;
         };
         self.body.set_position(*to);
-        if self.path.remaining().len() > 1 && self.path.current() == Some(self.body.center_position())
+        if self.route.path.len() > 1
+            && self.route.path.current() == Some(self.body.center_position())
         {
-            self.path.advance();
+            self.route.path.advance();
         }
     }
 
     /// Which way it is going: from where it stands to the middle of the next
     /// cell of the route. `None` with no route, or standing on its end.
     pub fn heading(&self) -> Option<(f32, f32)> {
-        let step = self.path.current()?;
+        let step = self.route.path.current()?;
         let (x, y) = self.body.position();
         let (dx, dy) = (step.x as f32 + 0.5 - x, step.y as f32 + 0.5 - y);
         (dx * dx + dy * dy > ARRIVED * ARRIVED).then_some((dx, dy))
@@ -223,32 +244,78 @@ impl Walker {
     /// somewhere else, hold off, give up on the whole idea — is a decision,
     /// and belongs to whoever asked.
     pub fn route_to(&mut self, ctx: &Think<'_>, cell: Point) -> bool {
+        self.route_to_any(ctx, Destinations::one(cell))
+    }
+
+    /// A multi-destination walk succeeds at the cheapest reachable approach.
+    /// Budget exhaustion keeps the action running, with no movement until the
+    /// static search finishes. It never becomes a false unreachable result.
+    pub fn route_to_any(&mut self, ctx: &Think<'_>, goals: Destinations) -> bool {
+        self.halt();
         #[cfg(test)]
         ROUTES_ASKED.with(|asked| asked.set(asked.get() + 1));
+        let free = Destinations::from_cells(
+            goals
+                .as_slice()
+                .iter()
+                .copied()
+                .filter(|&cell| ctx.occupancy.is_free_for(cell, self.body.uid())),
+        );
+        let prefer_free = goals.as_slice().len() > 1 && free.first().is_some() && free != goals;
+        self.route.request = Some(RouteRequest {
+            start: self.body.center_position(),
+            goals: if prefer_free { free } else { goals },
+            fallback: prefer_free.then_some(goals),
+            key: self.body.home(),
+        });
+        self.continue_route(ctx) != SearchStatus::Unreachable
+    }
 
-        let here = self.body.center_position();
-        let key = self.body.home();
-        match path::find_path(here, cell, FAR_LIMIT, |c| ctx.is_passable_with(c, key)) {
-            // Already in the cell, which still means walking to the middle of
-            // it: a route of one step, ticked off by `advance` on arrival.
-            Some(steps) if steps.is_empty() => {
-                self.path = Path::new(vec![cell]);
-                true
-            }
-            Some(steps) => {
-                self.path = Path::new(steps);
-                true
-            }
-            None => {
-                self.path.clear();
-                false
-            }
+    fn continue_route(&mut self, ctx: &Think<'_>) -> SearchStatus {
+        let mut request = self.route.request.expect("a route is being planned");
+        if request.start != self.body.center_position() || request.key != self.body.home() {
+            path::recycle(&mut self.route.pending);
+            request.start = self.body.center_position();
+            request.key = self.body.home();
+            self.route.request = Some(request);
         }
+        let status = path::search(
+            &mut self.route.pending,
+            ctx.map,
+            request.start,
+            request.goals,
+            FAR_LIMIT,
+            |c| ctx.step_cost_with(c, request.key),
+            self.route.path.output(),
+        );
+        match status {
+            SearchStatus::Found(cell) => {
+                self.route.request = None;
+                if self.route.path.is_done() {
+                    self.route.path.single(cell);
+                }
+            }
+            SearchStatus::Unreachable => {
+                if let Some(fallback) = request.fallback {
+                    self.route.request = Some(RouteRequest {
+                        goals: fallback,
+                        fallback: None,
+                        ..request
+                    });
+                    return self.continue_route(ctx);
+                }
+                self.route.request = None;
+            }
+            SearchStatus::BudgetExhausted => {}
+        }
+        status
     }
 
     /// Stop walking: drop the route, wherever it was going.
     pub fn halt(&mut self) {
-        self.path.clear();
+        path::recycle(&mut self.route.pending);
+        self.route.request = None;
+        self.route.path.clear();
     }
 
     /// **Step directly onto `cell`, no search.** For the one case a route
@@ -262,7 +329,8 @@ impl Walker {
     /// route, the way [`Walker::route_to`] does, and a claim already held by
     /// somebody else refuses the step exactly as a wall would.
     pub fn enter(&mut self, cell: Point) {
-        self.path = Path::new(vec![cell]);
+        self.halt();
+        self.route.path.single(cell);
     }
 
     /// **The reaction round for a walk in progress.** Repair the route if the
@@ -274,17 +342,23 @@ impl Walker {
     ///   [`ActionState::Finished`]
     /// * otherwise → [`ActionState::Running`]
     pub fn advance(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> ActionState {
+        if self.route.request.is_some() {
+            return match self.continue_route(ctx) {
+                SearchStatus::Unreachable => ActionState::Failed,
+                SearchStatus::Found(_) | SearchStatus::BudgetExhausted => ActionState::Running,
+            };
+        }
         if outcome.is_blocked() && !self.detour(ctx) {
             return ActionState::Failed;
         }
         // The last step, which `apply` leaves for arrival rather than entry.
-        if self.path.remaining().len() == 1
-            && self.path.current() == Some(self.body.center_position())
+        if self.route.path.len() == 1
+            && self.route.path.current() == Some(self.body.center_position())
             && self.is_centred()
         {
-            self.path.advance();
+            self.route.path.advance();
         }
-        if self.path.is_done() {
+        if self.route.path.is_done() {
             ActionState::Finished
         } else {
             ActionState::Running
@@ -302,35 +376,41 @@ impl Walker {
     /// from the far stage and the reason it can find a way round a body the
     /// far stage cannot see.
     ///
-    /// The target cell itself is allowed to be occupied. Refusing it would
-    /// make a walker whose next-but-four cell happens to have somebody in it
-    /// throw away a good route; letting it stand means the walker gets there,
-    /// is blocked, and detours again — by which time whoever it was has
-    /// probably moved.
+    /// An intermediate rejoin cell may be occupied, since its occupant may
+    /// leave before we reach it. A final destination must be free: repeatedly
+    /// repairing the last step would bypass the goal's bounded wait/retry.
     pub fn detour(&mut self, ctx: &Think<'_>) -> bool {
-        let remaining = self.path.remaining();
-        if remaining.is_empty() {
+        if self.route.path.is_done() {
             return true;
         }
-        let cells = remaining.len().min(DETOUR_CELLS);
-        let target = remaining[cells - 1];
-
+        let cells = self.route.path.len().min(DETOUR_CELLS);
+        let target = self.route.path.remaining().nth(cells - 1).unwrap();
+        let final_target = Some(target) == self.route.path.destination();
         let uid = self.body.uid();
         let key = self.body.home();
         let here = self.body.center_position();
-        let detour = path::find_path(here, target, DETOUR_LIMIT, |cell| {
-            ctx.is_passable_with(cell, key) && (cell == target || ctx.occupancy.is_free_for(cell, uid))
-        });
-
-        match detour {
-            Some(detour) => {
-                self.path.splice(cells, detour);
-                true
-            }
-            None => {
-                self.path.clear();
-                false
-            }
+        // A local crowd snapshot is valid only for this tick. An exhausted
+        // repair fails back to the goal's bounded wait/retry, retaining the
+        // blocking body's ID. Only static far searches resume across ticks.
+        self.route.repair.clear();
+        let status = path::search_local(
+            ctx.map,
+            here,
+            target,
+            DETOUR_LIMIT,
+            |cell| {
+                ctx.step_cost_with(cell, key).filter(|_| {
+                    (!final_target && cell == target) || ctx.occupancy.is_free_for(cell, uid)
+                })
+            },
+            &mut self.route.repair,
+        );
+        if matches!(status, SearchStatus::Found(_)) {
+            self.route.path.splice(cells, &mut self.route.repair);
+            true
+        } else {
+            self.route.path.clear();
+            false
         }
     }
 
@@ -339,22 +419,25 @@ impl Walker {
     /// this walker crosses. `None` standing in a doorway already: the door
     /// does not shut on somebody in it.
     pub fn door_ahead(&self, ctx: &Think<'_>) -> Option<Point> {
-        let step = self.path.current()?;
+        let step = self.route.path.current()?;
         (step != self.body.center_position() && ctx.doors.is_door(step)).then_some(step)
     }
 
     /// Where the route ends, if there is one.
     pub fn destination(&self) -> Option<Point> {
-        if self.path.is_done() {
+        if let Some(request) = self.route.request {
+            return request.goals.first();
+        }
+        if self.route.path.is_done() {
             None
         } else {
-            self.path.destination()
+            self.route.path.destination()
         }
     }
 
     /// Whether there is any route left to walk.
     pub fn is_walking(&self) -> bool {
-        !self.path.is_done()
+        self.route.request.is_some() || !self.route.path.is_done()
     }
 
     /// What a walker would tell a debugger: where it is going, how far it has
@@ -368,7 +451,7 @@ impl Walker {
                     None => "none".to_string(),
                 },
             ),
-            ("path", format!("{} cells", self.path.remaining().len())),
+            ("path", format!("{} cells", self.route.path.len())),
             ("speed", format!("{:.2} cells/s", self.speed)),
         ]
     }
@@ -376,24 +459,24 @@ impl Walker {
     /// The route still to walk, current step first — see
     /// [`super::GameEntity::planned_path`].
     pub fn path_cells(&self) -> Vec<Point> {
-        self.path.remaining().to_vec()
+        self.route.path.remaining().collect()
     }
 
     #[cfg(test)]
     pub(crate) fn set_path(&mut self, steps: Vec<Point>) {
-        self.path = Path::new(steps);
+        self.route.path = Path::new(steps);
     }
 
     #[cfg(test)]
     pub(crate) fn path(&self) -> &Path {
-        &self.path
+        &self.route.path
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::{Map, Size, FLOOR, WALL};
+    use crate::map::{FLOOR, Map, Size, WALL};
     use crate::sim::entity::cell_of;
     use crate::sim::feature::Features;
     use crate::sim::fridge::Fridges;
@@ -442,6 +525,50 @@ mod tests {
 
     fn walker(cell: Point) -> Walker {
         Walker::new(Uid::new(EntityType::Human, 42), cell, 2.0)
+    }
+
+    #[test]
+    fn an_occupied_final_destination_fails_instead_of_repairing_forever() {
+        let mut world = World::new(Map::new(Size::new(9, 9), FLOOR));
+        let blocker = Uid::new(EntityType::Human, 99);
+        let goal = Point::new(2, 1);
+        world.occupancy.claim(goal, blocker).unwrap();
+        let mut walker = walker(Point::new(1, 1));
+        assert!(walker.route_to(&world.ctx(0), goal));
+        assert_eq!(
+            walker.advance(&world.ctx(0), MoveOutcome::Blocked { by: Some(blocker) }),
+            ActionState::Failed
+        );
+        assert!(!walker.is_walking());
+    }
+
+    #[test]
+    fn a_large_mixed_cost_search_waits_then_resumes_and_can_be_cancelled() {
+        let road = crate::map::TerrainId::from_name("road").unwrap();
+        let mut map = Map::new(Size::new(300, 300), road);
+        map.set_terrain(Point::ORIGIN, FLOOR); // admissible minimum remains one
+        let world = World::new(map);
+        let goal = Point::new(299, 299);
+        let mut walker = walker(Point::ORIGIN);
+        assert!(walker.route_to(&world.ctx(0), goal));
+        assert!(
+            walker.route.pending.is_some(),
+            "fixture must exhaust the first slice"
+        );
+        assert_eq!(walker.think(&world.ctx(0)), Intent::Idle);
+        assert_eq!(
+            walker.advance(&world.ctx(1), MoveOutcome::Idle),
+            ActionState::Running
+        );
+        assert!(walker.route.pending.is_none());
+        assert_eq!(walker.destination(), Some(goal));
+        assert_eq!(walker.route.path.len(), 598);
+        assert!(matches!(walker.think(&world.ctx(2)), Intent::Move { .. }));
+        assert!(walker.route_to(&world.ctx(3), goal));
+        assert!(walker.route.pending.is_some());
+        walker.halt();
+        assert!(walker.route.pending.is_none());
+        assert!(!walker.is_walking());
     }
 
     #[test]
@@ -501,7 +628,10 @@ mod tests {
             }
         }
         let (x, y) = walker.body().position();
-        assert!((x - 5.5).abs() < 1e-3 && (y - 1.5).abs() < 1e-3, "stopped at {x}, {y}");
+        assert!(
+            (x - 5.5).abs() < 1e-3 && (y - 1.5).abs() < 1e-3,
+            "stopped at {x}, {y}"
+        );
     }
 
     #[test]
@@ -524,7 +654,10 @@ mod tests {
         }
         assert!(finished);
         let (x, y) = walker.body().position();
-        assert!((x - 3.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3, "stopped at {x}, {y}");
+        assert!(
+            (x - 3.5).abs() < 1e-3 && (y - 3.5).abs() < 1e-3,
+            "stopped at {x}, {y}"
+        );
     }
 
     #[test]
@@ -567,14 +700,21 @@ mod tests {
         let toilet = Point::new(4, 2);
         map.set_terrain(toilet, FLOOR);
         crate::sim::testing::prop_at(&mut map, "toilet", toilet);
-        let features = Features::from_map(&map, &crate::map::utilities::Supply::everywhere(map.size()));
-        assert!(features.is_enterable(toilet), "the fixture should have made a real toilet");
+        let features =
+            Features::from_map(&map, &crate::map::utilities::Supply::everywhere(map.size()));
+        assert!(
+            features.is_enterable(toilet),
+            "the fixture should have made a real toilet"
+        );
 
         let mut world = World::new(map);
         world.features = features;
         let mut walker = walker(Point::new(1, 1));
 
-        assert!(!walker.route_to(&world.ctx(0), Point::new(7, 4)), "the toilet is not a doorway");
+        assert!(
+            !walker.route_to(&world.ctx(0), Point::new(7, 4)),
+            "the toilet is not a doorway"
+        );
         assert!(!walker.is_walking());
     }
 
@@ -589,7 +729,10 @@ mod tests {
         walker.set_path(vec![Point::new(1, 2)]);
 
         assert!(!walker.route_to(&world.ctx(0), Point::new(7, 1)));
-        assert!(!walker.is_walking(), "a stale route must not survive a miss");
+        assert!(
+            !walker.is_walking(),
+            "a stale route must not survive a miss"
+        );
     }
 
     #[test]
@@ -639,7 +782,7 @@ mod tests {
         assert_eq!(state, ActionState::Running);
         assert_eq!(walker.destination(), Some(destination));
         assert!(
-            !walker.path().remaining().contains(&Point::new(5, 4)),
+            !walker.path().remaining().any(|p| p == Point::new(5, 4)),
             "should not still be heading straight at the blocker"
         );
     }
@@ -660,6 +803,64 @@ mod tests {
         let state = walker.advance(&world.ctx(0), MoveOutcome::Blocked { by: Some(blocker) });
         assert_eq!(state, ActionState::Failed);
         assert!(!walker.is_walking());
+    }
+
+    #[test]
+    fn a_walker_keeps_to_the_pavement_and_crosses_the_road_straight_over() {
+        // A street: a pavement each side of three cells of road. From one end
+        // of the near pavement to the far end of the other, the straight line
+        // runs diagonally down the road; a walker should walk the pavement and
+        // cross once, at right angles.
+        let pavement = crate::map::TerrainId::from_name("pavement").unwrap();
+        let road = crate::map::TerrainId::from_name("road").unwrap();
+        let mut map = Map::new(Size::new(16, 5), road);
+        for x in 0..16 {
+            map.set_terrain(Point::new(x, 0), pavement);
+            map.set_terrain(Point::new(x, 4), pavement);
+        }
+        let world = World::new(map);
+        let mut walker = walker(Point::new(0, 0));
+        assert!(walker.route_to(&world.ctx(0), Point::new(15, 4)));
+
+        let on_road: Vec<Point> = walker
+            .path()
+            .remaining()
+            .filter(|&cell| world.map.walk_cost(cell) > 1)
+            .collect();
+        assert_eq!(
+            on_road.len(),
+            3,
+            "one crossing, three cells of road: {on_road:?}"
+        );
+        assert!(
+            on_road.iter().all(|cell| cell.x == on_road[0].x),
+            "crossed at an angle: {on_road:?}"
+        );
+    }
+
+    #[test]
+    fn a_detour_round_a_body_on_the_pavement_steps_onto_the_road_only_to_pass() {
+        let pavement = crate::map::TerrainId::from_name("pavement").unwrap();
+        let road = crate::map::TerrainId::from_name("road").unwrap();
+        let mut map = Map::new(Size::new(12, 4), road);
+        for x in 0..12 {
+            map.set_terrain(Point::new(x, 0), pavement);
+        }
+        let mut world = World::new(map);
+        let blocker = Uid::new(EntityType::Human, 99);
+        world.occupancy.claim(Point::new(3, 0), blocker).unwrap();
+
+        let mut walker = walker(Point::new(2, 0));
+        walker.set_path((3..=10).map(|x| Point::new(x, 0)).collect());
+        let state = walker.advance(&world.ctx(0), MoveOutcome::Blocked { by: Some(blocker) });
+
+        assert_eq!(state, ActionState::Running);
+        let remaining: Vec<_> = walker.path().remaining().collect();
+        let on_road = remaining
+            .iter()
+            .filter(|&&cell| world.map.walk_cost(cell) > 1)
+            .count();
+        assert_eq!(on_road, 3, "out, past and back: {remaining:?}");
     }
 
     #[test]

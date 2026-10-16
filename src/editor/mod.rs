@@ -76,6 +76,9 @@ const KEY_HINTS: &str = "lmb/A place   rmb/X erase   q/e or bumpers item   tab/Y
 const SELECTION_FRAME: &str = "selection.png";
 /// The about-to-be-placed sprite is drawn washed out under the frame.
 const GHOST_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.55);
+/// ...and red, where a press would place nothing: a light switch with no
+/// wall beside it.
+const REFUSED_TINT: Color = Color::srgba(1.0, 0.3, 0.3, 0.55);
 
 /// One strip of art: a PNG holding `frames` square frames side by side.
 ///
@@ -375,6 +378,11 @@ impl Tool {
                 Instrument::Block => "  drag corner to corner for a filled block",
                 Instrument::Brush => "",
             },
+            Target::Objects(ObjectLayer::Props)
+                if crate::map::ObjectKind::new(self.item().name).is_wall_mounted() =>
+            {
+                "  floor beside a wall only; goes on the wall nearest the pointer"
+            }
             _ => self.layer.def().hint,
         };
         format!(
@@ -958,9 +966,10 @@ fn edit(
         }
         // One press, one prop — or one lamp.
         Target::Objects(objects) => {
+            // A light switch with no wall beside it is refused, and the ghost
+            // has already said so.
             let changed = if place_once {
-                props::place(&mut prop_window, &mut current.map, objects, world, tool.index());
-                true
+                props::place(&mut prop_window, &mut current.map, objects, world, tool.index())
             } else if erase_once {
                 props::erase_nearest(&mut prop_window, &mut current.map, objects, &placed, world);
                 true
@@ -1002,10 +1011,15 @@ struct BrushStroke {
 
 /// Move the ghost and frame to the cursor, snapping the way the active layer
 /// places things so the preview cannot lie about where a press will land.
+///
+/// A wall-mounted prop is shown where [`props::placement`] would put it —
+/// in its cell, turned to the wall nearest the pointer — or, where it would
+/// be refused, at the pointer and tinted [`REFUSED_TINT`].
 fn update_cursor(
     assets: Res<AssetServer>,
     tool: Res<Tool>,
     cursor: Res<Cursor>,
+    current: Res<CurrentMap>,
     mut cursors: Query<(&mut Transform, &mut Visibility), With<EditorCursor>>,
     mut ghosts: Query<GhostQuery, GhostFilter>,
 ) {
@@ -1025,13 +1039,39 @@ fn update_cursor(
             *visibility = Visibility::Hidden;
             continue;
         };
+        let mut turn = Quat::IDENTITY;
+        let mut tint = GHOST_TINT;
         let snapped = match tool.layer.target() {
             Target::Terrain | Target::Grid(_) => background::cell_centre(background::cell_of(pos)),
-            Target::Objects(_) => pos.round(),
+            Target::Objects(layer) => {
+                let kind = crate::map::ObjectKind::new(tool.item().name);
+                match props::placement(&current.map, layer, &kind, pos) {
+                    Some(at) if kind.is_wall_mounted() => {
+                        let side = crate::map::mount::wall_of(&current.map, at).expect("placed on a wall");
+                        let (middle, rotation) = props::on_wall(at, side);
+                        turn = rotation;
+                        middle
+                    }
+                    Some(_) => pos.round(),
+                    None => {
+                        tint = REFUSED_TINT;
+                        pos.round()
+                    }
+                }
+            }
         };
         transform.translation.x = snapped.x;
         transform.translation.y = snapped.y;
         *visibility = Visibility::Visible;
+        // Only the picture turns, not the frame round the cell.
+        for (mut sprite, mut ghost) in &mut ghosts {
+            if ghost.rotation != turn {
+                ghost.rotation = turn;
+            }
+            if sprite.color != tint {
+                sprite.color = tint;
+            }
+        }
     }
 }
 

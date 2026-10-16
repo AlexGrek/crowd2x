@@ -33,6 +33,9 @@ parts, each a step further from the simulation:
   powered emitters. What puts them out by day is the controller on their box taking the
   power away: the sim re-floods its `Supply`, bumps `supply_generation`, and
   `follow_power` → `apply_supply` switches them (dirty chunks only, never a new scene).
+  `apply_supply` asks `supply.serves(light.name, light.cell)` (each `Light` keeps its
+  `EMITTERS` name), so a ceiling or tube lamp whose room's **light switch** is off goes dark
+  by the same path, its wiring still live (`Supply::with_lights_off`, `electrician`).
 - **`mod.rs` — the main world.** Builds a `Lighting` from the simulated map on the game
   screen, switches computer lights by asking `Occupancy` about each computer's own cell and
   the four beside it — *not* the on-screen crowd `game/props.rs` asks, since a screen's

@@ -9,7 +9,7 @@
   "open": "district",
   "timeout": 600,
   "steps": [
-    { "note": "seed 7: 79x54, 32 houses of one or two people, the bank across the bottom left, shops above the middle" },
+    { "note": "seed 7: 89x62, streets of pavement and road, 32 houses of one or two people, the bank across the bottom left, shops above the middle" },
     { "key": "p" },
     { "expect_speed": "paused" },
     { "press": "-" },
@@ -22,18 +22,18 @@
     { "expect_log": "53 moved in" },
     { "expect_log": "was given the bed" },
 
-    { "look_at": { "x": 20, "y": 10 } },
+    { "look_at": { "x": 23, "y": 11 } },
     { "wait": 0.3 },
     { "expect_drawn": {} },
     { "expect_world_sprites": { "min": 40, "max": 1200 } },
     { "shot": "the bank: lobby, desks, restrooms" },
 
-    { "look_at": { "x": 45, "y": 6 } },
+    { "look_at": { "x": 52, "y": 8 } },
     { "wait": 0.3 },
     { "expect_drawn": {} },
     { "shot": "houses beside the bank" },
 
-    { "look_at": { "x": 29, "y": 43 } },
+    { "look_at": { "x": 34, "y": 50 } },
     { "wait": 0.3 },
     { "shot": "the shops" },
 
@@ -44,7 +44,7 @@
     { "note": "flies, so the crowd that gathers at the bank's computers converges on the one nearest" },
     { "note": "fridge and jams there. When this was written the crowd's hunger ran ~84, bladder ~90" },
     { "note": "and stamina ~6 by morning; the table above is the evidence to watch when that changes" },
-    { "look_at": { "x": 20, "y": 10 } },
+    { "look_at": { "x": 23, "y": 11 } },
     { "wait": 0.3 },
     { "shot": "08:00 the next day, at the bank" }
   ]

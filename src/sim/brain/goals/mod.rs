@@ -192,29 +192,23 @@ pub(super) enum Stand {
     Nowhere,
 }
 
-/// The cell to use the feature in `cell` from: beside it, passable, preferably
-/// free, and nearest.
-///
-/// The four cells beside it and never its own — a prop blocks the cell it
-/// stands in, so a fridge is used from the side or not at all. The crowd is
-/// read for those four cells and nothing else: a human choosing the free side
-/// of a fridge is a lookup, not a scan.
+/// Whether to approach a feature. The task expands its four possible sides
+/// when walking starts, filters permissions, and searches the free sides
+/// before falling back to occupied ones. No route search happens in a goal.
 pub(super) fn stand_beside(ctx: &GoalCtx<'_>, cell: Point) -> Stand {
     let here = ctx.body.center_position();
     if here.manhattan_distance(cell) <= 1 {
         return Stand::Here;
     }
-    let uid = ctx.body.uid();
-    Point::CARDINALS
-        .iter()
-        .map(|&step| cell + step)
-        .filter(|&beside| ctx.think.is_passable(beside))
-        .min_by_key(|&beside| {
-            (
-                !ctx.think.occupancy.is_free_for(beside, uid),
-                here.manhattan_distance(beside),
-                beside,
-            )
-        })
-        .map_or(Stand::Nowhere, Stand::At)
+    let key = ctx.body.home();
+    let goals = crate::sim::path::Destinations::from_cells(
+        cell.cardinal_neighbours()
+            .into_iter()
+            .filter(|&beside| ctx.think.is_passable_with(beside, key)),
+    );
+    if goals.first().is_some() {
+        Stand::At(cell)
+    } else {
+        Stand::Nowhere
+    }
 }

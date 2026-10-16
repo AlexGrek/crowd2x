@@ -27,15 +27,27 @@
 //! Which boxes are off is the simulation's state, not the map's, so it is
 //! handed in ([`Supply::with_boxes_off`]) rather than read off the map.
 //!
-//! **A street light controller switches a box by daylight.** A
+//! **A street light controller switches a circuit by daylight.** A
 //! [`CONTROLLER`] is a prop, a cabinet with a photocell, standing on a
-//! distribution box: it is the box's switch, closed while it is dark and open
-//! while it is light. Whatever that box's wiring feeds — street lamps, as a
-//! district lays them — has power at night only. The map holds where the
-//! controllers are ([`controlled_boxes`]); whether it is dark is the
-//! simulation's clock (`sim::sun`), so a controlled box that is open is just
-//! one more box in the `off` list handed to [`Supply::with_boxes_off`]. A
+//! distribution box: it switches that box **and every other box on the same
+//! circuit** (the wiring and boxes joined to it, [`circuit`]) — closed while
+//! it is dark, open while it is light. So one cabinet runs a long street
+//! circuit fed from several boxes, the junctions where the circuit crosses a
+//! power line included, and whatever the circuit feeds — street lamps, as a
+//! district lays them — has power at night only. The map holds which boxes
+//! are controlled ([`controlled_boxes`]); whether it is dark is the
+//! simulation's clock (`sim::sun`), so controlled boxes that are open are
+//! just more boxes in the `off` list handed to [`Supply::with_boxes_off`]. A
 //! controller standing anywhere but on a box switches nothing.
+//!
+//! **A light switch switches the lamps of its room.** A [`LIGHT_SWITCH`] is a
+//! prop on a wall (`super::mount`) inside a building; off, the lamps hung in
+//! its room ([`SWITCHED`]) get no power, though the wiring under them is live
+//! and the fridge on the same wiring keeps running. It is not on the network
+//! at all: it stands between the wiring and the lamps the way a real one does,
+//! so a switch needs no cable of its own. Which room a switch is in, and
+//! whether it is off, is the simulation's (`sim::light_switch`); what it hands
+//! in is the cells whose lamps are switched off ([`Supply::with_lights_off`]).
 //!
 //! This is plain Rust like the rest of `map/`, and derived like
 //! passability: [`Supply::from_map`] floods both networks once, and the
@@ -84,15 +96,32 @@ pub const CONSUMERS: &[(&str, Utility)] = &[
 /// while it is dark, off while it is light. See the module docs.
 pub const CONTROLLER: &str = "street light controller";
 
-/// Every distribution box with a [`CONTROLLER`] standing on it, sorted.
-/// A controller on anything but a box is not in the list: it has nothing to
-/// switch.
+/// The prop that switches the lamps of the room it is in, on a wall by the
+/// door. See the module docs.
+pub const LIGHT_SWITCH: &str = "light switch";
+
+/// What a [`LIGHT_SWITCH`] switches, by the name a map stores: the lamps that
+/// hang from a ceiling. Not the room's fridge or computer, which are on the
+/// same wiring and stay on, and not a street lamp, which is outdoors.
+pub const SWITCHED: &[&str] = &["ceiling lamp", "tube lamp"];
+
+/// Whether a light switch switches something called `name`.
+pub fn is_switched(name: &str) -> bool {
+    SWITCHED.contains(&name)
+}
+
+/// Every distribution box a [`CONTROLLER`] switches, sorted: each box on
+/// the circuit of a box with a controller standing on it. A controller on
+/// anything but a box switches nothing. Floods the map once per controller:
+/// for building a world, not a tick.
 pub fn controlled_boxes(map: &Map) -> Vec<Point> {
     let mut boxes: Vec<Point> = map
         .objects(ObjectLayer::Props)
         .iter()
         .filter(|object| object.kind.as_str() == CONTROLLER)
         .map(Object::cell)
+        .filter(|&cell| map.grid(GridLayer::Power, cell) == power::BOX)
+        .flat_map(|cell| circuit(map, cell))
         .filter(|&cell| map.grid(GridLayer::Power, cell) == power::BOX)
         .collect();
     boxes.sort_unstable();
@@ -120,6 +149,9 @@ pub struct Supply {
     size: Size,
     /// One per cell, row-major, per [`Network`] in declaration order.
     live: [Vec<bool>; 3],
+    /// One per cell, row-major: whether the lamps in it are switched off at
+    /// a light switch. Empty while none is ([`Supply::with_lights_off`]).
+    switched_off: Vec<bool>,
     /// Answers yes everywhere, whatever is painted: [`Supply::everywhere`].
     everywhere: bool,
 }
@@ -169,8 +201,26 @@ impl Supply {
         Supply {
             size,
             live: [line, wiring, pipes],
+            switched_off: Vec::new(),
             everywhere: false,
         }
+    }
+
+    /// This supply with the lamps in `cells` switched off at a light switch:
+    /// a [`SWITCHED`] lamp in one of them is not served, whatever its wiring
+    /// says. Nothing else in the cell is switched — the wiring stays live, and
+    /// so does a fridge on it. Cells off the map are ignored.
+    pub fn with_lights_off(mut self, cells: impl IntoIterator<Item = Point>) -> Supply {
+        for cell in cells {
+            let Some(index) = self.size.index_of(cell) else {
+                continue;
+            };
+            if self.switched_off.is_empty() {
+                self.switched_off = vec![false; self.size.area()];
+            }
+            self.switched_off[index] = true;
+        }
+        self
     }
 
     /// A supply that reaches every cell of every network, whatever is or is
@@ -184,6 +234,7 @@ impl Supply {
         Supply {
             size,
             live: [Vec::new(), Vec::new(), Vec::new()],
+            switched_off: Vec::new(),
             everywhere: true,
         }
     }
@@ -196,12 +247,21 @@ impl Supply {
         }
     }
 
+    /// Whether the lamps in `cell` are switched off at a light switch. Off
+    /// the map they are not.
+    pub fn is_switched_off(&self, cell: Point) -> bool {
+        self.size.index_of(cell).is_some_and(|index| self.switched_off.get(index).copied().unwrap_or(false))
+    }
+
     /// Whether something called `name` standing in `cell` has what it needs
-    /// to work — always, for something that needs nothing.
+    /// to work — always, for something that needs nothing. A lamp switched
+    /// off at its light switch has no power, however live its wiring.
     pub fn serves(&self, name: &str, cell: Point) -> bool {
         match needs(name) {
             None => true,
-            Some(Utility::Power) => self.is_live(Network::Wiring, cell),
+            Some(Utility::Power) => {
+                self.is_live(Network::Wiring, cell) && !(is_switched(name) && self.is_switched_off(cell))
+            }
             Some(Utility::Water) => self.is_live(Network::Pipes, cell),
         }
     }
@@ -417,10 +477,41 @@ mod tests {
         assert!(!day.serves("street lamp", lamp), "by day: open");
         assert!(day.is_live(Network::Line, Point::new(2, 0)), "the line still runs through it");
 
+        // A second box on the lamp's wiring is on the same circuit, and
+        // switched with it.
+        let mut fed_twice = street("==B-B-");
+        fed_twice.add_object(ObjectLayer::Props, at(CONTROLLER, Point::new(2, 0)));
+        assert_eq!(controlled_boxes(&fed_twice), [Point::new(2, 0), Point::new(4, 0)]);
+        let day = Supply::with_boxes_off(&fed_twice, &controlled_boxes(&fed_twice));
+        assert!(!day.serves("fridge", Point::new(5, 0)), "neither box feeds it by day");
+
         // A controller beside the box, on the line, switches nothing.
         let mut astray = street("==B--");
         astray.add_object(ObjectLayer::Props, at(CONTROLLER, Point::new(1, 0)));
         assert!(controlled_boxes(&astray).is_empty());
+    }
+
+    #[test]
+    fn a_lamp_switched_off_has_no_power_and_its_fridge_keeps_it() {
+        // One cell of wiring under both a ceiling lamp and a fridge.
+        let mut map = street("==B--");
+        map.add_object(ObjectLayer::Lamps, at("ceiling lamp", Point::new(4, 0)));
+        let (here, elsewhere) = (Point::new(4, 0), Point::new(3, 0));
+        let on = Supply::from_map(&map);
+        assert!(on.serves("ceiling lamp", here));
+        assert!(!on.is_switched_off(here));
+
+        let off = Supply::from_map(&map).with_lights_off([here, Point::new(99, 0)]);
+        assert!(off.is_switched_off(here) && !off.is_switched_off(elsewhere));
+        assert!(!off.serves("ceiling lamp", here), "switched off");
+        assert!(off.serves("fridge", here), "the fridge is not on the switch");
+        assert!(off.is_live(Network::Wiring, here), "the wiring under it is still live");
+        assert!(off.serves("ceiling lamp", elsewhere), "nor is the next cell");
+        let served: Vec<bool> = off.consumers(&map).map(|(_, _, served)| served).collect();
+        assert_eq!(served, [true, false], "the fridge, then the lamp");
+
+        // Switched off and on again is the supply it was.
+        assert_eq!(Supply::from_map(&map).with_lights_off([]), on);
     }
 
     #[test]
@@ -514,6 +605,12 @@ mod tests {
         }
         for (name, _) in CONSUMERS {
             assert_eq!(CONSUMERS.iter().filter(|(n, _)| n == name).count(), 1, "{name} twice");
+        }
+        let switch = ObjectKind::new(LIGHT_SWITCH);
+        assert!(switch.prop().is_some() && switch.is_wall_mounted(), "a light switch hangs on a wall");
+        assert_eq!(needs(LIGHT_SWITCH), None, "and needs no cable of its own");
+        for name in SWITCHED {
+            assert_eq!(needs(name), Some(Utility::Power), "{name}: a switch switches power");
         }
     }
 }

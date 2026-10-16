@@ -14,6 +14,13 @@
 //! body follows too, so it is the one a prop follows: a tall crate whose art
 //! overhangs the cell above it does not wall that cell off, and a prop placed
 //! on a cell boundary blocks the one side its centre landed on.
+//!
+//! # Some props hang on a wall
+//!
+//! A [`Prop::wall_mounted`] one — a light switch — is fixed to the wall beside
+//! the cell it is in rather than standing in it, so it blocks nothing, and it
+//! can only be put on a free floor cell with a wall beside it: [`super::mount`]
+//! says which wall, and where on it.
 
 use super::terrain::Passability;
 use super::ObjectKind;
@@ -22,6 +29,10 @@ use super::ObjectKind;
 pub struct Prop {
     pub name: &'static str,
     pub passability: Passability,
+    /// Fixed to a wall beside its cell, not standing in it: placed only on a
+    /// free floor cell next to a wall, and drawn against that wall
+    /// ([`super::mount`]). Never blocks.
+    pub wall_mounted: bool,
 }
 
 impl Prop {
@@ -29,6 +40,7 @@ impl Prop {
         Self {
             name,
             passability: Passability::Impassable,
+            wall_mounted: false,
         }
     }
 
@@ -36,6 +48,15 @@ impl Prop {
         Self {
             name,
             passability: Passability::Passable,
+            wall_mounted: false,
+        }
+    }
+
+    const fn on_wall(name: &'static str) -> Self {
+        Self {
+            name,
+            passability: Passability::Passable,
+            wall_mounted: true,
         }
     }
 }
@@ -74,6 +95,9 @@ pub const PROPS: &[Prop] = &[
     // locked to whoever owns the room behind it (`sim::property`).
     Prop::walkable("door"),
     Prop::walkable("house door"),
+    // A switch by the door of a room: it switches the room's lamps
+    // (`super::utilities::LIGHT_SWITCH`). On the wall, so in nobody's way.
+    Prop::on_wall("light switch"),
 ];
 
 impl ObjectKind {
@@ -81,6 +105,12 @@ impl ObjectKind {
     /// build does not know.
     pub fn prop(&self) -> Option<&'static Prop> {
         PROPS.iter().find(|prop| prop.name == self.as_str())
+    }
+
+    /// Whether a prop of this kind hangs on a wall ([`Prop::wall_mounted`]).
+    /// One this build does not know stands on the floor.
+    pub fn is_wall_mounted(&self) -> bool {
+        self.prop().is_some_and(|prop| prop.wall_mounted)
     }
 
     /// Whether a prop of this kind lets anyone stand in its cell. **A prop
@@ -105,6 +135,23 @@ mod tests {
     fn a_door_does_not_block_its_cell() {
         for door in ["door", "house door"] {
             assert_eq!(ObjectKind::new(door).prop_passability(), Passability::Passable, "{door}");
+        }
+    }
+
+    #[test]
+    fn a_light_switch_hangs_on_a_wall_and_blocks_nothing() {
+        let switch = ObjectKind::new("light switch");
+        assert!(switch.is_wall_mounted());
+        assert_eq!(switch.prop_passability(), Passability::Passable);
+        assert!(!ObjectKind::new("fridge").is_wall_mounted());
+        assert!(!ObjectKind::new("hat stand").is_wall_mounted());
+    }
+
+    /// Something on a wall is in nobody's way.
+    #[test]
+    fn nothing_on_a_wall_blocks() {
+        for prop in PROPS.iter().filter(|prop| prop.wall_mounted) {
+            assert!(prop.passability.is_passable(), "{}", prop.name);
         }
     }
 

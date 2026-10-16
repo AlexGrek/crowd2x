@@ -1,6 +1,8 @@
 //! The props that answer to the simulation: a computer's screen comes on
 //! while somebody is sitting at it, and goes dark when they leave; a door's
-//! leaf slides open and shut as the simulation moves it ([`swing_doors`]).
+//! leaf slides open and shut as the simulation moves it ([`swing_doors`]);
+//! a light switch's rocker shows whether its room's lights are on
+//! ([`flip_switches`]).
 //!
 //! The art is not this module's — a prop's pictures are both on its palette
 //! entry ([`PaletteItem::in_use`](crate::editor::PaletteItem::in_use)), drawn
@@ -36,7 +38,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::animation::StripAnimation;
-use crate::editor::props::{DoorLeaf, Prop, Usable};
+use crate::editor::props::{DoorLeaf, Prop, SwitchPlate, Usable};
 use crate::map::Point;
 use crate::state::AppState;
 
@@ -51,7 +53,7 @@ impl Plugin for PropsPlugin {
         // put right on the frame it appears rather than the one after.
         app.add_systems(
             Update,
-            (light_up_props_in_use, swing_doors)
+            (light_up_props_in_use, swing_doors, flip_switches)
                 .in_set(super::SpriteSync)
                 .after(crate::editor::props::sync_prop_window)
                 .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
@@ -120,9 +122,28 @@ fn swing_doors(sim: Res<Sim>, mut doors: Query<(&Prop, &mut DoorLeaf, &mut Sprit
             continue;
         }
         leaf.showing = frame;
-        if let Some(rect) = sprite.rect.as_mut() {
-            let side = rect.width();
-            *rect = Rect::new(frame as f32 * side, 0.0, (frame + 1) as f32 * side, side);
+        show_frame(&mut sprite, frame);
+    }
+}
+
+/// Show every light switch on screen on or off, as the simulation says its
+/// room is: the first frame of its strip on, the second off. A binary search
+/// per plate on the canvas, and a write only on a frame one was flipped.
+fn flip_switches(sim: Res<Sim>, mut plates: Query<(&Prop, &mut SwitchPlate, &mut Sprite)>) {
+    for (prop, mut plate, mut sprite) in &mut plates {
+        let on = sim.0.light_is_on(prop.cell());
+        if on == plate.showing_on {
+            continue;
         }
+        plate.showing_on = on;
+        show_frame(&mut sprite, u32::from(!on));
+    }
+}
+
+/// Put frame `frame` of a posed strip on its sprite.
+fn show_frame(sprite: &mut Sprite, frame: u32) {
+    if let Some(rect) = sprite.rect.as_mut() {
+        let side = rect.width();
+        *rect = Rect::new(frame as f32 * side, 0.0, (frame + 1) as f32 * side, side);
     }
 }

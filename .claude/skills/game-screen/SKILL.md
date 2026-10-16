@@ -1,6 +1,6 @@
 ---
 name: game-screen
-description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, the HUD corners and the spawn menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
+description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the HUD corners and the spawn menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
 ---
 
 # The game screen
@@ -107,6 +107,16 @@ selects nobody and the panel goes with them.
 
 Nothing here is `Focusable`, for the reason the corners are not (below), and every button
 still answers to `Activated` so a QA script can press it by name.
+
+### Flipping a light switch (`selection::pick`, `game/props.rs`)
+
+A click on a cell with nobody in it and a **light switch** on its wall flips it: `pick`
+pushes `Input::switch_light(cell, !light_is_on)` on `SimInput` and selects nothing (no
+panel; the room's lamps going out is the answer). It is asked **before** the box, so a box
+under a switch is reached with QA `select_box` only. The plate shows the state:
+`SwitchPlate` + `flip_switches` pick frame 0 (on) or 1 (off) from `GameState::light_is_on`.
+The rest is the box's path below - re-flood, `supply_generation`, lighting, x-ray
+(`electrician`).
 
 ### Switching a box (`game/boxpanel.rs`, `GameState::switch_box`)
 

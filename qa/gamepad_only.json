@@ -3,6 +3,8 @@
   "state": "maps",
   "given": { "maps": ["alpha"] },
   "steps": [
+    { "note": "keep pointer hover clear of the widgets while testing controller focus" },
+    { "mouse": { "x": 0, "y": 0 } },
     { "note": "name a map on the on-screen keyboard, one letter at a time" },
     { "pad": "south" },
     { "expect_focus": "a" },

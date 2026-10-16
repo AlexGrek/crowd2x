@@ -38,14 +38,25 @@ pub struct Terrain {
     /// Whether sight and light cross it. True of everything walkable and of a
     /// window; a wall is the one thing neither.
     pub see_through: bool,
+    /// What stepping into it costs a route, in whole steps of the cheapest
+    /// ground ([`MIN_WALK_COST`]). Zero on what cannot be walked, which no
+    /// search ever asks. This is how a crowd keeps to the pavement: a road is
+    /// walkable, only dearer, so it is crossed rather than walked along.
+    pub cost: u8,
 }
 
 impl Terrain {
     const fn walkable(name: &'static str) -> Self {
+        Self::ground(name, MIN_WALK_COST)
+    }
+
+    /// Walkable ground that costs `cost` to cross: a road, a lawn.
+    const fn ground(name: &'static str, cost: u8) -> Self {
         Self {
             name,
             passability: Passability::Passable,
             see_through: true,
+            cost,
         }
     }
 
@@ -54,6 +65,7 @@ impl Terrain {
             name,
             passability: Passability::Impassable,
             see_through: false,
+            cost: 0,
         }
     }
 
@@ -63,6 +75,7 @@ impl Terrain {
             name,
             passability: Passability::Impassable,
             see_through: true,
+            cost: 0,
         }
     }
 }
@@ -81,6 +94,12 @@ pub const VOID: TerrainId = TerrainId(0);
 pub const FLOOR: TerrainId = TerrainId(1);
 /// The plain brown wall — the default when something just needs to block.
 pub const WALL: TerrainId = TerrainId(9);
+
+/// What the cheapest walkable ground costs to step into: a floor, a
+/// pavement. Every walkable tile costs at least this, which is what keeps a
+/// route search's straight-line guess from ever overestimating
+/// (`sim::path`), and a test holds the catalogue to it.
+pub const MIN_WALK_COST: u8 = 1;
 
 /// Every tile that can be painted, in the order the editor palette offers
 /// them. Names are what map files store, so renaming one invalidates saved
@@ -102,6 +121,11 @@ pub const TERRAIN: &[Terrain] = &[
     Terrain::blocked("block"),
     Terrain::walkable("wood cracked"),
     Terrain::pane("window"),
+    Terrain::walkable("pavement"),
+    // Walked across, not along: five pavement steps round are worth one
+    // step over the road.
+    Terrain::ground("road", 5),
+    Terrain::ground("grass", 3),
 ];
 
 impl TerrainId {
@@ -144,6 +168,14 @@ impl TerrainId {
         self.is_see_through() && !self.is_passable()
     }
 
+    /// What a route pays to step into this tile ([`Terrain::cost`]); zero for
+    /// anything that cannot be walked, unknown terrain included.
+    pub fn walk_cost(self) -> u8 {
+        self.terrain()
+            .filter(|terrain| terrain.passability.is_passable())
+            .map_or(0, |terrain| terrain.cost)
+    }
+
     /// Unknown terrain is impassable: an agent that cannot be told what a tile
     /// is should walk around it, not through it.
     pub fn is_passable(self) -> bool {
@@ -184,6 +216,28 @@ mod tests {
         assert!(!WALL.is_see_through());
         assert!(!WALL.lets_sun_in());
         assert!(!FLOOR.lets_sun_in());
+    }
+
+    /// The route search's heuristic counts every step at the cheapest cost;
+    /// one walkable tile cheaper than that and routes stop being cheapest.
+    #[test]
+    fn nothing_walkable_costs_less_than_the_cheapest_step() {
+        for (index, terrain) in TERRAIN.iter().enumerate() {
+            let id = TerrainId(index as u16);
+            if id.is_passable() {
+                assert!(id.walk_cost() >= MIN_WALK_COST, "{} is too cheap", terrain.name);
+            } else {
+                assert_eq!(id.walk_cost(), 0, "{} cannot be walked", terrain.name);
+            }
+        }
+    }
+
+    #[test]
+    fn a_road_costs_more_than_grass_and_grass_more_than_a_pavement() {
+        let cost = |name| TerrainId::from_name(name).unwrap().walk_cost();
+        assert!(cost("road") > cost("grass"));
+        assert!(cost("grass") > cost("pavement"));
+        assert_eq!(cost("pavement"), FLOOR.walk_cost());
     }
 
     #[test]

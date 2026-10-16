@@ -118,7 +118,7 @@ impl DrinkGoal {
                 let _ = ctx.tasks.push_back(Task::consume(other, other.consume_seconds()));
             }
             if let Stand::At(cell) = stand {
-                let _ = ctx.tasks.push_back(Task::move_to(cell));
+                let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
             let _ = ctx.tasks.push_back(Task::open_fridge(fridge, OPEN_SECONDS));
             let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Water, POUR_SECONDS));

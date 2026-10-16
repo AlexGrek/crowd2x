@@ -8,7 +8,7 @@ description: Add and change what crowd2x units decide and do - the unit brain in
 Every unit's decisions live in `src/sim/brain/`, run from `GameEntity::react`. It is plain
 Rust with **no `bevy::` imports**, and it is tested with `cargo test`, no `App`. AGENTS.md
 ("The brain") has the architecture. This skill is how to extend it without breaking the three
-things it exists to protect: **no per-agent per-tick search, no allocation in a tick,
+things it exists to protect: **bounded route work, reusable hot-loop storage,
 determinism**.
 
 Code templates for every extension point are in [recipes.md](recipes.md); read it before
@@ -77,9 +77,11 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 
 <rules>
 
-1. **Never search inside `process` or a routine.** Queue `Task::move_to(cell)`. A far route is
-   asked for in exactly one place, `Action::walk_to`, once per walk started. If a goal needs to
-   know reachability, it finds out from the `MoveTo` failing.
+1. **Never search inside a goal's `process` or a routine.** Queue `Task::move_to(cell)`
+   or `Task::move_beside(feature)`. `Action::walk_to_any` starts the far search once per walk;
+   `Walker::advance` continues its saved frontier when `FAR_LIMIT` expires. `BudgetExhausted`
+   keeps the task executing, and must never become an unreachable-feature memory. Feature
+   approaches try all free permitted sides, then occupied sides, before failing.
 
 2. **Every `process` call ends in one of these:** it queued a task; it returned `Blocked`
    (expensive miss, so the goal is held off 32 ticks, doubling); it returned `Achieved`; or it
@@ -111,11 +113,14 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 8. **A task does one thing and never walks.** `TakeItem` from two cells away fails; the goal
    should have queued a `MoveTo` first. One task, one action.
 
-9. **No allocation in a tick.**
+9. **Keep routines, goals and task queues allocation-free.** Routing reuses generation-stamped
+   search scratch and walker-owned far/detour buffers. Buffer growth and the owned continuation
+   of an unusually large search can allocate; warm route reuse must not. Detours replace a
+   separate prefix and never copy the untouched far-route tail.
    - `Task` and every task struct must be `Copy`; the queue is a fixed ring of 8, and `push_*`
      returns `false` when full (`#[must_use]` — write `let _ =` only when full cannot happen).
    - Goal and routine fields are inline.
-   - A `Vec` is allowed in `debug_fields` only.
+   - A goal or routine may allocate a `Vec` in `debug_fields` only; route buffers belong to the walker.
 
 10. **Determinism.**
     - Randomness comes only from `crate::sim::rng::tick_rng(ctx.body.uid(), ctx.think.tick)`.

@@ -20,6 +20,14 @@
 //! worth having. Like terrain, a prop is stored by the name of its palette
 //! entry, so re-ordering the palette cannot turn every saved bed into a
 //! toilet.
+//!
+//! A **wall-mounted** prop (`map::PROPS` says which: a light switch) is the
+//! exception to free placement. It goes only on a free floor cell beside a
+//! wall, onto the wall nearest the pointer, and is kept on that wall's edge of
+//! the cell ([`crate::map::mount`]); [`place`] refuses it anywhere else. It is
+//! drawn in the middle of its cell, its art — drawn for a wall above — turned
+//! to face its wall, and deep by where it is kept, so a switch on the far wall
+//! is behind whoever stands in front of it and one on the near wall in front.
 
 use std::collections::HashMap;
 
@@ -28,7 +36,8 @@ use bevy::prelude::*;
 use super::{CurrentMap, PaletteItem};
 use crate::animation::StripAnimation;
 use crate::characters::{depth_for, upscale, CELL};
-use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point};
+use crate::map::mount::{self, Side};
+use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 use crate::render::WORLD_LAYER;
 use crate::state::AppState;
 use crate::view::{CellRect, VisibleArea};
@@ -80,6 +89,11 @@ pub const PALETTE: &[PaletteItem] = &[
     // lives there. Drawn by `tools/door_art.py`.
     PaletteItem::posed("door", "door.png", 6),
     PaletteItem::posed("house door", "house_door.png", 6),
+    // On the wall by a room's door: switches the room's lamps
+    // (`map::utilities::LIGHT_SWITCH`). Two poses, on and off, chosen by the
+    // game ([`SwitchPlate`]); drawn for a wall above and turned to fit its
+    // own. Drawn by `tools/switch_art.py`.
+    PaletteItem::posed("light switch", "light_switch.png", 2),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in
@@ -210,6 +224,27 @@ impl DoorLeaf {
     }
 }
 
+/// A light switch's plate: a [`PaletteItem::posed`] strip of two frames, on
+/// and off, of which the game screen shows the one the simulation says
+/// (`game::props`). The editor shows it on.
+#[derive(Component)]
+pub struct SwitchPlate {
+    /// Whether the frame showing is the "on" one, so a switch nobody flipped
+    /// costs no write.
+    pub showing_on: bool,
+}
+
+/// How a prop is turned to fit where it stands.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Fit {
+    /// As drawn, where it was put.
+    Free,
+    /// A door's leaf: [`DoorLeaf::pose`].
+    Door { vertical: bool, mirrored: bool },
+    /// Fixed to the wall on this side of its cell ([`mount::wall_of`]).
+    Wall(Side),
+}
+
 /// Every cell with a door in it, sorted.
 fn door_cells(map: &Map) -> Vec<Point> {
     let mut cells: Vec<Point> = map
@@ -231,21 +266,43 @@ pub fn item_of(layer: ObjectLayer, kind: &ObjectKind) -> Option<usize> {
 /// Put a prop — or a lamp, by `layer` — in the map. What draws it is
 /// [`sync_prop_window`], from the map, so this cannot show one the saved file
 /// does not contain.
-pub fn place(window: &mut PropWindow, map: &mut Map, layer: ObjectLayer, pos: Vec2, item: usize) {
+///
+/// A wall-mounted prop goes onto the wall nearest `pos` and only where there
+/// is one ([`placement`]); returns whether anything was placed.
+pub fn place(window: &mut PropWindow, map: &mut Map, layer: ObjectLayer, pos: Vec2, item: usize) -> bool {
+    let kind = ObjectKind::new(palette_of(layer)[item].name);
+    let Some(at) = placement(map, layer, &kind, pos) else {
+        return false;
+    };
+    map.add_object(layer, Object { at, kind });
+    window.touch();
+    true
+}
+
+/// Where a `kind` put down at `pos` on `layer` would go, in whole pixels, or
+/// `None` where it may not — a wall-mounted prop with no wall beside it
+/// ([`mount::mount`]). What [`place`] places, and what the cursor's ghost
+/// shows before it does.
+pub fn placement(map: &Map, layer: ObjectLayer, kind: &ObjectKind, pos: Vec2) -> Option<Point> {
     // Whole pixels only: a sprite on a fractional coordinate samples between
     // texels and puts a seam through the pixel grid. It is also what lets a
     // position be an exact key when the prop is erased again.
     let pos = pos.round();
     let at = Point::new(pos.x as i32, pos.y as i32);
+    if layer == ObjectLayer::Props && kind.is_wall_mounted() {
+        mount::mount(map, at)
+    } else {
+        Some(at)
+    }
+}
 
-    map.add_object(
-        layer,
-        Object {
-            at,
-            kind: ObjectKind::new(palette_of(layer)[item].name),
-        },
-    );
-    window.touch();
+/// Where a wall-mounted prop kept at `at` is drawn, turned to its wall: the
+/// middle of its cell, so a quarter turn of a cell-sized sprite keeps every
+/// texel on the pixel grid. The rotation is about that middle.
+pub fn on_wall(at: Point, side: Side) -> (Vec2, Quat) {
+    let cell = IVec2::new(at.x.div_euclid(PIXELS_PER_CELL), at.y.div_euclid(PIXELS_PER_CELL));
+    let turn = std::f32::consts::FRAC_PI_2 * f32::from(side.quarter_turns());
+    (super::background::cell_centre(cell), Quat::from_rotation_z(turn))
 }
 
 /// Delete the prop nearest the cursor, if one is close enough.
@@ -390,11 +447,18 @@ pub fn sync_prop_window(
             // this runs every time the view moves, and a map with one unknown
             // prop would fill the log with it.
             if let Some(item) = item_of(layer, &object.kind) {
-                let pose = palette_of(layer)[item].posed.then(|| {
+                let fit = if layer == ObjectLayer::Props && object.kind.is_wall_mounted() {
+                    // One on no wall — a hand-written file — is drawn where
+                    // it stands, rather than left out or turned to nothing.
+                    mount::wall_of(map, object.at).map_or(Fit::Free, Fit::Wall)
+                } else if palette_of(layer)[item].posed {
                     let doors = doors.get_or_insert_with(|| door_cells(map));
-                    DoorLeaf::pose(map, object.cell(), doors)
-                });
-                let prop = spawn_prop(&mut commands, &assets, layer, object.at, item, pose, *state.get());
+                    let (vertical, mirrored) = DoorLeaf::pose(map, object.cell(), doors);
+                    Fit::Door { vertical, mirrored }
+                } else {
+                    Fit::Free
+                };
+                let prop = spawn_prop(&mut commands, &assets, layer, object.at, item, fit, *state.get());
                 window.drawn.insert((slot, index), prop);
             }
         }
@@ -412,16 +476,27 @@ fn spawn_prop(
     layer: ObjectLayer,
     at: Point,
     item: usize,
-    pose: Option<(bool, bool)>,
+    fit: Fit,
     state: AppState,
 ) -> Entity {
     let item = &palette_of(layer)[item];
-    let y = at.y as f32;
-    let z = if layer == ObjectLayer::Lamps { LAMP_Z } else { depth_for(y) };
-    let (vertical, mirrored) = pose.unwrap_or((false, false));
+    // Deep by where it is kept, even when drawn elsewhere: a switch on the
+    // far wall of a cell is behind whoever stands in it.
+    let z = if layer == ObjectLayer::Lamps { LAMP_Z } else { depth_for(at.y as f32) };
     // A quarter turn about the middle of a whole-pixel square, for a door in
-    // a wall running up and down: every texel still lands on the pixel grid.
-    let rotation = if vertical { Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
+    // a wall running up and down or a switch on a wall beside it: every texel
+    // still lands on the pixel grid.
+    let (position, rotation, mirrored) = match fit {
+        Fit::Free => (Vec2::new(at.x as f32, at.y as f32), Quat::IDENTITY, false),
+        Fit::Door { vertical, mirrored } => {
+            let turn = if vertical { Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
+            (Vec2::new(at.x as f32, at.y as f32), turn, mirrored)
+        }
+        Fit::Wall(side) => {
+            let (middle, turn) = on_wall(at, side);
+            (middle, turn, false)
+        }
+    };
     let prop = commands
         .spawn((
             Name::new(if layer == ObjectLayer::Lamps { "lamp" } else { "prop" }),
@@ -437,17 +512,20 @@ fn spawn_prop(
                 flip_x: mirrored,
                 ..default()
             },
-            Transform::from_xyz(at.x as f32, y, z).with_scale(upscale(item.scale)).with_rotation(rotation),
+            Transform::from_xyz(position.x, position.y, z).with_scale(upscale(item.scale)).with_rotation(rotation),
             WORLD_LAYER,
             DespawnOnExit(state),
         ))
         .id();
 
-    if pose.is_some() {
+    if matches!(fit, Fit::Door { .. }) {
         commands.entity(prop).insert(DoorLeaf {
             frames: item.art.frames,
             showing: 0,
         });
+    } else if item.posed {
+        // Posed and not a door: a switch's plate, showing on.
+        commands.entity(prop).insert(SwitchPlate { showing_on: true });
     } else if item.art.frames > 1 {
         commands.entity(prop).insert(StripAnimation::new(
             item.frame(),
@@ -580,6 +658,44 @@ mod tests {
                 item.name
             );
             assert!(!busy.path.is_empty());
+        }
+    }
+
+    /// A light switch goes only on floor beside a wall, onto the wall nearest
+    /// where it was put down, one to a cell; anything else goes anywhere.
+    #[test]
+    fn a_wall_mounted_prop_is_placed_only_beside_a_wall() {
+        use crate::map::{Size, FLOOR, WALL};
+        let mut map = Map::new(Size::new(6, 5), FLOOR);
+        for x in 0..6 {
+            map.set_terrain(Point::new(x, 4), WALL);
+        }
+        let mut window = PropWindow::default();
+        let switch = item_of(ObjectLayer::Props, &ObjectKind::new("light switch")).expect("in the palette");
+        let a_crate = item_of(ObjectLayer::Props, &ObjectKind::new("crate")).unwrap();
+        let near = |x: i32, y: i32| Vec2::new((x * PIXELS_PER_CELL + 20) as f32, (y * PIXELS_PER_CELL + 30) as f32);
+
+        assert!(!place(&mut window, &mut map, ObjectLayer::Props, near(2, 1), switch), "the middle of the floor");
+        assert!(map.objects(ObjectLayer::Props).is_empty());
+        assert!(place(&mut window, &mut map, ObjectLayer::Props, near(2, 3), switch), "under the wall");
+        assert_eq!(map.objects(ObjectLayer::Props)[0].at, mount::mounted_at(Point::new(2, 3), Side::Up));
+        assert!(!place(&mut window, &mut map, ObjectLayer::Props, near(2, 3), switch), "one to a cell");
+        assert!(place(&mut window, &mut map, ObjectLayer::Props, near(2, 1), a_crate), "a crate goes anywhere");
+        assert_eq!(map.objects(ObjectLayer::Props)[1].at, Point::new(116, 78), "where it was put");
+    }
+
+    /// Drawn in the middle of its cell and turned to face its wall, so a
+    /// quarter turn of a cell-sized sprite keeps it on the pixel grid.
+    #[test]
+    fn a_switch_is_drawn_in_its_cell_turned_to_its_wall() {
+        let cell = Point::new(3, 2);
+        for side in Side::ALL {
+            let (middle, turn) = on_wall(mount::mounted_at(cell, side), side);
+            assert_eq!(middle, Vec2::new(3.0 * 48.0 + 24.0, 2.0 * 48.0 + 24.0), "{side:?}");
+            // The top of the art points at the wall.
+            let top = turn * Vec3::Y;
+            let step = side.step();
+            assert!((top - Vec3::new(step.x as f32, step.y as f32, 0.0)).length() < 1e-5, "{side:?}: {top:?}");
         }
     }
 

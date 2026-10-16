@@ -446,7 +446,7 @@ A tick is **two passes**, and which one may write the entity table is the design
 | | writes the entity table | allocates | parallelisable |
 | --- | --- | --- | --- |
 | `spawn_pass(&mut GameState, &Input)` | **yes** — the only thing that does | yes | no |
-| `process_pass(&mut GameState, dt)` | **no** | no | that is what it is for |
+| `process_pass(&mut GameState, dt)` | **no** | route-buffer growth only | that is what it is for |
 
 The **spawn pass** drains `Input`'s spawns and despawns. It runs first, so an entity
 spawned this tick thinks this tick, and it is the only pass that may resize the table.
@@ -618,14 +618,31 @@ goal having a say. A goal put down before it heard is handed that result in
 `deprioritized`. A goal that returns `Blocked` is held off (`BLOCKED_TICKS`, doubling), and
 `Achieved` does not hand over — if the routine still wants it, it starts again.
 
-The routing under `MoveTo` is **two stages of one A\*** (`sim/path.rs`, asked twice with two
-different predicates), in `sim/walker.rs`. The *far* stage plans against the terrain only,
-once per walk, and its cost is bounded by a count of expansions rather than by hope — an
-unreachable goal floods everything it can reach before it knows, so `FAR_LIMIT` turns a
-walled-off room from a frame-rate cliff into a bounded miss. The *near* stage is the detour:
-something was in the way, so `DETOUR_CELLS` of the plan are thrown out and rerouted against
-the crowd as well as the terrain; no local way round fails the walk, and the goal decides
-whether to wait for a gap (`WAIT_FOR_A_GAP`, up to `PATIENCE` times) or give up.
+The routing under `MoveTo` is **two stages of one A\*** (`sim/path.rs`, in
+`sim/walker.rs`). A task can request a named cell or any usable side of a feature;
+feature approaches try all free sides before falling back to occupied sides, and
+respect door permissions. Only failure of all approaches makes a feature unreachable.
+
+The *far* stage plans over terrain and door permissions. `Map::navigation()` caches
+static connected components and each component's minimum walk cost; game construction
+warms it, and terrain/prop edits invalidate it. Components treat potentially open doors
+as connected, so they can reject an impossible route without claiming to know keys.
+`SearchStatus` distinguishes `Found`, `Unreachable`, and `BudgetExhausted`. `FAR_LIMIT`
+bounds one tick's expansions; an exhausted static search keeps its frontier and resumes
+next tick while the walker stands still. Cancellation releases that continuation.
+
+Search scratch is a generation-stamped grid and a heap, ordinarily reused per thread;
+only pending searches own a finder across ticks and worker migration. Completed routes
+fill reusable walker buffers directly. A walker's route storage is boxed once at spawn
+to keep the unit and its inline task queue small.
+
+The *near* stage replaces the next `DETOUR_CELLS` cells against this tick's crowd, with
+its own `DETOUR_LIMIT`. A transient crowd snapshot is not resumed next tick; a failed
+or exhausted repair hands the collision back to the goal's existing wait/retry policy.
+A separate detour prefix rejoins the retained far route without copying its tail.
+An occupied final destination fails the walk instead of repeatedly repairing the last
+step, so `WAIT_FOR_A_GAP` and `PATIENCE` remain effective. There is no aggregate search
+budget yet: simultaneous unfinished far searches can each consume `FAR_LIMIT` per tick.
 
 The search is 4-connected and movement is not: a walker leaves for the next cell as soon as
 it is inside the current one, so the line it walks cuts corners — except the last cell,

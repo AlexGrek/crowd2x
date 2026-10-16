@@ -45,8 +45,19 @@ impl Action {
     /// function of how many decisions were made rather than of how many ticks
     /// went by.
     pub fn walk_to(walk: &mut Walker, think: &Think<'_>, cell: Point) -> Option<Action> {
-        walk.route_to(think, cell).then_some(Action::Move {
-            to: cell,
+        Self::walk_to_any(walk, think, crate::sim::path::Destinations::one(cell))
+    }
+
+    pub fn walk_to_any(
+        walk: &mut Walker,
+        think: &Think<'_>,
+        goals: crate::sim::path::Destinations,
+    ) -> Option<Action> {
+        if !walk.route_to_any(think, goals) {
+            return None;
+        }
+        Some(Action::Move {
+            to: walk.destination()?,
             elapsed: 0.0,
         })
     }
@@ -147,9 +158,11 @@ impl Action {
     pub fn advance(&mut self, think: &Think<'_>, outcome: MoveOutcome, walk: &mut Walker) -> ActionState {
         match self {
             Action::None => ActionState::Finished,
-            Action::Move { elapsed, .. } => {
+            Action::Move { to, elapsed } => {
                 *elapsed += think.dt;
-                walk.advance(think, outcome)
+                let state = walk.advance(think, outcome);
+                if let Some(destination) = walk.destination() { *to = destination; }
+                state
             }
             Action::Interact {
                 seconds, elapsed, ..

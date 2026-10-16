@@ -1,132 +1,140 @@
-//! A*, and the route it produces.
+//! Deterministic, resumable orthogonal A* and reusable route storage.
 //!
-//! Plain Rust like the rest of `src/sim/`, and deliberately ignorant of what
-//! is walking the path: it is handed a start, a goal, a budget and a predicate
-//! that says whether a cell can be stood in. Which passability that predicate
-//! consults is the caller's business, and it is the whole of the difference
-//! between this module's two customers — see [`crate::sim::walker::Walker`],
-//! which asks twice with two different predicates.
-//!
-//! # Orthogonal, and only orthogonal
-//!
-//! A search step is one of [`Point::CARDINALS`]. Nothing here expands a
-//! diagonal, so every cost is a whole number of steps and
-//! [`Point::manhattan_distance`] is an exact, admissible, consistent
-//! heuristic — which is what lets the closed set be a plain "already seen this
-//! cheaply" test with no reopening.
-//!
-//! **Movement is still diagonal.** A walker aims at the centre of the next
-//! cell in its path and moves on the moment it is inside that cell, so it
-//! leaves for the next one before reaching the middle and the line it actually
-//! walks cuts the corner. That is intended: the grid is what the *search* is
-//! 4-connected over, not what a body may travel along. A straight segment from
-//! anywhere inside one cell to the centre of an edge-adjacent one stays inside
-//! those two cells, so cutting a corner can never skip a cell the search
-//! vetted.
-//!
-//! # The budget is a count of expansions
-//!
-//! [`PathFinder::find`] gives up after `limit` cells have been popped and
-//! returns `None`. Unreachable is the case that costs: a goal behind a sealed
-//! wall makes A* flood every cell it *can* reach before it knows, and that
-//! bill is paid per entity per tick by whoever asks. The limit is what turns
-//! "this map has a walled-off room in it" from a frame-rate cliff into a
-//! bounded miss, and callers treat a miss the same way they treat no route.
-//!
-//! # Ties are broken on coordinates, not on insertion order
-//!
-//! Two cells with the same `f` come off the heap in the order `Candidate`'s
-//! `Ord` gives, which is a total order over `(f, h, point)` and has nothing to
-//! do with when they went in. A binary heap promises nothing about equal
-//! elements, and "the sequence of pushes happens to be the same" is not what
-//! determinism should rest on when determinism is a test this crate runs for a
-//! thousand ticks.
+//! A search distinguishes exhausted work from an impossible route. Scratch
+//! uses generation-stamped grid slots: beginning a small search never clears
+//! the capacity retained by an earlier large one. Ordinary searches reuse one
+//! finder per thread; only unfinished searches keep their finder with a walker.
 
+use crate::map::{MIN_WALK_COST, Map, Point, Size};
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 
-use crate::map::Point;
+/// Inline destination set: a single cell or up to four sides of a feature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Destinations {
+    cells: [Point; 4],
+    len: u8,
+}
+impl Destinations {
+    pub const fn one(cell: Point) -> Self {
+        Self {
+            cells: [cell; 4],
+            len: 1,
+        }
+    }
+    pub fn from_cells(cells: impl IntoIterator<Item = Point>) -> Self {
+        let mut result = Self {
+            cells: [Point::ORIGIN; 4],
+            len: 0,
+        };
+        for cell in cells {
+            if result.as_slice().contains(&cell) {
+                continue;
+            }
+            assert!(result.len < 4, "at most four destinations");
+            result.cells[result.len as usize] = cell;
+            result.len += 1;
+        }
+        result
+    }
+    pub fn as_slice(&self) -> &[Point] {
+        &self.cells[..self.len as usize]
+    }
+    pub fn first(&self) -> Option<Point> {
+        self.as_slice().first().copied()
+    }
+}
 
-/// A route: the cells to walk through, and how far along it we are.
-///
-/// The start cell is **not** in the steps — a path is what is left to do, and
-/// the cell you are standing in is not. The destination is the last entry.
+/// The far route and a short replacement prefix. Repairing a prefix copies
+/// only any unfinished previous detour, never the untouched far-route tail.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Path {
     steps: Vec<Point>,
-    /// Index of the cell currently being walked to.
     next: usize,
+    patch: Vec<Point>,
+    patch_next: usize,
 }
-
 impl Path {
-    /// An empty path: nothing left to walk.
-    pub fn none() -> Path {
-        Path::default()
+    pub fn none() -> Self {
+        Self::default()
     }
-
-    pub fn new(steps: Vec<Point>) -> Path {
-        Path { steps, next: 0 }
+    pub fn new(steps: Vec<Point>) -> Self {
+        Self {
+            steps,
+            ..Self::default()
+        }
     }
-
-    /// The cell being walked to right now, or `None` when the path is done.
     pub fn current(&self) -> Option<Point> {
-        self.steps.get(self.next).copied()
+        self.patch
+            .get(self.patch_next)
+            .or_else(|| self.steps.get(self.next))
+            .copied()
     }
-
-    /// Where this path ends up, whether or not it has been started.
     pub fn destination(&self) -> Option<Point> {
-        self.steps.last().copied()
+        self.steps
+            .get(self.next..)
+            .and_then(|s| s.last())
+            .or_else(|| self.patch.last())
+            .copied()
     }
-
-    /// Everything still to be walked, current step first.
-    pub fn remaining(&self) -> &[Point] {
-        &self.steps[self.next.min(self.steps.len())..]
+    pub fn remaining(&self) -> impl Iterator<Item = Point> + '_ {
+        self.patch[self.patch_next..]
+            .iter()
+            .chain(self.steps[self.next..].iter())
+            .copied()
     }
-
+    pub fn len(&self) -> usize {
+        self.patch.len() - self.patch_next + self.steps.len() - self.next
+    }
     pub fn is_done(&self) -> bool {
-        self.next >= self.steps.len()
+        self.len() == 0
     }
-
-    /// One cell reached; move on to the next.
     pub fn advance(&mut self) {
-        self.next += 1;
+        if self.patch_next < self.patch.len() {
+            self.patch_next += 1;
+        } else if self.next < self.steps.len() {
+            self.next += 1;
+        }
     }
-
     pub fn clear(&mut self) {
         self.steps.clear();
+        self.patch.clear();
         self.next = 0;
+        self.patch_next = 0;
     }
-
-    /// Replace the next `count` remaining cells with `detour`.
-    ///
-    /// The already-walked prefix is dropped rather than kept: it is history,
-    /// and keeping it would mean preserving `next`, which is exactly the index
-    /// the splice invalidates. What comes back starts at `detour` and runs to
-    /// the same destination.
-    pub fn splice(&mut self, count: usize, detour: Vec<Point>) {
-        let tail = self.next.saturating_add(count).min(self.steps.len());
-        let mut steps = detour;
-        steps.extend_from_slice(&self.steps[tail..]);
-        *self = Path::new(steps);
+    pub fn output(&mut self) -> &mut Vec<Point> {
+        self.clear();
+        &mut self.steps
+    }
+    pub fn single(&mut self, cell: Point) {
+        self.output().push(cell);
+    }
+    pub fn splice(&mut self, count: usize, detour: &mut Vec<Point>) {
+        let patched = count.min(self.patch.len() - self.patch_next);
+        self.patch_next += patched;
+        self.next = (self.next + count - patched).min(self.steps.len());
+        detour.extend_from_slice(&self.patch[self.patch_next..]);
+        std::mem::swap(&mut self.patch, detour);
+        detour.clear();
+        self.patch_next = 0;
     }
 }
 
-/// A cell waiting to be expanded.
-///
-/// Ordered so a `BinaryHeap` — a *max* heap — pops the smallest `f` first:
-/// every comparison below is written backwards on purpose. `h` breaks a tie
-/// towards the goal, which is what stops A* fanning out across an open floor,
-/// and the point itself breaks what is left so the order is total. See the
-/// module docs for why that last one matters.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchStatus {
+    Found(Point),
+    Unreachable,
+    BudgetExhausted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Candidate {
-    f: i32,
-    h: i32,
+    f: u64,
+    h: u64,
     point: Point,
 }
-
 impl Ord for Candidate {
-    fn cmp(&self, other: &Candidate) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         other
             .f
             .cmp(&self.f)
@@ -134,170 +142,508 @@ impl Ord for Candidate {
             .then_with(|| other.point.cmp(&self.point))
     }
 }
-
 impl PartialOrd for Candidate {
-    fn partial_cmp(&self, other: &Candidate) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-
-/// How a cell was reached, and how cheaply.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Visit {
-    /// Steps from the start.
-    cost: i32,
+    generation: u32,
+    cost: u64,
     from: Point,
 }
 
-/// A* with its working memory kept between searches.
-///
-/// The scratch is why this is a struct and not a free function: a search over
-/// a big map touches thousands of cells, and allocating and freeing that table
-/// and heap on every call is most of the cost of a short path. [`find_path`]
-/// is the free-function door, over one of these per thread.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PathFinder {
     open: BinaryHeap<Candidate>,
-    seen: HashMap<Point, Visit>,
-    trace: Vec<Point>,
+    seen: Vec<Visit>,
+    generation: u32,
+    size: Option<Size>,
+    start: Point,
+    goals: Option<Destinations>,
+    minimum: u32,
+    revision: u64,
+    #[cfg(test)]
+    expanded: usize,
 }
-
 impl PathFinder {
-    pub fn new() -> PathFinder {
-        PathFinder::default()
+    pub fn new() -> Self {
+        Self::default()
     }
-
-    /// The shortest orthogonal route from `start` to `goal`, or `None`.
-    ///
-    /// The returned cells **exclude `start` and include `goal`**, so the
-    /// result is a list of moves and not a list of places. `start == goal` is
-    /// an empty route rather than a failure: there is nothing to walk, which
-    /// is a different answer from "you cannot get there".
-    ///
-    /// `passable` is asked about every cell except `start`. A walker standing
-    /// somewhere it could not have walked into — spawned inside a wall — can
-    /// therefore still find its way out, which is the only way it ever will.
-    ///
-    /// `None` means no route *within the budget*: unreachable, or reachable
-    /// only after more than `limit` expansions. The two are deliberately the
-    /// same answer, because a caller can do nothing different about them.
-    pub fn find(
-        &mut self,
-        start: Point,
-        goal: Point,
-        limit: usize,
-        passable: impl Fn(Point) -> bool,
-    ) -> Option<Vec<Point>> {
-        if start == goal {
-            return Some(Vec::new());
-        }
-        // Cheaper than discovering it by flooding the whole reachable region.
-        if !passable(goal) {
-            return None;
-        }
-
+    fn guess(&self, point: Point) -> u64 {
+        self.goals
+            .unwrap()
+            .as_slice()
+            .iter()
+            .map(|&goal| {
+                (point.x.abs_diff(goal.x) as u64 + point.y.abs_diff(goal.y) as u64)
+                    * self.minimum as u64
+            })
+            .min()
+            .unwrap_or(0)
+    }
+    pub fn begin(&mut self, size: Size, start: Point, goals: Destinations, minimum: u32) {
         self.open.clear();
-        self.seen.clear();
-
-        let heuristic = start.manhattan_distance(goal);
-        self.seen.insert(
-            start,
-            Visit {
-                cost: 0,
-                from: start,
-            },
-        );
+        self.size = Some(size);
+        self.seen.resize(size.area(), Visit::default());
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.seen.fill(Visit::default());
+            self.generation = 1;
+        }
+        self.start = start;
+        self.goals = Some(goals);
+        self.minimum = minimum.max(MIN_WALK_COST as u32);
+        #[cfg(test)]
+        {
+            self.expanded = 0;
+        }
+        // Starts outside the grid are not valid simulation positions.
+        if goals.first().is_none() {
+            return;
+        }
+        let Some(index) = size.index_of(start) else {
+            return;
+        };
+        self.seen[index] = Visit {
+            generation: self.generation,
+            cost: 0,
+            from: start,
+        };
+        let h = self.guess(start);
         self.open.push(Candidate {
-            f: heuristic,
-            h: heuristic,
+            f: h,
+            h,
             point: start,
         });
-
-        let mut expanded = 0usize;
-        while let Some(candidate) = self.open.pop() {
+    }
+    /// Continue the same search. The passability/cost function must remain
+    /// unchanged between slices. Output is filled only on success.
+    pub fn advance(
+        &mut self,
+        limit: usize,
+        cost: impl Fn(Point) -> Option<u32>,
+        output: &mut Vec<Point>,
+    ) -> SearchStatus {
+        let size = self.size.expect("begin before advance");
+        let goals = self.goals.unwrap();
+        let mut expanded = 0;
+        while let Some(candidate) = self.open.peek() {
             let point = candidate.point;
-            let cost = self.seen[&point].cost;
-
-            // A stale heap entry: this cell was reached again more cheaply
-            // after it was pushed. Dropping it here is what stands in for the
-            // decrease-key a `BinaryHeap` does not have.
-            if candidate.f - candidate.h != cost {
+            let visit = self.seen[size.index_of(point).unwrap()];
+            if candidate.f - candidate.h != visit.cost {
+                self.open.pop();
                 continue;
             }
-            if point == goal {
-                return Some(self.unwind(start, goal));
+            if goals.as_slice().contains(&point) && (point == self.start || cost(point).is_some()) {
+                self.open.pop();
+                output.clear();
+                let mut here = point;
+                while here != self.start {
+                    output.push(here);
+                    here = self.seen[size.index_of(here).unwrap()].from;
+                }
+                output.reverse();
+                return SearchStatus::Found(point);
             }
-
+            if expanded == limit {
+                return SearchStatus::BudgetExhausted;
+            }
+            self.open.pop();
             expanded += 1;
-            if expanded > limit {
-                return None;
+            #[cfg(test)]
+            {
+                self.expanded += 1;
             }
-
-            for step in Point::CARDINALS {
-                let next = point + step;
-                let cost = cost + 1;
-                // The heuristic is consistent, so a cell already reached this
-                // cheaply can never be improved and needs no reopening.
-                if self.seen.get(&next).is_some_and(|seen| seen.cost <= cost) {
+            for next in point.cardinal_neighbours() {
+                let Some(index) = size.index_of(next) else {
+                    continue;
+                };
+                let Some(step) = cost(next) else { continue };
+                let total = visit.cost + step.max(MIN_WALK_COST as u32) as u64;
+                let seen = self.seen[index];
+                if seen.generation == self.generation && seen.cost <= total {
                     continue;
                 }
-                if !passable(next) {
-                    continue;
-                }
-                self.seen.insert(next, Visit { cost, from: point });
-                let h = next.manhattan_distance(goal);
+                self.seen[index] = Visit {
+                    generation: self.generation,
+                    cost: total,
+                    from: point,
+                };
+                let h = self.guess(next);
                 self.open.push(Candidate {
-                    f: cost + h,
+                    f: total + h,
                     h,
                     point: next,
                 });
             }
         }
-        None
+        SearchStatus::Unreachable
     }
 
-    /// Walk the parent links back from `goal` and hand the route out forwards.
-    fn unwind(&mut self, start: Point, goal: Point) -> Vec<Point> {
-        self.trace.clear();
-        let mut point = goal;
-        while point != start {
-            self.trace.push(point);
-            point = self.seen[&point].from;
+    #[cfg(test)]
+    fn find(
+        &mut self,
+        size: Size,
+        start: Point,
+        goal: Point,
+        limit: usize,
+        cost: impl Fn(Point) -> Option<u32>,
+    ) -> Option<Vec<Point>> {
+        if start != goal && cost(goal).is_none() {
+            return None;
         }
-        self.trace.reverse();
-        // A fresh `Vec`, sized exactly: the route outlives this call and the
-        // scratch does not.
-        self.trace.clone()
+        self.begin(size, start, Destinations::one(goal), MIN_WALK_COST as u32);
+        let mut output = Vec::new();
+        matches!(
+            self.advance(limit, cost, &mut output),
+            SearchStatus::Found(_)
+        )
+        .then_some(output)
     }
 }
-
 thread_local! {
-    /// One [`PathFinder`]'s scratch per thread, reused by [`find_path`].
-    ///
-    /// The reaction round runs across threads and every entity in it may want
-    /// a search, so the alternatives were a `&mut PathFinder` threaded through
-    /// [`crate::sim::GameEntity::react`] — a parameter every kind would carry
-    /// and most would ignore — or an allocation per search. This is neither,
-    /// and it changes no result: the scratch is cleared at the top of every
-    /// `find`, so which thread ran a search is not observable in what it
-    /// returns.
     static SCRATCH: std::cell::RefCell<PathFinder> = std::cell::RefCell::new(PathFinder::new());
 }
 
-/// [`PathFinder::find`], over a scratch buffer reused per thread.
-pub fn find_path(
+/// Start or resume a static route, borrowing ordinary search scratch from
+/// this thread. A budget-exhausted search alone takes ownership of its finder;
+/// completion returns its buffers to the thread, including after migration.
+pub fn search(
+    pending: &mut Option<Box<PathFinder>>,
+    map: &Map,
+    start: Point,
+    goals: Destinations,
+    limit: usize,
+    cost: impl Fn(Point) -> Option<u32>,
+    output: &mut Vec<Point>,
+) -> SearchStatus {
+    if pending.as_ref().is_some_and(|p| {
+        p.revision != map.navigation_revision() || p.size != Some(map.size()) || p.start != start
+    }) {
+        recycle(pending);
+    }
+    if let Some(finder) = pending {
+        let status = finder.advance(limit, &cost, output);
+        if status != SearchStatus::BudgetExhausted {
+            recycle(pending);
+        }
+        return status;
+    }
+    let goals = Destinations::from_cells(goals.as_slice().iter().copied().filter(|&goal| {
+        map.navigation().may_reach(start, goal) && (start == goal || cost(goal).is_some())
+    }));
+    if goals.first().is_none() {
+        return SearchStatus::Unreachable;
+    }
+    let minimum = goals
+        .as_slice()
+        .iter()
+        .map(|&g| map.navigation().minimum_cost(g))
+        .min()
+        .unwrap();
+    SCRATCH.with(|slot| {
+        let mut finder = slot.borrow_mut();
+        finder.begin(map.size(), start, goals, minimum);
+        finder.revision = map.navigation_revision();
+        let status = finder.advance(limit, cost, output);
+        if status == SearchStatus::BudgetExhausted {
+            *pending = Some(Box::new(std::mem::take(&mut *finder)));
+        }
+        status
+    })
+}
+
+/// A crowd repair uses this tick's occupancy only. It shares the stamped
+/// buffers but never allocates an owned continuation for a transient snapshot.
+pub fn search_local(
+    map: &Map,
     start: Point,
     goal: Point,
     limit: usize,
-    passable: impl Fn(Point) -> bool,
+    cost: impl Fn(Point) -> Option<u32>,
+    output: &mut Vec<Point>,
+) -> SearchStatus {
+    if !map.navigation().may_reach(start, goal) || (start != goal && cost(goal).is_none()) {
+        return SearchStatus::Unreachable;
+    }
+    SCRATCH.with(|slot| {
+        let mut finder = slot.borrow_mut();
+        finder.begin(
+            map.size(),
+            start,
+            Destinations::one(goal),
+            map.navigation().minimum_cost(goal),
+        );
+        finder.advance(limit, cost, output)
+    })
+}
+
+/// Keep the largest useful scratch allocation when cancelling or completing.
+pub fn recycle(pending: &mut Option<Box<PathFinder>>) {
+    if let Some(mut finder) = pending.take() {
+        SCRATCH.with(|slot| {
+            let mut scratch = slot.borrow_mut();
+            if finder.seen.capacity() > scratch.seen.capacity() {
+                std::mem::swap(&mut *finder, &mut *scratch);
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+pub fn find_path(
+    size: Size,
+    start: Point,
+    goal: Point,
+    limit: usize,
+    cost: impl Fn(Point) -> Option<u32>,
 ) -> Option<Vec<Point>> {
-    SCRATCH.with(|finder| finder.borrow_mut().find(start, goal, limit, passable))
+    SCRATCH.with(|finder| finder.borrow_mut().find(size, start, goal, limit, cost))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::{Map, Size, FLOOR, WALL};
+    use crate::map::{FLOOR, Map, Size, WALL};
+
+    #[test]
+    fn a_map_edit_discards_the_unfinished_search_instead_of_using_stale_parents() {
+        let mut map = open(12, 1);
+        let mut pending = None;
+        let mut output = Vec::new();
+        let goal = Point::new(11, 0);
+        assert_eq!(
+            search(
+                &mut pending,
+                &map,
+                Point::ORIGIN,
+                Destinations::one(goal),
+                2,
+                walkable(&map),
+                &mut output
+            ),
+            SearchStatus::BudgetExhausted
+        );
+        map.set_terrain(Point::new(5, 0), WALL);
+        assert_eq!(
+            search(
+                &mut pending,
+                &map,
+                Point::ORIGIN,
+                Destinations::one(goal),
+                100,
+                walkable(&map),
+                &mut output
+            ),
+            SearchStatus::Unreachable
+        );
+        assert!(pending.is_none());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn budget_exhaustion_resumes_the_same_search_and_matches_one_shot() {
+        let road = crate::map::TerrainId::from_name("road").unwrap();
+        let map = Map::new(Size::new(35, 35), road);
+        let start = Point::ORIGIN;
+        let goals = Destinations::one(Point::new(34, 34));
+        let mut sliced = PathFinder::new();
+        sliced.begin(map.size(), start, goals, 1);
+        let mut output = Vec::new();
+        assert_eq!(
+            sliced.advance(7, walkable(&map), &mut output),
+            SearchStatus::BudgetExhausted
+        );
+        assert_eq!(sliced.expanded, 7);
+        assert!(output.is_empty());
+        let mut slices = 1;
+        loop {
+            slices += 1;
+            match sliced.advance(7, walkable(&map), &mut output) {
+                SearchStatus::BudgetExhausted => assert!(slices < 1000),
+                SearchStatus::Found(cell) => {
+                    assert_eq!(cell, goals.first().unwrap());
+                    break;
+                }
+                SearchStatus::Unreachable => panic!("open ground is reachable"),
+            }
+        }
+        assert!(slices > 2);
+        let mut whole = PathFinder::new();
+        let expected = whole
+            .find(
+                map.size(),
+                start,
+                goals.first().unwrap(),
+                100_000,
+                walkable(&map),
+            )
+            .unwrap();
+        assert_eq!(output, expected);
+        assert_eq!(
+            sliced.expanded, whole.expanded,
+            "no expansions replayed between slices"
+        );
+    }
+
+    #[test]
+    fn connectivity_rejects_a_sealed_room_without_expanding_or_asking_costs() {
+        let mut map = open(300, 300);
+        for y in 0..300 {
+            map.set_terrain(Point::new(150, y), WALL);
+        }
+        let calls = std::cell::Cell::new(0);
+        let mut pending = None;
+        let mut output = Vec::new();
+        assert_eq!(
+            search(
+                &mut pending,
+                &map,
+                Point::new(148, 1),
+                Destinations::one(Point::new(152, 1)),
+                1,
+                |c| {
+                    calls.set(calls.get() + 1);
+                    map.is_passable(c).then_some(1)
+                },
+                &mut output
+            ),
+            SearchStatus::Unreachable
+        );
+        assert_eq!(calls.get(), 0);
+        assert!(pending.is_none());
+    }
+
+    #[test]
+    fn uniform_expensive_ground_fits_the_normal_budget() {
+        for name in ["grass", "road"] {
+            let map = Map::new(
+                Size::new(300, 300),
+                crate::map::TerrainId::from_name(name).unwrap(),
+            );
+            let mut pending = None;
+            let mut output = Vec::new();
+            let goal = Point::new(299, 299);
+            assert_eq!(
+                search(
+                    &mut pending,
+                    &map,
+                    Point::ORIGIN,
+                    Destinations::one(goal),
+                    crate::sim::walker::FAR_LIMIT,
+                    walkable(&map),
+                    &mut output
+                ),
+                SearchStatus::Found(goal)
+            );
+            assert_eq!(output.len(), 598);
+            assert!(pending.is_none());
+        }
+    }
+
+    #[test]
+    fn generations_wrap_and_buffers_survive_repeated_searches() {
+        let map = open(8, 8);
+        let mut finder = PathFinder::new();
+        finder
+            .find(
+                map.size(),
+                Point::ORIGIN,
+                Point::new(7, 7),
+                100,
+                walkable(&map),
+            )
+            .unwrap();
+        let slots = finder.seen.as_ptr();
+        finder.generation = u32::MAX;
+        let route = finder
+            .find(
+                map.size(),
+                Point::new(7, 7),
+                Point::ORIGIN,
+                100,
+                walkable(&map),
+            )
+            .unwrap();
+        assert_eq!(finder.generation, 1);
+        assert_eq!(finder.seen.as_ptr(), slots);
+        assert!(is_a_walk(Point::new(7, 7), Point::ORIGIN, &route));
+    }
+
+    #[test]
+    fn an_unfinished_search_can_move_to_another_worker_without_changing_its_route() {
+        let map = open(40, 40);
+        let mut pending = None;
+        let mut output = Vec::new();
+        let goal = Point::new(39, 39);
+        assert_eq!(
+            search(
+                &mut pending,
+                &map,
+                Point::ORIGIN,
+                Destinations::one(goal),
+                1,
+                walkable(&map),
+                &mut output
+            ),
+            SearchStatus::BudgetExhausted
+        );
+        let expected = route(&map, Point::ORIGIN, goal).unwrap();
+        let actual = std::thread::spawn(move || {
+            let status = search(
+                &mut pending,
+                &map,
+                Point::ORIGIN,
+                Destinations::one(goal),
+                1000,
+                walkable(&map),
+                &mut output,
+            );
+            assert_eq!(status, SearchStatus::Found(goal));
+            assert!(pending.is_none());
+            output
+        })
+        .join()
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn repairing_a_long_route_keeps_its_far_buffer_and_handles_nested_repairs() {
+        let mut path = Path::new((1..=1000).map(|x| Point::new(x, 0)).collect());
+        let far = path.steps.as_ptr();
+        let mut repair = vec![
+            Point::new(0, 1),
+            Point::new(1, 1),
+            Point::new(2, 1),
+            Point::new(3, 1),
+            Point::new(4, 1),
+            Point::new(5, 1),
+            Point::new(5, 0),
+        ];
+        path.splice(5, &mut repair);
+        assert_eq!(path.steps.as_ptr(), far);
+        path.advance();
+        repair.extend([Point::new(0, 2), Point::new(1, 2), Point::new(1, 1)]);
+        path.splice(1, &mut repair);
+        assert_eq!(path.steps.as_ptr(), far);
+        assert_eq!(
+            path.remaining().take(4).collect::<Vec<_>>(),
+            [
+                Point::new(0, 2),
+                Point::new(1, 2),
+                Point::new(1, 1),
+                Point::new(2, 1)
+            ]
+        );
+        assert_eq!(path.destination(), Some(Point::new(1000, 0)));
+        while !path.is_done() {
+            path.advance();
+        }
+        assert!(path.current().is_none());
+    }
 
     const PLENTY: usize = 100_000;
 
@@ -305,8 +651,58 @@ mod tests {
         Map::new(Size::new(width, height), FLOOR)
     }
 
+    /// What the walker's far stage asks: the map's passability and its
+    /// terrain's costs, and nothing else.
+    fn walkable(map: &Map) -> impl Fn(Point) -> Option<u32> + '_ {
+        |cell| map.is_passable(cell).then(|| map.walk_cost(cell) as u32)
+    }
+
     fn route(map: &Map, from: Point, to: Point) -> Option<Vec<Point>> {
-        find_path(from, to, PLENTY, |cell| map.is_passable(cell))
+        find_path(map.size(), from, to, PLENTY, walkable(map))
+    }
+
+    fn tile(name: &str) -> crate::map::TerrainId {
+        crate::map::TerrainId::from_name(name).unwrap()
+    }
+
+    /// What walking `steps` costs.
+    fn cost_of(map: &Map, steps: &[Point]) -> u32 {
+        steps.iter().map(|&cell| map.walk_cost(cell) as u32).sum()
+    }
+
+    /// The cheapest cost from `from` to every cell, the slow and obvious way:
+    /// relax every cell until nothing changes. What A* has to agree with.
+    fn cheapest_by_brute_force(map: &Map, from: Point, to: Point) -> Option<u32> {
+        let size = map.size();
+        let mut best = vec![u32::MAX; size.area()];
+        best[size.index_of(from).unwrap()] = 0;
+        loop {
+            let mut changed = false;
+            for cell in size.points() {
+                let here = best[size.index_of(cell).unwrap()];
+                if here == u32::MAX {
+                    continue;
+                }
+                for next in cell.cardinal_neighbours() {
+                    let Some(index) = size.index_of(next) else {
+                        continue;
+                    };
+                    if !map.is_passable(next) {
+                        continue;
+                    }
+                    let through = here + map.walk_cost(next) as u32;
+                    if through < best[index] {
+                        best[index] = through;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let cost = best[size.index_of(to).unwrap()];
+        (cost != u32::MAX).then_some(cost)
     }
 
     /// Every cell is a cardinal step from the one before, the first is a step
@@ -411,12 +807,15 @@ mod tests {
         }
         let (from, to) = (Point::new(1, 1), Point::new(50, 50));
 
-        assert_eq!(find_path(from, to, 16, |c| map.is_passable(c)), None);
-        assert_eq!(find_path(from, to, PLENTY, |c| map.is_passable(c)), None);
+        assert_eq!(find_path(map.size(), from, to, 16, walkable(&map)), None);
+        assert_eq!(
+            find_path(map.size(), from, to, PLENTY, walkable(&map)),
+            None
+        );
 
         // ...and a route that fits in the budget still comes back.
         let near = Point::new(4, 1);
-        assert!(find_path(from, near, 16, |c| map.is_passable(c)).is_some());
+        assert!(find_path(map.size(), from, near, 16, walkable(&map)).is_some());
     }
 
     #[test]
@@ -437,14 +836,22 @@ mod tests {
         let map = open(12, 12);
         let mut finder = PathFinder::new();
         let long = finder
-            .find(Point::new(0, 0), Point::new(11, 11), PLENTY, |c| {
-                map.is_passable(c)
-            })
+            .find(
+                map.size(),
+                Point::new(0, 0),
+                Point::new(11, 11),
+                PLENTY,
+                walkable(&map),
+            )
             .unwrap();
         let short = finder
-            .find(Point::new(0, 0), Point::new(0, 1), PLENTY, |c| {
-                map.is_passable(c)
-            })
+            .find(
+                map.size(),
+                Point::new(0, 0),
+                Point::new(0, 1),
+                PLENTY,
+                walkable(&map),
+            )
             .unwrap();
 
         assert_eq!(long.len(), 22);
@@ -461,10 +868,119 @@ mod tests {
 
         assert_eq!(route(&map, from, to), Some(vec![occupied, to]));
 
-        let round = find_path(from, to, PLENTY, |c| c != occupied && map.is_passable(c))
-            .expect("round the outside");
+        let terrain = walkable(&map);
+        let round = find_path(map.size(), from, to, PLENTY, |c| {
+            if c == occupied { None } else { terrain(c) }
+        })
+        .expect("round the outside");
         assert!(!round.contains(&occupied));
         assert!(is_a_walk(from, to, &round));
+    }
+
+    // --- costs ---
+
+    /// A 9x5 floor with a strip of `name` across the middle row's left part,
+    /// the start and the goal at either end of that row.
+    fn strip_across(name: &str, length: i32) -> (Map, Point, Point) {
+        let mut map = open(length + 2, 5);
+        for x in 1..=length {
+            map.set_terrain(Point::new(x, 2), tile(name));
+        }
+        (map, Point::new(0, 2), Point::new(length + 1, 2))
+    }
+
+    #[test]
+    fn a_route_steps_off_dear_ground_when_going_round_is_cheaper() {
+        // Seven cells of road straight ahead cost 35; one row up the same
+        // seven cells of floor and two steps to get there and back cost 11.
+        let (map, from, to) = strip_across("road", 7);
+        let steps = route(&map, from, to).unwrap();
+
+        assert!(is_a_walk(from, to, &steps));
+        assert!(
+            steps.iter().all(|&cell| map.walk_cost(cell) == 1),
+            "walked the road: {steps:?}"
+        );
+        assert_eq!(cost_of(&map, &steps), 7 + 2 + 1);
+    }
+
+    #[test]
+    fn a_route_crosses_dear_ground_when_there_is_no_cheaper_way() {
+        // The road fills a whole column between two walls of floor: the only
+        // way over is across it, and a crossing goes straight over.
+        let mut map = open(7, 7);
+        for y in 0..7 {
+            map.set_terrain(Point::new(3, y), tile("road"));
+        }
+        let (from, to) = (Point::new(0, 3), Point::new(6, 3));
+        let steps = route(&map, from, to).unwrap();
+
+        let on_road = steps
+            .iter()
+            .filter(|&&cell| map.walk_cost(cell) > 1)
+            .count();
+        assert_eq!(on_road, 1, "one cell of road and no more: {steps:?}");
+        assert_eq!(steps.len() as i32, from.manhattan_distance(to));
+    }
+
+    #[test]
+    fn a_short_stretch_of_dear_ground_is_walked_rather_than_gone_round() {
+        // One cell of grass costs 3, and with a post either side of it going
+        // round is six steps of floor. Cheapest, not "never on grass".
+        let (mut map, from, to) = strip_across("grass", 1);
+        map.set_terrain(Point::new(1, 1), WALL);
+        map.set_terrain(Point::new(1, 3), WALL);
+        let steps = route(&map, from, to).unwrap();
+        assert_eq!(steps, vec![Point::new(1, 2), to]);
+    }
+
+    #[test]
+    fn a_weighted_route_costs_what_the_brute_force_cheapest_costs() {
+        // A* with a heuristic that ever overestimated would come back with a
+        // route that is fine to walk and quietly not the cheapest. Pseudo-random
+        // mazes of every ground there is, checked against relaxing the grid.
+        let names = ["floor", "pavement", "grass", "road", "wall brown"];
+        for seed in 0..24u64 {
+            let mut map = open(14, 11);
+            let mut state = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            for cell in map.size().points() {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                map.set_terrain(cell, tile(names[(state >> 33) as usize % names.len()]));
+            }
+            let (from, to) = (Point::new(0, 0), Point::new(13, 10));
+            map.set_terrain(from, FLOOR);
+            map.set_terrain(to, FLOOR);
+
+            let expected = cheapest_by_brute_force(&map, from, to);
+            let found = route(&map, from, to);
+            assert_eq!(
+                found.as_ref().map(|steps| cost_of(&map, steps)),
+                expected,
+                "seed {seed}"
+            );
+            if let Some(steps) = found {
+                assert!(is_a_walk(from, to, &steps), "seed {seed}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_weighted_search_gives_the_same_path_every_time() {
+        let mut map = open(20, 20);
+        for x in 0..20 {
+            for y in 8..12 {
+                map.set_terrain(Point::new(x, y), tile("road"));
+            }
+        }
+        let (from, to) = (Point::new(2, 3), Point::new(17, 16));
+        let first = route(&map, from, to).unwrap();
+        for _ in 0..8 {
+            assert_eq!(route(&map, from, to), Some(first.clone()));
+        }
     }
 
     // --- the path itself ---
@@ -482,7 +998,7 @@ mod tests {
         path.advance();
         assert_eq!(path.current(), None);
         assert!(path.is_done());
-        assert!(path.remaining().is_empty());
+        assert!(path.is_done());
     }
 
     #[test]
@@ -499,12 +1015,12 @@ mod tests {
         path.advance(); // walked (1, 0); (2, 0) is next
 
         let detour = vec![Point::new(2, 1), Point::new(3, 1), Point::new(4, 0)];
-        path.splice(3, detour.clone());
+        path.splice(3, &mut detour.clone());
 
         // The three replaced cells are gone, the detour is in their place, and
         // (5, 0) and (6, 0) still follow.
         assert_eq!(
-            path.remaining(),
+            path.remaining().collect::<Vec<_>>(),
             [detour, vec![Point::new(5, 0), Point::new(6, 0)]].concat()
         );
         assert_eq!(path.destination(), Some(Point::new(6, 0)));
@@ -514,7 +1030,7 @@ mod tests {
     fn splicing_more_cells_than_are_left_replaces_the_whole_tail() {
         let mut path = Path::new(vec![Point::new(1, 0), Point::new(2, 0)]);
         let detour = vec![Point::new(1, 1), Point::new(2, 1), Point::new(2, 0)];
-        path.splice(50, detour.clone());
-        assert_eq!(path.remaining(), detour);
+        path.splice(50, &mut detour.clone());
+        assert_eq!(path.remaining().collect::<Vec<_>>(), detour);
     }
 }

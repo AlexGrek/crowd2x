@@ -133,7 +133,7 @@ impl EatGoal {
                 let _ = ctx.tasks.push_back(Task::consume(other, other.consume_seconds()));
             }
             if let Stand::At(cell) = stand {
-                let _ = ctx.tasks.push_back(Task::move_to(cell));
+                let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
             let _ = ctx.tasks.push_back(Task::open_fridge(fridge, OPEN_SECONDS));
             let _ = ctx.tasks.push_back(Task::take(fridge, ItemKind::Food, TAKE_SECONDS));
@@ -295,6 +295,25 @@ mod tests {
     /// Hungry, and nothing else pressing.
     fn hungry_human(cell: Point, hunger: f32) -> Human {
         needy_human(cell, hunger, 0.0, 0.0)
+    }
+
+    #[test]
+    fn a_fridge_with_an_unreachable_nearest_side_is_used_from_another_side() {
+        let mut map = Map::new(Size::new(8, 6), FLOOR);
+        let fridge = Point::new(4, 2);
+        prop_at(&mut map, "fridge", fridge);
+        for wall in [Point::new(2, 2), Point::new(3, 1), Point::new(3, 3)] {
+            map.set_terrain(wall, WALL);
+        }
+        let mut world = World::new(map);
+        let mut human = hungry_human(Point::new(1, 2), 90.0);
+        for _ in 0..1200 {
+            world.step(&mut human);
+            if world.meals() > 0 { break; }
+        }
+        assert_eq!(world.meals(), 1, "{:?}", human.brain_fields());
+        assert_ne!(human.center_position(), Point::new(3, 2));
+        assert!(!world.log_contains("gave up on reaching 4, 2"));
     }
 
     #[test]

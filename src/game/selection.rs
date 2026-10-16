@@ -37,6 +37,16 @@
 //! a click is usually for, and the box is under the floor. One selection at a
 //! time, so selecting either clears the other, and the frame goes on
 //! whichever it is.
+//!
+//! # A light switch is flipped, not selected
+//!
+//! A click on a cell with nobody in it and a light switch on its wall flips
+//! the switch — a [`Command::SwitchLight`](crate::sim::Command::SwitchLight)
+//! on [`SimInput`], so the room's lamps go out or come on next tick — and
+//! selects nothing: a switch has nothing to say a panel would add, and its
+//! lamps are the answer to "did that work". It is asked before the box,
+//! which is under the floor, so a box under a switch is selected with
+//! `select_box` (or by moving the switch).
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -49,7 +59,7 @@ use crate::sim::Uid;
 use crate::state::AppState;
 use crate::ui::nav::NavSystems;
 
-use super::actors::{world_pos, Sim};
+use super::actors::{world_pos, Sim, SimInput};
 
 /// The green corner brackets. The editor's cursor is drawn from the same file:
 /// both mean "this is the thing being pointed at".
@@ -180,8 +190,9 @@ fn spawn_frame(mut commands: Commands, assets: Res<AssetServer>) {
     ));
 }
 
-/// A left click on the map selects whoever is standing in that cell, and a
-/// click on empty ground selects nobody.
+/// A left click on the map selects whoever is standing in that cell, flips
+/// the light switch there if nobody is, and a click on empty ground selects
+/// nobody.
 ///
 /// Clicks that landed on the interface are not clicks on the map: the panel
 /// this feature puts at the bottom of the screen is large, and selecting the
@@ -197,6 +208,7 @@ fn pick(
     zoom: Res<PixelZoom>,
     interactions: Query<&Interaction>,
     sim: Option<Res<Sim>>,
+    mut input: ResMut<SimInput>,
     mut selected: ResMut<Selected>,
     mut selected_box: ResMut<SelectedBox>,
 ) {
@@ -220,7 +232,11 @@ fn pick(
     let cell = background::point_of(background::cell_of(world));
     let unit = sim.0.occupancy().occupant(cell);
     Selected::set(&mut selected, unit);
-    let a_box = (unit.is_none() && sim.0.has_box(cell)).then_some(cell);
+    let switch = unit.is_none() && sim.0.has_light_switch(cell);
+    if switch {
+        input.0.switch_light(cell, !sim.0.light_is_on(cell));
+    }
+    let a_box = (unit.is_none() && !switch && sim.0.has_box(cell)).then_some(cell);
     SelectedBox::set(&mut selected_box, a_box);
 }
 

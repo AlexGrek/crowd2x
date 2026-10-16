@@ -1,0 +1,127 @@
+{
+  "name": "a light switch goes only on floor beside a wall, and a click on it puts its room's lamp out and back on",
+  "state": "editor",
+  "given": {
+    "maps": [
+      {
+        "name": "flat",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 9 },
+          "terrain": {
+            "palette": ["floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,1,1,1,1,1,1,1,1,0",
+                  "0,0,0,1,0,0,0,0,0,0,1,0",
+                  "0,0,0,1,0,0,0,0,0,0,1,0",
+                  "0,0,0,1,0,0,0,0,0,0,1,0",
+                  "0,0,0,1,1,1,1,1,1,1,1,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "ceiling": [
+            "............",
+            "...########.",
+            "...########.",
+            "...########.",
+            "...########.",
+            "...########.",
+            "............",
+            "............",
+            "............"
+          ],
+          "power": [
+            "............",
+            ".B-----.....",
+            "......-.....",
+            "......-.....",
+            "............",
+            "............",
+            "............",
+            "............",
+            "............"
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 72, "y": 72 }, "kind": "transformer" }
+            ],
+            "lamps": [
+              { "at": { "x": 312, "y": 168 }, "kind": "ceiling lamp" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "flat",
+  "steps": [
+    { "note": "a roofed room, walls from (3, 1) to (10, 5), its ceiling lamp at (6, 3) wired from a box outside; no switch yet" },
+    { "tool": "light switch" },
+    { "expect_text": "floor beside a wall only" },
+
+    { "note": "the middle of the room has no wall to hang it on: the ghost is red and a press places nothing" },
+    { "cursor_cell": { "x": 6, "y": 3 } },
+    { "wait": 0.2 },
+    { "shot": "nowhere to hang it in the middle of the room" },
+    { "click": {} },
+    { "key": "f5" },
+    { "expect_objects": { "map": "flat", "layer": "props", "kind": "light switch", "count": 0 } },
+
+    { "note": "under the far wall it goes on that wall; a second press in the same cell places nothing" },
+    { "cursor_cell": { "x": 7, "y": 4 } },
+    { "wait": 0.2 },
+    { "shot": "the ghost on the far wall" },
+    { "click": {} },
+    { "click": {} },
+    { "key": "f5" },
+    { "expect_objects": { "map": "flat", "layer": "props", "kind": "light switch", "count": 1 } },
+
+    { "note": "in the top-left corner, pointing near the left wall puts it on the left wall" },
+    { "cursor": { "x": 195, "y": 216 } },
+    { "wait": 0.2 },
+    { "click": {} },
+    { "key": "f5" },
+    { "expect_objects": { "map": "flat", "layer": "props", "kind": "light switch", "count": 2 } },
+    { "shot": "two switches, each turned to its own wall" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "press": "flat" },
+    { "expect_state": "game" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "look_at": { "x": 7, "y": 4 } },
+    { "wait": 0.3 },
+    { "expect_lighting": { "lights_on": 1 } },
+    { "expect_connected": { "utility": "power", "served": 1, "of": 1 } },
+    { "shot": "the room lit by its lamp" },
+
+    { "note": "looking at (7, 4) puts the switch in the middle of the canvas, (160, 90): a click flips it and selects nothing" },
+    { "mouse": { "x": 160, "y": 90 } },
+    { "click": {} },
+    { "tick": 1 },
+    { "expect_log": "the light switch at 7, 4 was switched off" },
+    { "expect_selected": null },
+    { "expect_lighting": { "lights_on": 0 } },
+    { "expect_connected": { "utility": "power", "served": 0, "of": 1 } },
+    { "wait": 0.2 },
+    { "shot": "switched off: the room dark and the rocker down" },
+
+    { "note": "the other switch is in the same room, so it is the same switch: it puts the lamp back on" },
+    { "switch_light": { "x": 4, "y": 4, "on": true } },
+    { "tick": 1 },
+    { "expect_log": "the light switch at 4, 4 was switched on" },
+    { "expect_lighting": { "lights_on": 1 } },
+    { "expect_connected": { "utility": "power", "served": 1, "of": 1 } },
+    { "wait": 0.2 },
+    { "shot": "back on from the switch at the other wall" }
+  ]
+}

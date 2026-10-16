@@ -1,0 +1,32 @@
+{
+  "name": "how a tick costs on a generated district, where routes cross roads",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "district", "district": 7 }
+    ]
+  },
+  "open": "district",
+  "timeout": 300,
+  "steps": [
+    { "note": "routes are cheapest by the ground's walk cost: a pavement 1, grass 3, a road 5, so" },
+    { "note": "a route that has to cross a street floods some pavement first to be sure there is" },
+    { "note": "no cheaper way. Plaza (perf_simulation) is all floor and never pays that; this does" },
+    { "key": "p" },
+    { "tick": 1 },
+    { "expect_entities": 53 },
+
+    { "note": "a crowd wandering the whole district, every walk a far route over its streets" },
+    { "populate": { "kind": "human", "count": 947 } },
+    { "expect_entities": 1000 },
+    { "measure": { "name": "1000 humans on a district", "ticks": 600 } },
+
+    { "populate": { "kind": "human", "count": 3000 } },
+    { "expect_entities": 4000 },
+    { "measure": { "name": "4000 humans on a district", "ticks": 600 } },
+
+    { "note": "a wall well above what a machine does, to catch an order of magnitude" },
+    { "expect_under": { "measure": "4000 humans on a district", "ms": 5.0 } },
+    { "expect_state": "game" }
+  ]
+}

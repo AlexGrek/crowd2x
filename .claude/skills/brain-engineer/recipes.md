@@ -345,7 +345,7 @@ impl RelieveGoal {
         match stand_beside(ctx, toilet) {
             Stand::Nowhere => return false,
             Stand::Here => {}
-            Stand::At(cell) => { let _ = ctx.tasks.push_back(Task::move_to(cell)); }
+            Stand::At(cell) => { let _ = ctx.tasks.push_back(Task::move_beside(cell)); }
         }
         let _ = ctx.tasks.push_back(Task::use_toilet(toilet, TOILET_SECONDS));
         true

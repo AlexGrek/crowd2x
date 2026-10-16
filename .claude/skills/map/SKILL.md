@@ -30,6 +30,16 @@ The first piece of simulation state, so it follows the simulation rule: **plain 
 - A cell holds a `TerrainId` into the static `TERRAIN` catalogue, so a big map is a flat
   array of `u16`. Passability lives in the catalogue, and an id this build does not know
   is impassable rather than a panic.
+- **Walk cost** lives in the catalogue too (`Terrain::cost`, `TerrainId::walk_cost`,
+  `Map::walk_cost`): what a route pays to step into a walkable cell. Floors and
+  `"pavement"` cost `MIN_WALK_COST` (1), `"grass"` 3, `"road"` 5; anything impassable 0.
+  Routes are *cheapest*, not shortest (`sim::path`), which is how the crowd keeps to the
+  pavement and crosses the road straight over. It is read straight off the terrain, not
+  kept as another derived layer: a prop changes whether a cell is walkable, never what it
+  costs. **No walkable tile may cost less than `MIN_WALK_COST`** — the A* heuristic assumes
+  it, and `nothing_walkable_costs_less_than_the_cheapest_step` holds the catalogue to it. A
+  new ground is `Terrain::ground(name, cost)`, appended to the end of `TERRAIN` (names are
+  what files store; the order is not) with art in the editor palette.
 - **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
   `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
   through: furniture cannot — beds, the fridge, the toilet, the computer, crates, fire — and the two doors (`"door"`, `"house door"`) can, since a door's leaf is simulation state, not the map's (the `doors` skill).
@@ -54,9 +64,14 @@ The first piece of simulation state, so it follows the simulation rule: **plain 
   **A box can be switched off during play** (`Supply::with_boxes_off`): it still carries
   the line through, but feeds no wiring. Which boxes are off is simulation state, not the
   map's (a map is saved with every box on) — see "Switching a box" in the `game-screen` skill.
-  A `"street light controller"` prop standing on a box is that box's daylight switch
-  (`utilities::controlled_boxes`); the sim opens it by day, so the `"street lamp"`s on its
-  wiring are lit at night only (`electrician`).
+  A `"street light controller"` prop standing on a box is the daylight switch of every box
+  on that box's circuit (`utilities::controlled_boxes`); the sim opens them by day, so the
+  `"street lamp"`s on the circuit are lit at night only (`electrician`).
+  A `"light switch"` is a **wall-mounted** prop (`Prop::on_wall`, `wall_mounted: true`,
+  `ObjectKind::is_wall_mounted`): passable, on a free floor cell beside a wall, kept on that
+  wall's edge of the cell (`map/mount.rs`: `can_mount`, `wall_of`, `mounted_at`, `mount`).
+  It needs no cable; off, the `SWITCHED` lamps of its roofed room are not served
+  (`Supply::with_lights_off`, rooms in `sim::light_switch`) (`electrician`).
   `Supply::everywhere` serves everything, for a test whose wiring is beside the point
   (`sim::testing::World::new` uses it; `World::as_built` asks the wiring). `CONSUMERS` and
   `SOURCES` are the catalogue, by name. `serve_everything` wires a map the shortest way,
@@ -80,8 +95,9 @@ The first piece of simulation state, so it follows the simulation rule: **plain 
   not wired to this format yet and still spawns its own tile entities.
 
 **The district generator** (`map/district.rs`, plain Rust like the rest of `map/`):
-`district::generate(seed)` builds a 79x54 district — a grid of 2x2-lot blocks with
-3-cell streets between and around them, everything outside a building paved — holding 32
+`district::generate(seed)` builds an 89x62 district — a grid of 2x2-lot blocks with
+5-cell streets between and around them (pavement, three cells of road, pavement; yards
+paved, the empty lots grass parks) — holding 32
 houses of 1-2 residents (a bed each, a fridge, a toilet, and a `"human"` spawner beside
 each bed), a bank across two merged blocks (a lobby lined with fridges, desk rows of
 computers, two restrooms at each end) and three empty shops. One `SmallRng`, drawn in a
@@ -99,8 +115,8 @@ are laid the same way, after that**: a transformer in the bottom-right corner, a
 top-left, a power line and a sewer main down the middle of every street (broken where the bank
 stands across one), and for each building a box and a pipe entry just inside the wall nearest
 a main, a straight run out to it, and wiring or pipes inside to everything that needs them.
-Last, street lamps along both sides of every street, each run on its own controlled box
-(`light_streets`). A
+Last, street lamps along both sides of every street on a few long circuits, one controller
+each (`light_streets`). A
 line never runs indoors and wiring never outdoors; both are tested over 64 seeds, as is every
 consumer being served. Reached from the browser's `district` button (a fresh
 seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture

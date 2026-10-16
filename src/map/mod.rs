@@ -16,7 +16,8 @@
 //!   [`Map::terrain_layers`].
 //! * **Objects** — sparse lists of positioned things, one list per
 //!   [`ObjectLayer`]: props, spawners and ceiling lamps. A prop blocks the cell it stands in
-//!   ([`PROPS`]); the simulation reads props for what they are *for*
+//!   ([`PROPS`]) unless it hangs on a wall beside it ([`mount`]: a light
+//!   switch); the simulation reads props for what they are *for*
 //!   (`sim::feature` — a fridge is food), by name. A spawner names an entity
 //!   kind (`"human"`), and playing the map spawns one of it where it stands
 //!   (`sim::GameState::spawn_from_spawners`).
@@ -49,7 +50,10 @@ mod coords;
 pub mod district;
 mod format;
 pub mod grid;
+pub mod mount;
 mod passability;
+mod navigation;
+pub use navigation::Navigation;
 mod props;
 mod storage;
 mod terrain;
@@ -61,7 +65,7 @@ pub use grid::GridLayer;
 pub use passability::PassabilityMap;
 pub use props::{Prop, PROPS};
 pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
-pub use terrain::{Passability, Terrain, TerrainId, FLOOR, TERRAIN, VOID, WALL};
+pub use terrain::{Passability, Terrain, TerrainId, FLOOR, MIN_WALK_COST, TERRAIN, VOID, WALL};
 
 use serde::{Deserialize, Serialize};
 
@@ -206,6 +210,8 @@ pub struct Map {
     /// Indexed by `ObjectLayer as usize`, one entry per variant.
     objects: Vec<Vec<Object>>,
     passability: PassabilityMap,
+    navigation: std::sync::OnceLock<Navigation>,
+    navigation_revision: u64,
     /// Which cells can be seen *through*: the terrain's half of passability
     /// alone — a wall hides what is behind it, a fridge or a bed does not.
     /// The same one-bit-per-cell shape, for the same reason: a unit looking
@@ -235,6 +241,8 @@ impl Map {
             terrain: vec![TerrainLayer { tiles }],
             objects: ObjectLayer::ALL.map(|_| Vec::new()).into(),
             passability: PassabilityMap::new(size),
+            navigation: Default::default(),
+            navigation_revision: 0,
             sight: PassabilityMap::new(size),
             grids: GridLayer::ALL.map(|_| vec![0; size.area()]).into(),
         };
@@ -245,6 +253,18 @@ impl Map {
     /// An unbuilt map: every cell [`VOID`], and so nothing walkable anywhere.
     pub fn empty(size: Size) -> Self {
         Self::new(size, VOID)
+    }
+
+    /// Built before simulation starts; map edits invalidate the derived index.
+    pub fn navigation(&self) -> &Navigation {
+        self.navigation.get_or_init(|| Navigation::build(self))
+    }
+    pub fn navigation_revision(&self) -> u64 {
+        self.navigation_revision
+    }
+    fn invalidate_navigation(&mut self) {
+        self.navigation.take();
+        self.navigation_revision = self.navigation_revision.wrapping_add(1);
     }
 
     pub fn size(&self) -> Size {
@@ -295,6 +315,7 @@ impl Map {
     /// in it** — so when overlay layers arrive (a rug over a floor) combining
     /// them happens here and every caller keeps asking the same question.
     pub fn rebuild_passability(&mut self) {
+        self.invalidate_navigation();
         for (index, tile) in self.terrain[BASE].tiles.iter().enumerate() {
             let point = self.size.point_at(index);
             self.passability.set(point, tile.is_passable());
@@ -313,6 +334,7 @@ impl Map {
     /// Scans the props, which is the cost of an edit and never of a tick —
     /// nothing in the simulation changes the map.
     fn refresh_passability(&mut self, point: Point) {
+        self.invalidate_navigation();
         let terrain = self.terrain(point);
         self.sight.set(point, terrain.is_some_and(TerrainId::is_see_through));
         let passable = terrain.is_some_and(TerrainId::is_passable)
@@ -387,6 +409,18 @@ impl Map {
         self.passability.is_passable(point)
     }
 
+    /// What a route pays to step into `point` when it is [passable]: the
+    /// terrain's [`Terrain::cost`] — a pavement 1, a road 5. A prop changes
+    /// whether a cell can be walked, never what walking it costs, so this is
+    /// read straight off the terrain rather than kept as a third derived
+    /// layer that edits would have to keep in step. Zero off the map and on
+    /// anything that cannot be walked; ask [`Map::is_passable`] first.
+    ///
+    /// [passable]: Map::is_passable
+    pub fn walk_cost(&self, point: Point) -> u8 {
+        self.terrain(point).map_or(0, TerrainId::walk_cost)
+    }
+
     pub fn objects(&self, layer: ObjectLayer) -> &[Object] {
         &self.objects[layer as usize]
     }
@@ -400,6 +434,7 @@ impl Map {
     /// nothing, there being no cell there to block.
     pub fn add_object(&mut self, layer: ObjectLayer, object: Object) {
         if layer == ObjectLayer::Props && !object.kind.prop_passability().is_passable() {
+            self.invalidate_navigation();
             self.passability.set(object.cell(), false);
         }
         self.objects[layer as usize].push(object);
