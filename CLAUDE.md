@@ -58,8 +58,8 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator | `map-generator` |
-| The endless world past a map's edge: the wasteland generator, chunks and streaming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
-| `GameState`, passes, movement, entities, Commands, items, inventory, clock | `simulation` |
+| The endless world past a map's edge: the wasteland generator, chunks, streaming and reclaiming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
+| `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
 | Drawing new art: hair, dresses, outfits, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
@@ -110,6 +110,7 @@ src/map/mount.rs, src/sim/light_switch.rs  wall-mounted props; light switches an
 src/map/district.rs     the district generator                              [map-generator]
 src/map/wasteland.rs, chunk.rs  the endless ground round every map; chunks    [wasteland]
 src/sim/                GameState, passes, entities, clock, items           [simulation]
+src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell  [simulation, wasteland]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
 src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]

@@ -10,6 +10,7 @@ pub mod drink;
 pub mod eat;
 pub mod play;
 pub mod relieve;
+pub mod salvage;
 pub mod sleep;
 pub mod wander;
 
@@ -17,6 +18,7 @@ pub use drink::DrinkGoal;
 pub use eat::EatGoal;
 pub use play::PlayGoal;
 pub use relieve::RelieveGoal;
+pub use salvage::SalvageGoal;
 pub use sleep::SleepGoal;
 pub use wander::WanderGoal;
 

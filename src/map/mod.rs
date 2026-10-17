@@ -45,14 +45,22 @@
 //! [`Map::size`] that was authored, saved and edited. A map from a file, the
 //! district generator or the browser does not stop at its edge — it is
 //! surrounded by the endless [`wasteland`], dirt and scrub and lakes running
-//! off in every direction, which is terrain and nothing else: no props, no
-//! roof, no wiring. [`Map::terrain`], [`Map::is_passable`],
+//! off in every direction, which is terrain and heaps of scrap metal and
+//! nothing else: no props, no roof, no wiring. [`Map::terrain`], [`Map::is_passable`],
 //! [`Map::is_see_through`] and [`Map::walk_cost`] answer for any cell in the
 //! world; the site's own layers and everything derived from them (the supply,
 //! the features, the lightmap) stay the size of the site, there being nothing
 //! out there for them. The wasteland is a pure function of a seed, cached a
 //! [`chunk`] at a time ([`Map::load_chunks`]) by whatever reads it often — a
 //! camera, the simulation — and loading never changes what a cell is.
+//!
+//! **Scrap is the one part of the world play changes.** A heap
+//! ([`Map::scrap`]) is in the way until it has been emptied, a piece at a
+//! time ([`Map::take_scrap`]); what has been taken from which heap is kept
+//! here, beside the chunks, so a chunk dropped and loaded again still has
+//! its emptied heaps gone. It is the simulation's state, never a file's: a
+//! map is saved with every heap as it was found, and only the simulation's
+//! own copy of a map is ever salvaged.
 //!
 //! A map built in code ([`Map::new`]) has no wasteland: off the site is
 //! nothing, impassable and opaque, which is the bounded box every unit test
@@ -82,7 +90,7 @@ pub mod wasteland;
 
 pub use chunk::{Chunk, ChunkGrid, ChunkPos, CHUNK};
 pub use coords::{Bounds, Point, Size};
-pub use wasteland::Wasteland;
+pub use wasteland::{Scrap, Wasteland};
 pub use format::{MapFormatError, FORMAT_VERSION};
 pub use grid::GridLayer;
 pub use passability::PassabilityMap;
@@ -92,6 +100,8 @@ pub use terrain::{
     Passability, Terrain, TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, FLOOR, MEADOW, MIN_WALK_COST, MUD, SCRUB,
     TERRAIN, VOID, WALL, WATER,
 };
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -233,6 +243,7 @@ impl std::fmt::Debug for Map {
             .field("size", &self.size)
             .field("wasteland", &self.wasteland.map(Wasteland::seed))
             .field("loaded_chunks", &self.chunks.len())
+            .field("salvaged", &self.salvaged.len())
             .field("terrain_layers", &self.terrain.len())
             .field("props", &self.objects(ObjectLayer::Props).len())
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
@@ -272,7 +283,19 @@ pub struct Map {
     wasteland: Option<Wasteland>,
     /// The wasteland, a chunk at a time, for whoever reads it often. A
     /// cache: a cell reads the same loaded or not.
-    chunks: ChunkGrid<Chunk>,
+    chunks: ChunkGrid<Box<Chunk>>,
+    /// How many pieces have been taken from each heap of scrap anybody has
+    /// been at, by chunk and cell in it — so one chunk's heaps are a range.
+    /// Simulation state, never saved; see the module docs.
+    salvaged: BTreeMap<(ChunkPos, u16), u8>,
+    /// Bumped by every piece taken, so whatever draws the heaps knows to look
+    /// again.
+    salvage_revision: u64,
+}
+
+/// Where a heap's tally is kept in `Map::salvaged`.
+fn salvage_key(cell: Point) -> (ChunkPos, u16) {
+    (ChunkPos::of(cell), chunk::local_index(cell) as u16)
 }
 
 /// Whether every cell of the chunk at `pos` is on the site, so it would
@@ -306,6 +329,8 @@ impl Map {
             grids: GridLayer::ALL.map(|_| vec![0; size.area()]).into(),
             wasteland: None,
             chunks: ChunkGrid::new(),
+            salvaged: BTreeMap::new(),
+            salvage_revision: 0,
         };
         map.rebuild_passability();
         map
@@ -323,11 +348,14 @@ impl Map {
     }
 
     /// Surround the site with a wasteland, or with nothing. Forgets every
-    /// loaded chunk, which was the other wasteland's ground.
+    /// loaded chunk, which was the other wasteland's ground, and everything
+    /// salvaged from its scrap.
     pub fn set_wasteland(&mut self, wasteland: Option<Wasteland>) {
         if self.wasteland != wasteland {
             self.wasteland = wasteland;
             self.chunks = ChunkGrid::new();
+            self.salvaged.clear();
+            self.salvage_revision = self.salvage_revision.wrapping_add(1);
             self.invalidate_navigation();
         }
     }
@@ -360,8 +388,17 @@ impl Map {
         if self.chunks.contains(pos) || chunk_is_all_site(pos, site) {
             return false;
         }
-        self.chunks
-            .get_or_insert_with(pos, || Chunk::generate(pos, |cell| wasteland.tile(cell, site)));
+        let chunk = self.chunks.get_or_insert_with(pos, || {
+            Chunk::generate(pos, |cell| wasteland.tile(cell, site), |cell, tile| wasteland.scrap_on(cell, site, tile))
+        });
+        // A heap emptied before the chunk was dropped is still empty.
+        let origin = pos.origin();
+        for (&(_, index), &taken) in self.salvaged.range((pos, 0)..=(pos, u16::MAX)) {
+            let cell = origin.offset(index as i32 % CHUNK, index as i32 / CHUNK);
+            if chunk.scrap(cell).is_some_and(|found| found.pieces <= taken) {
+                chunk.clear(cell);
+            }
+        }
         true
     }
 
@@ -374,8 +411,16 @@ impl Map {
     /// Drop every loaded chunk `keep` says no to; returns how many went.
     /// Nothing about any cell changes — they are worked out from the seed
     /// again until something loads them back.
-    pub fn unload_chunks(&mut self, keep: impl FnMut(ChunkPos) -> bool) -> usize {
-        self.chunks.retain(keep)
+    pub fn unload_chunks(&mut self, mut keep: impl FnMut(ChunkPos) -> bool) -> usize {
+        self.chunks.retain(|pos, _| keep(pos))
+    }
+
+    /// [`Map::unload_chunks`] over at most `count` of the loaded chunks,
+    /// starting at `cursor` and leaving it for next time — a bounded slice of
+    /// the whole, for a caller that reclaims a little every frame
+    /// ([`crate::map::ChunkGrid::sweep`]).
+    pub fn sweep_chunks(&mut self, cursor: &mut usize, count: usize, mut keep: impl FnMut(ChunkPos) -> bool) -> usize {
+        self.chunks.sweep(cursor, count, |pos, _| keep(pos))
     }
 
     /// How many chunks of wasteland are in memory.
@@ -396,6 +441,117 @@ impl Map {
             Some(chunk) => chunk.tile(cell),
             None => wasteland.tile(cell, self.site()),
         })
+    }
+
+    /// Whether a cell off the site whose chunk is not loaded can be walked:
+    /// its ground can, and no heap of scrap is left on it. What a loaded
+    /// chunk's passable bit says, worked out.
+    fn ground_is_passable(&self, cell: Point) -> bool {
+        let Some(wasteland) = self.wasteland else {
+            return false;
+        };
+        let site = self.site();
+        let tile = wasteland.tile(cell, site);
+        tile.is_passable()
+            && wasteland.scrap_on(cell, site, tile).is_none_or(|found| self.left_of(cell, found).is_none())
+    }
+
+    /// What is left of a heap found as `found` in `cell`: `None` once it is
+    /// empty.
+    #[inline]
+    fn left_of(&self, cell: Point, found: Scrap) -> Option<Scrap> {
+        let taken = if self.salvaged.is_empty() {
+            0
+        } else {
+            self.salvaged.get(&salvage_key(cell)).copied().unwrap_or(0)
+        };
+        (found.pieces > taken).then_some(Scrap { pieces: found.pieces - taken, ..found })
+    }
+
+    /// The heap of scrap in `cell`, with however many pieces are still in it
+    /// — `None` where there is none, and where there was one that has been
+    /// emptied. Never on the site, nor on a map with nothing round it.
+    pub fn scrap(&self, cell: Point) -> Option<Scrap> {
+        let wasteland = self.wasteland?;
+        if self.contains(cell) {
+            return None;
+        }
+        let found = match self.chunks.at(cell) {
+            Some(chunk) => chunk.scrap(cell),
+            None => wasteland.scrap(cell, self.site()),
+        }?;
+        self.left_of(cell, found)
+    }
+
+    /// Take one piece of scrap metal from the heap in `cell`, and say how
+    /// many are left in it; `None`, and nothing taken, where there is no
+    /// heap or nothing left in it. The last piece clears the heap away and
+    /// opens its cell.
+    ///
+    /// The one edit play makes to a map (`sim::world_step`, for whoever
+    /// finished salvaging it). It does not touch [`Map::navigation`]:
+    /// reachability already counts a heap's cell as open, the way it counts
+    /// a door ([`Map::is_open_ground`]), so clearing one changes nothing it
+    /// said.
+    pub fn take_scrap(&mut self, cell: Point) -> Option<u8> {
+        let heap = self.scrap(cell)?;
+        *self.salvaged.entry(salvage_key(cell)).or_insert(0) += 1;
+        self.salvage_revision = self.salvage_revision.wrapping_add(1);
+        let left = heap.pieces - 1;
+        if left == 0
+            && let Some(chunk) = self.chunks.get_mut(ChunkPos::of(cell))
+        {
+            chunk.clear(cell);
+        }
+        Some(left)
+    }
+
+    /// Bumped by every piece of scrap taken: what a drawing of the heaps
+    /// compares to know it is out of date.
+    pub fn salvage_revision(&self) -> u64 {
+        self.salvage_revision
+    }
+
+    /// Every heap of scrap with anything left in it in `area`, chunk by
+    /// chunk and bottom row first, with what is left of it. A loaded
+    /// chunk's heaps are a list; a chunk not loaded is asked of the
+    /// generator cell by cell, which is slower and the same answer.
+    pub fn heaps(&self, area: Bounds, mut each: impl FnMut(Point, Scrap)) {
+        let Some(wasteland) = self.wasteland else {
+            return;
+        };
+        let site = self.site();
+        for pos in ChunkPos::covering(area) {
+            if chunk_is_all_site(pos, site) {
+                continue;
+            }
+            match self.chunks.get(pos) {
+                Some(chunk) => {
+                    for (cell, found) in chunk.heaps(pos) {
+                        if area.contains(cell)
+                            && let Some(left) = self.left_of(cell, found)
+                        {
+                            each(cell, left);
+                        }
+                    }
+                }
+                None => {
+                    for cell in pos.bounds().points().filter(|&cell| area.contains(cell)) {
+                        if let Some(left) = wasteland.scrap(cell, site).and_then(|found| self.left_of(cell, found)) {
+                            each(cell, left);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether `point` could be walked once whatever scrap is on it has been
+    /// cleared away: what reachability is worked out over ([`Navigation`]),
+    /// which counts a heap as something that can go, the way it counts a
+    /// door as something that can open.
+    pub fn is_open_ground(&self, point: Point) -> bool {
+        self.is_passable(point) || self.scrap(point).is_some()
     }
 
     /// An unbuilt map: every cell [`VOID`], and so nothing walkable anywhere.
@@ -569,7 +725,7 @@ impl Map {
             Some(index) => self.passability.is_passable_at(index),
             None => match self.chunks.at(point) {
                 Some(chunk) => chunk.is_passable(point),
-                None => self.ground(point).is_some_and(TerrainId::is_passable),
+                None => self.ground_is_passable(point),
             },
         }
     }
@@ -875,5 +1031,103 @@ mod tests {
         let outside = Point::new(-30, 400);
         map.add_object(ObjectLayer::Props, bed(outside));
         assert_eq!(map.objects(ObjectLayer::Props), [bed(outside)]);
+    }
+
+    /// A small site in the wasteland of seed 3, and the first heap of scrap
+    /// out past its clearing holding `pieces` pieces.
+    fn scrapyard(pieces: u8) -> (Map, Point) {
+        let map = Map::new(Size::new(8, 8), FLOOR).with_wasteland(3);
+        let mut found = None;
+        map.heaps(Bounds::new(Point::new(40, -200), Size::new(400, 400)), |cell, heap| {
+            if found.is_none() && heap.pieces == pieces {
+                found = Some(cell);
+            }
+        });
+        (map, found.expect("a heap in a patch that size"))
+    }
+
+    #[test]
+    fn a_heap_of_scrap_is_in_the_way_whether_its_chunk_is_loaded_or_not() {
+        let (mut map, heap) = scrapyard(2);
+        assert_eq!(map.scrap(heap).map(|h| h.pieces), Some(2));
+        assert!(!map.is_passable(heap), "unloaded");
+        assert!(map.is_see_through(heap), "a heap is seen over");
+        assert!(map.is_open_ground(heap), "and could be cleared away");
+        map.load_chunk(ChunkPos::of(heap));
+        assert!(!map.is_passable(heap), "loaded");
+        assert_eq!(map.scrap(heap).map(|h| h.pieces), Some(2));
+        let beside = heap.cardinal_neighbours();
+        assert!(beside.iter().any(|&cell| map.is_passable(cell)), "something to work it from");
+    }
+
+    #[test]
+    fn taking_the_last_piece_clears_a_heap_away_and_opens_its_cell() {
+        for loaded in [false, true] {
+            let (mut map, heap) = scrapyard(2);
+            if loaded {
+                map.load_chunk(ChunkPos::of(heap));
+            }
+            let revision = map.salvage_revision();
+            assert_eq!(map.take_scrap(heap), Some(1), "loaded {loaded}");
+            assert!(map.salvage_revision() > revision);
+            assert_eq!(map.scrap(heap).map(|h| h.pieces), Some(1));
+            assert!(!map.is_passable(heap), "one piece is still a heap");
+            assert_eq!(map.take_scrap(heap), Some(0));
+            assert_eq!(map.scrap(heap), None);
+            assert!(map.is_passable(heap), "loaded {loaded}: cleared away");
+            assert_eq!(map.take_scrap(heap), None, "nothing left to take");
+            let mut listed = false;
+            map.heaps(Bounds::new(heap, Size::new(1, 1)), |_, _| listed = true);
+            assert!(!listed, "an empty heap is not drawn");
+        }
+    }
+
+    #[test]
+    fn a_heap_emptied_stays_empty_when_its_chunk_is_dropped_and_loaded_again() {
+        let (mut map, heap) = scrapyard(1);
+        let pos = ChunkPos::of(heap);
+        map.load_chunk(pos);
+        assert_eq!(map.take_scrap(heap), Some(0));
+        map.unload_chunks(|_| false);
+        assert!(map.is_passable(heap), "dropped");
+        map.load_chunk(pos);
+        assert!(map.is_passable(heap), "loaded again");
+        assert_eq!(map.scrap(heap), None);
+    }
+
+    #[test]
+    fn heaps_read_the_same_from_a_loaded_chunk_as_from_the_generator() {
+        let (mut map, heap) = scrapyard(3);
+        let area = Bounds::new(heap.offset(-40, -40), Size::new(80, 80));
+        let gather = |map: &Map| {
+            let mut heaps = Vec::new();
+            map.heaps(area, |cell, scrap| heaps.push((cell, scrap)));
+            heaps.sort_by_key(|&(cell, _)| cell);
+            heaps
+        };
+        let unloaded = gather(&map);
+        assert!(unloaded.len() > 1);
+        map.load_chunks(area);
+        assert_eq!(gather(&map), unloaded);
+        for cell in area.points() {
+            assert_eq!(map.is_passable(cell), map.terrain(cell).is_some_and(TerrainId::is_passable) && map.scrap(cell).is_none());
+        }
+    }
+
+    #[test]
+    fn a_new_wasteland_forgets_what_was_salvaged_from_the_old_one() {
+        let (mut map, heap) = scrapyard(1);
+        assert_eq!(map.take_scrap(heap), Some(0));
+        map.set_wasteland(None);
+        map.set_wasteland(Some(Wasteland::new(3)));
+        assert_eq!(map.scrap(heap).map(|h| h.pieces), Some(1));
+    }
+
+    #[test]
+    fn there_is_no_scrap_on_the_site_or_round_a_map_with_nothing_round_it() {
+        let (map, heap) = scrapyard(1);
+        assert!((0..8).all(|x| (0..8).all(|y| map.scrap(Point::new(x, y)).is_none())));
+        let bare = Map::new(Size::new(8, 8), FLOOR);
+        assert_eq!(bare.scrap(heap), None);
     }
 }

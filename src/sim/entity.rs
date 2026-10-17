@@ -176,6 +176,17 @@ pub trait GameEntity: Send + Sync {
         Effect::default()
     }
 
+    /// The part of it that walks, for a kind that walks — what the react
+    /// step meters a tick's route searching through ([`super::react_step`]).
+    /// `None`, the default, for a kind that plans no routes.
+    fn walker(&self) -> Option<&super::walker::Walker> {
+        None
+    }
+
+    fn walker_mut(&mut self) -> Option<&mut super::walker::Walker> {
+        None
+    }
+
     /// Which way it is oriented, if that means anything for this kind.
     ///
     /// On the trait rather than reached for with a downcast: the renderer asks
@@ -322,6 +333,17 @@ pub trait GameEntity: Send + Sync {
     /// that a person could have had.
     fn set_home(&mut self, bed: Point, property: Option<PropertyId>) -> bool {
         let _ = (bed, property);
+        false
+    }
+
+    /// Take on an order to salvage the heap of scrap in `heap`, and say
+    /// whether it was taken. From outside the world ([`Command::Salvage`]),
+    /// applied by the spawn pass. `false` — the default — for a kind with
+    /// nothing to carry scrap away in.
+    ///
+    /// [`Command::Salvage`]: super::Command::Salvage
+    fn order_salvage(&mut self, heap: Point) -> bool {
+        let _ = heap;
         false
     }
 

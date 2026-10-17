@@ -11,6 +11,12 @@ use crate::sim::uid::Uid;
 /// the goal that puts it to bed.
 pub const HOME_BED: &str = "home bed";
 
+/// The key an order to salvage a heap of scrap is remembered under: a
+/// [`Recall::Cell`], the heap. Written from outside the world
+/// (`crate::sim::Command::Salvage`), and let go of by the goal that carries
+/// it out once there is nothing more it can do there.
+pub const SALVAGE_ORDER: &str = "salvage order";
+
 /// How long a place found out of reach is remembered as out of reach, in
 /// **world** seconds: an hour of the world, half a minute of watching. Long
 /// enough for the crowd round a toilet to clear, short enough that a doorway
@@ -22,9 +28,10 @@ pub const OUT_OF_REACH_FOR: f64 = HOUR as f64;
 /// pushes out the place that would have been forgiven soonest.
 pub const OUT_OF_REACH_SLOTS: usize = 8;
 
-/// What a brain remembers. **Nearly empty on purpose: the one keyed thing
-/// written so far is which bed is its own** ([`HOME_BED`]); beside the keys,
-/// the places it could not get to lately ([`OutOfReach`]).
+/// What a brain remembers. **Nearly empty on purpose: the keyed things
+/// written so far are which bed is its own** ([`HOME_BED`]) **and an order it
+/// is carrying out** ([`SALVAGE_ORDER`]); beside the keys, the places it
+/// could not get to lately ([`OutOfReach`]).
 ///
 /// A `BTreeMap` rather than a `HashMap`, and that is the only liberty taken
 /// with the shape: iteration order has to be a declaration of the keys and not

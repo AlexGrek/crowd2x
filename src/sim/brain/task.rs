@@ -25,7 +25,7 @@ use crate::sim::walker::Walker;
 use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
-use super::tasks::{CloseFridge, ConsumeItem, MoveTo, OpenFridge, Sleep, TakeItem, UseComputer, UseToilet, Wait};
+use super::tasks::{CloseFridge, ConsumeItem, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait};
 
 /// What a task may touch while it runs: the world to read, the body it moves,
 /// the action it drives, and the parts of its unit a task can change.
@@ -121,6 +121,7 @@ pub enum Task {
     Wait(Wait),
     OpenFridge(OpenFridge),
     CloseFridge(CloseFridge),
+    Salvage(Salvage),
 }
 
 impl Task {
@@ -180,6 +181,12 @@ impl Task {
         Task::CloseFridge(CloseFridge { fridge, seconds })
     }
 
+    /// Work the heap of scrap in `heap`, from a cell beside it, for one
+    /// piece of scrap metal.
+    pub const fn salvage(heap: Point, seconds: f32) -> Task {
+        Task::Salvage(Salvage { heap, seconds })
+    }
+
     /// Run this task's executor for a tick.
     pub fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         match self {
@@ -192,6 +199,7 @@ impl Task {
             Task::Wait(task) => task.execute(ctx),
             Task::OpenFridge(task) => task.execute(ctx),
             Task::CloseFridge(task) => task.execute(ctx),
+            Task::Salvage(task) => task.execute(ctx),
         }
     }
 
@@ -208,6 +216,7 @@ impl Task {
             Task::Wait(task) => task.interrupted(action, biology),
             Task::OpenFridge(task) => task.interrupted(action, biology),
             Task::CloseFridge(task) => task.interrupted(action, biology),
+            Task::Salvage(task) => task.interrupted(action, biology),
         }
     }
 
@@ -222,6 +231,7 @@ impl Task {
             Task::Wait(task) => task.describe(),
             Task::OpenFridge(task) => task.describe(),
             Task::CloseFridge(task) => task.describe(),
+            Task::Salvage(task) => task.describe(),
         }
     }
 }

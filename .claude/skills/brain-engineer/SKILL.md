@@ -88,7 +88,8 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 
 1. **Never search inside a goal's `process` or a routine.** Queue `Task::move_to(cell)`
    or `Task::move_beside(feature)`. `Action::walk_to_any` starts the far search once per walk;
-   `Walker::advance` continues its saved frontier when `FAR_LIMIT` expires. `BudgetExhausted`
+   `Walker::advance` continues its saved frontier when `FAR_LIMIT` or the tick's shared route
+   budget runs out (`architecture.md`, "The route budget"). `BudgetExhausted`
    keeps the task executing, and must never become an unreachable-feature memory. Feature
    approaches try all free permitted sides, then occupied sides, before failing.
 
@@ -265,6 +266,7 @@ and the top executor's `debug_fields`.
 | Symptom | Likely cause |
 | --- | --- |
 | Stands still, goal `idle`, `held off wander …t` | wander was `Blocked`: a target the components call reachable and the route could not find — a pocket far out in the wasteland (`wasteland`), or a detour past the search window. Near the site, unreachable cells are never picked |
+| Stands still with a `move` task, `path 0 cells`, in a big crowd that all wanted to go somewhere at once | waiting its turn in the route budget (`architecture.md`). It gets there in the end; a long wait means far searches that big that the block's share takes ticks each |
 | Flips between two goals every few ticks | routine lacks hysteresis, or a goal returns `Blocked` and is retried the moment its cooldown ends |
 | Walks halfway, turns round | the routine released because the goal's own progress changed the stat; add hysteresis |
 | `result` flickers `in progress`, no task | `process` returns `Working` with nothing queued, every tick |

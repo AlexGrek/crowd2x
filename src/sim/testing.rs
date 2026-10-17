@@ -136,6 +136,7 @@ impl World {
             Effect::Door { at, key } => {
                 let _ = self.doors.want(at, key);
             }
+            Effect::Salvage { at } => super::salvage(entity, &mut self.map, &self.log, at),
             Effect::None => {}
         }
         self.doors.advance(self.dt, &self.occupancy);

@@ -1,0 +1,73 @@
+{
+  "name": "a unit told to salvage a heap of scrap out in the wasteland carries it away a piece at a time, and the heap goes",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "yard",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor"],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": { "props": [], "spawners": [] }
+        }
+      }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "no \"wasteland\" key, so the default seed, 0: it lays a scrapyard west of this 9x7 site, and the heap at -43, 11 holds three pieces, with another of two just above it" },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": -46, "y": 11 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "note": "nothing but the order is to be wanted while the test runs" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "look_at": { "x": -44, "y": 11 } },
+    { "wait": 0.3 },
+    { "expect_scrap": { "x": -43, "y": 11, "pieces": 3 } },
+    { "expect_scrap": { "x": -43, "y": 12, "pieces": 2 } },
+    { "expect_scrap": { "x": -44, "y": 11, "pieces": 0 } },
+    { "shot": "a scrapyard" },
+
+    { "note": "the order: walk two cells, then twenty world minutes a piece, which is 640 ticks" },
+    { "salvage": { "x": -43, "y": 11 } },
+    { "tick": 1 },
+    { "expect_log": "was told to salvage the scrap at -43, 11: 3 left" },
+    { "tick": 800 },
+    { "expect_log": "salvaged scrap metal at -43, 11: 2 left" },
+    { "expect_carrying": { "item": "scrap metal", "count": 1 } },
+    { "wait": 0.2 },
+    { "expect_scrap": { "x": -43, "y": 11, "pieces": 2 } },
+    { "shot": "one piece off it" },
+
+    { "note": "two more pieces and the heap is gone: its cell opens and nothing is drawn there" },
+    { "tick": 1400 },
+    { "expect_log": "stopped salvaging at -43, 11: nothing left" },
+    { "expect_carrying": { "item": "scrap metal", "count": 3 } },
+    { "wait": 0.2 },
+    { "expect_scrap": { "x": -43, "y": 11, "pieces": 0 } },
+    { "expect_scrap": { "x": -43, "y": 12, "pieces": 2 } },
+    { "shot": "the heap is gone" }
+  ]
+}

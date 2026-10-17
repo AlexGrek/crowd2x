@@ -182,6 +182,14 @@ impl GameEntity for Human {
         self.walk.apply(intent);
     }
 
+    fn walker(&self) -> Option<&Walker> {
+        Some(&self.walk)
+    }
+
+    fn walker_mut(&mut self) -> Option<&mut Walker> {
+        Some(&mut self.walk)
+    }
+
     /// Time passes for the body first, so a routine reads this tick's needs
     /// and not last tick's.
     ///
@@ -278,6 +286,11 @@ impl GameEntity for Human {
         true
     }
 
+    fn order_salvage(&mut self, heap: Point) -> bool {
+        self.brain.order_salvage(heap);
+        true
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
@@ -324,6 +337,14 @@ impl GameEntity for Dog {
 
     fn think(&self, ctx: &Think<'_>) -> Intent {
         self.walk.think(ctx)
+    }
+
+    fn walker(&self) -> Option<&Walker> {
+        Some(&self.walk)
+    }
+
+    fn walker_mut(&mut self) -> Option<&mut Walker> {
+        Some(&mut self.walk)
     }
 
     fn facing(&self) -> Option<Facing> {

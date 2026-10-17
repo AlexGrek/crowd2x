@@ -1,6 +1,6 @@
 ---
 name: wasteland
-description: Knowledge base for crowd2x's endless world - the procedural wasteland round every map (dirt, stones, cracks, scrub, meadow, mud, lakes) as a pure function of a seed, the 32-cell chunks it is cached in and how they are streamed round the camera and round the crowd, the map file's "wasteland" seed, routes, reachability and occupancy off the site, spawning out there, the unclamped camera and its reach, depth and lighting far from the origin, the editor's dimmed wasteland, its tiles and their art. Maps every concept to the file and function that owns it (no code). Use when changing the wasteland generator or its tiles, chunk loading and streaming, anything a unit does off the site, the camera far from the map, or when something breaks only a long way from the origin (sprites missing or under the ground, units stuck in a lake pocket, searches failing out there).
+description: Knowledge base for crowd2x's endless world - the procedural wasteland round every map (dirt, stones, cracks, scrub, meadow, mud, lakes) as a pure function of a seed, the 32-cell chunks it is cached in (the sparse ChunkGrid), how they are streamed round the camera and round the crowd and reclaimed behind it, the per-chunk census of who is where, the map file's "wasteland" seed, routes, reachability and occupancy off the site, spawning out there, the unclamped camera and its reach, depth and lighting far from the origin, the editor's dimmed wasteland, its tiles and their art. Maps every concept to the file and function that owns it (no code). Use when changing the wasteland generator or its tiles, chunk loading and streaming, anything a unit does off the site, the camera far from the map, or when something breaks only a long way from the origin (sprites missing or under the ground, units stuck in a lake pocket, searches failing out there).
 ---
 
 # Wasteland: the world past the map's edge
@@ -31,8 +31,16 @@ there; it is terrain only. Every map loaded from a file stands in one.
 ## Chunks: `src/map/chunk.rs`
 
 - `CHUNK` = 32 cells. `ChunkPos` (`of`, `covering`, `around`), `Chunk` (tiles plus passable
-  and see-through bits, built by `Chunk::generate`), and `ChunkGrid<T>`, a flat grid of
-  boxed slots: a lookup is an offset, never a hash, and a skipped chunk costs a pointer.
+  and see-through bits, built by `Chunk::generate`), and `ChunkGrid<T>`: **sparse** — a
+  dense list of values with an open-addressed index beside it (linear probing, at most half
+  full, Fibonacci hashing of the position, never the standard library's seeded hash, so the
+  layout and iteration order are the same on every machine). Memory follows how many
+  chunks are held, never how far apart; the index shrinks once it is under an eighth full.
+  It replaced a rectangle of slots that grew to take in everything ever loaded and never
+  shrank, so two units walking apart made it the size of the distance between them.
+  Values are inline (`ChunkGrid<Box<Chunk>>` for big ones). `retain` and the bounded,
+  resumable `sweep(cursor, count, keep)` drop values; a removal moves the last value into
+  the gap.
 - **Loaded only means cached.** A chunk holds a pure function of seed and position, so
   loading or dropping one never changes a cell. A cell whose chunk is not loaded reads the
   same, only slower (`Map::ground` falls back to the generator). That is what keeps
@@ -50,12 +58,28 @@ there; it is terrain only. Every map loaded from a file stands in one.
   chunks under the canvas plus `STREAM_AHEAD` (1), and drops those more than `STREAM_KEEP`
   (4) behind. It loads into `CurrentMap` with `bypass_change_detection`, because loading
   is not an edit. The HUD's `where x, y  chunks n` line shows the camera's cell and the count.
-- **The crowd**: `GameState::follow_the_crowd_out` (`src/sim/mod.rs`) loads the chunk under
-  everybody off the site, and its neighbours, into the simulation's own copy of the map.
-  This is spawn-pass work because it allocates. Nothing is unloaded.
+- **The crowd**: `GameState::follow_the_crowd` (`src/sim/mod.rs`, spawn pass, since it
+  allocates). For every chunk somebody is in — read off the **census**, not a walk of the
+  crowd — it prepares that chunk and the eight round it: their census lists, and on an
+  endless map their ground in the simulation's own copy of the map and their occupancy
+  chunks (anything not wholly on the site, so a unit at the site's edge is covered too).
+  Then it **reclaims**: a bounded sweep (`RECLAIM_EACH_PASS` chunks of each structure a
+  pass) drops what has nobody within `KEEP_CHUNKS` (2, one more than the ring loaded, so
+  walking to and fro over an edge does not thrash). Ground in the navigation area is never
+  dropped; an occupancy chunk with anybody in it is never dropped. None of it changes an
+  outcome (`sim` test `reclaiming_chunks_never_changes_what_happens`, against a world that
+  keeps everything, `GameState::keep_every_chunk`).
+- **Nothing is sped up, slowed down or put to sleep for being off-screen.** The simulation
+  has no idea where the camera is; what is in memory follows the crowd, and a unit far
+  from everything is simulated exactly as one in view.
+- **The census** (`src/sim/census.rs`): who is in which chunk, everybody (a stack in one
+  cell included, which occupancy names only one of). A per-chunk doubly linked list
+  threaded through per-slot links, so the move step moves somebody between chunks with no
+  allocation once the list exists (`Census::prepare`). `occupied`, `units_in`, `count`,
+  `anyone_within`, `chunk_of`. Kept by `GameState::spawn`/`despawn` and the move step.
 - **Occupancy** (`src/sim/occupancy.rs`) keeps off-site claims per chunk (`WildCells`).
-  `prepare(cell)` makes them ahead of a move so the move never allocates. `wild_chunks`
-  counts them.
+  `prepare(chunk)` makes them ahead of a move so the move never allocates; `sweep` drops
+  empty ones. `GameState::wild_chunks` counts them.
 
 ## Routes and reachability off the site
 
@@ -117,12 +141,17 @@ added last, so it changes nothing laid out on the site.
 
 ## Tests
 
-- `map::wasteland`, `map::chunk`: determinism, the clearing, the grid.
+- `map::wasteland`, `map::chunk`: determinism, the clearing, the grid (checked against a
+  `BTreeMap` through thousands of inserts, removals, sweeps and retains; cost follows what
+  is held).
 - `map::navigation`: walls met round, sealed rooms, `is_outside`.
 - `sim::path`: routes round the site, windows far out, water.
-- `sim::occupancy`: off-site claims, `prepare`.
-- `sim` (`mod.rs`): a crowd far out loads its ground; loading never changes the outcome; a
-  hungry human walks home from the wasteland.
+- `sim::occupancy`: off-site claims, `prepare`, a sweep keeps anybody's chunk.
+- `sim::census`: filing, crossing, stacks, preparing, sweeping.
+- `sim` (`mod.rs`): a crowd far out loads its ground and the census agrees with where
+  everybody stands; loading never changes the outcome; reclaiming never changes it either,
+  and lets go of everything out there once the crowd has gone; a hungry human walks home
+  from the wasteland.
 - `lighting::scene`: `an_endless_maps_lightmap_reaches_out_into_the_wasteland`.
 - `map::format`: old maps load surrounded; seed or `false` round-trips; junk refused.
 - QA: `qa/wasteland.json` (streaming bounds via `expect_chunks`, dogs far out drawn,

@@ -432,6 +432,53 @@ mod tests {
     }
 
     #[test]
+    fn a_rested_human_goes_to_bed_at_night_and_stays_until_morning() {
+        let bed = Point::new(5, 5);
+        let mut world = night_with_beds(&[bed]);
+        let mut human = owner(Point::new(4, 5), 0.0, bed);
+
+        assert!(step_until(&mut world, &mut human, 600, |h| h.brain().is_asleep()), "never went to bed");
+        for _ in 0..4000 {
+            world.step(&mut human);
+            assert_eq!(human.brain().top_goal(), GoalId::Sleep);
+            assert_eq!(human.center_position(), bed);
+        }
+        assert!(world.sleeps() >= 2, "never completed a stretch of sleep");
+
+        world.clock = Clock::after_watching(22.0 * HOUR as f64 / TIME_SCALE as f64);
+        assert!(!world.clock.is_night());
+        world.step(&mut human);
+        assert_eq!(human.brain().top_goal(), GoalId::Wander);
+    }
+
+    #[test]
+    fn bedtime_interrupts_a_bored_humans_computer_session_and_keeps_it_in_bed() {
+        let bed = Point::new(5, 5);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "bed 1", bed);
+        prop_at(&mut map, "computer", Point::new(3, 3));
+        let mut world = World::new(map);
+        let mut human = owner(Point::new(3, 4), 0.0, bed);
+        human.biology_mut().unwrap().set_running(ProcessId::Fun, true);
+        human.set_fun(0.0);
+        assert!(step_until(&mut world, &mut human, 100, |h| h.brain().top_goal() == GoalId::Play));
+
+        world.clock = midnight();
+        assert!(step_until(&mut world, &mut human, 600, |h| h.brain().is_asleep()), "stayed up playing");
+        for _ in 0..4000 {
+            world.step(&mut human);
+            assert_eq!(human.brain().top_goal(), GoalId::Sleep, "boredom woke the sleeper");
+        }
+        assert!(world.sleeps() >= 2);
+        assert_eq!(world.plays(), 0, "should have left the computer at bedtime");
+
+        // Switching energy off removes the sleep schedule too.
+        human.biology_mut().unwrap().set_running(ProcessId::Energy, false);
+        world.step(&mut human);
+        assert_eq!(human.brain().top_goal(), GoalId::Play);
+    }
+
+    #[test]
     fn a_human_goes_to_its_own_bed_even_when_another_is_nearer() {
         let (near, own) = (Point::new(4, 3), Point::new(10, 7));
         let mut world = night_with_beds(&[near, own]);

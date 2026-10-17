@@ -349,8 +349,10 @@ fn tick_sim(
 /// walks of the whole crowd, each with a hash probe per entity, and Bevy's own
 /// three passes over every sprite entity plus their transform propagation.
 /// Going from those to one cheap read pass is the win; going from one pass to
-/// zero is worth an order of magnitude less and costs a second structure in
-/// `sim/` that the move step would have to keep true.
+/// zero is worth an order of magnitude less. The structure that would take it
+/// to zero exists now — `sim::Census` files everybody by chunk, stacks
+/// included, and the move step keeps it true — so `units_in` over the chunks
+/// under the view is the change to make when a profile says this scan matters.
 fn collect_visible_crowd(
     sim: Res<Sim>,
     area: Res<VisibleArea>,

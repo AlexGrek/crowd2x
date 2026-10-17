@@ -48,14 +48,17 @@ use crate::map::Point;
 
 use super::brain::ActionState;
 use super::entity::{Body, Think};
-use super::path::{self, Destinations, Path, PathFinder, SearchStatus};
+use super::path::{self, Allowance, Destinations, Path, PathFinder, SearchStatus};
 use super::uid::Uid;
 use super::{Intent, MoveOutcome};
 
-/// The far stage's budget, in cells expanded. Deliberately large: a walker
-/// crossing a real map should be limited by the map and not by this, and the
-/// number bounds one tick of work; unfinished static searches resume next tick.
-/// See [`path::PathFinder::advance`].
+/// The most one walker's far stage expands in one tick, in cells.
+/// Deliberately large: a walker crossing a real map should be limited by the
+/// map and not by this, and the number bounds one tick of work; unfinished
+/// static searches resume next tick. See [`path::PathFinder::advance`]. In a
+/// world, what the whole crowd may expand in a tick is bounded too, by the
+/// route budget the react step shares out (`sim::ROUTE_BUDGET`), and a walker
+/// gets the lesser of the two.
 pub const FAR_LIMIT: usize = 65_536;
 
 /// How many cells of the plan the near stage throws away and replaces.
@@ -106,6 +109,16 @@ pub struct Walker {
     route: Box<Route>,
     /// Cells per second.
     speed: f32,
+    /// What far searching it may still do this tick, while the react step
+    /// has it metered ([`Walker::meter`]); `None`, unmetered, is
+    /// [`FAR_LIMIT`] a search and nothing shared — a walker driven by a test.
+    /// Here and not in `route`, like `searching`: the react step asks both of
+    /// every walker every tick, and the body beside them is already in cache
+    /// where the boxed route may not be.
+    meter: Option<Allowance>,
+    /// Whether `route` holds an unfinished far search — kept in step with it
+    /// by everything that starts, finishes or drops one.
+    searching: bool,
 }
 
 #[cfg(test)]
@@ -141,6 +154,8 @@ impl Walker {
             body: Body::at_cell(uid, cell),
             route: Box::default(),
             speed,
+            meter: None,
+            searching: false,
         }
     }
 
@@ -279,15 +294,24 @@ impl Walker {
             request.key = self.body.home();
             self.route.request = Some(request);
         }
+        let mut allowance = match self.meter {
+            Some(meter) => Allowance { cells: meter.cells.min(FAR_LIMIT), ..meter },
+            None => Allowance::new(FAR_LIMIT),
+        };
+        let given = allowance.cells;
         let status = path::search(
             &mut self.route.pending,
             ctx.map,
             request.start,
             request.goals,
-            FAR_LIMIT,
+            &mut allowance,
             |c| ctx.step_cost_with(c, request.key),
             self.route.path.output(),
         );
+        if let Some(meter) = &mut self.meter {
+            meter.cells -= given - allowance.cells;
+        }
+        self.searching = self.route.pending.is_some();
         match status {
             SearchStatus::Found(cell) => {
                 self.route.request = None;
@@ -311,9 +335,31 @@ impl Walker {
         status
     }
 
+    /// Let this walker's far searches spend no more than `allowance` until
+    /// [`Walker::unmeter`] — the react step's share of the tick's route
+    /// budget, handed over before the unit reacts. What a search cannot
+    /// finish inside it waits for a later tick; it is never cut short into
+    /// a different route, or into a miss.
+    pub fn meter(&mut self, allowance: Allowance) {
+        self.meter = Some(allowance);
+    }
+
+    /// Stop metering, and say how many cells of the allowance are left.
+    pub fn unmeter(&mut self) -> usize {
+        self.meter.take().map_or(0, |meter| meter.cells)
+    }
+
+    /// Whether it holds an unfinished far search of its own between ticks
+    /// — scratch the size of the search's window, which is why the react
+    /// step bounds how many are held at once.
+    pub fn is_searching(&self) -> bool {
+        self.searching
+    }
+
     /// Stop walking: drop the route, wherever it was going.
     pub fn halt(&mut self) {
         path::recycle(&mut self.route.pending);
+        self.searching = false;
         self.route.request = None;
         self.route.path.clear();
     }
@@ -555,19 +601,23 @@ mod tests {
             walker.route.pending.is_some(),
             "fixture must exhaust the first slice"
         );
+        assert!(walker.is_searching());
         assert_eq!(walker.think(&world.ctx(0)), Intent::Idle);
         assert_eq!(
             walker.advance(&world.ctx(1), MoveOutcome::Idle),
             ActionState::Running
         );
         assert!(walker.route.pending.is_none());
+        assert!(!walker.is_searching());
         assert_eq!(walker.destination(), Some(goal));
         assert_eq!(walker.route.path.len(), 598);
         assert!(matches!(walker.think(&world.ctx(2)), Intent::Move { .. }));
         assert!(walker.route_to(&world.ctx(3), goal));
         assert!(walker.route.pending.is_some());
+        assert!(walker.is_searching());
         walker.halt();
         assert!(walker.route.pending.is_none());
+        assert!(!walker.is_searching());
         assert!(!walker.is_walking());
     }
 

@@ -41,6 +41,7 @@ pub mod background;
 pub mod grids;
 pub mod props;
 mod saving;
+pub mod scrap;
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -579,6 +580,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<RectangleDrag>()
             .init_resource::<background::TileWindow>()
             .init_resource::<props::PropWindow>()
+            .init_resource::<scrap::ScrapWindow>()
             .init_resource::<grids::GridOverlay>()
             .init_resource::<grids::LayerView>()
             .init_resource::<BrushStroke>()
@@ -602,6 +604,13 @@ impl Plugin for EditorPlugin {
                 background::stream_chunks
                     .after(ViewSystems)
                     .before(background::sync_tile_window)
+                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
+            )
+            // ...and the heaps of scrap standing on it.
+            .add_systems(
+                Update,
+                scrap::sync_scrap_window
+                    .after(background::stream_chunks)
                     .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
             )
             .add_systems(
@@ -642,7 +651,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
-/// Start both map windows empty.
+/// Start every map window empty.
 ///
 /// They hold entities, and those entities are despawned by `DespawnOnExit`
 /// every time a map screen is left — including by routes that never run
@@ -652,9 +661,11 @@ impl Plugin for EditorPlugin {
 fn reset_map_windows(
     mut tiles: ResMut<background::TileWindow>,
     mut props_window: ResMut<props::PropWindow>,
+    mut scrap_window: ResMut<scrap::ScrapWindow>,
 ) {
     tiles.clear();
     props_window.clear();
+    scrap_window.clear();
 }
 
 /// Aim at the middle of the map rather than at its bottom-left corner, which

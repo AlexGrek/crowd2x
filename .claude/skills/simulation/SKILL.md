@@ -1,6 +1,6 @@
 ---
 name: simulation
-description: The crowd2x simulation core (src/sim/) - the GameState contract, process_game_state, Uids, the spawn and processing passes (think, move, react, world), FrozenEntities, occupancy, Commands and freezing, inventories and items, the world clock and TIME_SCALE, the entity arena, determinism and the lock-free log. Use before writing anything simulation-shaped, adding an entity kind, Intent, Command or Effect, changing movement or collisions, items or carrying, or time. For brains and bodies use brain-engineer.
+description: The crowd2x simulation core (src/sim/) - the GameState contract, process_game_state, Uids, the spawn and processing passes (think, move, react, world), FrozenEntities, occupancy, the per-chunk census of who is where, the route budget react shares out by slot blocks, Commands and freezing, inventories and items, the world clock and TIME_SCALE, the entity arena, determinism and the lock-free log. Use before writing anything simulation-shaped, adding an entity kind, Intent, Command or Effect, changing movement or collisions, items or carrying, or time. For brains and bodies use brain-engineer.
 ---
 
 # The simulation
@@ -80,6 +80,24 @@ elsewhere. One entity to a cell, `claim` naming the occupant when it refuses. **
 therefore never creates an overlap; spawning can** — an entity is placed exactly where it
 was asked for, so two can share a cell, and `release` only ever clears a cell whose
 occupant is the entity leaving it, which is what keeps that contained.
+
+**Who is in which chunk is the census** (`sim/census.rs`), the coarse layer beside
+occupancy: a list per 32-cell chunk of *everybody* in it (a stack spawned into one cell
+included), threaded through per-slot links so the move step keeps it true with no
+allocation — `census.moved(slot, cell)` on every granted step into a new cell, and
+`file`/`strike` in `spawn`/`despawn`. It is how the simulation finds its crowd without
+walking it: the spawn pass's `follow_the_crowd` prepares the census lists, the occupancy
+chunks and the ground round every occupied chunk, and reclaims what nobody is near
+(`wasteland` skill). **Nothing decides anything by chunk**: no unit is ticked differently
+for where it is, and the simulation never hears where the camera is — off-screen is
+simulated exactly as on.
+
+**The react step shares out a route budget** (`ROUTE_BUDGET` far-search cells a tick)
+by blocks of `ROUTE_BLOCK` slots, each reacting in order on one thread with its turn
+rotating by tick, so who gets the budget is fixed by slot and tick and never by thread
+timing; the sequential path below `PARALLEL_AT` cuts the same blocks. A budget only
+delays a route, never changes it. Details in `brain-engineer`'s `architecture.md`, "The
+route budget".
 
 **Freezing is the one thing done to an entity from outside it.** `Command::Freeze` rides
 the same queue as a spawn and is applied in the spawn pass, so a freeze asked for this tick

@@ -130,6 +130,7 @@
 pub mod background;
 pub mod biology;
 pub mod brain;
+pub mod census;
 pub mod clock;
 pub mod door;
 pub mod entities;
@@ -163,6 +164,7 @@ use crate::map::{Map, ObjectLayer, Point};
 
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
+pub use census::Census;
 pub use clock::Clock;
 pub use sun::Sun;
 pub use door::Doors;
@@ -265,6 +267,12 @@ pub enum Effect {
     /// about to go through it. Refused for a door locked to another key —
     /// see [`door`].
     Door { at: Point, key: Option<PropertyId> },
+    /// Take a piece of scrap metal off the heap at `at` and stow it: the
+    /// unit has finished salvaging it ([`brain::tasks::Salvage`]). Granted
+    /// only while the heap has a piece left and the unit has room for one,
+    /// so two finishing on the last piece in one tick get one between them,
+    /// the lower slot's — see [`world_step`].
+    Salvage { at: Point },
 }
 
 /// Something done *to* the world, from outside it.
@@ -318,6 +326,11 @@ pub enum Command {
     /// switches the lamps of its room, and every other switch in that room
     /// with it: see [`GameState::switch_light`].
     SwitchLight { at: Point, on: bool },
+    /// Tell a unit to salvage the heap of scrap at `at`: walk to it and work
+    /// it a piece at a time, until it is empty or the unit can carry no more
+    /// ([`GameState::order_salvage`]). The only thing that sends anybody to
+    /// a heap yet: nothing in a brain wants scrap of its own accord.
+    Salvage { uid: Uid, at: Point },
 }
 
 /// One frame's worth of input to the simulation.
@@ -378,6 +391,11 @@ impl Input {
         self
     }
 
+    pub fn salvage(&mut self, uid: Uid, at: Point) -> &mut Input {
+        self.commands.push(Command::Salvage { uid, at });
+        self
+    }
+
     pub fn hold(&mut self, uid: Uid, item: Option<ItemKind>) -> &mut Input {
         self.commands.push(Command::Hold { uid, item });
         self
@@ -389,6 +407,33 @@ impl Input {
     /// them every frame, which for a spawn means an unbounded crowd.
     pub fn clear(&mut self) {
         self.commands.clear();
+    }
+}
+
+/// How many chunks each of [`GameState::follow_the_crowd`]'s sweeps looks at
+/// per spawn pass: once a frame, a few thousand chunks a second, so even a
+/// crowd that has been everywhere is swept through in a second or two, and
+/// no pass pays for more than this.
+pub const RECLAIM_EACH_PASS: usize = 64;
+
+/// How near somebody, in chunks, a chunk is kept. One more than the ring
+/// loaded round each occupied chunk, so walking to and fro over a chunk's
+/// edge does not drop and load the same chunks over and over.
+pub const KEEP_CHUNKS: i32 = 2;
+
+/// Where each of [`GameState::follow_the_crowd`]'s three sweeps got to.
+#[derive(Clone, Copy, Debug)]
+struct Reclaim {
+    ground: usize,
+    occupancy: usize,
+    census: usize,
+    /// Off only in a test, to compare with a world that keeps everything.
+    on: bool,
+}
+
+impl Default for Reclaim {
+    fn default() -> Self {
+        Reclaim { ground: 0, occupancy: 0, census: 0, on: true }
     }
 }
 
@@ -407,6 +452,15 @@ pub struct GameState {
     /// the spawn pass and by the move step, and by nothing else — see
     /// [`Occupancy`].
     occupancy: Occupancy,
+    /// Who is in which chunk, everybody: kept in step by the spawn pass and
+    /// the move step, like `occupancy`. See [`census`].
+    census: Census,
+    /// Where each of [`GameState::follow_the_crowd`]'s sweeps got to, and
+    /// whether it sweeps at all.
+    reclaim: Reclaim,
+    /// The chunks somebody is in, gathered by the spawn pass and kept for
+    /// the capacity.
+    crowded: Vec<crate::map::ChunkPos>,
     /// Written from any thread, drained by the renderer. See [`Log`].
     pub log: Log,
     /// Where the props a brain can use are. Derived from `map` once, here,
@@ -469,6 +523,9 @@ pub struct GameState {
     /// and drained by [`world_step`] at the end of the tick. Indexed by
     /// [`Slot`] and sized alongside [`GameState::intents`].
     effects: Vec<Effect>,
+    /// Cells the far route searches expanded last tick, all of them — what
+    /// the route budget bounds ([`react_step`]).
+    route_work: usize,
 }
 
 impl GameState {
@@ -497,6 +554,9 @@ impl GameState {
         let properties = Properties::from_map(&map);
         GameState {
             occupancy: Occupancy::new(map.size()),
+            census: Census::new(),
+            reclaim: Reclaim::default(),
+            crowded: Vec::new(),
             features: Features::from_map(&map, &supply),
             fridges: Fridges::from_map(&map, &supply),
             doors: Doors::from_map(&map, &properties),
@@ -519,38 +579,92 @@ impl GameState {
             intents: Vec::new(),
             moves: Vec::new(),
             effects: Vec::new(),
+            route_work: 0,
         }
+    }
+
+    /// Cells the far route searches expanded last tick, the whole crowd's
+    /// together: never more than the route budget allows
+    /// ([`ROUTE_BUDGET`], [`MIN_BLOCK_BUDGET`] a block).
+    pub fn route_work(&self) -> usize {
+        self.route_work
     }
 
     pub fn entities(&self) -> &Entities {
         &self.entities
     }
 
-    /// Load the wasteland round everybody out in it: the chunk each one
-    /// stands in and the eight round it, both the ground and the occupancy
-    /// layer's, so the processing pass reads the ground from memory and the
-    /// move step claims a cell without allocating.
+    /// Who is in which chunk. See [`census`].
+    pub fn census(&self) -> &Census {
+        &self.census
+    }
+
+    /// Keep in memory what the crowd needs round it, and let go of what it
+    /// has left behind.
     ///
-    /// Spawn-pass work, since it allocates; and it may lag a unit by however
-    /// many ticks a frame runs without changing anything — a chunk not loaded
-    /// reads the same, only slower ([`crate::map::chunk`]), so what is loaded
-    /// when is never part of what happens. Nothing is unloaded: the crowd's
-    /// chunks stay for the life of the world.
-    fn follow_the_crowd_out(&mut self) {
-        if !self.map.is_endless() {
-            return;
-        }
-        let site = self.map.site();
-        for entity in self.entities.iter() {
-            let cell = entity.center_position();
-            if site.contains(cell) {
-                continue;
+    /// For every chunk somebody is in ([`Census::occupied`], not a walk of
+    /// the crowd), the chunk and the eight round it: their census lists, so
+    /// the move step files a unit crossing into one without allocating; and
+    /// on an endless map their ground and the occupancy layer's cells for
+    /// whatever of them is off the site, so the processing pass reads the
+    /// ground from memory and claims a cell without allocating.
+    ///
+    /// Then a bounded sweep of each of the three — [`RECLAIM_EACH_PASS`]
+    /// chunks, so the cost of a pass does not grow with how far the crowd
+    /// has been — drops the chunks with nobody within [`KEEP_CHUNKS`]: the
+    /// wasteland's ground (but never the navigation area round the site,
+    /// which every search near it reads), the occupancy layer's empty
+    /// chunks, and the census's empty lists. Keeping a ring wider than the
+    /// one loaded means somebody walking to and fro over a chunk's edge does
+    /// not load and drop the same chunks over and over.
+    ///
+    /// **None of it changes anything that happens.** A chunk of ground not
+    /// loaded reads the same as one that is, only slower
+    /// ([`crate::map::chunk`]); a chunk of occupancy with nobody in it reads
+    /// the same as none, and one with anybody in it is never dropped. So this
+    /// may lag the crowd by however many ticks a frame runs, and what is in
+    /// memory when is never part of the outcome — a unit a long way from
+    /// anything, that nobody is watching, is simulated exactly as one in
+    /// view. Spawn-pass work, since it allocates.
+    fn follow_the_crowd(&mut self) {
+        let mut crowded = std::mem::take(&mut self.crowded);
+        crowded.clear();
+        crowded.extend(self.census.occupied());
+        let endless = self.map.is_endless();
+        for &pos in &crowded {
+            self.census.prepare(pos);
+            if endless {
+                for near in pos.around(1) {
+                    self.map.load_chunk(near);
+                }
+                self.occupancy.prepare(pos);
             }
-            for pos in crate::map::ChunkPos::of(cell).around(1) {
-                self.map.load_chunk(pos);
-            }
-            self.occupancy.prepare(cell);
         }
+        self.crowded = crowded;
+
+        if self.reclaim.on {
+            let GameState { map, occupancy, census, reclaim, .. } = self;
+            let pinned = map.navigation_area();
+            map.sweep_chunks(&mut reclaim.ground, RECLAIM_EACH_PASS, |pos| {
+                pos.bounds().overlaps(pinned) || census.anyone_within(pos, KEEP_CHUNKS)
+            });
+            occupancy.sweep(&mut reclaim.occupancy, RECLAIM_EACH_PASS, |pos| {
+                census.anyone_within(pos, KEEP_CHUNKS)
+            });
+            census.sweep(&mut reclaim.census, RECLAIM_EACH_PASS, KEEP_CHUNKS);
+        }
+    }
+
+    /// Stop dropping chunks behind the crowd, so a test can compare a world
+    /// that reclaims with one that keeps everything.
+    #[cfg(test)]
+    pub(crate) fn keep_every_chunk(&mut self) {
+        self.reclaim.on = false;
+    }
+
+    /// How many chunks the occupancy layer holds off the site.
+    pub fn wild_chunks(&self) -> usize {
+        self.occupancy.wild_chunks()
     }
 
     /// What the map's props are for, and where. See [`feature`].
@@ -831,6 +945,8 @@ impl GameState {
         // for, so spawning is the one thing that can put two of them in one
         // cell. See the [`occupancy`] module docs; moving cannot.
         let _ = self.occupancy.claim(at, uid);
+        // The census has everybody, a second in one cell included.
+        self.census.file(slot, at);
 
         self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
         self.give_a_bed(uid, at);
@@ -903,6 +1019,9 @@ impl GameState {
 
     /// Remove an entity. Returns whether there was one.
     pub fn despawn(&mut self, uid: Uid) -> bool {
+        if let Some(slot) = self.entities.slot_of(uid) {
+            self.census.strike(slot);
+        }
         match self.entities.remove(uid) {
             Some(gone) => {
                 // Only if it was the registered occupant: an entity that
@@ -997,6 +1116,33 @@ impl GameState {
             Some(item) => format!("{uid} is holding {}", item.name()),
             None => format!("{uid} is holding nothing"),
         });
+        true
+    }
+
+    /// Tell `uid` to salvage the heap of scrap at `at` — see
+    /// [`Command::Salvage`]. `false`, and a line in the log saying why, when
+    /// there is no heap there with anything left in it, no such entity, or
+    /// one that cannot salvage (a dog). The order is the unit's to carry out
+    /// from here: it walks there, works the heap, and lets the order go when
+    /// it is empty, when it can carry no more, or when there is no getting
+    /// there.
+    pub fn order_salvage(&mut self, uid: Uid, at: Point) -> bool {
+        let Some(heap) = self.map.scrap(at) else {
+            self.log.push(format!("salvage: no scrap at {}, {}", at.x, at.y));
+            return false;
+        };
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("salvage: no such entity {uid}"));
+            return false;
+        };
+        if !entity.order_salvage(at) {
+            self.log.push(format!("salvage: {uid} cannot salvage anything"));
+            return false;
+        }
+        self.log.push(format!(
+            "{uid} was told to salvage the scrap at {}, {}: {} left",
+            at.x, at.y, heap.pieces
+        ));
         true
     }
 
@@ -1118,9 +1264,12 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             Command::Hold { uid, item } => {
                 state.hold_item(*uid, *item);
             }
+            Command::Salvage { uid, at } => {
+                state.order_salvage(*uid, *at);
+            }
         }
     }
-    state.follow_the_crowd_out();
+    state.follow_the_crowd();
 }
 
 /// **The processing pass: advances every entity, and adds or removes none.**
@@ -1160,6 +1309,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         map,
         entities,
         occupancy,
+        census,
         log,
         features,
         fridges,
@@ -1169,6 +1319,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
         moves,
         effects,
+        route_work,
         ..
     } = state;
 
@@ -1203,11 +1354,11 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
     );
 
-    move_step(&mut table, map, occupancy, features, doors, intents, moves);
+    move_step(&mut table, map, occupancy, census, features, doors, intents, moves);
 
     // ...and as it ends this one, which is the layer a detour is worth
     // planning against. Same struct, deliberately different moment.
-    react_step(
+    *route_work = react_step(
         &mut table,
         &Think {
             map,
@@ -1231,7 +1382,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    world_step(fridges, doors, occupancy, effects, dt);
+    world_step(&mut table, map, log, fridges, doors, occupancy, effects, dt);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1240,8 +1391,9 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
 /// Handing eight entities to a thread pool costs more than thinking for them,
 /// and every test in this crate and most of the QA suite runs worlds that
 /// size. The answer is identical either side of the line — the parallel rounds
-/// write one slot each and read nothing that changes — so this is a choice
-/// about overhead and never about behaviour.
+/// write one slot each and read nothing that changes, and react shares its
+/// route budget out by blocks fixed by slot number, the same either way — so
+/// this is a choice about overhead and never about behaviour.
 const PARALLEL_AT: usize = 64;
 
 /// **Step 1: everybody decides.** Read-only, and run across threads.
@@ -1303,11 +1455,17 @@ fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
 /// margin — at a walking pace of two cells a second, a boundary is crossed
 /// about once every thirty ticks — and it costs neither of the two checks: no
 /// cell changes hands, so there is nothing to claim and nobody new to bump
-/// into.
+/// into. A step into a new cell is also where the [`Census`] hears of it,
+/// which matters once every thirty-odd cells, when it crosses into another
+/// chunk.
+// The world's parts, borrowed apart so the borrow checker can see which of
+// them the step writes.
+#[allow(clippy::too_many_arguments)]
 fn move_step(
     table: &mut FrozenEntities<'_>,
     map: &Map,
     occupancy: &mut Occupancy,
+    census: &mut Census,
     features: &Features,
     doors: &Doors,
     intents: &[Intent],
@@ -1352,6 +1510,7 @@ fn move_step(
             // anywhere but here.
             occupancy.release(from, uid);
             entity.apply(&intent);
+            census.moved(slot as Slot, into);
             MoveOutcome::Moved
         };
     }
@@ -1380,29 +1539,118 @@ fn move_step(
 /// shares nothing with another's, and a crowd that has all arrived at once
 /// wants all of them planned at once. See [`walker::Walker`]; and since the
 /// brain runs here too, [`brain`] for what else a reaction decides.
-fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome], effects: &mut [Effect]) {
-    let moves = &moves[..table.capacity()];
-    let effects = &mut effects[..table.capacity()];
+///
+/// # The route budget
+///
+/// What the whole crowd may spend on far routes in one tick is bounded:
+/// [`ROUTE_BUDGET`] cells expanded, shared out. Without it, a crowd that all
+/// wanted to go somewhere far at once — dusk, and everybody off to bed —
+/// searched it all in one tick, and the frame waited for every search.
+///
+/// Shared out **by block**, not by who asks first. Who asks first is a race
+/// once react runs on threads, and the simulation does not run races. So the
+/// slots are cut into blocks of [`ROUTE_BLOCK`], each block gets an equal
+/// share ([`MIN_BLOCK_BUDGET`] at least), and a block reacts in order on one
+/// thread, its units spending from the block's share as they go. The blocks
+/// run in parallel; which slots make a block is fixed by slot number alone,
+/// so the sequential path below a crowd of [`PARALLEL_AT`] cuts them the
+/// same and gives the same answer. Within a block the turn rotates with the
+/// tick, so nobody is always last to the budget.
+///
+/// **A budget delays a route; it never changes one.** A search that runs out
+/// carries on next tick from where it stopped, and finds the route an
+/// unlimited search would have ([`path::Allowance`]). Nothing here knows or
+/// asks what is on the screen: a unit a long way off gets its turn exactly as
+/// one in view does.
+///
+/// An unfinished search keeps scratch the size of its window between ticks,
+/// so a block keeps at most [`SEARCHES_KEPT`]. A unit that wants to start
+/// another while that one is held gets [`ROUTE_TRIAL`] cells — plenty for a
+/// walk across a room — and if that is not enough its work is let go and it
+/// asks again next tick; once the held search is done, the next in turn
+/// takes its place.
+///
+/// Detours round a body ([`walker::Walker::detour`]) are not drawn from it:
+/// they plan against where the crowd stands this tick, so they cannot wait
+/// for another, and each is bounded by [`walker::DETOUR_LIMIT`] already.
+///
+/// Returns the cells the far searches expanded.
+fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutcome], effects: &mut [Effect]) -> usize {
+    let capacity = table.capacity();
+    let moves = &moves[..capacity];
+    let effects = &mut effects[..capacity];
+    let share = (ROUTE_BUDGET / capacity.div_ceil(ROUTE_BLOCK).max(1)).max(MIN_BLOCK_BUDGET);
+    let turn = ctx.tick as usize;
     if table.len() < PARALLEL_AT {
-        for (slot, entity) in table.iter_slots_mut() {
-            effects[slot as usize] = react_for(entity, ctx, moves[slot as usize]);
-        }
-        return;
+        return table
+            .blocks_mut(ROUTE_BLOCK)
+            .zip(moves.chunks(ROUTE_BLOCK))
+            .zip(effects.chunks_mut(ROUTE_BLOCK))
+            .map(|((block, moves), effects)| react_block(block, ctx, moves, effects, share, turn))
+            .sum();
     }
     table
-        .par_iter_slots_mut()
-        .zip(moves.par_iter())
-        .zip(effects.par_iter_mut())
-        .for_each(|((entity, outcome), effect)| {
-            *effect = match entity {
-                Some(entity) => react_for(entity, ctx, *outcome),
-                None => Effect::None,
-            };
-        });
+        .par_blocks_mut(ROUTE_BLOCK)
+        .zip(moves.par_chunks(ROUTE_BLOCK))
+        .zip(effects.par_chunks_mut(ROUTE_BLOCK))
+        .map(|((block, moves), effects)| react_block(block, ctx, moves, effects, share, turn))
+        .sum()
+}
+
+/// The far-route search the whole world may do in one tick, in cells
+/// expanded — see [`react_step`]. Four times what one walker may do
+/// ([`walker::FAR_LIMIT`]), so a small world searches as it always did.
+pub const ROUTE_BUDGET: usize = 1 << 18;
+
+/// How many slots share one part of [`ROUTE_BUDGET`], reacting in turn on
+/// one thread. The size [`PARALLEL_AT`] is, for the same reason: a smaller
+/// piece of work is not worth handing to a thread.
+pub const ROUTE_BLOCK: usize = 64;
+
+/// The least a block is given, however many there are: enough that a long
+/// search in a crowd of thousands still gets somewhere every tick. With very
+/// many blocks this, not [`ROUTE_BUDGET`], is what bounds the tick.
+pub const MIN_BLOCK_BUDGET: usize = 1 << 12;
+
+/// Unfinished far searches a block keeps between ticks. One: each holds
+/// scratch the size of its window, a few megabytes for a search about a
+/// large map.
+pub const SEARCHES_KEPT: usize = 1;
+
+/// What a unit gets to try a far route with while its block is already
+/// holding [`SEARCHES_KEPT`] unfinished ones: enough for any walk across a
+/// room or down a street, which is most of them.
+pub const ROUTE_TRIAL: usize = 256;
+
+/// One block's reactions, in turn from the slot `turn` points at, sharing
+/// `share` cells of route search between them. Returns what they spent.
+fn react_block(
+    mut block: entities::SlotBlock<'_>,
+    ctx: &Think<'_>,
+    moves: &[MoveOutcome],
+    effects: &mut [Effect],
+    share: usize,
+    turn: usize,
+) -> usize {
+    let len = block.len();
+    let mut left = share;
+    let mut kept = (0..len)
+        .filter(|&index| block.get(index).and_then(|entity| entity.walker()).is_some_and(Walker::is_searching))
+        .count();
+    for offset in 0..len {
+        let index = (turn + offset) % len;
+        effects[index] = match block.get_mut(index) {
+            Some(entity) => react_for(entity, ctx, moves[index], &mut left, &mut kept),
+            None => Effect::None,
+        };
+    }
+    share - left
 }
 
 /// One entity's reaction, whichever round asked for it — [`think_for`]'s
-/// other half.
+/// other half — with what is `left` of its block's route budget, and how
+/// many unfinished searches the block is holding (`kept`), both brought up to
+/// date with what it did.
 ///
 /// A frozen entity is not asked here either, and it matters more here than
 /// in think: its brain would find no action running, and an executor asked
@@ -1411,12 +1659,28 @@ fn react_step(table: &mut FrozenEntities<'_>, ctx: &Think<'_>, moves: &[MoveOutc
 /// freezing claims — "it keeps its cell and its goal" — than a brain that
 /// replans while held still. Its needs are held with it: no time passes for a
 /// frozen body, and it asks the world for nothing either.
-fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+fn react_for(
+    entity: &mut dyn GameEntity,
+    ctx: &Think<'_>,
+    outcome: MoveOutcome,
+    left: &mut usize,
+    kept: &mut usize,
+) -> Effect {
     if entity.is_frozen() {
-        Effect::None
-    } else {
-        entity.react(ctx, outcome)
+        return Effect::None;
     }
+    let Some(walker) = entity.walker_mut() else {
+        return entity.react(ctx, outcome);
+    };
+    let held = walker.is_searching();
+    let may_keep = held || *kept < SEARCHES_KEPT;
+    let given = if may_keep { *left } else { (*left).min(ROUTE_TRIAL) };
+    walker.meter(path::Allowance { cells: given, may_keep });
+    let effect = entity.react(ctx, outcome);
+    let walker = entity.walker_mut().expect("it walked a moment ago");
+    *left -= given - walker.unmeter();
+    *kept = *kept + usize::from(walker.is_searching()) - usize::from(held);
+    effect
 }
 
 /// **Step 4: the world settles what react asked of it, and the fridges move
@@ -1438,8 +1702,25 @@ fn react_for(entity: &mut dyn GameEntity, ctx: &Think<'_>, outcome: MoveOutcome)
 /// it is locked to somebody else; then every leaf moves by the **watched**
 /// `dt` — a door is seen to open, like a walk — and none shuts on a body
 /// standing in it, which is why the crowd as it ends the tick is handed in.
-fn world_step(fridges: &mut Fridges, doors: &mut Doors, occupancy: &Occupancy, effects: &mut [Effect], dt: f32) {
-    for effect in effects.iter_mut() {
+///
+/// Every [`Effect::Salvage`] takes a piece off its heap and stows it in the
+/// unit that asked — the one write here into an entity, and into the map:
+/// the piece has to leave the heap and arrive in the pack together, and the
+/// heap is the world's while the pack is the unit's, so the step that
+/// settles races between units is the one place both are in reach. In slot
+/// order, so the last piece goes to the same unit on every run.
+#[allow(clippy::too_many_arguments)]
+fn world_step(
+    table: &mut FrozenEntities<'_>,
+    map: &mut Map,
+    log: &Log,
+    fridges: &mut Fridges,
+    doors: &mut Doors,
+    occupancy: &Occupancy,
+    effects: &mut [Effect],
+    dt: f32,
+) {
+    for (slot, effect) in effects.iter_mut().enumerate() {
         match *effect {
             Effect::Fridge { at, open } => {
                 let _ = fridges.set_open(at, open);
@@ -1449,12 +1730,42 @@ fn world_step(fridges: &mut Fridges, doors: &mut Doors, occupancy: &Occupancy, e
                 // would push everything else out of the log.
                 let _ = doors.want(at, key);
             }
+            Effect::Salvage { at } => {
+                if let Some(entity) = table.slot_mut(slot as Slot) {
+                    salvage(entity, map, log, at);
+                }
+            }
             Effect::None => {}
         }
         *effect = Effect::None;
     }
     fridges.advance(dt * clock::TIME_SCALE);
     doors.advance(dt, occupancy);
+}
+
+/// [`Effect::Salvage`], for the unit in one slot: a piece off the heap and
+/// into its pack, if there is a piece and room for it. Logged either way —
+/// once a piece, a few seconds of work apart, so never a flood.
+pub(crate) fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
+    let uid = entity.uid();
+    let Some(inventory) = entity.inventory_mut() else {
+        return;
+    };
+    if !inventory.room_for(ItemKind::Scrap) {
+        log.push(format!("{uid} has no room for scrap metal: {}", inventory.describe_load()));
+        return;
+    }
+    match map.take_scrap(at) {
+        Some(left) => {
+            let _ = inventory.stow(ItemKind::Scrap);
+            log.push(if left == 0 {
+                format!("{uid} salvaged scrap metal at {}, {}: the heap is gone", at.x, at.y)
+            } else {
+                format!("{uid} salvaged scrap metal at {}, {}: {left} left", at.x, at.y)
+            });
+        }
+        None => log.push(format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
+    }
 }
 
 #[cfg(test)]
@@ -1890,6 +2201,7 @@ mod tests {
             moved += usize::from(here != from);
         }
         assert!(moved > start.len() / 2, "only {moved} of {} moved", start.len());
+        census_agrees(&a);
 
         let (mut b, _) = build();
         run(&mut b, 1500);
@@ -1924,6 +2236,191 @@ mod tests {
             state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect()
         };
         assert_eq!(positions(&cold), positions(&warm));
+    }
+
+    /// The census has everybody, in the chunk each one stands in, and
+    /// nobody twice.
+    fn census_agrees(state: &GameState) {
+        let mut filed = 0;
+        for (slot, entity) in state.entities().iter_slots() {
+            let pos = crate::map::ChunkPos::of(entity.center_position());
+            assert_eq!(state.census().chunk_of(slot), Some(pos), "{} at {:?}", entity.uid(), entity.center_position());
+            assert!(state.census().units_in(pos).any(|filed| filed == slot));
+        }
+        for pos in state.census().occupied() {
+            filed += state.census().count(pos);
+        }
+        assert_eq!(filed, state.entities().len());
+    }
+
+    #[test]
+    fn the_wasteland_behind_a_crowd_is_let_go_once_it_has_gone() {
+        let map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(5);
+        let cells = dry_cells(&map, Point::new(-700, 450), 6);
+        let mut state = GameState::new(map, 3);
+        let site_only = state.map.loaded_chunks();
+        let crowd: Vec<Uid> = cells.iter().map(|&cell| state.spawn(EntityType::Dog, cell)).collect();
+        run(&mut state, 60);
+        assert!(state.map.loaded_chunks() >= site_only + 9, "the ground round them is loaded");
+        assert!(state.wild_chunks() >= 9 && state.census().lists() >= 9);
+        census_agrees(&state);
+
+        let mut input = Input::new();
+        for &uid in &crowd {
+            input.despawn(uid);
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        // A few passes of the bounded sweep, and everything out there goes
+        // — but never the navigation area round the site.
+        run(&mut state, 20);
+        assert_eq!(state.map.loaded_chunks(), site_only);
+        assert_eq!(state.wild_chunks(), 0);
+        assert_eq!(state.census().lists(), 0);
+    }
+
+    #[test]
+    fn reclaiming_chunks_never_changes_what_happens() {
+        // Two worlds with the wasteland loaded far and wide, a crowd walking
+        // out in it: one lets go of what nobody is near as it goes, the
+        // other keeps everything. Not a step between them may differ.
+        let build = |reclaim: bool| {
+            let mut map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(9);
+            map.load_chunks(crate::map::Bounds::from_corners(Point::new(-400, -300), Point::new(300, 300)));
+            let cells = dry_cells(&map, Point::new(-250, 120), 16);
+            let mut state = GameState::new(map, 4);
+            if !reclaim {
+                state.keep_every_chunk();
+            }
+            for (i, &cell) in cells.iter().enumerate() {
+                state.spawn(if i % 3 == 0 { EntityType::Human } else { EntityType::Dog }, cell);
+            }
+            state
+        };
+        let (mut thrifty, mut hoarder) = (build(true), build(false));
+        run(&mut thrifty, 1200);
+        run(&mut hoarder, 1200);
+        assert!(
+            thrifty.map.loaded_chunks() * 4 < hoarder.map.loaded_chunks(),
+            "{} chunks kept against {}",
+            thrifty.map.loaded_chunks(),
+            hoarder.map.loaded_chunks()
+        );
+        let state_of = |state: &GameState| -> Vec<(u64, (f32, f32), Option<GoalId>)> {
+            state.entities().iter().map(|e| (e.uid().raw(), e.position(), e.current_goal())).collect()
+        };
+        assert_eq!(state_of(&thrifty), state_of(&hoarder));
+        census_agrees(&thrifty);
+    }
+
+    /// A hundred and twenty-eight hungry people on one side of a long wall,
+    /// the fridge on the other and the only gap at the far end: each route
+    /// is a search of most of a side, thousands of cells, and they all ask on
+    /// the same tick. Unbudgeted that was the whole lot in one tick.
+    fn a_hungry_crowd_behind_a_wall() -> (GameState, Vec<(Uid, Point)>) {
+        let mut map = Map::new(Size::new(96, 96), FLOOR);
+        for y in 0..95 {
+            map.set_terrain(Point::new(48, y), WALL);
+        }
+        crate::sim::testing::prop_at(&mut map, "fridge", Point::new(90, 2));
+        crate::map::utilities::serve_everything(&mut map, Point::new(95, 95), Point::new(94, 95));
+        let mut state = GameState::new(map, 11);
+        let mut crowd = Vec::new();
+        for y in 2..10 {
+            for x in 2..18 {
+                let at = Point::new(x, y);
+                let uid = state.spawn(EntityType::Human, at);
+                state.entities.get_mut(uid).unwrap().biology_mut().unwrap().edit(|_| {
+                    crate::sim::biology::Stats::calm()
+                        .with_hunger(95.0)
+                        .with_thirst(0.0)
+                        .with_fun(100.0)
+                        .with_stamina(100.0)
+                        .with_bladder(0.0)
+                });
+                crowd.push((uid, at));
+            }
+        }
+        (state, crowd)
+    }
+
+    #[test]
+    fn the_route_budget_bounds_a_tick_and_everybody_gets_their_route_in_turn() {
+        let (mut state, crowd) = a_hungry_crowd_behind_a_wall();
+        let mut busiest = 0;
+        let mut waited = false;
+        let mut routed = std::collections::HashSet::new();
+        for tick in 0..400 {
+            run(&mut state, 1);
+            busiest = busiest.max(state.route_work());
+            assert!(state.route_work() <= ROUTE_BUDGET, "tick {tick}: {} cells", state.route_work());
+            // Never more unfinished searches held than the blocks may keep.
+            let mut held = [0usize; 2];
+            for (slot, entity) in state.entities().iter_slots() {
+                held[slot as usize / ROUTE_BLOCK] += usize::from(entity.walker().unwrap().is_searching());
+            }
+            assert!(held.iter().all(|&held| held <= SEARCHES_KEPT), "tick {tick}: {held:?}");
+            // Somebody who has asked for a route and has none yet is waiting
+            // its turn.
+            for entity in state.entities().iter() {
+                let walker = entity.walker().unwrap();
+                if walker.is_walking() && walker.path_cells().is_empty() {
+                    waited = true;
+                } else if walker.path_cells().len() > 50 {
+                    routed.insert(entity.uid());
+                }
+            }
+        }
+        assert!(busiest > ROUTE_BUDGET / 2, "the crowd should have wanted more than the budget: {busiest}");
+        assert!(waited, "nobody had to wait, so the budget never bit");
+        // ...and nobody waited for ever: every one of them was handed its
+        // route round the wall. (Walking it is another matter — a hundred
+        // and twenty-eight people through one gap is a jam.)
+        for (uid, _) in crowd {
+            assert!(routed.contains(&uid), "{uid} never got its route");
+        }
+    }
+
+    #[test]
+    fn a_block_holds_no_more_unfinished_searches_than_it_may() {
+        // Routes longer than one walker may search in a tick (`FAR_LIMIT`):
+        // the far side of a wall across a 400-cell map. The first to ask
+        // keeps its unfinished search; the rest of the block get a trial and
+        // wait their turn, rather than each holding megabytes of scratch.
+        let mut map = Map::new(Size::new(400, 400), FLOOR);
+        for y in 0..399 {
+            map.set_terrain(Point::new(200, y), WALL);
+        }
+        crate::sim::testing::prop_at(&mut map, "fridge", Point::new(390, 2));
+        crate::map::utilities::serve_everything(&mut map, Point::new(399, 399), Point::new(398, 399));
+        let mut state = GameState::new(map, 5);
+        for x in 2..10 {
+            let uid = state.spawn(EntityType::Human, Point::new(x, 2));
+            state.entities.get_mut(uid).unwrap().biology_mut().unwrap().edit(|_| {
+                crate::sim::biology::Stats::calm().with_hunger(95.0).with_thirst(0.0).with_fun(100.0).with_stamina(100.0).with_bladder(0.0)
+            });
+        }
+        let mut most = 0;
+        for tick in 0..4 {
+            run(&mut state, 1);
+            let held = state.entities().iter().filter(|e| e.walker().unwrap().is_searching()).count();
+            assert!(held <= SEARCHES_KEPT, "tick {tick}: {held} unfinished searches held");
+            most = most.max(held);
+        }
+        assert_eq!(most, SEARCHES_KEPT, "the routes were long enough that one was kept");
+    }
+
+    #[test]
+    fn a_budgeted_crowd_is_the_same_crowd_every_run() {
+        // Above `PARALLEL_AT`, so the blocks react on threads: who gets the
+        // budget must not depend on which thread got there first.
+        let (mut a, _) = a_hungry_crowd_behind_a_wall();
+        let (mut b, _) = a_hungry_crowd_behind_a_wall();
+        run(&mut a, 300);
+        run(&mut b, 300);
+        let positions = |state: &GameState| -> Vec<(u64, (f32, f32))> {
+            state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect()
+        };
+        assert_eq!(positions(&a), positions(&b));
     }
 
     #[test]
@@ -2333,9 +2830,12 @@ mod tests {
         // faces boxed, out of line, for exactly this; company in recent memory
         // is one more familiarity. The places a unit gave up on reaching are
         // boxed in its memory for the same reason (624 -> 632).
+        //
+        // Raised from 640 to 704, a cache line, on purpose: salvaging scrap
+        // is a goal slot and a count of an item kind more (648).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 640, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 704, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -2535,13 +3035,14 @@ mod tests {
             map,
             entities,
             occupancy,
+            census,
             features,
             doors,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -2581,13 +3082,14 @@ mod tests {
             map,
             entities,
             occupancy,
+            census,
             features,
             doors,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
 
         assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
         assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
@@ -2609,8 +3111,8 @@ mod tests {
             let uid = state.spawn(EntityType::Human, Point::new(2, 0));
             let slot = state.entities.slot_of(uid).unwrap() as usize;
             state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
-            let GameState { map, entities, occupancy, features, doors, intents, moves, .. } = &mut state;
-            move_step(&mut entities.freeze(), map, occupancy, features, doors, intents, moves);
+            let GameState { map, entities, occupancy, census, features, doors, intents, moves, .. } = &mut state;
+            move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
             assert_eq!(state.last_move(uid), Some(MoveOutcome::Blocked { by: None }));
             assert_eq!(state.entities().get(uid).unwrap().center_position(), Point::new(2, 0));
             assert_eq!(state.occupancy().occupant(bed), None);
@@ -2764,7 +3266,16 @@ mod tests {
 
         state.effects[first_slot] = Effect::Fridge { at: fridge, open: true };
         state.effects[second_slot] = Effect::Fridge { at: fridge, open: false };
-        world_step(&mut state.fridges, &mut state.doors, &state.occupancy, &mut state.effects, 0.0);
+        world_step(
+            &mut state.entities.freeze(),
+            &mut state.map,
+            &state.log,
+            &mut state.fridges,
+            &mut state.doors,
+            &state.occupancy,
+            &mut state.effects,
+            0.0,
+        );
 
         assert!(!state.fridges().is_open(fridge), "the later slot's request should have won");
         // The slots are drained either way, so nothing is replayed next tick.
@@ -3184,5 +3695,190 @@ mod tests {
         walk.body_mut().set_home(home);
         assert!(walk.route_to(&world.ctx(), inside), "its owner does");
         assert!(walk.path_cells().contains(&Point::new(5, 2)) || walk.path_cells().contains(&Point::new(4, 2)));
+    }
+
+    /// A small site in the wasteland of seed 3: the scrap of a yard out past
+    /// its clearing lies a few dozen cells off, inside the navigation area.
+    fn scrap_site() -> Map {
+        Map::new(Size::new(8, 8), FLOOR).with_wasteland(3)
+    }
+
+    /// The heaps holding `pieces` nearest `from`, nearest first, each with
+    /// open wasteland beside it to work it from.
+    fn heaps_near(map: &Map, from: Point, pieces: u8) -> Vec<Point> {
+        let mut heaps = Vec::new();
+        map.heaps(crate::map::Bounds::from_corners(from.offset(-60, -60), from.offset(60, 60)), |cell, heap| {
+            if heap.pieces == pieces {
+                heaps.push(cell);
+            }
+        });
+        heaps.retain(|heap| {
+            heap.cardinal_neighbours().iter().any(|&side| map.is_passable(side) && map.navigation().is_outside(side))
+        });
+        heaps.sort_by_key(|heap| (heap.manhattan_distance(from), *heap));
+        assert!(!heaps.is_empty(), "no heap of {pieces} near {from:?}");
+        heaps
+    }
+
+    /// Spawn a human at `cell` with every need met, so for the length of a
+    /// test nothing but the order is wanted.
+    fn calm_human(state: &mut GameState, cell: Point) -> Uid {
+        let uid = state.spawn(EntityType::Human, cell);
+        let biology = state.entities.get_mut(uid).unwrap().biology_mut().unwrap();
+        biology.edit(|_| {
+            crate::sim::biology::Stats::calm()
+                .with_hunger(0.0)
+                .with_thirst(0.0)
+                .with_bladder(0.0)
+                .with_fun(100.0)
+                .with_stamina(100.0)
+        });
+        uid
+    }
+
+    fn stowed_scrap(state: &GameState, uid: Uid) -> u8 {
+        let inventory = state.entities().get(uid).unwrap().inventory().unwrap();
+        inventory.stowed().find(|&(kind, _)| kind == ItemKind::Scrap).map_or(0, |(_, count)| count)
+    }
+
+    #[test]
+    fn a_unit_told_to_salvage_a_heap_works_it_until_it_is_empty_and_carries_the_scrap_away() {
+        let map = scrap_site();
+        let heap = heaps_near(&map, Point::new(4, 4), 3)[0];
+        let start = dry_cells(&map, heap.offset(-6, 0), 1)[0];
+        let mut state = GameState::new(map, 1);
+        let uid = calm_human(&mut state, start);
+        assert!(!state.map.is_passable(heap), "a heap is in the way");
+
+        let mut input = Input::new();
+        input.salvage(uid, heap);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let mut lines = state.log.drain();
+        assert!(lines.iter().any(|l| l.contains("was told to salvage the scrap") && l.contains("3 left")), "{lines:?}");
+        assert_eq!(state.entities().get(uid).unwrap().current_goal(), Some(GoalId::Salvage));
+
+        // Three pieces at ten seconds of work each, and the walk there.
+        for _ in 0..3600 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if lines.iter().any(|l| l.contains("stopped salvaging")) {
+                break;
+            }
+        }
+        let salvaged = lines.iter().filter(|l| l.contains("salvaged scrap metal")).count();
+        assert_eq!(salvaged, 3, "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("the heap is gone")));
+        assert!(lines.iter().any(|l| l.contains("stopped salvaging") && l.contains("nothing left")), "{lines:?}");
+        assert_eq!(stowed_scrap(&state, uid), 3);
+        assert_eq!(state.map.scrap(heap), None);
+        assert!(state.map.is_passable(heap), "cleared away, and walkable");
+        let here = state.entities().get(uid).unwrap().center_position();
+        assert_eq!(here.manhattan_distance(heap), 1, "worked from beside it");
+
+        run(&mut state, 2);
+        assert_ne!(state.entities().get(uid).unwrap().current_goal(), Some(GoalId::Salvage), "the order is done with");
+    }
+
+    #[test]
+    fn a_unit_that_can_carry_no_more_lets_the_order_go() {
+        let map = scrap_site();
+        let heap = heaps_near(&map, Point::new(4, 4), 2)[0];
+        let side = *heap.cardinal_neighbours().iter().find(|&&side| map.is_passable(side)).unwrap();
+        let mut state = GameState::new(map, 2);
+        let uid = calm_human(&mut state, side);
+        // Two pieces in the pack already: room for one more, not two.
+        assert!(state.give_item(uid, ItemKind::Scrap) && state.give_item(uid, ItemKind::Scrap));
+        assert!(state.order_salvage(uid, heap));
+        let mut lines = Vec::new();
+        for _ in 0..2400 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+        }
+        assert!(lines.iter().any(|l| l.contains("stopped salvaging") && l.contains("can carry no more")), "{lines:?}");
+        assert_eq!(stowed_scrap(&state, uid), 3);
+        assert_eq!(state.map.scrap(heap).map(|h| h.pieces), Some(1), "one left for somebody else");
+        assert!(!state.map.is_passable(heap));
+    }
+
+    #[test]
+    fn the_last_piece_of_a_heap_goes_to_one_of_two_finishing_on_it_together() {
+        let map = scrap_site();
+        let (heap, sides) = heaps_near(&map, Point::new(4, 4), 1)
+            .into_iter()
+            .find_map(|heap| {
+                let sides: Vec<Point> = heap.cardinal_neighbours().into_iter().filter(|&side| map.is_passable(side)).collect();
+                (sides.len() >= 2).then_some((heap, sides))
+            })
+            .expect("a heap of one with two sides free");
+        let mut state = GameState::new(map, 3);
+        let (a, b) = (calm_human(&mut state, sides[0]), calm_human(&mut state, sides[1]));
+        let mut input = Input::new();
+        input.salvage(a, heap).salvage(b, heap);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let mut lines = Vec::new();
+        for _ in 0..1200 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+        }
+        assert_eq!(stowed_scrap(&state, a) + stowed_scrap(&state, b), 1, "{lines:?}");
+        assert_eq!(lines.iter().filter(|l| l.contains("salvaged scrap metal")).count(), 1);
+        assert_eq!(state.map.scrap(heap), None);
+        // Both worked it to the end, and the world settled who got it.
+        assert!(lines.iter().any(|l| l.contains("found no scrap left")), "{lines:?}");
+    }
+
+    #[test]
+    fn an_order_to_salvage_nothing_or_given_to_a_dog_is_refused() {
+        let map = scrap_site();
+        let heap = heaps_near(&map, Point::new(4, 4), 1)[0];
+        let mut state = GameState::new(map, 4);
+        let dog = state.spawn(EntityType::Dog, Point::new(2, 2));
+        let human = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert!(!state.order_salvage(human, Point::new(-5, 3)), "nothing there");
+        assert!(!state.order_salvage(dog, heap));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|l| l.contains("salvage: no scrap at -5, 3")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("cannot salvage")), "{lines:?}");
+    }
+
+    #[test]
+    fn determinism_survives_a_crowd_salvaging_a_scrapyard() {
+        // More people than the parallel threshold, sent at the heaps of a
+        // yard in turns, several to a heap: who gets which piece is settled
+        // by the world step, and has to be settled the same way twice.
+        let build = || {
+            let map = scrap_site();
+            let heaps: Vec<Point> = (1..=3).flat_map(|pieces| heaps_near(&map, Point::new(4, 4), pieces)).take(12).collect();
+            let cells = dry_cells(&map, heaps[0], PARALLEL_AT + 6);
+            let mut state = GameState::new(map, 9);
+            let mut input = Input::new();
+            for (i, &cell) in cells.iter().enumerate() {
+                let uid = calm_human(&mut state, cell);
+                input.salvage(uid, heaps[i % heaps.len()]);
+            }
+            process_game_state(&mut state, 1.0 / 60.0, &input);
+            (state, heaps)
+        };
+        let (mut a, heaps) = build();
+        let (mut b, _) = build();
+        assert!(a.len() > PARALLEL_AT);
+        let (mut salvaged_a, mut salvaged_b) = (0, 0);
+        let count = |lines: Vec<String>| lines.iter().filter(|l| l.contains("salvaged scrap metal")).count();
+        for _ in 0..2400 {
+            run(&mut a, 1);
+            run(&mut b, 1);
+            salvaged_a += count(a.log.drain());
+            salvaged_b += count(b.log.drain());
+        }
+        let snapshot = |state: &GameState| {
+            let positions: Vec<(u64, (f32, f32))> =
+                state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect();
+            let carried: Vec<u8> = state.entities().iter().map(|e| stowed_scrap(state, e.uid())).collect();
+            let left: Vec<Option<u8>> = heaps.iter().map(|&heap| state.map.scrap(heap).map(|h| h.pieces)).collect();
+            (positions, carried, left)
+        };
+        assert!(salvaged_a > 0, "nobody salvaged anything, so the salvaging never ran");
+        assert_eq!(salvaged_a, salvaged_b);
+        assert_eq!(snapshot(&a), snapshot(&b));
     }
 }

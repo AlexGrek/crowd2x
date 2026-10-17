@@ -34,7 +34,8 @@ use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 
 use super::goal::Goals;
-use super::routines::{Need, NeedRoutine, SleepRoutine, StayBusyRoutine};
+use super::memory::Memory;
+use super::routines::{Need, NeedRoutine, OrdersRoutine, SleepRoutine, StayBusyRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -47,6 +48,9 @@ pub struct RoutineCtx<'a> {
     /// The body's stats and which processes are running in it. `None` for a
     /// kind that has no needs.
     pub biology: Option<&'a Biology>,
+    /// What it remembers — an order it was given, so far
+    /// ([`OrdersRoutine`]).
+    pub memory: &'a Memory,
 }
 
 /// What one routine does.
@@ -72,6 +76,7 @@ pub enum Routine {
     Need(NeedRoutine),
     Sleep(SleepRoutine),
     StayBusy(StayBusyRoutine),
+    Orders(OrdersRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -83,7 +88,7 @@ impl Routine {
         Routine::Need(NeedRoutine::new(need))
     }
 
-    /// Go to bed when tired enough, and stay there through the night.
+    /// Go to bed at night or when exhausted, and stay there through the night.
     pub const fn sleep() -> Routine {
         Routine::Sleep(SleepRoutine::new())
     }
@@ -93,11 +98,17 @@ impl Routine {
         Routine::StayBusy(StayBusyRoutine)
     }
 
+    /// Carry out an order, when nothing more pressing is wanted.
+    pub const fn orders() -> Routine {
+        Routine::Orders(OrdersRoutine)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
             Routine::Sleep(routine) => routine.name(),
             Routine::StayBusy(routine) => routine.name(),
+            Routine::Orders(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -109,6 +120,7 @@ impl Routine {
             Routine::Need(routine) => routine.arrange(ctx, goals),
             Routine::Sleep(routine) => routine.arrange(ctx, goals),
             Routine::StayBusy(routine) => routine.arrange(ctx, goals),
+            Routine::Orders(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -119,6 +131,7 @@ impl Routine {
             Routine::Need(routine) => routine.debug_fields(),
             Routine::Sleep(routine) => routine.debug_fields(),
             Routine::StayBusy(routine) => routine.debug_fields(),
+            Routine::Orders(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }

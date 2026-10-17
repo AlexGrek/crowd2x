@@ -1,6 +1,10 @@
 //! Static connected components and their cheapest terrain cost.
 //!
 //! Potentially open doors connect components. Keys remain the search's job.
+//! So does a heap of scrap out in the wasteland ([`Map::is_open_ground`]):
+//! it can be salvaged away during play, and a filter that called its cell
+//! a wall would be wrong the moment it went — while one that calls it open
+//! is wrong only in the direction a search finds out.
 //!
 //! Worked out over [`Map::navigation_area`]: the site, and on an endless map
 //! a margin of wasteland round it. The world past that margin is not labelled
@@ -35,7 +39,7 @@ impl Navigation {
         let mut pending = Vec::new();
         for cell in area.points() {
             let index = area.index_of(cell).unwrap();
-            if result.components[index] != 0 || !map.is_passable(cell) {
+            if result.components[index] != 0 || !map.is_open_ground(cell) {
                 continue;
             }
             let component = result.minimum.len() as u32;
@@ -50,7 +54,7 @@ impl Navigation {
                     let Some(index) = area.index_of(next) else {
                         continue;
                     };
-                    if result.components[index] == 0 && map.is_passable(next) {
+                    if result.components[index] == 0 && map.is_open_ground(next) {
                         result.components[index] = component;
                         pending.push(next);
                     }

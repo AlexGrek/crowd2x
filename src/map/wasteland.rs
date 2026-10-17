@@ -4,8 +4,8 @@
 //! generator laid out — and outside it the world does not stop. It goes on in
 //! every direction as bare post-apocalyptic ground: mostly dirt, some of it
 //! stony or cracked, patches of scrub and meadow where something still grows,
-//! and lakes with a margin of mud. Nothing is built out there and nothing
-//! stands in it; it is terrain only.
+//! and lakes with a margin of mud. Nothing is built out there; what stands
+//! in it is the junk of whatever was, heaps of scrap metal (below).
 //!
 //! **It is a pure function of a seed and a cell.** [`Wasteland::tile`] is
 //! the whole of it: no state, no history, nothing that depends on what was
@@ -29,6 +29,26 @@
 //! gone within [`CLEARING`] cells of it, so whatever leads off a map's edge
 //! — a district's outer pavement, a door in an outer wall — opens onto dry
 //! ground and never into a lake.
+//!
+//! # Scrap
+//!
+//! The one thing that stands on the ground out there: heaps of **scrap
+//! metal** ([`Wasteland::scrap`]), the same kind of pure function of seed and
+//! cell as the ground under them. They lie in **yards** — a fourth field,
+//! *junk*, at a scale of a couple of dozen cells, with heaps only where it is
+//! high and thicker the higher it is — so the wasteland is mostly empty and
+//! now and then a scrapyard. Each heap holds one to [`MAX_SCRAP`] pieces and
+//! is drawn as one of [`SCRAP_VARIANTS`] pictures. A heap is in the way: its
+//! cell cannot be walked while anything is left in it, and it is worked from
+//! beside it. What has been taken from one is the simulation's business, not
+//! this module's (`Map::take_scrap`): here every heap is as it was found.
+//!
+//! **At most one heap in any two-by-two block of cells**, in the cell the
+//! block's hash picks. So every cell has a free neighbour inside its own
+//! block — a heap or two can never shut a single cell in — and every heap has
+//! two free cells beside it to be worked from. Heaps keep out of the
+//! [`CLEARING`] too, so nothing in a yard ever stands across the way off a
+//! map.
 
 use super::coords::{Bounds, Point};
 use super::terrain::{TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, MEADOW, MUD, SCRUB, WATER};
@@ -65,11 +85,44 @@ const CRACKED_ABOVE: f32 = 0.75;
 /// One cell of plain dirt in this many is stony.
 const STONES_ONE_IN: u64 = 7;
 
+/// How many pictures of a heap of scrap there are ([`Scrap::variant`]).
+pub const SCRAP_VARIANTS: u8 = 5;
+
+/// The most pieces of scrap metal a heap is found holding; the least is one.
+pub const MAX_SCRAP: u8 = 3;
+
+// Scrapyards: heaps where the junk field is above `JUNK_ABOVE`, thickening
+// to `DENSEST` of the two-by-two blocks holding one where it reaches
+// `JUNK_FULL`. Set, like the ground's thresholds, from the field's measured
+// quantiles: yards where it is above its 94th percentile, at their thickest
+// above the 98th, and a heap in about one cell of two hundred overall.
+// `scrap_lies_in_yards_and_most_of_the_wasteland_has_none` holds them to it.
+const JUNK_ABOVE: f32 = 0.775;
+const JUNK_FULL: f32 = 0.84;
+const DENSEST: f32 = 0.8;
+
+/// What a heap may stand on: dry ground, bare or scrubby. Not meadow, not
+/// mud and never water.
+const SCRAP_GROUND: [TerrainId; 4] = [DIRT, DIRT_STONES, DIRT_CRACKED, SCRUB];
+
 // Salts, so the fields of one seed are unrelated to each other.
 const WET: u64 = 0x5745_5400_0000_0001;
 const GREEN: u64 = 0x4752_4545_4e00_0002;
 const DRY: u64 = 0x4452_5900_0000_0003;
 const STONES: u64 = 0x5354_4f4e_4500_0004;
+const JUNK: u64 = 0x4a55_4e4b_0000_0005;
+const HEAPS: u64 = 0x4845_4150_5300_0006;
+
+/// A heap of scrap metal, as the wasteland lays it ([`Wasteland::scrap`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Scrap {
+    /// Which of the [`SCRAP_VARIANTS`] pictures it is. Only the drawing
+    /// reads it.
+    pub variant: u8,
+    /// How many pieces of scrap metal are in it: one to [`MAX_SCRAP`] as
+    /// found, fewer once somebody has been at it (`Map::scrap`).
+    pub pieces: u8,
+}
 
 /// The ground round one map.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -126,6 +179,58 @@ impl Wasteland {
         }
         DIRT
     }
+
+    /// The heap of scrap at `cell`, as found, round a site covering `site`
+    /// — or `None`, which is nearly everywhere.
+    ///
+    /// The cheap questions first: three cells in four lose on the block's
+    /// pick alone, before any noise is worked out, and the ground is asked
+    /// last. [`Wasteland::scrap_on`] is the same for a caller that already
+    /// has the tile.
+    pub fn scrap(self, cell: Point, site: Bounds) -> Option<Scrap> {
+        self.heap(cell, site, || self.tile(cell, site))
+    }
+
+    /// [`Wasteland::scrap`], on ground already known to be `tile`.
+    pub fn scrap_on(self, cell: Point, site: Bounds, tile: TerrainId) -> Option<Scrap> {
+        self.heap(cell, site, || tile)
+    }
+
+    #[inline]
+    fn heap(self, cell: Point, site: Bounds, ground: impl FnOnce() -> TerrainId) -> Option<Scrap> {
+        // One heap at most to a two-by-two block, in the cell its roll picks.
+        let roll = hash(self.seed ^ HEAPS, cell.x.div_euclid(2), cell.y.div_euclid(2));
+        if (cell.x.rem_euclid(2) + 2 * cell.y.rem_euclid(2)) as u64 != roll & 3 {
+            return None;
+        }
+        if site.chebyshev_distance(cell) <= CLEARING {
+            return None;
+        }
+        let junk = junk(self.seed, cell.x, cell.y);
+        if junk <= JUNK_ABOVE {
+            return None;
+        }
+        // Thicker towards the middle of a yard. The roll's top bits, which
+        // nothing below reads.
+        let thickness = ((junk - JUNK_ABOVE) / (JUNK_FULL - JUNK_ABOVE)).min(1.0) * DENSEST;
+        if unit(roll) >= thickness {
+            return None;
+        }
+        if !SCRAP_GROUND.contains(&ground()) {
+            return None;
+        }
+        Some(Scrap {
+            variant: ((roll >> 8) % SCRAP_VARIANTS as u64) as u8,
+            pieces: 1 + ((roll >> 16) % MAX_SCRAP as u64) as u8,
+        })
+    }
+}
+
+/// The junk field, in `[0, 1)`: where it is high there is a scrapyard. A
+/// coarse octave for the yards and a fine one to break their edges up.
+#[inline]
+fn junk(seed: u64, x: i32, y: i32) -> f32 {
+    value(seed ^ JUNK, x, y, 23) * 0.7 + value(mix(seed ^ JUNK), x, y, 7) * 0.3
 }
 
 /// splitmix64's finaliser: every bit of the input moves every bit of the
@@ -291,5 +396,88 @@ mod tests {
         let dry = walkable.iter().filter(|&&w| w).count();
         assert!(reached as f32 > dry as f32 * 0.97, "{reached} of {dry} dry cells joined up");
     }
-}
 
+    /// Where the heaps of a patch far out are, by cell.
+    fn heaps(land: Wasteland, patch: Bounds) -> Vec<(Point, Scrap)> {
+        patch.points().filter_map(|cell| land.scrap(cell, site()).map(|heap| (cell, heap))).collect()
+    }
+
+    #[test]
+    fn scrap_lies_in_yards_and_most_of_the_wasteland_has_none() {
+        let patch = Bounds::new(Point::new(-1500, 900), Size::new(384, 384));
+        let (mut found, mut crowded) = (0usize, 0usize);
+        for seed in [0, 1, 7, 40500] {
+            let land = Wasteland::new(seed);
+            let heaps = heaps(land, patch);
+            found += heaps.len();
+            // Clustered: a heap usually has another within a few cells,
+            // which scattered at this rate it would almost never have.
+            crowded += heaps
+                .iter()
+                .filter(|(cell, _)| {
+                    Bounds::new(cell.offset(-3, -3), Size::new(7, 7))
+                        .points()
+                        .any(|near| near != *cell && land.scrap(near, site()).is_some())
+                })
+                .count();
+        }
+        let share = found as f32 / (patch.area() * 4) as f32;
+        assert!((0.002..0.015).contains(&share), "a heap in {share} of the cells");
+        assert!(crowded as f32 > found as f32 * 0.8, "only {crowded} of {found} heaps have a neighbour");
+    }
+
+    #[test]
+    fn a_heap_holds_one_to_three_pieces_and_comes_in_five_looks() {
+        let heaps = heaps(Wasteland::new(11), Bounds::new(Point::new(300, -700), Size::new(512, 512)));
+        assert!(heaps.len() > 200, "{} heaps", heaps.len());
+        for pieces in 1..=MAX_SCRAP {
+            assert!(heaps.iter().any(|(_, heap)| heap.pieces == pieces), "no heap of {pieces}");
+        }
+        for variant in 0..SCRAP_VARIANTS {
+            assert!(heaps.iter().any(|(_, heap)| heap.variant == variant), "no look {variant}");
+        }
+        assert!(heaps.iter().all(|(_, heap)| (1..=MAX_SCRAP).contains(&heap.pieces) && heap.variant < SCRAP_VARIANTS));
+    }
+
+    #[test]
+    fn scrap_stands_only_on_dry_ground_and_never_two_to_a_block() {
+        let land = Wasteland::new(5);
+        let patch = Bounds::new(Point::new(-900, -900), Size::new(400, 400));
+        for (cell, _) in heaps(land, patch) {
+            let tile = land.tile(cell, site());
+            assert!(SCRAP_GROUND.contains(&tile), "a heap on {} at {cell:?}", tile.name());
+            let block = Point::new(cell.x.div_euclid(2) * 2, cell.y.div_euclid(2) * 2);
+            let others = Bounds::new(block, Size::new(2, 2))
+                .points()
+                .filter(|&other| other != cell && land.scrap(other, site()).is_some())
+                .count();
+            assert_eq!(others, 0, "two heaps in the block of {cell:?}");
+            assert_eq!(land.scrap_on(cell, site(), tile), land.scrap(cell, site()));
+        }
+    }
+
+    /// One heap to a block means a cell's two neighbours inside its own
+    /// block are never both heaps: nothing is ever shut in by scrap alone.
+    #[test]
+    fn scrap_never_shuts_a_cell_in() {
+        let land = Wasteland::new(9);
+        let patch = Bounds::new(Point::new(2000, 2000), Size::new(300, 300));
+        for cell in patch.points() {
+            if land.scrap(cell, site()).is_some() {
+                continue;
+            }
+            let free = cell.cardinal_neighbours().iter().filter(|&&next| land.scrap(next, site()).is_none()).count();
+            assert!(free > 0, "{cell:?} is walled in by scrap");
+        }
+    }
+
+    #[test]
+    fn there_is_no_scrap_in_the_clearing_round_the_site() {
+        for seed in 0..16 {
+            let land = Wasteland::new(seed);
+            for cell in site().grown(CLEARING).points() {
+                assert_eq!(land.scrap(cell, site()), None, "seed {seed}: scrap at {cell:?}");
+            }
+        }
+    }
+}

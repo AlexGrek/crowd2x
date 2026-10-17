@@ -153,6 +153,32 @@ pub enum SearchStatus {
     BudgetExhausted,
 }
 
+/// What a [`search`] may spend this time round.
+///
+/// A budget delays a route and never changes it: an unfinished search
+/// resumes exactly where it stopped, and one that had to be let go starts
+/// again from nothing and finds the same route, A* being deterministic. So
+/// however little it is given, the route found is the one an unlimited search
+/// would have found — only later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Allowance {
+    /// Cells it may expand; what it does expand is taken off.
+    pub cells: usize,
+    /// Whether a search that runs out may keep its own scratch to carry on
+    /// next tick. If not, its work is let go and it starts again when next
+    /// asked: an unfinished search holds scratch the size of its window, and
+    /// whoever hands out allowances bounds how many are held at once
+    /// (`sim::react_step`).
+    pub may_keep: bool,
+}
+
+impl Allowance {
+    /// `cells`, and an unfinished search may be kept.
+    pub const fn new(cells: usize) -> Allowance {
+        Allowance { cells, may_keep: true }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Candidate {
     f: u64,
@@ -244,17 +270,17 @@ impl PathFinder {
             point: start,
         });
     }
-    /// Continue the same search. The passability/cost function must remain
+    /// Continue the same search, expanding at most `budget` cells and taking
+    /// what it expands off it. The passability/cost function must remain
     /// unchanged between slices. Output is filled only on success.
     pub fn advance(
         &mut self,
-        limit: usize,
+        budget: &mut usize,
         cost: impl Fn(Point) -> Option<u32>,
         output: &mut Vec<Point>,
     ) -> SearchStatus {
         let size = self.window.expect("begin before advance");
         let goals = self.goals.unwrap();
-        let mut expanded = 0;
         while let Some(candidate) = self.open.peek() {
             let point = candidate.point;
             let visit = self.seen[size.index_of(point).unwrap()];
@@ -273,11 +299,11 @@ impl PathFinder {
                 output.reverse();
                 return SearchStatus::Found(point);
             }
-            if expanded == limit {
+            if *budget == 0 {
                 return SearchStatus::BudgetExhausted;
             }
             self.open.pop();
-            expanded += 1;
+            *budget -= 1;
             #[cfg(test)]
             {
                 self.expanded += 1;
@@ -323,7 +349,7 @@ impl PathFinder {
         self.begin(window.into(), start, Destinations::one(goal), MIN_WALK_COST as u32);
         let mut output = Vec::new();
         matches!(
-            self.advance(limit, cost, &mut output),
+            self.advance(&mut { limit }, cost, &mut output),
             SearchStatus::Found(_)
         )
         .then_some(output)
@@ -334,14 +360,22 @@ thread_local! {
 }
 
 /// Start or resume a static route, borrowing ordinary search scratch from
-/// this thread. A budget-exhausted search alone takes ownership of its finder;
-/// completion returns its buffers to the thread, including after migration.
+/// this thread, spending no more than `allowance` lets it. A budget-exhausted
+/// search alone takes ownership of its finder, if the allowance lets it keep
+/// one; completion returns its buffers to the thread, including after
+/// migration.
+///
+/// The cheap answers come first and cost nothing: a goal the map's components
+/// say is unreachable, or one that cannot be stood on, is refused before any
+/// cell is expanded — so with nothing left to spend, an impossible route is
+/// still `Unreachable` at once and a possible one waits (`BudgetExhausted`,
+/// nothing started and nothing kept).
 pub fn search(
     pending: &mut Option<Box<PathFinder>>,
     map: &Map,
     start: Point,
     goals: Destinations,
-    limit: usize,
+    allowance: &mut Allowance,
     cost: impl Fn(Point) -> Option<u32>,
     output: &mut Vec<Point>,
 ) -> SearchStatus {
@@ -353,7 +387,7 @@ pub fn search(
         recycle(pending);
     }
     if let Some(finder) = pending {
-        let status = finder.advance(limit, &cost, output);
+        let status = finder.advance(&mut allowance.cells, &cost, output);
         if status != SearchStatus::BudgetExhausted {
             recycle(pending);
         }
@@ -365,6 +399,9 @@ pub fn search(
     if goals.first().is_none() {
         return SearchStatus::Unreachable;
     }
+    if allowance.cells == 0 && !goals.as_slice().contains(&start) {
+        return SearchStatus::BudgetExhausted;
+    }
     let minimum = goals
         .as_slice()
         .iter()
@@ -375,8 +412,8 @@ pub fn search(
         let mut finder = slot.borrow_mut();
         finder.begin(window(map, start, goals.as_slice()), start, goals, minimum);
         finder.revision = map.navigation_revision();
-        let status = finder.advance(limit, cost, output);
-        if status == SearchStatus::BudgetExhausted {
+        let status = finder.advance(&mut allowance.cells, cost, output);
+        if status == SearchStatus::BudgetExhausted && allowance.may_keep {
             *pending = Some(Box::new(std::mem::take(&mut *finder)));
         }
         status
@@ -404,7 +441,7 @@ pub fn search_local(
             Destinations::one(goal),
             map.navigation().minimum_cost(goal),
         );
-        finder.advance(limit, cost, output)
+        finder.advance(&mut { limit }, cost, output)
     })
 }
 
@@ -448,7 +485,7 @@ mod tests {
                 &map,
                 Point::ORIGIN,
                 Destinations::one(goal),
-                2,
+                &mut Allowance::new(2),
                 walkable(&map),
                 &mut output
             ),
@@ -461,7 +498,7 @@ mod tests {
                 &map,
                 Point::ORIGIN,
                 Destinations::one(goal),
-                100,
+                &mut Allowance::new(100),
                 walkable(&map),
                 &mut output
             ),
@@ -481,7 +518,7 @@ mod tests {
         sliced.begin(map.site(), start, goals, 1);
         let mut output = Vec::new();
         assert_eq!(
-            sliced.advance(7, walkable(&map), &mut output),
+            sliced.advance(&mut 7, walkable(&map), &mut output),
             SearchStatus::BudgetExhausted
         );
         assert_eq!(sliced.expanded, 7);
@@ -489,7 +526,7 @@ mod tests {
         let mut slices = 1;
         loop {
             slices += 1;
-            match sliced.advance(7, walkable(&map), &mut output) {
+            match sliced.advance(&mut 7, walkable(&map), &mut output) {
                 SearchStatus::BudgetExhausted => assert!(slices < 1000),
                 SearchStatus::Found(cell) => {
                     assert_eq!(cell, goals.first().unwrap());
@@ -531,7 +568,7 @@ mod tests {
                 &map,
                 Point::new(148, 1),
                 Destinations::one(Point::new(152, 1)),
-                1,
+                &mut Allowance::new(1),
                 |c| {
                     calls.set(calls.get() + 1);
                     map.is_passable(c).then_some(1)
@@ -560,7 +597,7 @@ mod tests {
                     &map,
                     Point::ORIGIN,
                     Destinations::one(goal),
-                    crate::sim::walker::FAR_LIMIT,
+                    &mut Allowance::new(crate::sim::walker::FAR_LIMIT),
                     walkable(&map),
                     &mut output
                 ),
@@ -612,7 +649,7 @@ mod tests {
                 &map,
                 Point::ORIGIN,
                 Destinations::one(goal),
-                1,
+                &mut Allowance::new(1),
                 walkable(&map),
                 &mut output
             ),
@@ -625,7 +662,7 @@ mod tests {
                 &map,
                 Point::ORIGIN,
                 Destinations::one(goal),
-                1000,
+                &mut Allowance::new(1000),
                 walkable(&map),
                 &mut output,
             );
@@ -636,6 +673,75 @@ mod tests {
         .join()
         .unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// The route budget's promise, at the bottom: however the cells are
+    /// handed out, the route is the one an unlimited search finds, and the
+    /// allowance is charged exactly what was expanded.
+    #[test]
+    fn a_search_paid_a_few_cells_at_a_time_finds_the_route_an_unlimited_one_does() {
+        let mut map = open(30, 30);
+        for y in 0..28 {
+            map.set_terrain(Point::new(15, y), WALL);
+        }
+        let (start, goal) = (Point::new(2, 2), Point::new(28, 2));
+        let expected = route(&map, start, goal).unwrap();
+
+        let (mut pending, mut output) = (None, Vec::new());
+        let mut spent = 0;
+        let mut slices = 0;
+        loop {
+            slices += 1;
+            let mut allowance = Allowance::new(9);
+            let status = search(&mut pending, &map, start, Destinations::one(goal), &mut allowance, walkable(&map), &mut output);
+            assert!(allowance.cells <= 9);
+            spent += 9 - allowance.cells;
+            match status {
+                SearchStatus::BudgetExhausted => assert_eq!(allowance.cells, 0, "ran out, so spent it all"),
+                SearchStatus::Found(_) => break,
+                SearchStatus::Unreachable => panic!("round the end of the wall"),
+            }
+        }
+        assert!(slices > 20, "the wall makes it a long search: {slices} slices");
+        assert_eq!(output, expected);
+
+        let mut whole = PathFinder::new();
+        whole.find(map.size(), start, goal, usize::MAX, walkable(&map)).unwrap();
+        assert_eq!(spent, whole.expanded, "charged for exactly what was expanded");
+    }
+
+    #[test]
+    fn a_search_that_may_not_keep_its_work_lets_it_go_and_starts_again_the_same() {
+        let mut map = open(30, 30);
+        for y in 0..28 {
+            map.set_terrain(Point::new(15, y), WALL);
+        }
+        let (start, goal) = (Point::new(2, 2), Point::new(28, 2));
+        let (mut pending, mut output) = (None, Vec::new());
+        let mut trial = Allowance { cells: 50, may_keep: false };
+        let status = search(&mut pending, &map, start, Destinations::one(goal), &mut trial, walkable(&map), &mut output);
+        assert_eq!(status, SearchStatus::BudgetExhausted);
+        assert!(pending.is_none(), "nothing kept");
+        let status = search(&mut pending, &map, start, Destinations::one(goal), &mut Allowance::new(usize::MAX), walkable(&map), &mut output);
+        assert_eq!(status, SearchStatus::Found(goal));
+        assert_eq!(output, route(&map, start, goal).unwrap());
+    }
+
+    #[test]
+    fn with_nothing_to_spend_a_miss_is_still_a_miss_and_a_route_waits() {
+        let mut map = open(12, 5);
+        for y in 0..5 {
+            map.set_terrain(Point::new(6, y), WALL);
+        }
+        let (mut pending, mut output) = (None, Vec::new());
+        let mut nothing = Allowance::new(0);
+        let sealed = search(&mut pending, &map, Point::new(1, 1), Destinations::one(Point::new(9, 1)), &mut nothing, walkable(&map), &mut output);
+        assert_eq!(sealed, SearchStatus::Unreachable, "the components say so for free");
+        let open_side = search(&mut pending, &map, Point::new(1, 1), Destinations::one(Point::new(4, 3)), &mut nothing, walkable(&map), &mut output);
+        assert_eq!(open_side, SearchStatus::BudgetExhausted);
+        assert!(pending.is_none(), "nothing was started, so nothing is held");
+        let here = search(&mut pending, &map, Point::new(1, 1), Destinations::one(Point::new(1, 1)), &mut nothing, walkable(&map), &mut output);
+        assert_eq!(here, SearchStatus::Found(Point::new(1, 1)), "already there costs nothing");
     }
 
     #[test]
@@ -1080,7 +1186,7 @@ mod tests {
             map,
             start,
             Destinations::one(goal),
-            crate::sim::walker::FAR_LIMIT,
+            &mut Allowance::new(crate::sim::walker::FAR_LIMIT),
             walkable(map),
             &mut output,
         );

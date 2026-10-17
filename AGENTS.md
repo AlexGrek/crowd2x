@@ -574,13 +574,16 @@ talking only to the one below:
   per-unit scan of the crowd.
 - **memory** — a `BTreeMap<String, Recall>`, empty; a `BTreeMap` so iterating it can never
   be a hash order.
-- **routines** (`NeedRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
+- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
   `BLADDER` ("stay comfortable") — with hysteresis between a commit and a release
   threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
-  process behind the need is switched off. **There is no cap on how many a brain has**:
+  process behind the need is switched off. At night, entertainment is capped below sleep
+  while energy is running. `SleepRoutine` commits at 22:00 regardless of tiredness and
+  holds until 06:00 and rested; food, water and toilet needs can interrupt sleep. By day,
+  exhaustion still allows naps. **There is no cap on how many a brain has**:
   `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
   and a brain holds them in a `Box<[Routine]>` built once at spawn — one allocation per
   unit however many routines, state inline and contiguous, no `push` so the order cannot

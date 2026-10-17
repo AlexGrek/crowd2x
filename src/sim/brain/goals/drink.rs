@@ -56,7 +56,7 @@ impl Stage {
             Some(Task::OpenFridge(_)) => Stage::Opening,
             Some(Task::TakeItem(_)) => Stage::Taking,
             Some(Task::CloseFridge(_)) => Stage::Closing,
-            None | Some(Task::UseToilet(_) | Task::UseComputer(_) | Task::Sleep(_)) => Stage::Finding,
+            None | Some(Task::UseToilet(_) | Task::UseComputer(_) | Task::Sleep(_) | Task::Salvage(_)) => Stage::Finding,
         }
     }
 

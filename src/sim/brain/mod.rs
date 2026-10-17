@@ -86,7 +86,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SleepGoal, WanderGoal};
+use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -165,6 +165,7 @@ impl Brain {
                 Routine::need(&BLADDER),
                 Routine::need(&BOREDOM),
                 Routine::sleep(),
+                Routine::orders(),
                 Routine::stay_busy(),
             ],
             [
@@ -174,6 +175,7 @@ impl Brain {
                 Box::new(RelieveGoal::new()),
                 Box::new(PlayGoal::new()),
                 Box::new(SleepGoal::new()),
+                Box::new(SalvageGoal::new()),
             ],
         )
     }
@@ -252,6 +254,7 @@ impl Brain {
                 think: ctx,
                 body: &body,
                 biology: biology.as_deref(),
+                memory,
             };
             for routine in routines.iter_mut() {
                 routine.arrange(&routine_ctx, goals);
@@ -406,6 +409,16 @@ impl Brain {
     /// nothing else, so two units are never given the same one.
     pub fn set_home(&mut self, bed: Point) {
         self.memory.remember(memory::HOME_BED, Recall::Cell(bed));
+    }
+
+    /// Remember an order to salvage the heap of scrap in `heap`, replacing
+    /// any order before it. What [`OrdersRoutine`](routines::OrdersRoutine)
+    /// raises [`GoalId::Salvage`] for, and what
+    /// [`SalvageGoal`](goals::SalvageGoal) carries out and lets go of
+    /// ([`memory::SALVAGE_ORDER`]). From outside the world only: the spawn
+    /// pass, for a [`crate::sim::Command::Salvage`].
+    pub fn order_salvage(&mut self, heap: Point) {
+        self.memory.remember(memory::SALVAGE_ORDER, Recall::Cell(heap));
     }
 
     /// What it saw at its last look.
@@ -1028,7 +1041,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, stay busy"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }

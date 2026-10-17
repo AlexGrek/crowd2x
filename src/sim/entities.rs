@@ -282,6 +282,52 @@ impl FrozenEntities<'_> {
     pub fn get_mut(&mut self, uid: Uid) -> Option<&mut (dyn GameEntity + 'static)> {
         self.0.get_mut(uid)
     }
+
+    /// The entity in a slot, mutably: what the world step grants an
+    /// [`Effect`](super::Effect) to.
+    pub fn slot_mut(&mut self, slot: Slot) -> Option<&mut (dyn GameEntity + 'static)> {
+        self.0.slot_mut(slot)
+    }
+
+    /// The arena in runs of `size` slots, holes included: block `b` is slots
+    /// `b * size` up to the next block's first. Which slots share a block
+    /// depends on nothing but `size`, so it is the same here and in
+    /// [`FrozenEntities::par_blocks_mut`] — see [`super::react_step`], which
+    /// shares a budget out a block at a time.
+    pub fn blocks_mut(&mut self, size: usize) -> impl Iterator<Item = SlotBlock<'_>> {
+        self.0.slots.chunks_mut(size).map(SlotBlock)
+    }
+
+    /// [`FrozenEntities::blocks_mut`], as an indexed parallel iterator.
+    pub fn par_blocks_mut(&mut self, size: usize) -> impl IndexedParallelIterator<Item = SlotBlock<'_>> {
+        self.0.slots.par_chunks_mut(size).map(SlotBlock)
+    }
+}
+
+/// A run of consecutive slots of a frozen table
+/// ([`FrozenEntities::blocks_mut`]). It hands out the entities in it and
+/// nothing else: the slots themselves stay out of reach, or taking an entity
+/// out of one would be a despawn by the back door.
+pub struct SlotBlock<'a>(&'a mut [Option<Box<dyn GameEntity>>]);
+
+impl SlotBlock<'_> {
+    /// How many slots, holes included.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The entity in the block's `index`th slot, or `None` for a hole.
+    pub fn get(&self, index: usize) -> Option<&(dyn GameEntity + 'static)> {
+        self.0[index].as_deref()
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut (dyn GameEntity + 'static)> {
+        self.0[index].as_deref_mut()
+    }
 }
 
 /// Every read-only method of [`Entities`], and none of the structural ones.

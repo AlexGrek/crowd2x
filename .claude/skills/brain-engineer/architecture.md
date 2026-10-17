@@ -120,8 +120,19 @@ static connected components and each component's minimum walk cost; game constru
 warms it, and terrain/prop edits invalidate it. Components treat potentially open doors
 as connected, so they can reject an impossible route without claiming to know keys.
 `SearchStatus` distinguishes `Found`, `Unreachable`, and `BudgetExhausted`. `FAR_LIMIT`
-bounds one tick's expansions; an exhausted static search keeps its frontier and resumes
-next tick while the walker stands still. Cancellation releases that continuation.
+bounds one walker's expansions in a tick; an exhausted static search keeps its frontier and
+resumes next tick while the walker stands still. Cancellation releases that continuation.
+
+**The route budget** bounds the whole crowd's far search in a tick (`sim::react_step`):
+`ROUTE_BUDGET` cells, shared out by blocks of `ROUTE_BLOCK` slots (at least
+`MIN_BLOCK_BUDGET` each). A block reacts in order on one thread, its turn rotating with the
+tick, and each walker is metered (`Walker::meter`/`unmeter`, a `path::Allowance`) with what
+the block has left; a walker driven by a test is unmetered. A block keeps at most
+`SEARCHES_KEPT` unfinished searches between ticks (each holds window-sized scratch); while
+it holds them, another walker gets `ROUTE_TRIAL` cells and, if that is not enough, lets
+its work go and asks again next tick. A budget only delays a route — the same A* finds
+the same route whenever it finishes, and nothing in it knows what is on the screen.
+`GameState::route_work` is the last tick's total.
 
 Search scratch is a generation-stamped grid and a heap, ordinarily reused per thread;
 only pending searches own a finder across ticks and worker migration. Completed routes
@@ -133,8 +144,8 @@ its own `DETOUR_LIMIT`. A transient crowd snapshot is not resumed next tick; a f
 or exhausted repair hands the collision back to the goal's existing wait/retry policy.
 A separate detour prefix rejoins the retained far route without copying its tail.
 An occupied final destination fails the walk instead of repeatedly repairing the last
-step, so `WAIT_FOR_A_GAP` and `PATIENCE` remain effective. There is no aggregate search
-budget yet: simultaneous unfinished far searches can each consume `FAR_LIMIT` per tick.
+step, so `WAIT_FOR_A_GAP` and `PATIENCE` remain effective. Detours are not drawn from
+the route budget: they plan against this tick's crowd and cannot wait for another.
 
 
 Both stages minimize terrain cost: floor/pavement 1, grass 3, road 5. The

@@ -71,6 +71,7 @@ use crate::render::{CameraTarget, PixelZoom, PIXEL_SCALE, WORLD_LAYER};
 use crate::state::AppState;
 use crate::editor::{background, CurrentMap, Cursor as EditorCursor, Tool};
 use crate::editor::props::{Prop, Usable};
+use crate::editor::scrap::Heap;
 use crate::game::actors::{world_pos, Actor, Sim, SimInput};
 use crate::game::held::HeldItem;
 use crate::game::logview::LogView;
@@ -525,6 +526,8 @@ struct Checks<'w, 's> {
     props: Query<'w, 's, (&'static Prop, &'static Usable)>,
     /// Likewise the pictures of what is held, counted off the world.
     held: Query<'w, 's, &'static HeldItem>,
+    /// And the heaps of scrap drawn, for [`Step::ExpectScrap`].
+    heaps: Query<'w, 's, &'static Heap>,
     log: Res<'w, LogView>,
     /// The open map, for how much of the wasteland it has loaded.
     current: Res<'w, CurrentMap>,
@@ -978,6 +981,36 @@ fn perform(
         Step::SwitchLight { x, y, on } => {
             intents.sim_input.0.switch_light(crate::map::Point::new(*x, *y), *on);
             Ok(Next::Now)
+        }
+
+        Step::Salvage { x, y } => {
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `salvage` is an order to the selected unit".to_string())?;
+            intents.sim_input.0.salvage(uid, crate::map::Point::new(*x, *y));
+            Ok(Next::Now)
+        }
+
+        Step::ExpectScrap { x, y, pieces } => {
+            let world = &intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0;
+            let cell = crate::map::Point::new(*x, *y);
+            let left = world.map.scrap(cell).map_or(0, |heap| heap.pieces);
+            if left != *pieces {
+                return Err(format!("the heap at {x}, {y} has {left} pieces left, expected {pieces}"));
+            }
+            let drawn = checks.heaps.iter().any(|heap| heap.cell == cell);
+            let on_canvas = checks.area.tiles.contains(IVec2::new(*x, *y));
+            match (drawn, left > 0 && on_canvas) {
+                (true, false) if on_canvas => Err(format!("the heap at {x}, {y} is empty and still drawn")),
+                (true, false) => Err(format!("the heap at {x}, {y} is drawn off the canvas")),
+                (false, true) => Err(format!("the heap at {x}, {y} has {left} left and is not drawn")),
+                _ => Ok(Next::Now),
+            }
         }
 
         Step::Spawn { kind, x, y } => {

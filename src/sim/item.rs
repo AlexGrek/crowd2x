@@ -63,11 +63,32 @@ pub const CHEW_SECONDS: f32 = watched(15.0 * MINUTE);
 /// Time spent drinking water: a couple of minutes, a fraction of a meal.
 pub const SIP_SECONDS: f32 = watched(2.0 * MINUTE);
 
+/// What a piece of scrap metal salvaged from a heap in the wasteland weighs,
+/// in kilograms: a bent panel, a length of pipe, a fistful of bolts.
+///
+/// Heavy, so the mass limit is the one it meets: a person carries three
+/// pieces and no more — exactly the most a heap holds
+/// ([`MAX_SCRAP`](crate::map::wasteland::MAX_SCRAP)) — and a fourth waits for
+/// a hand that is free.
+pub const SCRAP_MASS: f32 = 3.0;
+
+/// ...and the space it takes up, in litres.
+pub const SCRAP_VOLUME: f32 = 2.0;
+
+/// How long a piece of scrap metal in a hand takes to be got rid of by a
+/// goal that wants the hand: a moment. There is nothing to consume in it,
+/// and the body gets nothing from it; only a QA script's `hold` ever puts
+/// one in a hand, salvage stowing it straight away.
+pub const DROP_SECONDS: f32 = watched(MINUTE);
+
 /// What is being held.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ItemKind {
     Food,
     Water,
+    /// A piece of scrap metal, salvaged from a heap in the wasteland
+    /// (`brain::tasks::Salvage`). Nothing a body can use: it is carried.
+    Scrap,
 }
 
 impl ItemKind {
@@ -77,17 +98,18 @@ impl ItemKind {
     /// indexed by this, and its debug view walks it — so the order here is the
     /// order a unit's items are listed in, and iterating it can never be a hash
     /// order.
-    pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water];
+    pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water, ItemKind::Scrap];
 
     /// How many kinds there are. A literal, because it sizes an array.
     /// `every_kind_is_in_all` fails if the two stop agreeing.
-    pub const COUNT: usize = 2;
+    pub const COUNT: usize = 3;
 
     /// How it reads in a debug view.
     pub const fn name(self) -> &'static str {
         match self {
             ItemKind::Food => "food",
             ItemKind::Water => "water",
+            ItemKind::Scrap => "scrap metal",
         }
     }
 
@@ -101,6 +123,7 @@ impl ItemKind {
         match self {
             ItemKind::Food => CHEW_SECONDS,
             ItemKind::Water => SIP_SECONDS,
+            ItemKind::Scrap => DROP_SECONDS,
         }
     }
 
@@ -108,14 +131,14 @@ impl ItemKind {
     pub const fn nutrition(self) -> f32 {
         match self {
             ItemKind::Food => MEAL,
-            ItemKind::Water => 0.0,
+            ItemKind::Water | ItemKind::Scrap => 0.0,
         }
     }
 
     /// How much water is in it, on the thirst scale.
     pub const fn hydration(self) -> f32 {
         match self {
-            ItemKind::Food => 0.0,
+            ItemKind::Food | ItemKind::Scrap => 0.0,
             ItemKind::Water => DRINK,
         }
     }
@@ -126,7 +149,7 @@ impl ItemKind {
     pub const fn taste(self) -> f32 {
         match self {
             ItemKind::Food => TASTY,
-            ItemKind::Water => 0.0,
+            ItemKind::Water | ItemKind::Scrap => 0.0,
         }
     }
 
@@ -138,6 +161,7 @@ impl ItemKind {
         match self {
             ItemKind::Food => MEAL_MASS,
             ItemKind::Water => DRINK_MASS,
+            ItemKind::Scrap => SCRAP_MASS,
         }
     }
 
@@ -150,6 +174,7 @@ impl ItemKind {
         match self {
             ItemKind::Food => MEAL_VOLUME,
             ItemKind::Water => DRINK_VOLUME,
+            ItemKind::Scrap => SCRAP_VOLUME,
         }
     }
 }
@@ -164,6 +189,13 @@ mod tests {
         for (index, kind) in ItemKind::ALL.iter().enumerate() {
             assert_eq!(*kind as usize, index, "{} is filed under the wrong index", kind.name());
         }
+    }
+
+    /// Scrap is carried, not consumed: nothing in it for a body.
+    #[test]
+    fn scrap_metal_is_nothing_a_body_can_use() {
+        let scrap = ItemKind::Scrap;
+        assert_eq!((scrap.nutrition(), scrap.hydration(), scrap.taste()), (0.0, 0.0, 0.0));
     }
 
     #[test]

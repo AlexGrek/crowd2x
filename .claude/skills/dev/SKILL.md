@@ -389,7 +389,15 @@ steering, detours and the near stage stay in `sim/walker.rs`.
 `Occupancy` is exactly the dynamic layer `map::PassabilityMap`'s docs reserve a space for,
 and it lives in `sim/` because who is standing where is simulation state. Movement never
 creates an overlap; **spawning can**, because an entity is placed where it was asked for —
-so `release` only clears a cell whose occupant is the entity leaving it.
+so `release` only clears a cell whose occupant is the entity leaving it. Beside it, the
+`Census` files everybody by 32-cell chunk (linked lists through the slots, so the move
+step keeps it with no allocation): the way to find units near somewhere without walking
+the crowd.
+
+React shares a **route budget**: the whole crowd's far searching in a tick is bounded
+(`sim::ROUTE_BUDGET`), dealt out by fixed blocks of slots so that who gets it never
+depends on thread timing. A burst of long searches is spread over ticks instead of
+stalling one; the routes found are the same.
 
 #### Determinism is a test, not an aspiration
 

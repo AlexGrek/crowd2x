@@ -3,6 +3,7 @@
 use crate::sim::biology::{ProcessId, Stats};
 
 use super::goal::{GoalId, Goals};
+use super::memory::SALVAGE_ORDER;
 use super::routine::{RoutineCtx, RoutineExecutor};
 
 /// Hunger at which a human decides it is time to eat.
@@ -162,7 +163,13 @@ impl RoutineExecutor for NeedRoutine {
             self.committed = false;
         }
         if self.committed {
-            goals.raise_to(self.need.goal, level / NEED_PER_PRIORITY);
+            let mut priority = level / NEED_PER_PRIORITY;
+            if self.need.goal == GoalId::Play && ctx.think.clock.is_night() && biology.is_running(ProcessId::Energy) {
+                // Entertainment can fill time if no bed is usable, but must
+                // never keep somebody up or wake them during the night.
+                priority = priority.min(SLEEPY / NEED_PER_PRIORITY / 2.0);
+            }
+            goals.raise_to(self.need.goal, priority);
         }
     }
 
@@ -179,10 +186,10 @@ impl RoutineExecutor for NeedRoutine {
 /// so this is about twelve of them.
 pub const EXHAUSTED: f32 = 75.0;
 
-/// Tiredness at which a human goes to bed **at night**: from
+/// Tiredness floor used to prioritize sleep **at night**: from
 /// [`BEDTIME`](crate::sim::clock::BEDTIME) to
-/// [`GETTING_UP`](crate::sim::clock::GETTING_UP), when there is nothing better
-/// on and a little tiredness is reason enough.
+/// [`GETTING_UP`](crate::sim::clock::GETTING_UP). Bedtime applies even below
+/// this level, so a rested human still goes to bed and stays there.
 pub const SLEEPY: f32 = 30.0;
 
 /// Tiredness a human has to be brought down to before it gets up — which
@@ -203,12 +210,11 @@ pub const CRITICALLY_TIRED: f32 = 90.0;
 ///
 /// * **By day** it commits at [`EXHAUSTED`] and lets go at [`RESTED`]: a nap
 ///   when somebody cannot go on.
-/// * **By night** it commits at [`SLEEPY`], and **does not let go until it is
-///   day** — somebody rested at one in the morning stays in bed, so the
-///   priority has a floor while it is night. That floor is what holds them
-///   there against wandering, and it is below every need that can be met
-///   without a bed: a bursting bladder or a hungry stomach gets somebody up,
-///   and they come back.
+/// * **By night** it commits regardless of tiredness, and **does not let go
+///   until it is day**. The priority has a floor of [`SLEEPY`] so a rested
+///   human goes to bed and stays there against wandering and entertainment.
+///   Food, water and a bursting bladder can still get somebody up, and they
+///   come back afterwards.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct SleepRoutine {
     committed: bool,
@@ -234,7 +240,7 @@ impl RoutineExecutor for SleepRoutine {
         let tiredness = biology.stats().tiredness();
         let night = ctx.think.clock.is_night();
 
-        if tiredness >= if night { SLEEPY } else { EXHAUSTED } {
+        if night || tiredness >= EXHAUSTED {
             self.committed = true;
         } else if tiredness <= RESTED && !night {
             self.committed = false;
@@ -265,6 +271,30 @@ impl RoutineExecutor for StayBusyRoutine {
 
     fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         goals.raise_to(GoalId::Wander, BUSY);
+    }
+}
+
+/// How much [`OrdersRoutine`] wants an order carried out: over wandering,
+/// under every need committed to and under a night in bed (`SLEEPY / 50`,
+/// 0.6). An order is an errand, got round to when nothing more pressing is.
+pub const ORDERED: f32 = 0.5;
+
+/// Do what it was told — so far, salvage a heap of scrap
+/// ([`crate::sim::Command::Salvage`]). Wants
+/// [`SalvageGoal`](super::goals::SalvageGoal) for as long as the order is
+/// remembered; the goal is what lets it go.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct OrdersRoutine;
+
+impl RoutineExecutor for OrdersRoutine {
+    fn name(&self) -> &'static str {
+        "do as told"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.get(SALVAGE_ORDER).is_some() {
+            goals.raise_to(GoalId::Salvage, ORDERED);
+        }
     }
 }
 
@@ -333,6 +363,7 @@ mod tests {
                 think: &think,
                 body: &body,
                 biology: Some(biology),
+                memory: &crate::sim::brain::memory::Memory::new(),
             },
             &mut goals,
         );
@@ -503,6 +534,7 @@ mod tests {
                 think: &think,
                 body: &body,
                 biology: Some(biology),
+                memory: &crate::sim::brain::memory::Memory::new(),
             },
             &mut goals,
         );
@@ -521,6 +553,14 @@ mod tests {
     #[test]
     fn the_same_tiredness_is_reason_enough_to_go_to_bed_at_night() {
         assert!(sleep_priority(&mut SleepRoutine::new(), &tired(SLEEPY + 10.0), night()) > BUSY);
+    }
+
+    #[test]
+    fn bedtime_sends_even_a_fully_rested_human_to_sleep() {
+        let mut routine = SleepRoutine::new();
+        assert_eq!(sleep_priority(&mut routine, &tired(0.0), day()), 0.0);
+        assert!(sleep_priority(&mut routine, &tired(0.0), night()) > BUSY);
+        assert_eq!(sleep_priority(&mut routine, &tired(0.0), day()), 0.0);
     }
 
     #[test]

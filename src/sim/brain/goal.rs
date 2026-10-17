@@ -40,10 +40,13 @@ pub enum GoalId {
     Relieve = 4,
     Play = 5,
     Sleep = 6,
+    /// Carry out an order to salvage a heap of scrap
+    /// ([`SalvageGoal`](super::goals::SalvageGoal)).
+    Salvage = 7,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -52,6 +55,7 @@ impl GoalId {
         GoalId::Relieve,
         GoalId::Play,
         GoalId::Sleep,
+        GoalId::Salvage,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -63,6 +67,7 @@ impl GoalId {
             GoalId::Relieve => "relieve",
             GoalId::Play => "play",
             GoalId::Sleep => "sleep",
+            GoalId::Salvage => "salvage",
         }
     }
 
@@ -80,6 +85,7 @@ impl GoalId {
             GoalId::Relieve => "🚽",
             GoalId::Play => "🎮",
             GoalId::Sleep => "😴",
+            GoalId::Salvage => "🔧",
         }
     }
 
@@ -479,7 +485,8 @@ mod tests {
                 (GoalId::Relieve, 0.1),
                 (GoalId::Idle, 0.0),
                 (GoalId::Play, 0.0),
-                (GoalId::Sleep, 0.0)
+                (GoalId::Sleep, 0.0),
+                (GoalId::Salvage, 0.0)
             ]
         );
     }

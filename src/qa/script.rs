@@ -250,7 +250,7 @@ pub enum Step {
     /// refused with a line in the log — which is how a test asserts on a limit
     /// rather than on the arithmetic behind it.
     Give {
-        /// `food` or `water`.
+        /// `food`, `water` or `scrap metal`.
         item: String,
         #[serde(default = "default_count")]
         count: u32,
@@ -584,6 +584,17 @@ pub enum Step {
     /// a player does it (`mouse` and `click`); this is for a test that cannot
     /// know where on screen the switch is.
     SwitchLight { x: i32, y: i32, on: bool },
+    /// Tell the **selected** unit to salvage the heap of scrap in a cell, on
+    /// the command queue the game uses — applied by the next tick, like
+    /// `give`. Nothing in a brain goes after scrap by itself, so this is the
+    /// way a heap gets worked at all.
+    Salvage { x: i32, y: i32 },
+    /// How many pieces of scrap metal the heap in a cell has left, as the
+    /// simulation says — `0` for none: emptied, or never there — **and** that
+    /// the screen agrees: on the canvas, a heap with anything left in it is
+    /// drawn and an emptied one is not, and off it nothing is drawn at all.
+    /// Give the scrap window a frame after a `tick` (`wait`) before asking.
+    ExpectScrap { x: i32, y: i32, pieces: u8 },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.
     ///

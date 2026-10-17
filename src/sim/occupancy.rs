@@ -41,11 +41,13 @@
 //! covers every cell there is: the site densely, as it always has, and the
 //! wasteland a [`crate::map::chunk`] at a time, a chunk coming into being the
 //! first time somebody stands in it. The spawn pass makes the chunks round
-//! everybody out there ahead of them ([`Occupancy::prepare`]), so the move
-//! step — which must not allocate — finds the chunk it claims in already
+//! every chunk somebody is in ahead of them ([`Occupancy::prepare`]), so the
+//! move step — which must not allocate — finds the chunk it claims in already
 //! there; a unit that outran that (a long run of ticks with no spawn pass
 //! between, which only a test does) costs one allocation, never a wrong
-//! answer.
+//! answer. And it drops them again once nobody is near
+//! ([`Occupancy::sweep`]): a chunk with nobody in it reads exactly as one
+//! that is not there, so that changes nothing but the memory.
 
 use crate::map::chunk::{local_index, ChunkGrid, ChunkPos, CHUNK_AREA};
 use crate::map::{Point, Size};
@@ -71,7 +73,7 @@ pub struct Occupancy {
     /// look needs to know about them.
     occupied: Vec<u64>,
     /// Everybody off the site, a chunk at a time.
-    wild: ChunkGrid<WildCells>,
+    wild: ChunkGrid<Box<WildCells>>,
 }
 
 /// One chunk of [`Occupancy`] off the site: the same two arrays as the site's,
@@ -95,6 +97,11 @@ impl WildCells {
             self.occupied[index / 64] &= !(1 << (index % 64));
         }
     }
+
+    /// Whether anybody holds a cell here.
+    fn is_held(&self) -> bool {
+        self.occupied.iter().any(|&word| word != 0)
+    }
 }
 
 impl Occupancy {
@@ -108,18 +115,33 @@ impl Occupancy {
         }
     }
 
-    /// Make the chunks within one chunk of `cell`, if it is off the site, so
-    /// a unit standing there can step anywhere near without the move step
-    /// having to allocate. The spawn pass's job; cheap when they are there.
-    pub fn prepare(&mut self, cell: Point) {
-        if self.size.contains(cell) {
-            return;
-        }
-        for pos in ChunkPos::of(cell).around(1) {
-            if !self.wild.contains(pos) {
+    /// Make the chunks within one chunk of `around` that have any cell off
+    /// the site, so a unit standing in it can step anywhere near without the
+    /// move step having to allocate — off the site's edge included. The spawn
+    /// pass's job; cheap when they are there.
+    pub fn prepare(&mut self, around: ChunkPos) {
+        for pos in around.around(1) {
+            if !self.is_all_site(pos) && !self.wild.contains(pos) {
                 self.wild.get_or_insert_with(pos, WildCells::empty);
             }
         }
+    }
+
+    /// Whether every cell of the chunk at `pos` is on the site, so it never
+    /// needs one of these.
+    fn is_all_site(&self, pos: ChunkPos) -> bool {
+        let bounds = pos.bounds();
+        self.size.contains(bounds.origin) && self.size.contains(bounds.max())
+    }
+
+    /// Drop chunks of the wasteland that `keep` says nobody needs, looking at
+    /// no more than `count` of them, from `cursor` on
+    /// ([`crate::map::ChunkGrid::sweep`]). **A chunk with anybody in it is
+    /// kept whatever `keep` says**: dropping one with nobody in it changes no
+    /// answer this layer gives, and that is the only kind it drops. Returns
+    /// how many went.
+    pub fn sweep(&mut self, cursor: &mut usize, count: usize, mut keep: impl FnMut(ChunkPos) -> bool) -> usize {
+        self.wild.sweep(cursor, count, |pos, cells| cells.is_held() || keep(pos))
     }
 
     /// How many chunks of the wasteland this layer holds.
@@ -243,7 +265,7 @@ impl Occupancy {
     pub fn clear(&mut self) {
         self.cells.fill(None);
         self.occupied.fill(0);
-        for chunk in self.wild.iter_mut() {
+        for (_, chunk) in self.wild.iter_mut() {
             chunk.cells.fill(None);
             chunk.occupied.fill(0);
         }
@@ -355,13 +377,31 @@ mod tests {
 
     #[test]
     fn preparing_makes_the_chunks_round_somebody_and_nothing_on_the_site() {
-        let mut occupancy = layer();
-        occupancy.prepare(Point::new(1, 1));
-        assert_eq!(occupancy.wild_chunks(), 0, "the site needs no chunks");
-        occupancy.prepare(Point::new(-40, 10));
+        let mut occupancy = Occupancy::new(Size::new(200, 200));
+        occupancy.prepare(ChunkPos::of(Point::new(100, 100)));
+        assert_eq!(occupancy.wild_chunks(), 0, "the middle of the site needs no chunks");
+        occupancy.prepare(ChunkPos::of(Point::new(-40, 10)));
         assert_eq!(occupancy.wild_chunks(), 9);
-        occupancy.prepare(Point::new(-41, 11));
+        occupancy.prepare(ChunkPos::of(Point::new(-41, 11)));
         assert_eq!(occupancy.wild_chunks(), 9, "the same chunks");
+        // Standing on the site at its edge, the wasteland one step away.
+        occupancy.prepare(ChunkPos::of(Point::new(199, 100)));
+        assert!(occupancy.wild.contains(ChunkPos::of(Point::new(200, 100))));
+    }
+
+    #[test]
+    fn a_sweep_drops_only_chunks_with_nobody_in_them() {
+        let mut occupancy = layer();
+        let out = Point::new(-40, 10);
+        occupancy.prepare(ChunkPos::of(out));
+        occupancy.claim(out, uid(1)).expect("empty");
+        let mut cursor = 0;
+        assert_eq!(occupancy.sweep(&mut cursor, 100, |_| false), 8, "all but the one somebody stands in");
+        assert_eq!(occupancy.occupant(out), Some(uid(1)));
+        assert!(occupancy.release(out, uid(1)));
+        assert_eq!(occupancy.sweep(&mut cursor, 100, |_| false), 1);
+        assert_eq!(occupancy.wild_chunks(), 0);
+        assert_eq!(occupancy.occupant(out), None, "nobody, as before");
     }
 
     #[test]
