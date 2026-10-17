@@ -77,6 +77,7 @@ pub use routine::{Routine, RoutineCtx, RoutineExecutor};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 
 use super::background::{Due, Priority};
 use super::biology::{Biology, Event};
@@ -421,6 +422,92 @@ impl Brain {
         self.memory.remember(memory::SALVAGE_ORDER, Recall::Cell(heap));
     }
 
+    // --- saving ---
+
+    /// The mind's state: what it has seen and remembers, what each routine
+    /// and executor is in the middle of, the queue, the task and its action.
+    /// Not which routines and executors it has — that is its kind's, and a
+    /// load builds it fresh ([`Brain::restore`]).
+    pub(crate) fn save(&self) -> pb::Brain {
+        let Brain {
+            perception,
+            attention,
+            memory,
+            routines,
+            goals,
+            executors,
+            tasks,
+            task,
+            action,
+            finished,
+            blocked_by,
+            last_result,
+        } = self;
+        let (queue, result) = tasks.save();
+        pb::Brain {
+            perception: Some(perception.save()),
+            attention: Some(attention.save()),
+            memory: Some(memory.save()),
+            routines: routines.iter().map(Routine::save).collect(),
+            goals: Some(goals.save()),
+            executors: executors
+                .iter()
+                .flatten()
+                .map(|executor| pb::ExecutorState {
+                    goal: pb::GoalId::from(executor.goal()) as i32,
+                    state: Some(executor.save()),
+                })
+                .collect(),
+            queue,
+            result,
+            task: task.map(|task| task.save()),
+            action: Some(action.save()),
+            finished: finished.map(|task| task.save()),
+            blocked_by: blocked_by.map(Uid::raw),
+            last_result: last_result.save(),
+        }
+    }
+
+    /// Fill a brain just built for its kind ([`Brain::human`],
+    /// [`Brain::dog`]) with the state [`Brain::save`] kept. The routines must
+    /// be the ones saved, in the same order; an executor the save says
+    /// nothing about — one added since — starts fresh, as it would in a unit
+    /// spawned today.
+    pub(crate) fn restore(&mut self, saved: &pb::Brain) -> Result<(), Invalid> {
+        if saved.routines.len() != self.routines.len() {
+            return invalid(format!(
+                "{} routines saved for a brain that has {}",
+                saved.routines.len(),
+                self.routines.len()
+            ));
+        }
+        for (routine, state) in self.routines.iter_mut().zip(&saved.routines) {
+            routine.restore(state)?;
+        }
+        self.perception = Perception::restore(pb::required(&saved.perception, "perception")?)?;
+        self.attention = Attention::restore(pb::required(&saved.attention, "attention")?)?;
+        self.memory = Memory::restore(pb::required(&saved.memory, "memory")?)?;
+        self.goals = Goals::restore(pb::required(&saved.goals, "goals")?)?;
+        for state in &saved.executors {
+            let goal = GoalId::from(pb::known::<pb::GoalId>(state.goal, "executor")?);
+            let Some(executor) = self.executors[goal as usize].as_deref_mut() else {
+                return invalid(format!("a {} executor saved for a brain without one", goal.name()));
+            };
+            let saved = pb::required(&state.state, "executor state")?;
+            executor.restore(saved).map_err(|error| error.within(goal.name()))?;
+        }
+        self.tasks = Tasks::restore(&saved.queue, saved.result)?;
+        self.task = saved.task.as_ref().map(Task::restore).transpose()?;
+        self.action = Action::restore(saved.action.as_ref())?;
+        self.finished = saved.finished.as_ref().map(Task::restore).transpose()?;
+        self.blocked_by = match saved.blocked_by {
+            None => None,
+            Some(raw) => Some(Uid::from_raw(raw).ok_or_else(|| Invalid::new("blocked by nobody"))?),
+        };
+        self.last_result = TaskResult::restore(saved.last_result)?;
+        Ok(())
+    }
+
     /// What it saw at its last look.
     pub fn perception(&self) -> &Perception {
         &self.perception
@@ -558,6 +645,10 @@ mod tests {
     }
 
     impl GameEntity for Puppet {
+        fn save(&self) -> crate::save::pb::Kind {
+            unreachable!("a test's stand-in is never saved")
+        }
+
         fn body(&self) -> &crate::sim::Body {
             self.walk.body()
         }
@@ -595,6 +686,14 @@ mod tests {
     }
 
     impl GoalExecutor for Recorder {
+        fn save(&self) -> crate::save::pb::Executor {
+            unreachable!("a test's stand-in is never saved")
+        }
+
+        fn restore(&mut self, _: &crate::save::pb::Executor) -> Result<(), crate::save::Invalid> {
+            unreachable!("a test's stand-in is never saved")
+        }
+
         fn goal(&self) -> GoalId {
             self.goal
         }
@@ -760,6 +859,14 @@ mod tests {
     fn a_blocked_goal_hands_over_and_is_held_off() {
         struct Hopeless;
         impl GoalExecutor for Hopeless {
+            fn save(&self) -> crate::save::pb::Executor {
+                unreachable!("a test's stand-in is never saved")
+            }
+
+            fn restore(&mut self, _: &crate::save::pb::Executor) -> Result<(), crate::save::Invalid> {
+                unreachable!("a test's stand-in is never saved")
+            }
+
             fn goal(&self) -> GoalId {
                 GoalId::Eat
             }
@@ -801,6 +908,14 @@ mod tests {
     }
 
     impl GoalExecutor for Listener {
+        fn save(&self) -> crate::save::pb::Executor {
+            unreachable!("a test's stand-in is never saved")
+        }
+
+        fn restore(&mut self, _: &crate::save::pb::Executor) -> Result<(), crate::save::Invalid> {
+            unreachable!("a test's stand-in is never saved")
+        }
+
         fn goal(&self) -> GoalId {
             self.goal
         }
@@ -923,6 +1038,14 @@ mod tests {
     }
 
     impl GoalExecutor for Roamer {
+        fn save(&self) -> crate::save::pb::Executor {
+            unreachable!("a test's stand-in is never saved")
+        }
+
+        fn restore(&mut self, _: &crate::save::pb::Executor) -> Result<(), crate::save::Invalid> {
+            unreachable!("a test's stand-in is never saved")
+        }
+
         fn goal(&self) -> GoalId {
             GoalId::Wander
         }

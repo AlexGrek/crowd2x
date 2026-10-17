@@ -16,6 +16,7 @@
 //! (`game::props`).
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 
@@ -86,6 +87,16 @@ impl PlayGoal {
 impl GoalExecutor for PlayGoal {
     fn goal(&self) -> GoalId {
         GoalId::Play
+    }
+
+    fn save(&self) -> pb::Executor {
+        let PlayGoal { seek } = self;
+        pb::Executor::Seek(seek.save())
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        self.seek = Seek::restore_only(saved, self.goal())?;
+        Ok(())
     }
 
     /// The half-walked route is gone, the computer is not.

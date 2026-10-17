@@ -1518,6 +1518,18 @@ fn perform(
                 .ok_or(format!("the chunk under the camera, {under:?}, is not loaded"))
         }
 
+        Step::ExpectSaves { count, quick } => {
+            let saves = crate::save::SaveStore::default_store().list().map_err(|error| error.to_string())?;
+            let quicks = saves.iter().filter(|save| save.is_quick()).count();
+            let matches = saves.len() == *count && quick.is_none_or(|quick| quicks == quick);
+            if !matches {
+                // Still being written, or pruned: ask again until the
+                // timeout, saying what there is so a timeout reads as why.
+                info!("qa: waiting for {count} saves ({quick:?} quick); there are {} ({quicks} quick)", saves.len());
+            }
+            Ok(if matches { Next::Now } else { Next::Again })
+        }
+
         Step::ExpectSelected(wanted) => {
             let actual = intents.selected.get().map(|uid| match uid.kind() {
                 Some(kind) => kind.name().to_string(),

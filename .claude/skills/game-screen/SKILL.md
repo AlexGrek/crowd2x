@@ -148,7 +148,8 @@ QA: `select_box` and `switch_box` steps, and `press` on the panel's buttons.
 
 The screen is laid out as **the view on the left and the world on the right**: `- x4 +`
 over the map's name, size, crowd, tick count and the world's clock top left; `slower x1 faster pause spawn
-menu` over the log top right, because the log is the readout for exactly those controls.
+menu` over the log top right, because the log is the readout for exactly those controls —
+with `save` and `quick save` in a row of their own between the two (`game/saving.rs`).
 
 **Nothing here is `Focusable`,** and that is forced: the arrows pan the camera on this
 screen and `A` zooms, so `nav`'s one highlight would be walked around by the camera
@@ -171,3 +172,20 @@ deciding whether `esc` closes it or leaves the game.
 **Doors swing on screen** (`game/props.rs` `swing_doors`): every `DoorLeaf` on the canvas
 shows the frame of its strip for `GameState::doors()` openness, written only when it changes.
 A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.
+
+### Saving, and opening a loaded game (`game/saving.rs`)
+
+`save` opens the on-screen keyboard titled "save the game as" (its own `Scope`, blocks the
+pointer, `DespawnOnExit`), pre-filled with "<map> <hh-mm>", and **pauses the world behind
+it**; enter/`done` saves, esc/B cancels, and the speed it had comes back either way.
+`quick save` and **F5** save at once as "quick save" (the newest four kept). The camera, zoom
+and x-ray keys, the speed keys and `leave` all run `if not_typing`, so typing a name does not
+drive the screen. A save is encoded in the system from `Res<Sim>` — never `ResMut` — and
+zipped and written on a `save writer` thread; `report_written` puts "saved ... in X ms" or
+the error in the log when it finishes (it runs on every screen, so a save started just
+before leaving still reports).
+
+`actors::build_world` takes a `PendingWorld` if the Load screen left one, instead of building
+a fresh world from the map's spawners; `look_where_it_was` (OnEnter, after
+`aim_camera_at_map`) puts back the saved camera, zoom and speed from `LoadedView`. The
+format, the store and the guarantee: `savegame` skill.

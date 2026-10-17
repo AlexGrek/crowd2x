@@ -165,6 +165,8 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
     maps = SCRATCH / name / "maps"
     shutil.rmtree(maps.parent, ignore_errors=True)
     maps.mkdir(parents=True)
+    # Saved games, likewise: a test saves and deletes, so never somebody's.
+    saves = SCRATCH / name / "saves"
 
     shots = SHOTS / name
     shutil.rmtree(shots, ignore_errors=True)
@@ -185,6 +187,7 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
         **os.environ,
         "CROWD2X_QA": str(path),
         "CROWD2X_MAPS": str(maps),
+        "CROWD2X_SAVES": str(saves),
         "CROWD2X_QA_SHOTS": str(shots),
         "CROWD2X_QA_PERF": str(perf),
         "CROWD2X_QA_OBSERVE": str(observed),

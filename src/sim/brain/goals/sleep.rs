@@ -34,6 +34,7 @@
 //! if nothing else will do, so nobody is kept from their own bed by a memory.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, HOUR};
 use crate::sim::feature::FeatureKind;
 use crate::sim::rng::tick_rng;
@@ -147,6 +148,16 @@ impl SleepGoal {
 impl GoalExecutor for SleepGoal {
     fn goal(&self) -> GoalId {
         GoalId::Sleep
+    }
+
+    fn save(&self) -> pb::Executor {
+        let SleepGoal { seek } = self;
+        pb::Executor::Seek(seek.save())
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        self.seek = Seek::restore_only(saved, self.goal())?;
+        Ok(())
     }
 
     /// The half-walked route is gone, the bed is not.

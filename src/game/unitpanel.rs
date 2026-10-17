@@ -789,6 +789,10 @@ mod tests {
         // off would read as a bug rather than as a fact about dogs.
         struct Nobody(crate::sim::Body);
         impl GameEntity for Nobody {
+            fn save(&self) -> crate::save::pb::Kind {
+                unreachable!("a test's stand-in is never saved")
+            }
+
             fn body(&self) -> &crate::sim::Body {
                 &self.0
             }

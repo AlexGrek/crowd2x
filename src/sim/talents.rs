@@ -7,6 +7,8 @@
 use rand::RngExt;
 use rand::rngs::SmallRng;
 
+use crate::save::{invalid, pb, Invalid};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Talent {
@@ -69,6 +71,61 @@ impl Talents {
     /// Explicit changes are bounded too, including negative inputs.
     pub fn set(&mut self, talent: Talent, value: i32) {
         self.values[talent as usize] = value.clamp(0, 100) as u8;
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> Vec<pb::TalentValue> {
+        Talent::ALL
+            .iter()
+            .map(|&talent| pb::TalentValue { talent: pb::Talent::from(talent) as i32, value: self.get(talent) as u32 })
+            .collect()
+    }
+
+    /// The talents as saved. One the save does not mention — a talent added
+    /// since — is the mean everybody is rolled round.
+    pub(crate) fn restore(saved: &[pb::TalentValue]) -> Result<Talents, Invalid> {
+        let mut talents = Talents { values: [50; Talent::ALL.len()] };
+        for entry in saved {
+            let talent = Talent::from(pb::known::<pb::Talent>(entry.talent, "talent")?);
+            if entry.value > 100 {
+                return invalid(format!("{} talent is {}", talent.name(), entry.value));
+            }
+            talents.values[talent as usize] = entry.value as u8;
+        }
+        Ok(talents)
+    }
+}
+
+impl From<Talent> for pb::Talent {
+    fn from(talent: Talent) -> pb::Talent {
+        match talent {
+            Talent::Arts => pb::Talent::Arts,
+            Talent::Engineering => pb::Talent::Engineering,
+            Talent::Communication => pb::Talent::Communication,
+            Talent::Management => pb::Talent::Management,
+            Talent::Athleticism => pb::Talent::Athleticism,
+            Talent::Military => pb::Talent::Military,
+            Talent::Beauty => pb::Talent::Beauty,
+            Talent::Responsibility => pb::Talent::Responsibility,
+            Talent::Precision => pb::Talent::Precision,
+        }
+    }
+}
+
+impl From<pb::Talent> for Talent {
+    fn from(talent: pb::Talent) -> Talent {
+        match talent {
+            pb::Talent::Arts => Talent::Arts,
+            pb::Talent::Engineering => Talent::Engineering,
+            pb::Talent::Communication => Talent::Communication,
+            pb::Talent::Management => Talent::Management,
+            pb::Talent::Athleticism => Talent::Athleticism,
+            pb::Talent::Military => Talent::Military,
+            pb::Talent::Beauty => Talent::Beauty,
+            pb::Talent::Responsibility => Talent::Responsibility,
+            pb::Talent::Precision => Talent::Precision,
+        }
     }
 }
 

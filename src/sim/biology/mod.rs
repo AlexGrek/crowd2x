@@ -73,6 +73,8 @@ pub use satisfaction::Satisfaction;
 pub use stats::Stats;
 pub use thirst::Thirst;
 
+use crate::save::{invalid, pb, Invalid};
+
 use super::background::Due;
 use super::item::ItemKind;
 
@@ -381,6 +383,73 @@ impl Biology {
     #[cfg(test)]
     pub(crate) fn edit(&mut self, change: impl FnOnce(Stats) -> Stats) {
         self.stats = change(self.stats);
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Biology {
+        // The processes with no state of their own are named so that one
+        // which grows some breaks this until it is saved.
+        let Biology {
+            stats,
+            switches,
+            recent,
+            hunger: Hunger,
+            thirst: Thirst,
+            bladder,
+            fun: Fun,
+            energy: Energy,
+            satisfaction: Satisfaction,
+        } = self;
+        pb::Biology {
+            stats: Some(stats.save()),
+            off: ProcessId::ALL
+                .iter()
+                .filter(|&&process| !switches.is_on(process))
+                .map(|&process| pb::ProcessId::from(process) as i32)
+                .collect(),
+            familiarity: recent.save(),
+            bladder_on_its_way: bladder.on_its_way(),
+        }
+    }
+
+    pub(crate) fn restore(saved: &pb::Biology) -> Result<Biology, Invalid> {
+        let mut biology = Biology::new(Stats::restore(pb::required(&saved.stats, "stats")?)?);
+        for &off in &saved.off {
+            biology.set_running(ProcessId::from(pb::known::<pb::ProcessId>(off, "process")?), false);
+        }
+        biology.recent = Recollection::restore(&saved.familiarity)?;
+        if !saved.bladder_on_its_way.is_finite() {
+            return invalid(format!("bladder: {} on its way", saved.bladder_on_its_way));
+        }
+        biology.bladder = Bladder::restore(saved.bladder_on_its_way);
+        Ok(biology)
+    }
+}
+
+impl From<ProcessId> for pb::ProcessId {
+    fn from(process: ProcessId) -> pb::ProcessId {
+        match process {
+            ProcessId::Hunger => pb::ProcessId::Hunger,
+            ProcessId::Thirst => pb::ProcessId::Thirst,
+            ProcessId::Bladder => pb::ProcessId::Bladder,
+            ProcessId::Fun => pb::ProcessId::Fun,
+            ProcessId::Energy => pb::ProcessId::Energy,
+            ProcessId::Satisfaction => pb::ProcessId::Satisfaction,
+        }
+    }
+}
+
+impl From<pb::ProcessId> for ProcessId {
+    fn from(process: pb::ProcessId) -> ProcessId {
+        match process {
+            pb::ProcessId::Hunger => ProcessId::Hunger,
+            pb::ProcessId::Thirst => ProcessId::Thirst,
+            pb::ProcessId::Bladder => ProcessId::Bladder,
+            pb::ProcessId::Fun => ProcessId::Fun,
+            pb::ProcessId::Energy => ProcessId::Energy,
+            pb::ProcessId::Satisfaction => ProcessId::Satisfaction,
+        }
     }
 }
 

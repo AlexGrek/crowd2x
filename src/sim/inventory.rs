@@ -44,6 +44,8 @@
 //! above. An item that grows state of its own is a change to [`ItemKind`]
 //! first, and this follows it.
 
+use crate::save::{invalid, pb, Invalid};
+
 use super::item::ItemKind;
 
 /// How much a unit can carry: a mass limit and a volume limit.
@@ -107,6 +109,38 @@ impl Inventory {
     /// An empty inventory a person could carry.
     pub const fn human() -> Inventory {
         Inventory::new(Capacity::HUMAN)
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Inventory {
+        let Inventory { hand, counts: _, capacity } = self;
+        pb::Inventory {
+            hand: hand.map(|item| item.name().to_string()),
+            stowed: self
+                .stowed()
+                .map(|(item, count)| pb::ItemCount { item: item.name().to_string(), count: count as u32 })
+                .collect(),
+            capacity_mass: capacity.mass,
+            capacity_volume: capacity.volume,
+        }
+    }
+
+    /// What it carried, as saved — limits and all, even a load over them: a
+    /// unit loaded past its limits can only have been made that way, and
+    /// the hand is never refused anyway.
+    pub(crate) fn restore(saved: &pb::Inventory) -> Result<Inventory, Invalid> {
+        let item = |name: &str| ItemKind::from_name(name).ok_or_else(|| Invalid::new(format!("no such item {name:?}")));
+        let mut inventory = Inventory::new(Capacity { mass: saved.capacity_mass, volume: saved.capacity_volume });
+        inventory.hand = saved.hand.as_deref().map(item).transpose()?;
+        for stowed in &saved.stowed {
+            let kind = item(&stowed.item)?;
+            if stowed.count > Inventory::MOST_OF_A_KIND as u32 {
+                return invalid(format!("{} {} stowed", stowed.count, kind.name()));
+            }
+            inventory.counts[kind as usize] = stowed.count as u8;
+        }
+        Ok(inventory)
     }
 
     /// What is in its hand.

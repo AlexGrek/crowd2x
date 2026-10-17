@@ -23,6 +23,7 @@
 //! What a meeting does to the unit is the brain's business, not this
 //! module's: [`Attention::take_in`] hands each one to a closure.
 
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::MINUTE;
 use crate::sim::uid::Uid;
 
@@ -106,6 +107,33 @@ pub struct Attention {
 }
 
 impl Attention {
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Attention {
+        let Faces { keys, unseen, met } = &*self.faces;
+        pb::Attention {
+            keys: keys.to_vec(),
+            unseen: unseen.iter().map(|&unseen| unseen as u32).collect(),
+            met: *met,
+        }
+    }
+
+    pub(crate) fn restore(saved: &pb::Attention) -> Result<Attention, Invalid> {
+        if saved.keys.len() != FACES || saved.unseen.len() != FACES {
+            return invalid(format!("attention: {} faces and {} timers", saved.keys.len(), saved.unseen.len()));
+        }
+        let mut faces = Faces::default();
+        for (slot, (&key, &unseen)) in saved.keys.iter().zip(&saved.unseen).enumerate() {
+            let Ok(unseen) = u16::try_from(unseen) else {
+                return invalid(format!("attention: a face unseen for {unseen}"));
+            };
+            faces.keys[slot] = key;
+            faces.unseen[slot] = unseen;
+        }
+        faces.met = saved.met;
+        Ok(Attention { faces: Box::new(faces) })
+    }
+
     /// `elapsed` **world** seconds go by for every face, and those gone too
     /// long are forgotten. All a unit with its eyes shut does.
     ///

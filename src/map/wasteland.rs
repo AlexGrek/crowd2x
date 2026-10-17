@@ -57,6 +57,13 @@ use super::terrain::{TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, MEADOW, MUD, SC
 /// wasteland existed, and a new one from the browser.
 pub const DEFAULT_SEED: u64 = 0;
 
+/// Which version of the generator this is. A save stores the chunks it had
+/// loaded verbatim (`crate::save`) and says which version made them; bump
+/// this whenever [`Wasteland::tile`] or [`Wasteland::scrap_on`] give a
+/// different answer for any seed and cell, so a save made before can be
+/// told apart.
+pub const GENERATION: u32 = 1;
+
 /// No water within this many cells of the site.
 pub const CLEARING: i32 = 12;
 

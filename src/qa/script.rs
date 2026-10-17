@@ -668,6 +668,17 @@ pub enum Step {
     /// the map the size of a view and not the size of the trip. A map with
     /// no wasteland loads none and fails any `min` above zero.
     ExpectChunks { min: usize, max: usize },
+    /// How many saved games there are (`CROWD2X_SAVES`, which `tools/qa.py`
+    /// points at a scratch directory), and how many of them are quick saves.
+    ///
+    /// A save is written on a thread of its own, so this waits — up to the
+    /// script's timeout — for the store to come to the count asked for, rather
+    /// than failing on a save still on its way to disk.
+    ExpectSaves {
+        count: usize,
+        #[serde(default)]
+        quick: Option<usize>,
+    },
 }
 
 fn default_tap() -> f32 {

@@ -93,6 +93,14 @@ pub struct Focus(pub Option<Entity>);
 #[derive(Resource, Default, PartialEq, Eq)]
 pub struct KeyboardCapture(pub bool);
 
+/// A run condition for a screen's own key and gamepad bindings: nobody is
+/// typing. The game screen pans with `wasd` and zooms with `A`, which would
+/// otherwise go on doing that while a save is being named — on the same
+/// frame-start snapshot `nav` itself uses.
+pub fn not_typing(capture: Res<KeyboardCapture>) -> bool {
+    !capture.0
+}
+
 /// Everything navigation does, in order. Systems that have to see input before
 /// or after the highlight moves hang off this.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]

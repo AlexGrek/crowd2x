@@ -13,6 +13,7 @@
 //! and the body's doing, not this goal's.
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 use crate::sim::inventory::Inventory;
@@ -180,6 +181,37 @@ fn is_a_meal(finished: Option<Task>) -> bool {
 impl GoalExecutor for EatGoal {
     fn goal(&self) -> GoalId {
         GoalId::Eat
+    }
+
+    fn save(&self) -> pb::Executor {
+        let EatGoal { stage, seek } = self;
+        let stage = match stage {
+            Stage::Finding => pb::FetchStage::Finding,
+            Stage::Clearing => pb::FetchStage::Clearing,
+            Stage::Walking => pb::FetchStage::Walking,
+            Stage::Opening => pb::FetchStage::Opening,
+            Stage::Taking => pb::FetchStage::Taking,
+            Stage::Closing => pb::FetchStage::Closing,
+            Stage::Eating => pb::FetchStage::Consuming,
+        };
+        pb::Executor::Fetch(pb::Fetch { stage: stage as i32, seek: Some(seek.save()) })
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        let pb::Executor::Fetch(fetch) = saved else {
+            return invalid("Eat is a stage and a seek");
+        };
+        self.stage = match pb::known::<pb::FetchStage>(fetch.stage, "eat stage")? {
+            pb::FetchStage::Finding => Stage::Finding,
+            pb::FetchStage::Clearing => Stage::Clearing,
+            pb::FetchStage::Walking => Stage::Walking,
+            pb::FetchStage::Opening => Stage::Opening,
+            pb::FetchStage::Taking => Stage::Taking,
+            pb::FetchStage::Closing => Stage::Closing,
+            pb::FetchStage::Consuming => Stage::Eating,
+        };
+        self.seek = Seek::restore(pb::required(&fetch.seek, "eat seek")?)?;
+        Ok(())
     }
 
     /// The half-walked route is gone — the brain dropped it — but the fridge

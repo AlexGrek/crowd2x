@@ -13,6 +13,9 @@ pub enum AppState {
     /// The map browser: saved maps, and everything done to a map from outside
     /// the editor.
     Maps,
+    /// The Load screen: saved games, and the only way back into one
+    /// (`crate::saves`).
+    Saves,
     Editor,
     /// Playing a map: the simulation, or as much of it as exists.
     Game,
@@ -24,7 +27,7 @@ impl AppState {
     /// Kept next to that function so a message listing the screens cannot go
     /// stale when one is added — which is exactly what a script asking for a
     /// screen that does not exist needs to be told.
-    pub const NAMES: &'static str = "menu, maps, editor, game";
+    pub const NAMES: &'static str = "menu, maps, saves, editor, game";
 
     /// Parse the value of `CROWD2X_STATE`, used by the debug harness to boot
     /// straight into a screen so a capture does not have to click through the
@@ -33,6 +36,7 @@ impl AppState {
         match name.trim().to_ascii_lowercase().as_str() {
             "menu" | "mainmenu" | "main_menu" => Some(Self::MainMenu),
             "maps" | "browser" | "files" => Some(Self::Maps),
+            "saves" | "load" => Some(Self::Saves),
             "editor" | "edit" => Some(Self::Editor),
             "game" | "play" => Some(Self::Game),
             _ => None,

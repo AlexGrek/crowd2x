@@ -130,6 +130,17 @@ there; it is terrain only. Every map loaded from a file stands in one.
   canvas shader takes `lightmap_origin` (`lit_canvas.wgsl`).
 - **Editor**: the wasteland is drawn dimmed (`background::OFF_SITE_TINT`) and cannot be painted.
 
+## In a saved game
+
+A save (`savegame` skill) keeps the endless world chunk by chunk, in `chunks/NNNN.pb`
+(`map/save.rs`): every **loaded chunk's ground stored verbatim** (tiles by name, heaps as
+found) and every **salvage tally**, loaded or not, with `wasteland::GENERATION` — the
+generator's version, which must be bumped whenever `Wasteland::tile` or `scrap_on` change
+their answer. Restored chunks go back into the cache (`Chunk::from_parts` re-derives the
+passable and see-through bits; `Map::restore_chunks` applies the tallies), and reclaiming one
+later regenerates it from the seed; a test checks the two agree. A save from a newer
+generator is refused.
+
 ## The file format
 
 `"wasteland"` in a map file (`src/map/format.rs`) is a seed, or `false` for nothing round

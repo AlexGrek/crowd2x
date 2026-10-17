@@ -59,6 +59,11 @@ impl Bladder {
     pub fn on_its_way(&self) -> f32 {
         self.on_its_way
     }
+
+    /// A bladder with `on_its_way` still to arrive — a saved one.
+    pub(crate) fn restore(on_its_way: f32) -> Bladder {
+        Bladder { on_its_way }
+    }
 }
 
 impl Process for Bladder {

@@ -17,6 +17,7 @@
 //! Adding a task is a struct, an [`TaskExecutor`] impl and a variant here.
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::Think;
 use crate::sim::inventory::Inventory;
@@ -125,6 +126,66 @@ pub enum Task {
 }
 
 impl Task {
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Task {
+        let cell = |cell: Point| Some(pb::Cell::from(cell));
+        let timed = |at: Point, seconds: f32| pb::Timed { cell: cell(at), seconds };
+        let kind = match *self {
+            Task::MoveTo(MoveTo { cell: to, beside }) => pb::TaskKind::MoveTo(pb::MoveTo { cell: cell(to), beside }),
+            Task::TakeItem(TakeItem { from, item, seconds }) => pb::TaskKind::TakeItem(pb::TakeItem {
+                from: cell(from),
+                item: item.name().to_string(),
+                seconds,
+            }),
+            Task::ConsumeItem(ConsumeItem { item, seconds }) => {
+                pb::TaskKind::ConsumeItem(pb::ConsumeItem { item: item.name().to_string(), seconds })
+            }
+            Task::UseToilet(UseToilet { toilet, seconds }) => pb::TaskKind::UseToilet(timed(toilet, seconds)),
+            Task::UseComputer(UseComputer { computer, seconds }) => pb::TaskKind::UseComputer(timed(computer, seconds)),
+            Task::Sleep(Sleep { bed, seconds }) => pb::TaskKind::Sleep(timed(bed, seconds)),
+            Task::Wait(Wait { seconds }) => pb::TaskKind::Wait(pb::Timed { cell: None, seconds }),
+            Task::OpenFridge(OpenFridge { fridge, seconds }) => pb::TaskKind::OpenFridge(timed(fridge, seconds)),
+            Task::CloseFridge(CloseFridge { fridge, seconds }) => pb::TaskKind::CloseFridge(timed(fridge, seconds)),
+            Task::Salvage(Salvage { heap, seconds }) => pb::TaskKind::Salvage(timed(heap, seconds)),
+        };
+        pb::Task { kind: Some(kind) }
+    }
+
+    pub(crate) fn restore(saved: &pb::Task) -> Result<Task, Invalid> {
+        let item = |name: &str| ItemKind::from_name(name).ok_or_else(|| Invalid::new(format!("task: no such item {name:?}")));
+        let seconds = |seconds: f32| {
+            if seconds.is_finite() && seconds >= 0.0 {
+                Ok(seconds)
+            } else {
+                invalid(format!("task: {seconds} seconds long"))
+            }
+        };
+        let at = |timed: &pb::Timed| pb::cell(timed.cell, "task");
+        Ok(match saved.kind.as_ref().ok_or_else(|| Invalid::new("a task of no kind"))? {
+            pb::TaskKind::MoveTo(task) => Task::MoveTo(MoveTo { cell: pb::cell(task.cell, "walk")?, beside: task.beside }),
+            pb::TaskKind::TakeItem(task) => Task::TakeItem(TakeItem {
+                from: pb::cell(task.from, "take")?,
+                item: item(&task.item)?,
+                seconds: seconds(task.seconds)?,
+            }),
+            pb::TaskKind::ConsumeItem(task) => {
+                Task::ConsumeItem(ConsumeItem { item: item(&task.item)?, seconds: seconds(task.seconds)? })
+            }
+            pb::TaskKind::UseToilet(task) => Task::UseToilet(UseToilet { toilet: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::UseComputer(task) => {
+                Task::UseComputer(UseComputer { computer: at(task)?, seconds: seconds(task.seconds)? })
+            }
+            pb::TaskKind::Sleep(task) => Task::Sleep(Sleep { bed: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Wait(task) => Task::Wait(Wait { seconds: seconds(task.seconds)? }),
+            pb::TaskKind::OpenFridge(task) => Task::OpenFridge(OpenFridge { fridge: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::CloseFridge(task) => {
+                Task::CloseFridge(CloseFridge { fridge: at(task)?, seconds: seconds(task.seconds)? })
+            }
+            pb::TaskKind::Salvage(task) => Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)? }),
+        })
+    }
+
     /// Walk until standing in the middle of `cell`.
     pub const fn move_to(cell: Point) -> Task {
         Task::MoveTo(MoveTo { cell, beside: false })
@@ -250,6 +311,24 @@ pub enum TaskResult {
 }
 
 impl TaskResult {
+    pub(crate) fn save(self) -> i32 {
+        (match self {
+            TaskResult::InProgress => pb::TaskResult::InProgress,
+            TaskResult::Executing => pb::TaskResult::Executing,
+            TaskResult::Failed => pb::TaskResult::Failed,
+            TaskResult::Success => pb::TaskResult::Success,
+        }) as i32
+    }
+
+    pub(crate) fn restore(raw: i32) -> Result<TaskResult, Invalid> {
+        Ok(match pb::known::<pb::TaskResult>(raw, "task result")? {
+            pb::TaskResult::InProgress => TaskResult::InProgress,
+            pb::TaskResult::Executing => TaskResult::Executing,
+            pb::TaskResult::Failed => TaskResult::Failed,
+            pb::TaskResult::Success => TaskResult::Success,
+        })
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             TaskResult::InProgress => "in progress",
@@ -397,6 +476,26 @@ impl Tasks {
     /// What the most recent task wrote.
     pub fn result(&self) -> TaskResult {
         self.result
+    }
+
+    // --- saving ---
+
+    /// The queue front to back, and the result. Where in the ring it sits is
+    /// not kept: it changes nothing the queue does.
+    pub(crate) fn save(&self) -> (Vec<pb::Task>, i32) {
+        let Tasks { slots: _, head: _, len: _, result } = self;
+        (self.iter().map(|task| task.save()).collect(), result.save())
+    }
+
+    pub(crate) fn restore(queue: &[pb::Task], result: i32) -> Result<Tasks, Invalid> {
+        let mut tasks = Tasks::new();
+        for task in queue {
+            if !tasks.push_back(Task::restore(task)?) {
+                return invalid(format!("{} tasks queued, more than {}", queue.len(), Tasks::CAPACITY));
+            }
+        }
+        tasks.result = TaskResult::restore(result)?;
+        Ok(tasks)
     }
 
     /// Where a task's result is written. The brain passes on what the task

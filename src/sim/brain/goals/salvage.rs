@@ -16,6 +16,7 @@
 //! whether to work another: the goal plans from them, and never counts.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::item::ItemKind;
 
@@ -85,6 +86,16 @@ impl SalvageGoal {
 impl GoalExecutor for SalvageGoal {
     fn goal(&self) -> GoalId {
         GoalId::Salvage
+    }
+
+    fn save(&self) -> pb::Executor {
+        let SalvageGoal { seek } = self;
+        pb::Executor::Seek(seek.save())
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        self.seek = Seek::restore_only(saved, self.goal())?;
+        Ok(())
     }
 
     /// Picked back up: the half-walked route is gone, the order is not, and

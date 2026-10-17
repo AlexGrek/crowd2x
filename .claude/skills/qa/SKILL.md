@@ -214,6 +214,7 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_speed": "x2"}` | How fast the game is running: `x1`, `x0.25`, or `paused`. |
 | `{"expect_focus": "create"}` | The focused widget's label. |
 | `{"expect_map": "office"}` / `{"expect_no_map": "office"}` | A saved map exists, or does not. |
+| `{"expect_saves": {"count": 5, "quick": 4}}` | How many saved games are in the store (`CROWD2X_SAVES`, a scratch dir per test), and optionally how many are quick saves. A save is written on a thread, so this re-runs itself (`Next::Again`) until it matches or the script times out. `qa/save_and_load.json`. |
 | `{"expect_tile": {"map": "office", "x": 3, "y": 2, "terrain": "wall brown"}}` | A cell of the **saved** map. |
 | `{"expect_entities": 3}` | How many entities the simulation holds. |
 | `{"expect_sprites": 3}` | How many actor sprites are drawn **right now** — culled to the view, so pin the camera. |

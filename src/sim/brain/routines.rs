@@ -143,6 +143,17 @@ impl NeedRoutine {
             committed: false,
         }
     }
+
+    /// Whether it has committed to its goal — the one thing it remembers
+    /// from one tick to the next, and so the one thing a save keeps.
+    pub(crate) fn is_committed(&self) -> bool {
+        let NeedRoutine { need: _, committed } = *self;
+        committed
+    }
+
+    pub(crate) fn set_committed(&mut self, committed: bool) {
+        self.committed = committed;
+    }
 }
 
 impl RoutineExecutor for NeedRoutine {
@@ -223,6 +234,16 @@ pub struct SleepRoutine {
 impl SleepRoutine {
     pub const fn new() -> SleepRoutine {
         SleepRoutine { committed: false }
+    }
+
+    /// Whether it has committed to sleeping — all a save keeps of it.
+    pub(crate) fn is_committed(&self) -> bool {
+        let SleepRoutine { committed } = *self;
+        committed
+    }
+
+    pub(crate) fn set_committed(&mut self, committed: bool) {
+        self.committed = committed;
     }
 }
 

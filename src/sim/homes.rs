@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 
 use super::uid::Uid;
 
@@ -58,6 +59,28 @@ impl Homes {
         let bed = self.owners.iter().find(|&(_, &owner)| owner == uid).map(|(&bed, _)| bed)?;
         self.owners.remove(&bed);
         Some(bed)
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> Vec<pb::Home> {
+        let Homes { owners } = self;
+        owners.iter().map(|(&bed, &owner)| pb::Home { bed: Some(bed.into()), owner: owner.raw() }).collect()
+    }
+
+    /// The beds as given out. One bed to one owner, and one owner to a bed.
+    pub(crate) fn restore(saved: &[pb::Home]) -> Result<Homes, Invalid> {
+        let mut homes = Homes::new();
+        for home in saved {
+            let bed = pb::cell(home.bed, "bed")?;
+            let Some(owner) = Uid::from_raw(home.owner) else {
+                return invalid(format!("the bed at {}, {} is nobody's", bed.x, bed.y));
+            };
+            if homes.owners.values().any(|&other| other == owner) || !homes.claim(bed, owner) {
+                return invalid(format!("{owner} and the bed at {}, {} given twice", bed.x, bed.y));
+            }
+        }
+        Ok(homes)
     }
 
     /// How many beds have an owner.

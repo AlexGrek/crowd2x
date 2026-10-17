@@ -28,6 +28,7 @@ use rand::rngs::SmallRng;
 use rand::RngExt;
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 
 use super::background::{Due, Schedule};
 use super::biology::{Biology, Stats};
@@ -294,6 +295,37 @@ impl GameEntity for Human {
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
+
+    fn save(&self) -> pb::Kind {
+        let Human { walk, brain, biology, identity, inventory, talents, schedule } = self;
+        pb::Kind::Human(pb::Human {
+            walker: Some(walk.save()),
+            brain: Some(brain.save()),
+            biology: Some(biology.save()),
+            identity: Some(identity.save()),
+            inventory: Some(inventory.save()),
+            talents: talents.save(),
+            schedule: Some(schedule.save()),
+        })
+    }
+}
+
+impl Human {
+    /// A person as saved, standing beside a map whose navigation is at
+    /// `revision` ([`Walker::restore`]).
+    fn restore(saved: &pb::Human, revision: u64) -> Result<Human, Invalid> {
+        let mut brain = Brain::human();
+        brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        Ok(Human {
+            walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
+            brain,
+            biology: Biology::restore(pb::required(&saved.biology, "biology")?)?,
+            identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
+            inventory: Inventory::restore(pb::required(&saved.inventory, "inventory")?)?,
+            talents: Talents::restore(&saved.talents)?,
+            schedule: Schedule::restore(pb::required(&saved.schedule, "schedule")?)?,
+        })
+    }
 }
 
 /// A dog.
@@ -410,6 +442,35 @@ impl GameEntity for Dog {
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
+
+    fn save(&self) -> pb::Kind {
+        let Dog { walk, brain, facing, identity } = self;
+        pb::Kind::Dog(pb::Dog {
+            walker: Some(walk.save()),
+            brain: Some(brain.save()),
+            facing: match facing {
+                Facing::Left => pb::Facing::Left,
+                Facing::Right => pb::Facing::Right,
+            } as i32,
+            identity: Some(identity.save()),
+        })
+    }
+}
+
+impl Dog {
+    fn restore(saved: &pb::Dog, revision: u64) -> Result<Dog, Invalid> {
+        let mut brain = Brain::dog();
+        brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        Ok(Dog {
+            walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
+            brain,
+            facing: match pb::known::<pb::Facing>(saved.facing, "facing")? {
+                pb::Facing::Left => Facing::Left,
+                pb::Facing::Right => Facing::Right,
+            },
+            identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
+        })
+    }
 }
 
 /// Build an entity of a kind, at a cell.
@@ -431,6 +492,27 @@ pub(super) fn build(
             rng,
         )),
     }
+}
+
+/// An entity as a save has it — [`build`]'s twin, and like it the one place
+/// a saved kind and the concrete type behind it are tied together. The kind
+/// saved must be the kind its id says, or the entity would report a type its
+/// own id disagrees with. `revision` is the restored map's navigation
+/// revision ([`Walker::restore`]).
+pub(super) fn restore(saved: &pb::Kind, revision: u64) -> Result<Box<dyn GameEntity>, Invalid> {
+    let entity: Box<dyn GameEntity> = match saved {
+        pb::Kind::Human(human) => Box::new(Human::restore(human, revision)?),
+        pb::Kind::Dog(dog) => Box::new(Dog::restore(dog, revision)?),
+    };
+    let saved_as = match saved {
+        pb::Kind::Human(_) => EntityType::Human,
+        pb::Kind::Dog(_) => EntityType::Dog,
+    };
+    if entity.kind() != Some(saved_as) {
+        let uid = entity.uid();
+        return invalid(format!("{uid} saved as a {saved_as}"));
+    }
+    Ok(entity)
 }
 
 #[cfg(test)]

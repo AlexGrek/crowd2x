@@ -12,6 +12,8 @@ mod map;
 mod menu;
 mod qa;
 mod render;
+mod save;
+mod saves;
 mod sim;
 mod state;
 mod ui;
@@ -63,6 +65,9 @@ fn main() -> AppExit {
             lighting::LightingPlugin,
             awake::AwakePlugin,
             debug::DebugPlugin,
+            // After the editor and the debug harness, each of which may put a
+            // map in `CurrentMap` as it is built: `CROWD2X_LOAD` wins.
+            saves::SavesPlugin,
             qa::QaPlugin::new(script),
         ))
         .run()

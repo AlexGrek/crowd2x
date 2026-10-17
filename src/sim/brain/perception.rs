@@ -42,6 +42,7 @@
 use std::sync::LazyLock;
 
 use crate::map::{Map, Point};
+use crate::save::{pb, Invalid};
 use crate::sim::entity::{Body, Think};
 use crate::sim::uid::Uid;
 
@@ -377,6 +378,41 @@ pub struct Perception {
 impl Perception {
     pub fn heading(&self) -> Heading {
         self.heading
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Perception {
+        let Perception { heading, near, far } = *self;
+        let heading = match heading {
+            Heading::East => pb::Heading::East,
+            Heading::NorthEast => pb::Heading::NorthEast,
+            Heading::North => pb::Heading::North,
+            Heading::NorthWest => pb::Heading::NorthWest,
+            Heading::West => pb::Heading::West,
+            Heading::SouthWest => pb::Heading::SouthWest,
+            Heading::South => pb::Heading::South,
+            Heading::SouthEast => pb::Heading::SouthEast,
+        };
+        pb::Perception { heading: heading as i32, near: near as u32, far: far as u32 }
+    }
+
+    pub(crate) fn restore(saved: &pb::Perception) -> Result<Perception, Invalid> {
+        let heading = match pb::known::<pb::Heading>(saved.heading, "heading")? {
+            pb::Heading::East => Heading::East,
+            pb::Heading::NorthEast => Heading::NorthEast,
+            pb::Heading::North => Heading::North,
+            pb::Heading::NorthWest => Heading::NorthWest,
+            pb::Heading::West => Heading::West,
+            pb::Heading::SouthWest => Heading::SouthWest,
+            pb::Heading::South => Heading::South,
+            pb::Heading::SouthEast => Heading::SouthEast,
+        };
+        let count = |n: u32| u8::try_from(n).ok().filter(|&n| n as usize <= SIGHTINGS);
+        match (count(saved.near), count(saved.far)) {
+            (Some(near), Some(far)) => Ok(Perception { heading, near, far }),
+            _ => Err(Invalid::new(format!("saw {} near and {} far", saved.near, saved.far))),
+        }
     }
 
     /// Face the way the body is going, if it is going anywhere; otherwise keep

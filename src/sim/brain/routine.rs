@@ -30,6 +30,7 @@
 //! [`NeedRoutine`] that exists — unless it depends on something a stat is not,
 //! like the time of day, which is what [`SleepRoutine`] is.
 
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 
@@ -135,5 +136,39 @@ impl Routine {
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
+    }
+
+    // --- saving ---
+
+    /// What this routine remembers between ticks, under its name. A routine
+    /// with nothing to remember is named all the same, so that a load can
+    /// check it is restoring the brain it saved.
+    pub(crate) fn save(&self) -> pb::RoutineState {
+        let committed = match self {
+            Routine::Need(routine) => routine.is_committed(),
+            Routine::Sleep(routine) => routine.is_committed(),
+            Routine::StayBusy(StayBusyRoutine) => false,
+            Routine::Orders(OrdersRoutine) => false,
+            // A test's dial is set from outside every tick; nothing to keep.
+            #[cfg(test)]
+            Routine::Dial(_) => false,
+        };
+        pb::RoutineState { name: self.name().to_string(), committed }
+    }
+
+    /// Put back what [`Routine::save`] kept, into the routine in the same
+    /// place in a freshly built brain — which must be the same routine.
+    pub(crate) fn restore(&mut self, saved: &pb::RoutineState) -> Result<(), Invalid> {
+        if saved.name != self.name() {
+            return invalid(format!("routine {:?} where {:?} should be", saved.name, self.name()));
+        }
+        match self {
+            Routine::Need(routine) => routine.set_committed(saved.committed),
+            Routine::Sleep(routine) => routine.set_committed(saved.committed),
+            Routine::StayBusy(_) | Routine::Orders(_) => {}
+            #[cfg(test)]
+            Routine::Dial(_) => {}
+        }
+        Ok(())
     }
 }

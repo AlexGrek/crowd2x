@@ -148,6 +148,7 @@ pub mod occupancy;
 pub mod path;
 pub mod property;
 pub(crate) mod rng;
+mod saving;
 pub mod sun;
 pub mod talents;
 #[cfg(test)]
@@ -185,6 +186,7 @@ pub use path::find_path;
 pub use property::{Properties, PropertyId};
 pub use talents::{Talent, Talents};
 pub use uid::{EntityType, Uid};
+pub use saving::RestoredEntity;
 pub use walker::Walker;
 
 /// What an entity decided to do this tick.
@@ -508,8 +510,9 @@ pub struct GameState {
     /// Which beds have been given to whom. Written by the spawn pass and read
     /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
     homes: Homes,
-    /// Mints ids and seeds new entities. Seeded, so a run replays.
-    rng: SmallRng,
+    /// Mints ids and seeds new entities. Seeded, so a run replays; and a
+    /// named generator, so a save can keep its state ([`rng::WorldRng`]).
+    rng: rng::WorldRng,
     tick: u64,
     elapsed: f64,
     /// The back buffer, reused between ticks so the processing pass allocates
@@ -573,7 +576,7 @@ impl GameState {
             map,
             entities: Entities::new(),
             log: Log::new(),
-            rng: SmallRng::seed_from_u64(seed),
+            rng: rng::WorldRng::seed_from_u64(seed),
             tick: 0,
             elapsed: 0.0,
             intents: Vec::new(),
@@ -660,6 +663,12 @@ impl GameState {
     #[cfg(test)]
     pub(crate) fn keep_every_chunk(&mut self) {
         self.reclaim.on = false;
+    }
+
+    /// An entity to set up by hand, for a test in another module.
+    #[cfg(test)]
+    pub(crate) fn entity_mut(&mut self, uid: Uid) -> Option<&mut (dyn GameEntity + 'static)> {
+        self.entities.get_mut(uid)
     }
 
     /// How many chunks the occupancy layer holds off the site.

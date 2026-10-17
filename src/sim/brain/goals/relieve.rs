@@ -10,6 +10,7 @@
 //! it back out again, and eats it when eating is next in charge.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 
@@ -79,6 +80,16 @@ impl RelieveGoal {
 impl GoalExecutor for RelieveGoal {
     fn goal(&self) -> GoalId {
         GoalId::Relieve
+    }
+
+    fn save(&self) -> pb::Executor {
+        let RelieveGoal { seek } = self;
+        pb::Executor::Seek(seek.save())
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        self.seek = Seek::restore_only(saved, self.goal())?;
+        Ok(())
     }
 
     /// The half-walked route is gone, the toilet is not.

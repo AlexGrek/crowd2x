@@ -4,6 +4,7 @@
 //! ```text
 //! +---------------------------------------------------------------+
 //! | [-] x4 [+]              [slower] x1 [faster] [pause] [menu]    |
+//! |                                            [save] [quick save] |
 //! | map, crowd, clock                       what the world is doing |
 //! |                                                               |
 //! |                       the map                                 |
@@ -13,7 +14,8 @@
 //! **Top left is the view** — the zoom, which changes what you are looking at
 //! and nothing about the world — with the map's own numbers beneath it.
 //! **Top right is the world** — how fast it runs, whether it runs, and the way
-//! out — with the log of what it has been doing beneath *that*, because the
+//! out, then keeping it (`save`, `quick save`: [`super::saving`]) — with the
+//! log of what it has been doing beneath *that*, because the
 //! log is the readout for exactly those controls: pausing and speeding up are
 //! the things you then want to read the consequences of.
 //!
@@ -86,6 +88,7 @@ const KEY_HINTS: &str = "wasd/arrows/dpad/stick  move
           -/+ or L1/R1  speed
                 p or Y  pause
                o or R3  x-ray
+                    f5  quick save
              esc/start  menu";
 
 /// A button in one of the corners, and what pressing it asks for.
@@ -257,6 +260,9 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                 (Control::Spawn, plain_button("spawn", px(26))),
                 (Control::Menu, plain_button("menu", px(26))),
             ]),
+            // Keeping the world, under the controls that run it: a row of
+            // its own, since the row above is as wide as the canvas allows.
+            row(super::saving::buttons()),
             logview::panel(),
         ],
     ));

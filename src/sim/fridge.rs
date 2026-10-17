@@ -14,6 +14,7 @@
 
 use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::MINUTE;
 
 /// The prop name a fridge is painted with — the only one [`Fridges::from_map`]
@@ -132,6 +133,40 @@ impl Fridges {
             }
             None => false,
         }
+    }
+
+    // --- saving ---
+
+    /// Every fridge's door and temperature. Not whether it has power: that
+    /// is the supply's to say, and is worked out again from the map.
+    pub(crate) fn save(&self) -> Vec<pb::Fridge> {
+        self.iter()
+            .map(|(cell, state)| {
+                let FridgeState { open, temperature, powered: _ } = state;
+                pb::Fridge { cell: Some(cell.into()), open, temperature }
+            })
+            .collect()
+    }
+
+    /// Put back every fridge's door and temperature, into fridges found on
+    /// the same map: the same fridges, in the same cells, or the save is not
+    /// of this map.
+    pub(crate) fn restore(&mut self, saved: &[pb::Fridge]) -> Result<(), Invalid> {
+        if saved.len() != self.cells.len() {
+            return invalid(format!("{} fridges saved for a map with {}", saved.len(), self.cells.len()));
+        }
+        for fridge in saved {
+            let cell = pb::cell(fridge.cell, "fridge")?;
+            let Some(i) = self.index(cell) else {
+                return invalid(format!("no fridge at {}, {}", cell.x, cell.y));
+            };
+            if !fridge.temperature.is_finite() {
+                return invalid(format!("the fridge at {}, {} is {} degrees", cell.x, cell.y, fridge.temperature));
+            }
+            self.states[i].open = fridge.open;
+            self.states[i].temperature = fridge.temperature;
+        }
+        Ok(())
     }
 
     /// Plug every fridge in or out according to `supply` — a box switched.

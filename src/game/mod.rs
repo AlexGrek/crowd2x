@@ -59,6 +59,7 @@ pub mod pool;
 pub mod hud;
 pub mod logview;
 pub mod props;
+pub mod saving;
 pub mod selection;
 pub mod speed;
 pub mod unitpanel;
@@ -70,7 +71,7 @@ use bevy::window::PrimaryWindow;
 use crate::editor::{background, map_centre, CurrentMap};
 use crate::render::{half_view, CameraPan, CameraTarget, PixelZoom, PIXEL_SCALE, WorldCamera};
 use crate::state::AppState;
-use crate::ui::nav::{NavSystems, Scope};
+use crate::ui::nav::{not_typing, NavSystems, Scope};
 use crate::view::ViewSystems;
 
 /// Camera speed at the default zoom, in canvas pixels per second.
@@ -110,6 +111,7 @@ impl Plugin for GamePlugin {
             selection::SelectionPlugin,
             unitpanel::UnitPanelPlugin,
             boxpanel::BoxPanelPlugin,
+            saving::SavingPlugin,
         ))
             .configure_sets(
                 Update,
@@ -122,7 +124,7 @@ impl Plugin for GamePlugin {
                 (move_camera, change_zoom, leave)
                     .chain()
                     .after(NavSystems)
-                    .run_if(in_state(AppState::Game)),
+                    .run_if(in_state(AppState::Game).and_then(not_typing)),
             );
     }
 }

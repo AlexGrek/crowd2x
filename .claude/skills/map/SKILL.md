@@ -155,3 +155,12 @@ never reaches a file. Three things about the shape:
 - **Nothing is repaired on load.** A short row, an unknown object layer, a size of zero,
   an object off the map — each is a `MapFormatError`, because padding or dropping produces
   a map that looks right and isn't. `FORMAT_VERSION` is checked first.
+
+## In a saved game (`map/save.rs`)
+
+A `.savegame` holds its own copy of the site (`Map::save_site` / `restore_site`, `map.pb`):
+everything a map file holds, by name — a terrain palette and indices, grid layers as raw
+values checked against each layer's alphabet, objects by name — rebuilt in the same order
+`from_json` builds a map, so passability is derived and never trusted. The wasteland round it
+is `save_chunks` / `restore_chunks` (`wasteland` skill). `salvaged` is never in a map file but
+is in a save. The rest: `savegame` skill.

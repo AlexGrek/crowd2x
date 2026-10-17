@@ -17,6 +17,8 @@
 use rand::rngs::SmallRng;
 use rand::RngExt;
 
+use crate::save::{invalid, pb, Invalid};
+
 /// A person's needs and condition. Every field is on a 0-100 scale except
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
@@ -100,6 +102,23 @@ impl Stats {
 
     pub(super) fn change_satisfaction(&mut self, by: f32) {
         self.satisfaction = need(self.satisfaction + by);
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Stats {
+        let Stats { health, stamina, fun, hunger, thirst, bladder, mental_health, attention, satisfaction } = *self;
+        pb::Stats { health, stamina, fun, hunger, thirst, bladder, mental_health, attention, satisfaction }
+    }
+
+    /// The stats as saved, exactly — but never a number that is not one.
+    pub(crate) fn restore(saved: &pb::Stats) -> Result<Stats, Invalid> {
+        let pb::Stats { health, stamina, fun, hunger, thirst, bladder, mental_health, attention, satisfaction } = *saved;
+        let stats = Stats { health, stamina, fun, hunger, thirst, bladder, mental_health, attention, satisfaction };
+        if let Some((name, value)) = stats.fields().into_iter().find(|(_, value)| !value.is_finite()) {
+            return invalid(format!("stats: {name} is {value}"));
+        }
+        Ok(stats)
     }
 
     /// Every stat at the middle of its range — a person with nothing unusual

@@ -128,6 +128,41 @@ impl Chunk {
         chunk
     }
 
+    /// A chunk from its tiles and its heaps as found, by local index
+    /// ascending — a saved one. The two bits are worked out from them as
+    /// [`Chunk::generate`] works them out, so a stored chunk cannot claim a
+    /// cell is open that its ground says is not.
+    pub fn from_parts(tiles: [TerrainId; CHUNK_AREA], scrap: Vec<(u16, Scrap)>) -> Box<Chunk> {
+        debug_assert!(scrap.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        let mut chunk = Box::new(Chunk {
+            tiles,
+            passable: [0; CHUNK_AREA / 64],
+            see_through: [0; CHUNK_AREA / 64],
+            scrap,
+        });
+        for index in 0..CHUNK_AREA {
+            let tile = chunk.tiles[index];
+            let heap = chunk.scrap.binary_search_by_key(&(index as u16), |&(at, _)| at).is_ok();
+            if tile.is_passable() && !heap {
+                chunk.passable[index / 64] |= 1 << (index % 64);
+            }
+            if tile.is_see_through() {
+                chunk.see_through[index / 64] |= 1 << (index % 64);
+            }
+        }
+        chunk
+    }
+
+    /// Every tile, row-major: what a save keeps of the ground.
+    pub fn tiles(&self) -> &[TerrainId; CHUNK_AREA] {
+        &self.tiles
+    }
+
+    /// Every heap of scrap as it was found, by local index ascending.
+    pub fn found(&self) -> &[(u16, Scrap)] {
+        &self.scrap
+    }
+
     /// The heap of scrap in a cell of this chunk as it was found — whatever
     /// has been taken from it since, which the map keeps
     /// (`Map::scrap`). A binary search of the chunk's few heaps.

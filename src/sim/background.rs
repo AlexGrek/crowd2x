@@ -46,6 +46,8 @@
 //! from the spawn RNG, and after that a schedule is a function of how many
 //! times it has been ticked.
 
+use crate::save::{invalid, pb, Invalid};
+
 /// How often a background task runs. The discriminant is its period, in ticks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -163,6 +165,60 @@ impl Schedule {
             .map(|&priority| format!("{} {}", priority.name(), self.ticks_until(priority)))
             .collect();
         ("background in", left.join(", "))
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Schedule {
+        let Schedule { seed, left, pending } = self;
+        pb::Schedule {
+            seed: *seed,
+            slots: Priority::ALL
+                .iter()
+                .map(|&priority| pb::ScheduleSlot {
+                    priority: pb::Priority::from(priority) as i32,
+                    left: left[priority.slot()] as u32,
+                    pending: pending[priority.slot()],
+                })
+                .collect(),
+        }
+    }
+
+    /// The schedule as saved. A priority the save does not mention starts
+    /// where a new unit's would, from the seed.
+    pub(crate) fn restore(saved: &pb::Schedule) -> Result<Schedule, Invalid> {
+        let mut schedule = Schedule::new(saved.seed);
+        for slot in &saved.slots {
+            let priority = Priority::from(pb::known::<pb::Priority>(slot.priority, "schedule")?);
+            if !(1..=priority.period() as u32).contains(&slot.left) {
+                return invalid(format!("schedule: {} is due in {} ticks", priority.name(), slot.left));
+            }
+            schedule.left[priority.slot()] = slot.left as u8;
+            schedule.pending[priority.slot()] = slot.pending;
+        }
+        Ok(schedule)
+    }
+}
+
+impl From<Priority> for pb::Priority {
+    fn from(priority: Priority) -> pb::Priority {
+        match priority {
+            Priority::High => pb::Priority::High,
+            Priority::Med => pb::Priority::Med,
+            Priority::Low => pb::Priority::Low,
+            Priority::VeryLow => pb::Priority::VeryLow,
+        }
+    }
+}
+
+impl From<pb::Priority> for Priority {
+    fn from(priority: pb::Priority) -> Priority {
+        match priority {
+            pb::Priority::High => Priority::High,
+            pb::Priority::Med => Priority::Med,
+            pb::Priority::Low => Priority::Low,
+            pb::Priority::VeryLow => Priority::VeryLow,
+        }
     }
 }
 

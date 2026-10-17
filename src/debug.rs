@@ -19,9 +19,11 @@
 //! | `CROWD2X_SHOT_DELAY` | Seconds to run before capturing, so assets finish loading. | `3.0` |
 //! | `CROWD2X_WINDOW` | Resize the window to `WxH` on startup, before capturing. | window default |
 //! | `CROWD2X_EXIT` | Quit after this many seconds even without a capture. | off |
-//! | `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
+//! | `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `saves`, `editor` or `game`. | `menu` (`game` with `CROWD2X_LOAD`) |
 //! | `CROWD2X_MAP` | Open this saved map, instead of a scratch one. | scratch |
 //! | `CROWD2X_DISTRICT` | Open a district generated from this seed (wins over `CROWD2X_MAP`). | off |
+//! | `CROWD2X_LOAD` | Open this saved game — a `.savegame` path, or `newest` — in the game (wins over both). | off |
+//! | `CROWD2X_SAVES` | Keep saved games here instead of `.saves/`. | `.saves` |
 //! | `CROWD2X_ZOOM` | Start at this zoom (screen pixels per canvas pixel). | `4` |
 //! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 //! | `CROWD2X_SPAWN` | Scatter this many actors on the map when the game screen opens. | none |
@@ -33,6 +35,7 @@
 //! CROWD2X_SHOT=/tmp/game.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 //! CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
 //! CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run
+//! CROWD2X_SHOT=/tmp/loaded.png CROWD2X_LOAD=newest cargo run
 //! CROWD2X_EXIT=5 cargo run          # smoke run, no capture
 //! ```
 //!
@@ -164,6 +167,10 @@ fn spawn_actors_from_env(app: &mut App) {
 /// the editor impossible to check unattended.
 pub fn initial_state() -> AppState {
     let Ok(raw) = std::env::var(ENV_STATE) else {
+        // A save to open means the game, unless something else was asked.
+        if std::env::var(crate::saves::ENV_LOAD).is_ok() {
+            return AppState::Game;
+        }
         return AppState::default();
     };
     AppState::from_name(&raw).unwrap_or_else(|| {

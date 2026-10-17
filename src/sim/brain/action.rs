@@ -8,6 +8,7 @@
 //! met — belongs to the task that started it ([`super::tasks`]).
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::entity::Think;
 use crate::sim::walker::Walker;
 use crate::sim::MoveOutcome;
@@ -37,6 +38,50 @@ pub enum ActionState {
 }
 
 impl Action {
+    // --- saving ---
+
+    pub(crate) fn save(self) -> pb::Action {
+        let kind = match self {
+            Action::None => None,
+            Action::Move { to, elapsed } => Some(pb::ActionKind::Move(pb::MoveAction { to: Some(to.into()), elapsed })),
+            Action::Interact { cell, seconds, elapsed } => {
+                Some(pb::ActionKind::Interact(pb::InteractAction { cell: Some(cell.into()), seconds, elapsed }))
+            }
+            Action::Consume { seconds, elapsed } => Some(pb::ActionKind::Consume(pb::TimedAction { seconds, elapsed })),
+            Action::Wait { seconds, elapsed } => Some(pb::ActionKind::Wait(pb::TimedAction { seconds, elapsed })),
+        };
+        pb::Action { kind }
+    }
+
+    pub(crate) fn restore(saved: Option<&pb::Action>) -> Result<Action, Invalid> {
+        let finite = |seconds: f32, elapsed: f32| {
+            if seconds.is_finite() && elapsed.is_finite() {
+                Ok((seconds, elapsed))
+            } else {
+                invalid(format!("action: {elapsed} of {seconds} seconds"))
+            }
+        };
+        Ok(match saved.and_then(|action| action.kind) {
+            None => Action::None,
+            Some(pb::ActionKind::Move(walk)) => {
+                let (_, elapsed) = finite(0.0, walk.elapsed)?;
+                Action::Move { to: pb::cell(walk.to, "walk")?, elapsed }
+            }
+            Some(pb::ActionKind::Interact(using)) => {
+                let (seconds, elapsed) = finite(using.seconds, using.elapsed)?;
+                Action::Interact { cell: pb::cell(using.cell, "interaction")?, seconds, elapsed }
+            }
+            Some(pb::ActionKind::Consume(eating)) => {
+                let (seconds, elapsed) = finite(eating.seconds, eating.elapsed)?;
+                Action::Consume { seconds, elapsed }
+            }
+            Some(pb::ActionKind::Wait(waiting)) => {
+                let (seconds, elapsed) = finite(waiting.seconds, waiting.elapsed)?;
+                Action::Wait { seconds, elapsed }
+            }
+        })
+    }
+
     /// **The far route is asked for here, and nowhere else.** A walk to `cell`,
     /// or `None` when there is no way there — in which case the walker is left
     /// with no route.

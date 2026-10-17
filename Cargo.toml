@@ -9,6 +9,9 @@ edition = "2024"
 # matching umbrella for bevy_ui: layout, widgets, input focus and the UI
 # renderer, which the menu and the editor HUD are built out of.
 bevy = { version = "0.19", default-features = false, features = ["2d", "ui", "png", "jpeg"] }
+# The local date and time a save file is named after (`save::store`). Only
+# the clock: no serde, no formatting locales.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # The simulation's log queue. Bounded, lock-free, and already in the tree via
 # Bevy, so naming it directly costs no compile time. See `src/sim/log.rs`.
 crossbeam-queue = "0.3"
@@ -17,7 +20,14 @@ crossbeam-queue = "0.3"
 # (`fake_with_rng`), so a name is as deterministic as the stats rolled
 # alongside it and costs no RNG of its own.
 fake = "5.1.0"
-rand = "0.10"
+# Save files are Protobuf (`src/save/`): messages written as Rust structs
+# with `#[derive(prost::Message)]` and explicit tags, so there is no `.proto`,
+# no build script and no `protoc`. Protobuf because a save has to keep loading
+# as the game grows: a new field is a new tag, and an old reader skips it.
+prost = { version = "0.14.4", default-features = false, features = ["derive", "std"] }
+# `serde` only to read the world's id RNG state out for a save
+# (`sim::rng::state_of`).
+rand = { version = "0.10", features = ["serde"] }
 # The think and react rounds run across threads: rayon over the entity arena,
 # each thread holding one entity and writing one slot. It is the simulation's
 # executor and not Bevy's on purpose — `src/sim/` imports no bevy, and the
@@ -29,6 +39,10 @@ rayon = "1.11"
 # because a map wants a format other tools and a human in a diff can read.
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# A `.savegame` is a zip of those Protobuf files. Deflate only, through the
+# flate2/zlib-rs already in the tree, so any zip tool opens a save; its
+# `ZipFileBuilder` compresses the entries in parallel.
+zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Bevy is unusably slow in a fully unoptimized debug build; optimize the
 # dependencies hard and our own crate lightly so iteration stays fast.

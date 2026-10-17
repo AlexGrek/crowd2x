@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 use crate::state::AppState;
-use crate::ui::nav::NavSystems;
+use crate::ui::nav::{not_typing, NavSystems};
 
 use super::actors::Sim;
 
@@ -99,6 +99,30 @@ impl GameSpeed {
         moved
     }
 
+    pub fn is_paused(self) -> bool {
+        self.paused
+    }
+
+    /// Pause or carry on, keeping the speed.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
+    /// The speed whose multiplier is `multiplier`, paused or not — a saved
+    /// game's. Returns `false`, leaving the speed alone but for the pause,
+    /// for a multiplier there is no speed for.
+    pub fn restore(&mut self, multiplier: f32, paused: bool) -> bool {
+        self.paused = paused;
+        self.pending = 0.0;
+        match SPEEDS.iter().position(|&speed| speed == multiplier) {
+            Some(index) => {
+                self.index = index;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn toggle_pause(&mut self) {
         self.paused = !self.paused;
     }
@@ -146,7 +170,7 @@ impl Plugin for SpeedPlugin {
             .add_systems(OnExit(AppState::Game), leave)
             .add_systems(
                 Update,
-                read_keys.after(NavSystems).run_if(in_state(AppState::Game)),
+                read_keys.after(NavSystems).run_if(in_state(AppState::Game).and_then(not_typing)),
             );
     }
 }

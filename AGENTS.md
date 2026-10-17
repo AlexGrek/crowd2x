@@ -8,7 +8,8 @@ crowd2x is a 2D pixel-art crowd simulation built on Bevy 0.19. Art was imported
 wholesale from an earlier prototype; all code is new.
 What exists is the pixel-perfect render pipeline, a menu, a map browser, a two-layer map
 editor backed by a saved map format, a game screen that loads a map and runs a simulation
-on it, and a scripted QA harness that drives all of it. The simulation is a `GameState`
+on it, saved games (`.saves/*.savegame`, loaded from the main menu), and a scripted QA
+harness that drives all of it. The simulation is a `GameState`
 advanced by one function, and every unit in it runs a brain — routines, goals, tasks,
 actions. What those brains do so far is wander, eat and drink at a fridge, and use a toilet
 — driven by biological processes (hunger, thirst, a bladder that a drink fills) that can be
@@ -757,6 +758,33 @@ many screen pixels a cell is drawn at is a fact about the art, and `actors.rs` i
 is applied. For the same reason nothing here knows what a human looks like — it supplies
 an `appearance_seed`, and `characters/` decides which PNGs that means.
 
+### Saved games (`src/save/`, `src/game/saving.rs`, `src/saves.rs`)
+
+A save is `.saves/{YYYY-MM-DD_HH-MM-SS}.savegame` (`CROWD2X_SAVES` moves the directory): a
+**zip of Protobuf files** written with `prost` — `manifest.pb`, `map.pb` (the whole site, by
+name), `world.pb` (clock, id RNG, switches, fridges, doors, beds, arena layout),
+`chunks/NNNN.pb` (every loaded chunk of the wasteland stored verbatim, and every salvage
+tally), `entities/NNNN.pb` (the arena, slot by slot) and an optional `view.pb` (camera, zoom,
+speed). The schema is Rust structs with explicit tags in `src/save/pb/` — no `.proto`, no
+build script — and evolves by Protobuf's rules: a tag is forever, a new field's default means
+"as before", a new file is optional, content is stored by name, a load refuses what it does
+not understand rather than repairing it, and `src/save/testdata/format1.savegame` must keep
+loading.
+
+**A loaded world carries on bit for bit as the saved one would have**, unfinished route
+searches included, and `save::tests` runs the two side by side to prove it. So **new state is
+saved state**: each type saves itself in a `// --- saving ---` section of its own module, every
+`save` destructures its struct exhaustively (a new field fails the build until it is saved or
+skipped), `GameEntity::save` and `GoalExecutor::save`/`restore` have no default, and derived
+state (features, supply, locks) is rebuilt from the map on load.
+
+Saving encodes on the main thread (crowd shards in parallel, ~23 ms for 20000 humans in
+release) and compresses and writes on a thread of its own (Deflate level 1, entries in
+parallel on a dedicated pool). In the game: `save` (named, the world paused behind the
+on-screen keyboard) and `quick save` / `F5` (the newest four kept), in a row under the world
+controls. Loading is only from the main menu's **Load** screen (`AppState::Saves`);
+`CROWD2X_LOAD=<path|newest>` boots straight into a save. Full detail: the `savegame` skill.
+
 ### Scripted QA (`src/qa/`, `qa/*.json`, `tools/qa.py`)
 
 `cargo test` covers the plain-Rust parts and `debug.rs` can photograph a frame, but
@@ -897,11 +925,15 @@ src/ui/                 UiPlugin, shared widgets; nav.rs (focus), keyboard.rs (t
 src/menu.rs             MainMenuPlugin
 src/editor/             EditorPlugin, background.rs + props.rs
 src/browser.rs          BrowserPlugin - the saved-maps screen
+src/saves.rs            SavesPlugin - the Load screen (saved games), CROWD2X_LOAD
+src/save/               the .savegame: pb/ (Protobuf schema), archive.rs (zip),
+                        store.rs (.saves/), mod.rs (snapshot / restore) - no bevy
 src/game/               GamePlugin - playing a map: camera, zoom, clamped to the map
                         actors.rs is the sim-to-sprite bridge; logview.rs shows the log
                         speed.rs is how fast the world runs; hud.rs the two corners
                         selection.rs is who was clicked; unitpanel.rs the bar about them
                         held.rs draws what a hand holds, in front of its carrier
+                        saving.rs is save / quick save, and opening a loaded game
 src/map/                the map + coordinate system - plain Rust, no bevy
 src/sim/                GameState + spawn_pass/process_pass - plain Rust, no bevy
                         uid.rs, entity.rs, kinds.rs, entities.rs (the arena), log.rs
@@ -928,6 +960,7 @@ qa/                     scripted QA tests, one JSON file each; fixtures/ holds m
 qa-screenshots/         what those tests photographed (gitignored)
 qa-perf/                what the perf tests measured (gitignored: one machine's evidence)
 maps/                   saved maps (gitignored; CROWD2X_MAPS points elsewhere)
+.saves/                 saved games (gitignored; CROWD2X_SAVES points elsewhere)
 assets/                 imported wholesale from an earlier prototype (layout preserved; .tmx maps not imported)
 ```
 

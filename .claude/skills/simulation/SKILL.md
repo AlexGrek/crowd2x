@@ -110,6 +110,23 @@ letting it go again carries on rather than starting over. `GameEntity::debug_fie
 other half of that pair — what a kind would tell a debugger about itself, allocating
 freely because it is asked about the one entity somebody has selected and never in a tick.
 
+### Saving it (`sim/saving.rs`, `savegame` skill)
+
+**A world saved and loaded carries on bit for bit as the saved one would have**, and
+`save::tests` runs the two side by side to prove it. `GameState::save_world` /
+`save_entities` (parallel, `SLOTS_PER_FILE` slots a shard) / `GameState::restore` live in
+`sim/saving.rs`, a child of `sim` so they read the private fields; `restore` builds the world
+the way `new` does — everything derived from the map derived again — then applies the saved
+clock, id RNG, boxes, street lights, switches (through `refresh_supply`), fridges, doors,
+beds, the arena (slots, holes, serials, free-list order), and who holds which cell. It does
+not prepare or reclaim chunks: the next spawn pass does, as it would have. The id allocator
+is `rng::WorldRng` (xoshiro256++, the stream `SmallRng` always was) so its state can be saved.
+
+So **any new field on `GameState`, an entity kind or anything inside one must be saved** — a
+tag in `src/save/pb/`, and `save`/`restore` beside the field — unless it is overwritten every
+tick or only says how memory is used. `GameEntity::save` has no default; every `save`
+destructures exhaustively, so the build finds what is missing.
+
 ### What a unit carries (`sim/inventory.rs`, `sim/item.rs`)
 
 An `ItemKind` says **what it is made of** — `nutrition`, `hydration`, and a `mass` in

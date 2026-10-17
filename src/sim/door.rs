@@ -36,6 +36,7 @@
 //! [`Body::home`]: crate::sim::Body::home
 
 use crate::map::{Map, ObjectLayer, Point, Size};
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 
 use super::occupancy::Occupancy;
@@ -205,6 +206,38 @@ impl Doors {
 
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
+    }
+
+    // --- saving ---
+
+    /// How far open every door is, and how long it is held. Not its lock,
+    /// which the map and its properties say.
+    pub(crate) fn save(&self) -> Vec<pb::Door> {
+        self.iter()
+            .map(|(cell, state)| {
+                let DoorState { openness, held, lock: _ } = state;
+                pb::Door { cell: Some(cell.into()), openness, held }
+            })
+            .collect()
+    }
+
+    /// Put back every leaf, into doors found on the same map.
+    pub(crate) fn restore(&mut self, saved: &[pb::Door]) -> Result<(), Invalid> {
+        if saved.len() != self.cells.len() {
+            return invalid(format!("{} doors saved for a map with {}", saved.len(), self.cells.len()));
+        }
+        for door in saved {
+            let cell = pb::cell(door.cell, "door")?;
+            let Some(i) = self.index(cell) else {
+                return invalid(format!("no door at {}, {}", cell.x, cell.y));
+            };
+            if !((0.0..=1.0).contains(&door.openness) && door.held.is_finite() && door.held >= 0.0) {
+                return invalid(format!("the door at {}, {} is {} open, held {}", cell.x, cell.y, door.openness, door.held));
+            }
+            self.states[i].openness = door.openness;
+            self.states[i].held = door.held;
+        }
+        Ok(())
     }
 
     /// Somebody holding `key` wants to go through the door in `cell`: start

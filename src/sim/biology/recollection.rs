@@ -32,6 +32,7 @@
 
 use crate::sim::background::{BackgroundTask, Priority};
 use crate::sim::clock::HOUR;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::item::ItemKind;
 
 use super::Event;
@@ -185,6 +186,44 @@ impl Recollection {
     }
 
     /// It happened: one more time to remember.
+    // --- saving ---
+
+    /// Every experience it recalls at all.
+    pub(crate) fn save(&self) -> Vec<pb::Familiarity> {
+        let Recollection { familiarity } = self;
+        Experience::ALL
+            .iter()
+            .filter(|&&experience| familiarity[experience.slot()] != 0.0)
+            .map(|&experience| {
+                let (kind, item) = match experience {
+                    Experience::Taste(item) => (pb::ExperienceKind::Taste, item.name().to_string()),
+                    Experience::Entertainment => (pb::ExperienceKind::Entertainment, String::new()),
+                    Experience::Company => (pb::ExperienceKind::Company, String::new()),
+                };
+                pb::Familiarity { kind: kind as i32, item, value: familiarity[experience.slot()] }
+            })
+            .collect()
+    }
+
+    pub(crate) fn restore(saved: &[pb::Familiarity]) -> Result<Recollection, Invalid> {
+        let mut recollection = Recollection::default();
+        for entry in saved {
+            let experience = match pb::known::<pb::ExperienceKind>(entry.kind, "familiarity")? {
+                pb::ExperienceKind::Taste => match ItemKind::from_name(&entry.item) {
+                    Some(item) => Experience::Taste(item),
+                    None => return invalid(format!("familiarity: no such item {:?}", entry.item)),
+                },
+                pb::ExperienceKind::Entertainment => Experience::Entertainment,
+                pb::ExperienceKind::Company => Experience::Company,
+            };
+            if !entry.value.is_finite() || entry.value < 0.0 {
+                return invalid(format!("familiarity with {} is {}", experience.name(), entry.value));
+            }
+            recollection.familiarity[experience.slot()] = entry.value;
+        }
+        Ok(recollection)
+    }
+
     pub fn remember(&mut self, experience: Experience) {
         let familiarity = &mut self.familiarity[experience.slot()];
         *familiarity = (*familiarity + 1.0).min(experience.most_familiar());

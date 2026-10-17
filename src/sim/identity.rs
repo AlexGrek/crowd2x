@@ -18,6 +18,8 @@ use fake::faker::name::en::{FirstName, LastName};
 use rand::rngs::SmallRng;
 use rand::RngExt;
 
+use crate::save::{pb, Invalid};
+
 /// Two genders, each as likely as the other at spawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Gender {
@@ -77,6 +79,29 @@ impl Identity {
 
     pub fn gender(&self) -> Gender {
         self.gender
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Identity {
+        let Identity { name, gender } = self;
+        pb::Identity {
+            name: name.clone(),
+            gender: match gender {
+                Gender::Male => pb::Gender::Male,
+                Gender::Female => pb::Gender::Female,
+            } as i32,
+        }
+    }
+
+    pub(crate) fn restore(saved: &pb::Identity) -> Result<Identity, Invalid> {
+        Ok(Identity {
+            name: saved.name.clone(),
+            gender: match pb::known::<pb::Gender>(saved.gender, "gender")? {
+                pb::Gender::Male => Gender::Male,
+                pb::Gender::Female => Gender::Female,
+            },
+        })
     }
 }
 

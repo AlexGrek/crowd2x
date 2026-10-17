@@ -1,0 +1,76 @@
+{
+  "name": "save a game, quick save it, and load it back from the menu",
+  "state": "maps",
+  "given": {
+    "maps": [
+      { "name": "town", "district": 7 }
+    ]
+  },
+  "steps": [
+    { "press": "town" },
+    { "expect_state": "game" },
+    { "tick": 1000 },
+    { "expect_world_time": { "hours": 0.5 } },
+    { "expect_saves": { "count": 0 } },
+
+    { "note": "save asks for a name, with the world paused behind it" },
+    { "press": "save" },
+    { "expect_speed": "paused" },
+    { "shot": "naming the save" },
+    { "name": "before lunch" },
+    { "key": "enter" },
+    { "expect_saves": { "count": 1, "quick": 0 } },
+    { "note": "and the speed it had comes back" },
+    { "expect_speed": "x1" },
+    { "expect_log": "saved \"before lunch\"" },
+
+    { "note": "escape while naming saves nothing, and does not leave the game" },
+    { "press": "save" },
+    { "key": "esc" },
+    { "expect_state": "game" },
+    { "expect_speed": "x1" },
+    { "expect_saves": { "count": 1 } },
+
+    { "note": "a quick save is one press, and only the newest four are kept" },
+    { "key": "f5" },
+    { "expect_saves": { "count": 2, "quick": 1 } },
+    { "press": "quick save" },
+    { "expect_saves": { "count": 3, "quick": 2 } },
+    { "key": "f5" },
+    { "key": "f5" },
+    { "key": "f5" },
+    { "expect_saves": { "count": 5, "quick": 4 } },
+    { "tick": 300 },
+
+    { "note": "loading is the main menu's, never the game's" },
+    { "key": "esc" },
+    { "expect_state": "maps" },
+    { "key": "esc" },
+    { "expect_state": "menu" },
+    { "press": "Load" },
+    { "expect_state": "saves" },
+    { "shot": "the saves, newest first" },
+
+    { "note": "a save's name is the button that loads it" },
+    { "press": "before lunch" },
+    { "expect_state": "game" },
+    { "expect_world_time": { "hours": 0.5 } },
+    { "note": "the lightmap is baked for the loaded world, switches and all" },
+    { "expect_lighting": {} },
+    { "shot": "loaded where it was saved" },
+
+    { "note": "and a save can be deleted, after saying so" },
+    { "key": "esc" },
+    { "key": "esc" },
+    { "expect_state": "menu" },
+    { "press": "Load" },
+    { "focus": "back" },
+    { "key": "down" },
+    { "key": "right" },
+    { "expect_focus": "delete" },
+    { "key": "enter" },
+    { "shot": "asked first" },
+    { "press": "delete" },
+    { "expect_saves": { "count": 4 } }
+  ]
+}

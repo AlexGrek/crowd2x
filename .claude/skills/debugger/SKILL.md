@@ -31,8 +31,10 @@ the binary directly produces a window full of nothing and a wall of `Path not fo
 | `CROWD2X_SHOT_DELAY` | Seconds to run before capturing. Raise it if new assets are slow. | `3.0` |
 | `CROWD2X_WINDOW` | Force the window to `WxH` before capturing. | window default |
 | `CROWD2X_EXIT` | Quit after N seconds even with no capture. | off |
-| `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `editor` or `game`. | `menu` |
+| `CROWD2X_STATE` | Boot straight into `menu`, `maps`, `saves`, `editor` or `game`. | `menu` (`game` with `CROWD2X_LOAD`) |
 | `CROWD2X_MAP` | Open this saved map instead of a scratch one. | scratch |
+| `CROWD2X_LOAD` | Open this saved game — a `.savegame` path, or `newest` — in the game screen, camera and zoom as saved. Wins over `CROWD2X_MAP`/`CROWD2X_DISTRICT`. | off |
+| `CROWD2X_SAVES` | Read and write saved games here instead of `.saves/`. | `.saves` |
 | `CROWD2X_ZOOM` | Start at this zoom, 1-8 screen pixels per canvas pixel. | `4` |
 | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
 | `CROWD2X_SPAWN` | Scatter N actors on the map when the game screen opens. | none |
@@ -164,6 +166,7 @@ CROWD2X_SHOT=/tmp/edit.png CROWD2X_STATE=editor cargo run      # skip the menu
 CROWD2X_SHOT=/tmp/play.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_ZOOM=6 cargo run
 CROWD2X_SHOT=/tmp/crowd.png CROWD2X_STATE=game CROWD2X_MAP=office CROWD2X_SPAWN=20 cargo run
 CROWD2X_SHOT=/tmp/town.png CROWD2X_STATE=game CROWD2X_DISTRICT=7 CROWD2X_ZOOM=1 cargo run   # a generated district
+CROWD2X_SHOT=/tmp/loaded.png CROWD2X_LOAD=newest cargo run     # the newest saved game, as it was saved
 CROWD2X_EXIT=3 cargo run                                       # smoke run, no capture
 CROWD2X_LIGHT_CHECK=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run   # GPU lightmap vs CPU reference, logged
 CROWD2X_LIGHT_STRESS=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run --release  # full re-bake every frame, GPU time logged

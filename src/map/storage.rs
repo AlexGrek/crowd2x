@@ -203,9 +203,12 @@ impl MapStore {
 /// Write beside the destination, flush it, then replace the old file in one
 /// rename. The old save remains intact if writing or replacement fails.
 /// `write` is also the fault-injection seam for a partial-write regression.
-fn write_atomic(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
+/// Write `path` whole or not at all: into a temporary file beside it, synced,
+/// then renamed over it — so a crash mid-write leaves the old file, never
+/// half of the new one. Saved games are written the same way (`crate::save`).
+pub(crate) fn write_atomic(path: &Path, write: impl FnOnce(&mut fs::File) -> io::Result<()>) -> io::Result<()> {
     static SERIAL: AtomicU64 = AtomicU64::new(0);
-    let directory = path.parent().expect("a map file has a store directory");
+    let directory = path.parent().expect("a file in a store has a store directory");
     let (temporary, mut file) = loop {
         let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
         let temporary = directory.join(format!(".crowd2x-{}-{serial}.tmp", std::process::id()));

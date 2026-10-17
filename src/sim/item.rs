@@ -113,6 +113,11 @@ impl ItemKind {
         }
     }
 
+    /// The kind called `name` ([`ItemKind::name`]) — how a save names one.
+    pub fn from_name(name: &str) -> Option<ItemKind> {
+        ItemKind::ALL.into_iter().find(|item| item.name() == name)
+    }
+
     /// How long using this up takes.
     ///
     /// On the item, rather than in whichever goal consumes it: a goal that

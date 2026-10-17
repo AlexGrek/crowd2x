@@ -82,6 +82,14 @@ This order has consequences:
 Never add a Bevy system that decides something, a `Component` holding agent state, or a new
 `Intent` variant for a behaviour. `Intent` stays `Idle | Move`.
 
+**Whatever you add with state is saved** (`savegame` skill). A goal executor implements
+`GoalExecutor::save`/`restore` (no default; reuse `pb::Executor::Seek`/`Fetch`/`Wander` or add
+a variant), a task variant needs a `pb::TaskKind` arm in `Task::save`/`restore`, an action
+variant one in `Action::save`/`restore`, a routine with memory one in `Routine::save`/`restore`,
+a process with state a field in `Biology::save`, a memory key nothing (memory is saved whole).
+Every `save` destructures its struct exhaustively, so the build points at what was missed; the
+side-by-side tests in `save::tests` catch what changes behaviour after a load.
+
 ## Rules that were each a bug, or would be
 
 <rules>

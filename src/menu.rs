@@ -17,14 +17,17 @@ use crate::ui::{button, label, FONT_BODY, FONT_TITLE, PANEL, TEXT_ACCENT, TEXT_D
 /// One way in, because there is only one thing to choose first: a map. The
 /// browser is where that choice is made, and it is also where a map is edited,
 /// copied or thrown away.
-const ENTRIES: [(&str, MenuAction); 2] = [
+const ENTRIES: [(&str, MenuAction); 3] = [
     ("Play", MenuAction::Maps),
+    ("Load", MenuAction::Saves),
     ("Quit", MenuAction::Quit),
 ];
 
 #[derive(Component, Clone, Copy)]
 enum MenuAction {
     Maps,
+    /// The Load screen: the only way back into a saved game.
+    Saves,
     Quit,
 }
 
@@ -112,6 +115,7 @@ fn choose(
     for Activated(entity) in activated.read() {
         match entries.get(*entity) {
             Ok(MenuAction::Maps) => next.set(AppState::Maps),
+            Ok(MenuAction::Saves) => next.set(AppState::Saves),
             Ok(MenuAction::Quit) => {
                 exit.write(AppExit::Success);
             }

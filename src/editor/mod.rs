@@ -618,7 +618,7 @@ impl Plugin for EditorPlugin {
                 grids::cycle_view
                     .after(NavSystems)
                     .before(grids::sync_grid_overlay)
-                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game))),
+                    .run_if(in_state(AppState::Editor).or_else(in_state(AppState::Game)).and_then(crate::ui::nav::not_typing)),
             )
             .add_systems(
                 OnEnter(AppState::Editor),

@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::HOUR;
 use crate::sim::uid::Uid;
 
@@ -181,6 +182,67 @@ impl Memory {
 
     pub fn out_of_reach_mut(&mut self) -> &mut OutOfReach {
         &mut self.out_of_reach
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Memory {
+        let Memory { keyed, out_of_reach } = self;
+        let OutOfReach { places } = **out_of_reach;
+        pb::Memory {
+            keyed: keyed
+                .iter()
+                .map(|(key, recall)| pb::Remembered {
+                    key: key.clone(),
+                    recall: Some(match recall {
+                        Recall::Cell(cell) => pb::Recall::Cell((*cell).into()),
+                        Recall::Entity(uid) => pb::Recall::Entity(uid.raw()),
+                        Recall::Number(number) => pb::Recall::Number(*number),
+                        Recall::Time(tick) => pb::Recall::Time(*tick),
+                        Recall::Text(text) => pb::Recall::Text(text.clone()),
+                    }),
+                })
+                .collect(),
+            // Slot for slot: which slot a place is in decides which is
+            // forgotten first when they are full.
+            out_of_reach: places
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, place)| {
+                    place.map(|(cell, until)| pb::OutOfReach { slot: slot as u32, cell: Some(cell.into()), until })
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn restore(saved: &pb::Memory) -> Result<Memory, Invalid> {
+        let mut memory = Memory::new();
+        for entry in &saved.keyed {
+            let recall = match &entry.recall {
+                Some(pb::Recall::Cell(cell)) => Recall::Cell((*cell).into()),
+                Some(pb::Recall::Entity(raw)) => match Uid::from_raw(*raw) {
+                    Some(uid) => Recall::Entity(uid),
+                    None => return invalid(format!("memory: {:?} is nobody", entry.key)),
+                },
+                Some(pb::Recall::Number(number)) => Recall::Number(*number),
+                Some(pb::Recall::Time(tick)) => Recall::Time(*tick),
+                Some(pb::Recall::Text(text)) => Recall::Text(text.clone()),
+                None => return invalid(format!("memory: {:?} recalls nothing", entry.key)),
+            };
+            if memory.keyed.insert(entry.key.clone(), recall).is_some() {
+                return invalid(format!("memory: {:?} twice", entry.key));
+            }
+        }
+        for place in &saved.out_of_reach {
+            let Some(slot) = memory.out_of_reach.places.get_mut(place.slot as usize) else {
+                return invalid(format!("memory: out-of-reach slot {}", place.slot));
+            };
+            if slot.is_some() {
+                return invalid(format!("memory: out-of-reach slot {} twice", place.slot));
+            }
+            *slot = Some((pb::cell(place.cell, "out of reach")?, place.until));
+        }
+        Ok(memory)
     }
 }
 

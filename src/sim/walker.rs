@@ -45,6 +45,7 @@
 //! crowd has moved.
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 
 use super::brain::ActionState;
 use super::entity::{Body, Think};
@@ -506,6 +507,78 @@ impl Walker {
     /// [`super::GameEntity::planned_path`].
     pub fn path_cells(&self) -> Vec<Point> {
         self.route.path.remaining().collect()
+    }
+
+    // --- saving ---
+
+    /// Everything about the walk that lasts from one tick to the next. Not
+    /// the meter, which only exists while the react step has it lent out,
+    /// and not the repair buffer, which is scratch.
+    pub(crate) fn save(&self) -> pb::Walker {
+        let Walker { body, route, speed, meter: _, searching: _ } = self;
+        let Route { path, repair: _, pending, request } = &**route;
+        pb::Walker {
+            body: Some(body.save()),
+            speed: *speed,
+            path: Some(path.save()),
+            request: request.map(|request| {
+                let RouteRequest { start, goals, fallback, key } = request;
+                pb::RouteRequest {
+                    start: Some(start.into()),
+                    goals: goals.save(),
+                    fallback: fallback.map(|fallback| pb::Destinations { cells: fallback.save() }),
+                    key: key.map(|key| key.get() as u32),
+                }
+            }),
+            search: pending.as_ref().map(|finder| finder.save()),
+        }
+    }
+
+    /// The walk as saved. `revision` is the navigation revision of the map it
+    /// is restored beside, which an unfinished search is stamped with so that
+    /// it carries on rather than starting over.
+    pub(crate) fn restore(saved: &pb::Walker, revision: u64) -> Result<Walker, Invalid> {
+        let body = Body::restore(pb::required(&saved.body, "body")?)?;
+        if !(saved.speed.is_finite() && saved.speed > 0.0) {
+            return invalid(format!("walks at {} cells a second", saved.speed));
+        }
+        let request = match &saved.request {
+            None => None,
+            Some(request) => Some(RouteRequest {
+                start: pb::cell(request.start, "route start")?,
+                goals: Destinations::restore(&request.goals, "route goals")?,
+                fallback: request
+                    .fallback
+                    .as_ref()
+                    .map(|fallback| Destinations::restore(&fallback.cells, "route fallback"))
+                    .transpose()?,
+                key: match request.key {
+                    None => None,
+                    Some(key) => Some(
+                        u16::try_from(key)
+                            .ok()
+                            .and_then(super::property::PropertyId::new)
+                            .ok_or_else(|| Invalid::new(format!("route key {key}")))?,
+                    ),
+                },
+            }),
+        };
+        let pending = saved.search.as_ref().map(|search| PathFinder::restore(search, revision)).transpose()?;
+        if pending.is_some() && request.is_none() {
+            return invalid("a search for no route");
+        }
+        Ok(Walker {
+            body,
+            searching: pending.is_some(),
+            route: Box::new(Route {
+                path: Path::restore(pb::required(&saved.path, "path")?)?,
+                repair: Vec::new(),
+                pending: pending.map(Box::new),
+                request,
+            }),
+            speed: saved.speed,
+            meter: None,
+        })
     }
 
     #[cfg(test)]

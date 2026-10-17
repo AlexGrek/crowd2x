@@ -16,6 +16,7 @@
 //! can never disagree about where something is.
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 
 use super::kinds::Facing;
 use super::property::PropertyId;
@@ -103,6 +104,30 @@ impl Body {
 
     pub fn set_home(&mut self, home: Option<PropertyId>) {
         self.home = home;
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Body {
+        let Body { uid, position: (x, y), frozen, home } = *self;
+        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32) }
+    }
+
+    pub(crate) fn restore(saved: &pb::Body) -> Result<Body, Invalid> {
+        let Some(uid) = Uid::from_raw(saved.uid) else {
+            return invalid(format!("{:#x} is not an entity id", saved.uid));
+        };
+        if !(saved.x.is_finite() && saved.y.is_finite()) {
+            return invalid(format!("{uid} stands at {}, {}", saved.x, saved.y));
+        }
+        let home = match saved.home {
+            None => None,
+            Some(home) => match u16::try_from(home).ok().and_then(PropertyId::new) {
+                Some(home) => Some(home),
+                None => return invalid(format!("{uid}'s home is property {home}")),
+            },
+        };
+        Ok(Body { uid, position: (saved.x, saved.y), frozen: saved.frozen, home })
     }
 }
 
@@ -355,6 +380,13 @@ pub trait GameEntity: Send + Sync {
     fn display_name(&self) -> Option<String> {
         None
     }
+
+    /// Everything this entity is, for a save (`crate::save`) — the kind's
+    /// own message, which `kinds::restore` turns back into the same entity.
+    ///
+    /// No default, on purpose: a kind that could be left out of a save would
+    /// come back from a load as something else, or not at all.
+    fn save(&self) -> pb::Kind;
 
     /// Stable randomness for the renderer to build an appearance from.
     ///

@@ -252,18 +252,26 @@ fn build_world(
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     current: Res<CurrentMap>,
+    mut pending: ResMut<super::saving::PendingWorld>,
 ) {
     let size = current.map.size();
-    let mut state = GameState::new(current.map.clone(), DEFAULT_SEED);
-    state.log.push(format!(
-        "opened {} ({}x{})",
-        current.title(),
-        size.width,
-        size.height
-    ));
-    // Whoever the map says lives here. Straight into the world rather than
-    // through `SimInput`, so they are there on the first frame drawn.
-    state.spawn_from_spawners();
+    // A world read from a save, if the Load screen left one; otherwise the
+    // map's own, fresh.
+    let state = match pending.0.take() {
+        Some(state) => {
+            state.log.push(format!("loaded {}: {} units, {}", current.title(), state.len(), state.clock().time()));
+            state
+        }
+        None => {
+            let mut state = GameState::new(current.map.clone(), DEFAULT_SEED);
+            state.log.push(format!("opened {} ({}x{})", current.title(), size.width, size.height));
+            // Whoever the map says lives here. Straight into the world
+            // rather than through `SimInput`, so they are there on the first
+            // frame drawn.
+            state.spawn_from_spawners();
+            state
+        }
+    };
 
     commands.insert_resource(Sim(state));
     // The dog atlas used to be loaded by the demo crowd on `Startup`. It
@@ -279,8 +287,8 @@ fn build_world(
 /// the *next* world.
 ///
 /// Removing `Sim` rather than keeping it means re-entering a map starts it
-/// again from the seed, which is the honest behaviour for a screen that saves
-/// nothing.
+/// again from the seed: a world is kept by saving it (`super::saving`), and
+/// comes back through the Load screen.
 fn tear_down_world(
     mut commands: Commands,
     mut sprites: ResMut<ActorSprites>,

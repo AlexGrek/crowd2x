@@ -5,7 +5,8 @@ description: crowd2x screens and interface - AppState, DespawnOnExit, the OnEnte
 
 # Screens and interface
 
-`AppState` (`src/state.rs`) is `MainMenu`, `Maps` (the map browser), `Editor` or `Game`.
+`AppState` (`src/state.rs`) is `MainMenu`, `Maps` (the map browser), `Saves` (the Load
+screen), `Editor` or `Game`.
 Screen entities carry `DespawnOnExit(..)` instead of hand-written teardown, which is also
 why drawing a map takes the state it is being drawn for: the editor and the game draw the
 same map from the same palettes and each takes its own sprites away on the way out.
@@ -61,3 +62,18 @@ it — playing is what a map is for, so it gets the biggest target in the row. S
 follows the focus (`ui::scroll_to_show`) so a controller can reach the end of a long
 list, and the wheel moves it directly for a mouse. `CROWD2X_MAPS` points the store
 somewhere else, which is what keeps a QA run from deleting real maps.
+
+**A screen whose keys do things must not do them while somebody types.** Gate its key and
+pad bindings with `run_if(ui::nav::not_typing)` (the same frame-start `KeyboardCapture`
+snapshot `nav` uses): the game screen does, so naming a save does not pan, zoom or pause.
+
+## The Load screen (`src/saves.rs`)
+
+Main menu → `Load` → every saved game, newest first: a save's **name** is the button that
+loads it, with its map, when it was saved, the world's day and time and its population
+beside it, and `delete` (confirmation starting on `cancel`). Built like the browser — nav
+focusables, a scroll list that follows focus, wheel scrolling. A save this build cannot read
+is listed with why, dimmed, and refuses to load. Loading runs on a thread with the status
+line saying so, then hands the game screen the world (`game::saving::PendingWorld`), the
+save's own map (`CurrentMap`) and the view (`LoadedView`). Loading happens nowhere else. The
+format and the rest: `savegame` skill.

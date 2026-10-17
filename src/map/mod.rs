@@ -58,9 +58,10 @@
 //! ([`Map::scrap`]) is in the way until it has been emptied, a piece at a
 //! time ([`Map::take_scrap`]); what has been taken from which heap is kept
 //! here, beside the chunks, so a chunk dropped and loaded again still has
-//! its emptied heaps gone. It is the simulation's state, never a file's: a
-//! map is saved with every heap as it was found, and only the simulation's
-//! own copy of a map is ever salvaged.
+//! its emptied heaps gone. It is the simulation's state, never a map file's:
+//! a map is saved with every heap as it was found, and only the simulation's
+//! own copy of a map is ever salvaged. A game's save keeps it, with the
+//! loaded chunks, chunk by chunk ([`save`]).
 //!
 //! A map built in code ([`Map::new`]) has no wasteland: off the site is
 //! nothing, impassable and opaque, which is the bounded box every unit test
@@ -80,6 +81,7 @@ mod format;
 pub mod grid;
 pub mod mount;
 mod passability;
+mod save;
 mod navigation;
 pub use navigation::Navigation;
 mod props;
@@ -96,6 +98,7 @@ pub use grid::GridLayer;
 pub use passability::PassabilityMap;
 pub use props::{Prop, PROPS};
 pub use storage::{sanitize_name, MapStore, StorageError, MAX_NAME};
+pub(crate) use storage::write_atomic;
 pub use terrain::{
     Passability, Terrain, TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, FLOOR, MEADOW, MIN_WALK_COST, MUD, SCRUB,
     TERRAIN, VOID, WALL, WATER,
@@ -286,7 +289,8 @@ pub struct Map {
     chunks: ChunkGrid<Box<Chunk>>,
     /// How many pieces have been taken from each heap of scrap anybody has
     /// been at, by chunk and cell in it — so one chunk's heaps are a range.
-    /// Simulation state, never saved; see the module docs.
+    /// Simulation state: never in a map file (see the module docs), but kept
+    /// by a game's save, chunk by chunk (`map::save`).
     salvaged: BTreeMap<(ChunkPos, u16), u8>,
     /// Bumped by every piece taken, so whatever draws the heaps knows to look
     /// again.
@@ -388,10 +392,19 @@ impl Map {
         if self.chunks.contains(pos) || chunk_is_all_site(pos, site) {
             return false;
         }
-        let chunk = self.chunks.get_or_insert_with(pos, || {
+        self.chunks.get_or_insert_with(pos, || {
             Chunk::generate(pos, |cell| wasteland.tile(cell, site), |cell, tile| wasteland.scrap_on(cell, site, tile))
         });
-        // A heap emptied before the chunk was dropped is still empty.
+        self.clear_salvaged(pos);
+        true
+    }
+
+    /// Open the cells of the loaded chunk at `pos` whose heaps have been
+    /// emptied: a heap emptied before the chunk was dropped is still empty.
+    fn clear_salvaged(&mut self, pos: ChunkPos) {
+        let Some(chunk) = self.chunks.get_mut(pos) else {
+            return;
+        };
         let origin = pos.origin();
         for (&(_, index), &taken) in self.salvaged.range((pos, 0)..=(pos, u16::MAX)) {
             let cell = origin.offset(index as i32 % CHUNK, index as i32 / CHUNK);
@@ -399,7 +412,6 @@ impl Map {
                 chunk.clear(cell);
             }
         }
-        true
     }
 
     /// Load every chunk with a cell in `area`; returns how many were loaded

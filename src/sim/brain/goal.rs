@@ -12,6 +12,7 @@
 //!
 //! [`Task`]: super::task::Task
 
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 use crate::sim::inventory::Inventory;
@@ -173,6 +174,41 @@ impl Goals {
         *priority = priority.max(at_least);
     }
 
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Goals {
+        let Goals { priority, cooldown, strikes, top } = self;
+        pb::Goals {
+            top: pb::GoalId::from(*top) as i32,
+            slots: GoalId::ALL
+                .iter()
+                .map(|&goal| pb::GoalSlot {
+                    goal: pb::GoalId::from(goal) as i32,
+                    priority: priority[goal.index()],
+                    cooldown: cooldown[goal.index()] as u32,
+                    strikes: strikes[goal.index()] as u32,
+                })
+                .collect(),
+        }
+    }
+
+    /// The list as saved. A goal the save does not mention — one added since
+    /// — starts where it does in a new brain: unwanted, not held off.
+    pub(crate) fn restore(saved: &pb::Goals) -> Result<Goals, Invalid> {
+        let mut goals = Goals::new();
+        goals.top = GoalId::from(pb::known::<pb::GoalId>(saved.top, "top goal")?);
+        for slot in &saved.slots {
+            let goal = GoalId::from(pb::known::<pb::GoalId>(slot.goal, "goal")?);
+            let (Ok(cooldown), Ok(strikes)) = (u16::try_from(slot.cooldown), u8::try_from(slot.strikes)) else {
+                return invalid(format!("{} held off {} ticks after {} strikes", goal.name(), slot.cooldown, slot.strikes));
+            };
+            goals.priority[goal.index()] = slot.priority;
+            goals.cooldown[goal.index()] = cooldown;
+            goals.strikes[goal.index()] = strikes;
+        }
+        Ok(goals)
+    }
+
     /// Zero every priority, ready for the routines to arrange the list again.
     pub(super) fn clear_priorities(&mut self) {
         self.priority = [0.0; GoalId::COUNT];
@@ -313,7 +349,8 @@ pub enum GoalProgress {
 ///
 /// A `Box<dyn GoalExecutor>` the brain owns for the entity's whole life,
 /// constructed at spawn and never dropped or rebuilt. **Its fields are the
-/// saved state** — no blob, no `Box<dyn Any>`, no serialization. What
+/// saved state** — no blob, no `Box<dyn Any>` — and they are what a save file
+/// keeps of it too ([`GoalExecutor::save`]). What
 /// [`GoalExecutor::deprioritized`] is for is the *queue*, which the executor
 /// does not own: the brain clears it on every handover, because tasks belong
 /// to whoever is in charge. So `deprioritized` notes the stage and drops what
@@ -357,6 +394,45 @@ pub trait GoalExecutor: Send + Sync {
     /// about the one unit somebody has selected.
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         Vec::new()
+    }
+
+    /// Its fields, for a save (`crate::save`). No default, on purpose: an
+    /// executor whose state a save forgot would come back from a load at
+    /// some other stage of its goal than the one it was at.
+    fn save(&self) -> pb::Executor;
+
+    /// Put back what [`GoalExecutor::save`] kept, into an executor built
+    /// fresh with its brain. A state of another executor's shape is refused.
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid>;
+}
+
+impl From<GoalId> for pb::GoalId {
+    fn from(goal: GoalId) -> pb::GoalId {
+        match goal {
+            GoalId::Idle => pb::GoalId::Idle,
+            GoalId::Wander => pb::GoalId::Wander,
+            GoalId::Eat => pb::GoalId::Eat,
+            GoalId::Drink => pb::GoalId::Drink,
+            GoalId::Relieve => pb::GoalId::Relieve,
+            GoalId::Play => pb::GoalId::Play,
+            GoalId::Sleep => pb::GoalId::Sleep,
+            GoalId::Salvage => pb::GoalId::Salvage,
+        }
+    }
+}
+
+impl From<pb::GoalId> for GoalId {
+    fn from(goal: pb::GoalId) -> GoalId {
+        match goal {
+            pb::GoalId::Idle => GoalId::Idle,
+            pb::GoalId::Wander => GoalId::Wander,
+            pb::GoalId::Eat => GoalId::Eat,
+            pb::GoalId::Drink => GoalId::Drink,
+            pb::GoalId::Relieve => GoalId::Relieve,
+            pb::GoalId::Play => GoalId::Play,
+            pb::GoalId::Sleep => GoalId::Sleep,
+            pb::GoalId::Salvage => GoalId::Salvage,
+        }
     }
 }
 

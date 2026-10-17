@@ -14,7 +14,8 @@ prototype; all code is new): a pixel-perfect render pipeline, a menu, a map brow
 six-layer map editor (floor, props, lamps, ceiling, power grid, sewer pipes), a saved map
 format, a seeded district generator, an endless procedural wasteland round every map
 (streamed in chunks as the camera and the crowd reach it), a lit and wired game screen that
-runs a simulation, and a scripted QA harness that drives all of it. The simulation is one
+runs a simulation, saved games (`.saves/*.savegame`, a zip of Protobuf files, loaded from the
+main menu), and a scripted QA harness that drives all of it. The simulation is one
 `GameState` advanced by one function; every unit runs a brain (routines, goals, tasks,
 actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
 energy, satisfaction).
@@ -35,12 +36,13 @@ resolves `assets/` relative to the manifest under cargo, and relative to the exe
 otherwise, so a direct run produces a blank window and asset-load errors.
 
 Unattended runs and screenshots are driven by `CROWD2X_*` env vars (`CROWD2X_SHOT`,
-`CROWD2X_STATE`, `CROWD2X_MAP`, `CROWD2X_DISTRICT`, `CROWD2X_EXIT`, ...) — the `debugger`
+`CROWD2X_STATE`, `CROWD2X_MAP`, `CROWD2X_DISTRICT`, `CROWD2X_LOAD`, `CROWD2X_EXIT`, ...) — the `debugger`
 skill has the full list. A pure black capture almost always means the frame was grabbed too
 early, not that rendering broke.
 
 Controls: `WASD` / arrows pan, `q` / `e` zoom in the game, `+` / `-` game speed, `p` pause,
-left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshots/`.
+left click selects, `o` steps the x-ray, `F5` quick saves the game, `F12` saves a screenshot
+to `screenshots/`.
 
 ## Which skill to load
 
@@ -65,6 +67,7 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
 | Drawing new art: hair, dresses, outfits, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
+| Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 
 ## Rules that hold everywhere
 
@@ -90,6 +93,10 @@ left click selects, `o` steps the x-ray, `F12` saves a screenshot to `screenshot
   than switching to defaults. `bevy/dynamic_linking` does not work on this version.
 - **`main` returns `AppExit`**, or a failing QA test exits 0; check a new test fails when it
   should (`qa`).
+- **New state is saved state.** A field added to the simulation, an entity kind, a brain part,
+  a task or the map needs a tag in `src/save/pb/` and a `save`/`restore` beside it; every
+  `save` destructures its struct exhaustively so the build says so (`savegame`). A loaded
+  world must carry on bit for bit as the saved one would have, and a test checks it.
 - **Keep the skills current.** A change to a system updates the skill that owns it in the same
   piece of work; a new system gets a skill and a row in the table above. CLAUDE.md stays a
   router — put detail in the skill, not here.
@@ -113,6 +120,9 @@ src/sim/                GameState, passes, entities, clock, items           [sim
 src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell  [simulation, wasteland]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
+src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
+src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
+src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]
 src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]
 src/debug.rs            env-var driven capture harness                      [debugger]
 src/awake.rs            macOS: hold the display awake during a run
@@ -123,6 +133,6 @@ tools/street_art.py     draws the street lamp and its controller            [ele
 tools/switch_art.py     draws the light switch (on and off)                 [electrician]
 tools/ground_art.py     draws the pavement, road and grass tiles            [pixel-artist]
 tools/wasteland_art.py  draws the wasteland's dirt, scrub, meadow, mud, water [wasteland]
-qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/   gitignored output
+qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

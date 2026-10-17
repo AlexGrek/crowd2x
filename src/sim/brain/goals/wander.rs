@@ -9,6 +9,7 @@ use rand::rngs::SmallRng;
 use rand::RngExt;
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::rng::tick_rng;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
@@ -114,6 +115,23 @@ impl WanderGoal {
 impl GoalExecutor for WanderGoal {
     fn goal(&self) -> GoalId {
         GoalId::Wander
+    }
+
+    fn save(&self) -> pb::Executor {
+        let WanderGoal { target, retries } = *self;
+        pb::Executor::Wander(pb::Wander { target: target.map(Into::into), retries: retries as u32 })
+    }
+
+    fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid> {
+        let pb::Executor::Wander(wander) = saved else {
+            return invalid("wandering is a target and its retries");
+        };
+        let Ok(retries) = u8::try_from(wander.retries) else {
+            return invalid(format!("wander: {} retries", wander.retries));
+        };
+        self.target = wander.target.map(Into::into);
+        self.retries = retries;
+        Ok(())
     }
 
     /// Carry on to where it was going — if that is still somewhere nearby.

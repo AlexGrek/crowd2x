@@ -14,7 +14,8 @@
 //! ground costs. Unreachable is then "not inside the window", which is what
 //! keeps a search for a cell on a lake island from flooding the world.
 
-use crate::map::{Bounds, MIN_WALK_COST, Map, Point};
+use crate::map::{Bounds, MIN_WALK_COST, Map, Point, Size};
+use crate::save::{invalid, pb, Invalid};
 
 /// How far past the start and the goals a search on an endless map may go.
 /// A chunk: any detour that wants more than that is round something the size
@@ -68,6 +69,22 @@ impl Destinations {
     }
     pub fn first(&self) -> Option<Point> {
         self.as_slice().first().copied()
+    }
+
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> Vec<i32> {
+        pb::pack(self.as_slice().iter().copied())
+    }
+
+    /// One to four different cells.
+    pub(crate) fn restore(xy: &[i32], what: &str) -> Result<Destinations, Invalid> {
+        let cells = pb::unpack(xy, what)?;
+        let distinct = cells.iter().enumerate().all(|(i, cell)| !cells[..i].contains(cell));
+        if cells.is_empty() || cells.len() > 4 || !distinct {
+            return invalid(format!("{what}: {} cells is not one to four places", cells.len()));
+        }
+        Ok(Destinations::from_cells(cells))
     }
 }
 
@@ -135,6 +152,37 @@ impl Path {
     pub fn single(&mut self, cell: Point) {
         self.output().push(cell);
     }
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Path {
+        let Path { steps, next, patch, patch_next } = self;
+        pb::Path {
+            steps: pb::pack(steps.iter().copied()),
+            next: *next as u32,
+            patch: pb::pack(patch.iter().copied()),
+            patch_next: *patch_next as u32,
+        }
+    }
+
+    pub(crate) fn restore(saved: &pb::Path) -> Result<Path, Invalid> {
+        let path = Path {
+            steps: pb::unpack(&saved.steps, "route")?,
+            next: saved.next as usize,
+            patch: pb::unpack(&saved.patch, "detour")?,
+            patch_next: saved.patch_next as usize,
+        };
+        if path.next > path.steps.len() || path.patch_next > path.patch.len() {
+            return invalid(format!(
+                "route: walked {} of {} cells and {} of a {}-cell detour",
+                path.next,
+                path.steps.len(),
+                path.patch_next,
+                path.patch.len()
+            ));
+        }
+        Ok(path)
+    }
+
     pub fn splice(&mut self, count: usize, detour: &mut Vec<Point>) {
         let patched = count.min(self.patch.len() - self.patch_next);
         self.patch_next += patched;
@@ -219,9 +267,104 @@ pub struct PathFinder {
     #[cfg(test)]
     expanded: usize,
 }
+/// The largest window a saved search may claim, in cells — far past any a
+/// search really lays out, and there only so that a broken save cannot ask
+/// for gigabytes of scratch.
+const LARGEST_SAVED_WINDOW: usize = 1 << 24;
+
 impl PathFinder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // --- saving ---
+
+    /// The search as it stands: its frontier and every cell it has reached.
+    /// What reached cells it remembers from earlier searches (an older
+    /// generation) is scratch, and is left behind.
+    pub(crate) fn save(&self) -> pb::PathSearch {
+        let PathFinder { open, seen, generation, window, start, goals, minimum, revision: _, .. } = self;
+        let window = window.expect("a saved search has begun");
+        pb::PathSearch {
+            window_x: window.origin.x,
+            window_y: window.origin.y,
+            window_width: window.size.width,
+            window_height: window.size.height,
+            start: Some((*start).into()),
+            goals: goals.map(|goals| goals.save()).unwrap_or_default(),
+            minimum: *minimum,
+            open: open
+                .iter()
+                .map(|candidate| pb::Candidate {
+                    f: candidate.f,
+                    h: candidate.h,
+                    x: candidate.point.x,
+                    y: candidate.point.y,
+                })
+                .collect(),
+            seen: seen
+                .iter()
+                .enumerate()
+                .filter(|(_, visit)| visit.generation == *generation)
+                .map(|(index, visit)| pb::Visit {
+                    index: index as u32,
+                    cost: visit.cost,
+                    from_x: visit.from.x,
+                    from_y: visit.from.y,
+                })
+                .collect(),
+        }
+    }
+
+    /// The search as saved, ready to carry on against a map whose
+    /// navigation is at `revision` — the map it is restored beside.
+    ///
+    /// Its frontier comes back as a heap of the same candidates, which pops
+    /// in the same order: candidates are ordered totally (cost, then guess,
+    /// then cell), so how they were arranged inside the heap never shows.
+    pub(crate) fn restore(saved: &pb::PathSearch, revision: u64) -> Result<PathFinder, Invalid> {
+        let size = Size::try_new(saved.window_width, saved.window_height)
+            .filter(|size| size.area() <= LARGEST_SAVED_WINDOW)
+            .ok_or_else(|| {
+                Invalid::new(format!("search: a {}x{} window", saved.window_width, saved.window_height))
+            })?;
+        let window = Bounds::new(Point::new(saved.window_x, saved.window_y), size);
+        let start = pb::cell(saved.start, "search start")?;
+        let goals = Destinations::restore(&saved.goals, "search goals")?;
+        let inside = |point: Point, what: &str| {
+            if window.contains(point) {
+                Ok(point)
+            } else {
+                invalid(format!("search: {what} {}, {} is outside its window", point.x, point.y))
+            }
+        };
+        let mut seen = vec![Visit::default(); window.area()];
+        for visit in &saved.seen {
+            let Some(slot) = seen.get_mut(visit.index as usize) else {
+                return invalid(format!("search: cell {} is outside its window", visit.index));
+            };
+            *slot = Visit { generation: 1, cost: visit.cost, from: inside(Point::new(visit.from_x, visit.from_y), "a step from")? };
+        }
+        let mut open = Vec::with_capacity(saved.open.len());
+        for candidate in &saved.open {
+            let point = inside(Point::new(candidate.x, candidate.y), "a candidate")?;
+            if candidate.h > candidate.f || seen[window.index_of(point).unwrap()].generation != 1 {
+                return invalid(format!("search: candidate {}, {} was never reached", point.x, point.y));
+            }
+            open.push(Candidate { f: candidate.f, h: candidate.h, point });
+        }
+        Ok(PathFinder {
+            open: BinaryHeap::from(open),
+            seen,
+            generation: 1,
+            window: Some(window),
+            start: inside(start, "the start")?,
+            goals: Some(goals),
+            minimum: saved.minimum.max(MIN_WALK_COST as u32),
+            revision,
+            #[cfg(test)]
+            expanded: 0,
+        })
     }
     fn guess(&self, point: Point) -> u64 {
         self.goals

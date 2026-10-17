@@ -20,3 +20,6 @@ __pycache__/
 # what the scripted QA tests watched happen (`observe` steps): evidence from one
 # run, like the screenshots
 /qa-observe
+
+# saved games (`src/save/`): somebody's games, not source
+/.saves

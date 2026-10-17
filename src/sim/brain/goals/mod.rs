@@ -23,9 +23,10 @@ pub use sleep::SleepGoal;
 pub use wander::WanderGoal;
 
 use crate::map::Point;
+use crate::save::{invalid, pb, Invalid};
 use crate::sim::feature::FeatureKind;
 
-use super::goal::GoalCtx;
+use super::goal::{GoalCtx, GoalId};
 use super::task::Task;
 
 /// How long to stand aside for somebody who is in the way before trying the
@@ -122,6 +123,28 @@ pub struct Seek {
 }
 
 impl Seek {
+    // --- saving ---
+
+    pub(crate) fn save(&self) -> pb::Seek {
+        let Seek { target, retries, reroutes } = *self;
+        pb::Seek { target: target.map(Into::into), retries: retries as u32, reroutes: reroutes as u32 }
+    }
+
+    pub(crate) fn restore(saved: &pb::Seek) -> Result<Seek, Invalid> {
+        let (Ok(retries), Ok(reroutes)) = (u8::try_from(saved.retries), u8::try_from(saved.reroutes)) else {
+            return invalid(format!("seek: {} retries and {} reroutes", saved.retries, saved.reroutes));
+        };
+        Ok(Seek { target: saved.target.map(Into::into), retries, reroutes })
+    }
+
+    /// The seek of an executor whose state is a seek and nothing else.
+    pub(crate) fn restore_only(saved: &pb::Executor, goal: GoalId) -> Result<Seek, Invalid> {
+        match saved {
+            pb::Executor::Seek(seek) => Seek::restore(seek),
+            _ => invalid(format!("{} is not a seek", goal.name())),
+        }
+    }
+
     /// Already on the way to `place` — for a test that starts mid-visit.
     #[cfg(test)]
     pub(super) fn at(place: Point) -> Seek {

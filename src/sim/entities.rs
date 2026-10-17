@@ -29,6 +29,8 @@ use std::ops::Deref;
 
 use rayon::prelude::*;
 
+use crate::save::{invalid, pb, Invalid};
+
 use super::entity::GameEntity;
 use super::uid::Uid;
 
@@ -223,6 +225,67 @@ impl Entities {
     }
 
 
+    // --- saving ---
+
+    /// When the entity in `slot` arrived ([`Entities::in_spawn_order`]).
+    pub(crate) fn serial(&self, slot: Slot) -> u64 {
+        self.serials[slot as usize]
+    }
+
+    /// How the arena is laid out beyond who is in it: how many slots, holes
+    /// included; the next arrival's serial; and the free list, whose order
+    /// says which hole the next spawn fills.
+    pub(crate) fn save_arena(&self) -> pb::Arena {
+        let Entities { slots, serials: _, next_serial, index: _, free, live: _ } = self;
+        pb::Arena { capacity: slots.len() as u32, next_serial: *next_serial, free: free.clone() }
+    }
+
+    /// An arena laid out exactly as saved: every entity back in its own
+    /// slot with its own serial, and the holes where they were, to be filled
+    /// in the same order. The free list must be exactly the holes, and no id
+    /// may be in two slots.
+    pub(crate) fn restore(
+        arena: &pb::Arena,
+        entities: impl IntoIterator<Item = (Slot, u64, Box<dyn GameEntity>)>,
+    ) -> Result<Entities, Invalid> {
+        let capacity = arena.capacity as usize;
+        let mut table = Entities {
+            slots: Vec::with_capacity(capacity),
+            serials: vec![0; capacity],
+            next_serial: arena.next_serial,
+            index: HashMap::new(),
+            free: arena.free.clone(),
+            live: 0,
+        };
+        table.slots.resize_with(capacity, || None);
+        for (slot, serial, entity) in entities {
+            let uid = entity.uid();
+            let Some(place) = table.slots.get_mut(slot as usize) else {
+                return invalid(format!("{uid} is in slot {slot} of {capacity}"));
+            };
+            if place.is_some() {
+                return invalid(format!("two entities in slot {slot}"));
+            }
+            if serial >= arena.next_serial {
+                return invalid(format!("{uid} arrived {serial}th of {}", arena.next_serial));
+            }
+            if table.index.insert(uid, slot).is_some() {
+                return invalid(format!("{uid} is in two slots"));
+            }
+            *place = Some(entity);
+            table.serials[slot as usize] = serial;
+            table.live += 1;
+        }
+        let mut holes: Vec<Slot> = (0..capacity as Slot).filter(|&slot| table.slots[slot as usize].is_none()).collect();
+        let mut free = table.free.clone();
+        free.sort_unstable();
+        holes.sort_unstable();
+        if free != holes {
+            return invalid(format!("{} holes in the arena and {} on its free list", holes.len(), free.len()));
+        }
+        Ok(table)
+    }
+
     /// Hand the table to the processing pass with its membership frozen.
     ///
     /// See [`FrozenEntities`]. The point is that the processing pass takes
@@ -359,6 +422,10 @@ mod tests {
     struct Stub(Body);
 
     impl GameEntity for Stub {
+        fn save(&self) -> crate::save::pb::Kind {
+            unreachable!("a test's stand-in is never saved")
+        }
+
         fn body(&self) -> &Body {
             &self.0
         }
