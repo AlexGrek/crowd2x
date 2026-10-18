@@ -13,6 +13,13 @@
     { "expect_world_time": { "hours": 0.5 } },
     { "expect_saves": { "count": 0 } },
 
+    { "note": "the half-size overview is saved along with the world" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 0.5 },
+
     { "note": "save asks for a name, with the world paused behind it" },
     { "press": "save" },
     { "expect_speed": "paused" },
@@ -54,6 +61,7 @@
     { "note": "a save's name is the button that loads it" },
     { "press": "before lunch" },
     { "expect_state": "game" },
+    { "expect_zoom": 0.5 },
     { "expect_world_time": { "hours": 0.5 } },
     { "note": "the lightmap is baked for the loaded world, switches and all" },
     { "expect_lighting": {} },

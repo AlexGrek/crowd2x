@@ -281,10 +281,13 @@ fn rebuild(
     menu: Res<OpenMenu>,
     sim: Option<Res<Sim>>,
     panels: Query<Entity, With<UnitPanel>>,
-    mut shown: Local<Option<(Uid, Option<Clothing>)>>,
+    mut shown: Local<Option<(Uid, Option<Clothing>, Option<Clothing>)>>,
 ) {
+    // Its own clothes and what it has on: a uniform going on with a shift
+    // redraws the portrait as a change of clothes does.
     let appearance = selected.get().and_then(|uid| {
-        sim.as_ref()?.0.entities().get(uid).map(|entity| (uid, entity.clothing()))
+        let sim = sim.as_ref()?;
+        sim.0.entities().get(uid).map(|entity| (uid, entity.clothing(), entity.worn(sim.0.clock())))
     });
     if !selected.is_changed() && !menu.is_changed() && *shown == appearance {
         return;
@@ -355,7 +358,7 @@ fn rebuild(
                 hud::absorbs_clicks(),
             ))
             .with_children(|bar| {
-                portrait(bar, &assets, sheets.as_deref(), entity);
+                portrait(bar, &assets, sheets.as_deref(), entity, sim.0.clock());
                 bar.spawn((
                     Node {
                         flex_direction: FlexDirection::Column,
@@ -406,7 +409,7 @@ fn menu_contents(
     assets: &AssetServer,
 ) {
     match menu {
-        Menu::Clothing => clothing_menu(parent, entity, assets),
+        Menu::Clothing => clothing_menu(parent, entity, assets, sim.0.clock()),
         Menu::Life => {
             parent.spawn((
                 Node {
@@ -489,6 +492,7 @@ fn portrait(
     assets: &AssetServer,
     sheets: Option<&dog::DogSheets>,
     entity: &dyn GameEntity,
+    clock: Clock,
 ) {
     let mut portrait = parent.spawn((
         Name::new("portrait"),
@@ -502,7 +506,7 @@ fn portrait(
 
     match entity.kind() {
         Some(EntityType::Human) => {
-            let look = look_from(entity);
+            let look = look_from(entity, clock);
             portrait.with_children(|stack| {
                 let paths = [Some(human::BASE), Some(look.eyes), look.clothes, Some(look.hair)];
                 for (slot, path) in paths.into_iter().enumerate() {
@@ -535,13 +539,19 @@ fn portrait(
     }
 }
 
-fn clothing_menu(parent: &mut ChildSpawnerCommands, entity: &dyn GameEntity, assets: &AssetServer) {
-    let Some(worn) = entity.clothing() else {
+fn clothing_menu(parent: &mut ChildSpawnerCommands, entity: &dyn GameEntity, assets: &AssetServer, clock: Clock) {
+    let (Some(worn), Some(on)) = (entity.clothing(), entity.worn(clock)) else {
         parent.spawn(label("no clothing", FONT_BODY, TEXT_DIM));
         return;
     };
-    parent.spawn(label(format!("wearing: {}", worn.name()), FONT_BODY, TEXT_ACCENT));
-    let look = look_from(entity);
+    // At work in its uniform, the buttons still change the clothes it goes
+    // home in.
+    if on.is_uniform() {
+        parent.spawn(label(format!("wearing: {} (own: {})", on.name(), worn.name()), FONT_BODY, TEXT_ACCENT));
+    } else {
+        parent.spawn(label(format!("wearing: {}", worn.name()), FONT_BODY, TEXT_ACCENT));
+    }
+    let look = look_from(entity, clock);
     for row in Clothing::ALL.chunks(5) {
         parent.spawn(Node { column_gap: px(2), ..default() }).with_children(|buttons| {
             for &outfit in row {
@@ -689,19 +699,23 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// (`computer at 12, 4`, `scrap bin at 30, 2`), the hours and days, and —
 /// `now` — what it is doing about them at `clock`, which is the line worth
 /// watching: on the way in, at the desk, out collecting scrap or storing it,
-/// away from it for something more pressing, or off.
+/// on watch at a gate, seeing to the dead, away from it for something more pressing, or off.
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
     };
     let shift = job.shift;
     let at_work = entity.interacting_with() == Some(job.workplace);
-    let now = if shift.is_due(clock) {
+    let now = if job.is_due(clock) {
         match (entity.current_goal(), job.kind) {
             (Some(GoalId::Work), JobKind::OfficeWorker) if at_work => "working".to_string(),
             (Some(GoalId::Work), JobKind::OfficeWorker) => "on the way to work".to_string(),
             (Some(GoalId::Collect), JobKind::ScrapCollector) if at_work => "storing scrap".to_string(),
             (Some(GoalId::Collect), JobKind::ScrapCollector) => "collecting scrap".to_string(),
+            (Some(GoalId::Work), JobKind::Guard) if at_work => "on watch".to_string(),
+            (Some(GoalId::Work), JobKind::Guard) => "on the way to the gate".to_string(),
+            (Some(GoalId::Bury), JobKind::Undertaker) if at_work => "cremating".to_string(),
+            (Some(GoalId::Bury), JobKind::Undertaker) => "seeing to the dead".to_string(),
             (Some(goal), _) => format!("on a break: {}", goal.name()),
             (None, _) => "off".to_string(),
         }
@@ -709,6 +723,9 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
         if clock.weekday().is_weekend() { "weekend" } else { "day off" }.to_string()
     } else if clock.hours() < shift.start() as f32 {
         format!("off until {:02}:00", shift.start())
+    } else if shift.start() == 0 && shift.works_on(clock.weekday().next()) {
+        // The night watch: its next start is tonight's midnight.
+        "off until 00:00".to_string()
     } else {
         "done for the day".to_string()
     };
@@ -1008,6 +1025,24 @@ mod tests {
         assert_eq!(field(&block, "at"), "scrap bin at 30, 2");
         assert_eq!(field(&block, "hours"), "09:00-17:00");
         assert_eq!(field(&block, "now"), "off until 09:00");
+    }
+
+    #[test]
+    fn a_guards_job_menu_names_its_post_and_its_watch() {
+        use crate::sim::job::WATCHES;
+        let mut person = human();
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::guard(Point::new(0, 20), WATCHES[1])));
+        let block = job_block(&person, on(6, 10.0));
+        assert_eq!(field(&block, "job"), "guard");
+        assert_eq!(field(&block, "at"), "guard post at 0, 20");
+        assert_eq!(field(&block, "hours"), "16:00-24:00");
+        assert_eq!(field(&block, "days"), "Mon-Sun");
+        assert_eq!(field(&block, "now"), "off until 16:00", "a Saturday is a day like any other");
+
+        let mut person = human();
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::guard(Point::new(0, 20), WATCHES[2])));
+        assert_eq!(field(&job_block(&person, on(2, 10.0)), "now"), "off until 00:00", "the night watch, after it");
+        assert_eq!(field(&job_block(&person, on(2, 23.75)), "now"), "on a break: idle", "due, and not set off");
     }
 
     #[test]

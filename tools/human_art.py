@@ -11,7 +11,9 @@ feet row 14.
     uv run tools/human_art.py generate          # write assets/human/, print the Rust lists
     uv run tools/human_art.py preview out.png   # every layer on the base body, at 4x
 
-`generate` prints the `HAIR` and `CLOTHES` arrays for `src/characters/human.rs`.
+`generate` prints the `HAIR` and `CLOTHES` arrays for `src/characters/human.rs`,
+and writes the work uniforms (`UNIFORMS`, `clothes_uniform_<job>.png`), which are
+not in the wardrobe a crowd is dressed from and so not in `CLOTHES`.
 """
 
 import os
@@ -214,6 +216,73 @@ SEPARATES = {
 }
 
 
+# Work uniforms, one per job (`sim::job::JobKind::uniform`), each a mask and its
+# own colours: worn while the shift is due, never handed out at random.
+# `t` a tie, `s` a reflective band, `k` brass, the rest as above.
+UNIFORMS = {
+    # A white shirt and a navy tie over charcoal trousers.
+    "office_worker": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....lmttml.....",
+            "....dmmttmmd....",
+            ".....bbkbbb.....",
+            ".....pppppp.....",
+            "......pqqp......",
+            "......pqqp......",
+        ],
+        {"d": CLOTH["white"][0], "m": CLOTH["white"][1], "l": CLOTH["white"][2], "t": CLOTH["navy"][1],
+         "b": BELT, "k": BUCKLE, "p": TROUSERS["charcoal"][0], "q": TROUSERS["charcoal"][1]},
+    ),
+    # Hi-vis overalls: orange, a silver band across the chest and the shins,
+    # dark boots.
+    "scrap_collector": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....dmmlmd.....",
+            "....dssssssd....",
+            ".....dmmlmd.....",
+            ".....dmmmmd.....",
+            "......ssss......",
+            "......qqqq......",
+        ],
+        {"d": CLOTH["orange"][0], "m": CLOTH["orange"][1], "l": CLOTH["orange"][2],
+         "s": (214, 218, 224), "q": (52, 40, 32)},
+    ),
+    # A navy tunic with brass buttons and a badge, a black belt, black
+    # trousers.
+    "guard": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....dmkmyd.....",
+            "....dmmkmmmd....",
+            ".....bbkbbb.....",
+            ".....pppppp.....",
+            "......pqqp......",
+            "......pqqp......",
+        ],
+        {"d": CLOTH["navy"][0], "m": CLOTH["navy"][1], "y": CLOTH["yellow"][2], "k": BUCKLE,
+         "b": (20, 20, 24), "p": (40, 40, 48), "q": (26, 26, 32)},
+    ),
+    # A black cassock to the ankles, a white clerical collar, and a gold
+    # cross on the chest: the undertaker's, who sees the dead to the
+    # crematorium.
+    "undertaker": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....dmwwmd.....",
+            "....dmmymmmd....",
+            ".....dyyymd.....",
+            ".....dmymmd.....",
+            ".....dmmmmd.....",
+            "....dmmmmmmd....",
+            "....dddddddd....",
+        ],
+        {"d": CLOTH["black"][0], "m": CLOTH["black"][1], "w": CLOTH["white"][2], "y": BUCKLE},
+    ),
+}
+
+
 def paint(mask, colours):
     """A 16x16 RGBA image (rows of tuples) of `mask` painted from `colours`."""
     rows = [[(0, 0, 0, 0)] * 16 for _ in range(16)]
@@ -251,6 +320,12 @@ def outfit_layers():
                 OUTFIT_STYLES[style],
                 {"o": SEAM, "d": d, "m": m, "l": l, "p": p, "q": q, "b": BELT, "k": BUCKLE},
             )
+
+
+def uniform_layers():
+    """Every (file name, image) of a work uniform."""
+    for job, (mask, colours) in UNIFORMS.items():
+        yield f"clothes_uniform_{job}.png", paint(mask, colours)
 
 
 def write_png(path, rows):
@@ -296,6 +371,8 @@ def generate():
         for name, image in layers:
             write_png(os.path.join(human, name), image)
             lists[key].append(f"human/{name}")
+    for name, image in uniform_layers():
+        write_png(os.path.join(human, name), image)
     for key, paths in lists.items():
         print(f"pub(super) const {key}: [&str; {len(paths)}] = [")
         for path in paths:
@@ -309,7 +386,7 @@ def preview(out, scale=4):
     base = load(os.path.join(human, "human_base.png"))
     eyes = load(os.path.join(human, "eyes_brown.png"))
     hair = list(hair_layers())
-    outfits = list(outfit_layers())
+    outfits = list(outfit_layers()) + list(uniform_layers())
     cols = max(len(NATURAL) + 3, 12)
     cells = []
     for style in HAIR_STYLES:

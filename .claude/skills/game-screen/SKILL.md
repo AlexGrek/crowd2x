@@ -20,7 +20,11 @@ here — it is `src/sim/` (the `simulation` skill) — and `game/actors.rs` is t
   whole canvas pixels. Either is exact for the pipeline, which never stretches a texel;
   the difference is that on the canvas grid a character's pixels sit a third of a texel
   off the grid they are drawn on, and crossing a cell reads as being nudged between
-  sub-positions rather than walking.
+  sub-positions rather than walking. **The dead lie down**: the same pass turns a doll a
+  quarter round (`Quat::from_rotation_z(FRAC_PI_2)`) while `GameEntity::is_dead`, compared
+  before writing like the translation; a square turned about its middle keeps its texels on
+  the grid. The dead have no goal label or action bar (`current_goal`/`action_progress` are
+  `None`), and the unit panel's `condition` field says `dead`.
 - **It only draws what is on the canvas.** `src/view.rs` works out `VisibleArea` once a
   frame, after the camera is snapped: `canvas` (exactly what is rendered), `actors`
   (`canvas` grown by `characters::OVERHANG_*`, so a unit whose bar or goal label reaches
@@ -86,12 +90,19 @@ A left click on the map picks whoever is standing in that cell, a green frame
 menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains` (the
 goal in charge, the priority list, the task, its result and action — live, like `debug`),
 `items` (the hand, what is stowed, and both totals against both limits — live too,
-since a unit picks things up while you are reading), `talents`, `clothing` and `job` (the
-job, `at` (`computer at x, y` or `scrap bin at x, y`), hours and days, and `now` — working,
+since a unit picks things up while you are reading), `talents`, `clothing` (the wardrobe;
+at work it reads `wearing: uniform guard (own: ...)` and the buttons change the clothes the
+worker goes home in) and `job` (the
+job, `at` (`computer at x, y`, `scrap bin at x, y` or `guard post at x, y`), hours and days, and `now` — working, on watch,
 on the way, collecting scrap, storing scrap, on a break, off, weekend —
 live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command::Hire`; the
 `jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
 them.
+
+**What a human has on is `GameEntity::worn(clock)`**, not `clothing()`: its job's uniform while
+the job is due, its own outfit otherwise. `actors::look_from(entity, clock)` dresses a sprite
+from it, `sync_clothing` swaps the clothes layer of visible humans when it changes (a uniform
+going on or off with a shift), and the panel's rebuild watches own and worn clothes both.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
   position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the

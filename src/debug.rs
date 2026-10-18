@@ -229,7 +229,7 @@ fn set_zoom_from_env(app: &mut App) {
     let Ok(raw) = std::env::var(ENV_ZOOM) else {
         return;
     };
-    match raw.trim().parse::<u32>() {
+    match raw.trim().parse::<f32>() {
         Ok(zoom) => {
             let zoom = PixelZoom::new(zoom);
             info!("debug: {ENV_ZOOM}={raw:?}, starting at x{}", zoom.get());

@@ -47,6 +47,10 @@ pub const fn clothing_path(clothing: Clothing) -> Option<&'static str> {
         Clothing::TrousersGreenKhaki => Some("human/clothes_trousers_green_khaki.png"),
         Clothing::TrousersNavyBrown => Some("human/clothes_trousers_navy_brown.png"),
         Clothing::TrousersOrangeJeans => Some("human/clothes_trousers_orange_jeans.png"),
+        Clothing::UniformOfficeWorker => Some("human/clothes_uniform_office_worker.png"),
+        Clothing::UniformScrapCollector => Some("human/clothes_uniform_scrap_collector.png"),
+        Clothing::UniformGuard => Some("human/clothes_uniform_guard.png"),
+        Clothing::UniformUndertaker => Some("human/clothes_uniform_undertaker.png"),
     }
 }
 // The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.
@@ -310,6 +314,18 @@ mod tests {
     use super::*;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
+
+    /// Every uniform has its own art, drawn by `tools/human_art.py`, on disk.
+    #[test]
+    fn every_uniform_has_art_of_its_own() {
+        let paths: Vec<_> = Clothing::UNIFORMS.into_iter().filter_map(clothing_path).collect();
+        assert_eq!(paths.len(), Clothing::UNIFORMS.len());
+        for path in paths {
+            assert!(!CLOTHES.contains(&path), "{path} is not in the wardrobe");
+            let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(path);
+            assert!(file.exists(), "{}", file.display());
+        }
+    }
 
     #[test]
     fn every_outfit_has_the_existing_art_and_the_original_seeded_appearance() {

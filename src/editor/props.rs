@@ -98,6 +98,12 @@ pub const PALETTE: &[PaletteItem] = &[
     // heaped, the game showing whichever the simulation's count says
     // ([`BinFill`]). Drawn by `tools/scrap_bin_art.py`.
     PaletteItem::posed("scrap bin", "scrap_bin.png", 4),
+    // A sentry box set into the district's wall beside a gate: a guard's
+    // workplace (`sim::job`). Drawn by `tools/guard_post_art.py`.
+    PaletteItem::upscaled("guard post", "guard_post.png"),
+    // A furnace for the dead: an undertaker's workplace (`sim::job`). Drawn
+    // by `tools/crematorium_art.py`.
+    PaletteItem::upscaled("crematorium", "crematorium.png"),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

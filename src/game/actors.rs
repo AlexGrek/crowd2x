@@ -426,7 +426,7 @@ fn sync_sprites(
         let pos = world_pos(entity.position());
         let sprite = match entity.kind() {
             Some(EntityType::Human) => {
-                let look = look_from(entity);
+                let look = look_from(entity, state.clock());
                 match pool.take_human() {
                     // Dressed as whoever needs it, positioned, and only then
                     // made visible — see `human::redress`.
@@ -509,6 +509,14 @@ fn sync_sprites(
         // crossing a cell.
         if transform.translation != wanted {
             transform.translation = wanted;
+        }
+
+        // The dead lie where they fell: the whole doll turned a quarter
+        // round. A square turned about its middle keeps its texels on the
+        // grid they were on.
+        let lying = if entity.is_dead() { Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
+        if transform.rotation != lying {
+            transform.rotation = lying;
         }
 
         // Written only when it actually changed: `dog::apply_facing` swaps the
@@ -798,19 +806,22 @@ pub fn world_pos((x, y): (f32, f32)) -> Vec2 {
     snap_to_texel(Vec2::new(x, y) * background::TILE)
 }
 
-/// A paperdoll from a stable personal seed and the currently worn outfit.
+/// A paperdoll from a stable personal seed and what it has on at `clock`.
 ///
-/// Hair and eyes stay seeded; clothing comes from mutable simulation state.
-/// Texture paths remain here, on the rendering side of the bridge.
-pub fn look_from(entity: &dyn GameEntity) -> human::Look {
+/// Hair and eyes stay seeded; clothing comes from mutable simulation state —
+/// its own outfit, or its job's uniform while the shift is due
+/// ([`GameEntity::worn`]). Texture paths remain here, on the rendering side
+/// of the bridge.
+pub fn look_from(entity: &dyn GameEntity, clock: crate::sim::clock::Clock) -> human::Look {
     let mut look = human::Look::random(&mut SmallRng::seed_from_u64(entity.appearance_seed()));
-    if let Some(clothing) = entity.clothing() {
+    if let Some(clothing) = entity.worn(clock) {
         look.clothes = human::clothing_path(clothing);
     }
     look
 }
 
-/// Change only the worn layer of visible humans. Offscreen humans get their
+/// Change only the worn layer of visible humans — a change of clothes, or a
+/// uniform going on or coming off with a shift. Offscreen humans get their
 /// current outfit through `look_from` when spawned or taken from the pool.
 fn sync_clothing(
     mut commands: Commands,
@@ -818,8 +829,9 @@ fn sync_clothing(
     sim: Res<Sim>,
     mut humans: Query<(&Actor, &human::Paperdoll, &mut human::Look)>,
 ) {
+    let clock = sim.0.clock();
     for (actor, doll, mut look) in &mut humans {
-        let Some(clothing) = sim.0.entities().get(actor.0).and_then(|entity| entity.clothing()) else {
+        let Some(clothing) = sim.0.entities().get(actor.0).and_then(|entity| entity.worn(clock)) else {
             continue;
         };
         let path = human::clothing_path(clothing);

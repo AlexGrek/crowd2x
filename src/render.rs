@@ -10,9 +10,9 @@
 //! can never land on a half-texel, so there is no shimmering when the camera
 //! moves and no uneven pixel sizes.
 //!
-//! **Zooming is changing N.** [`PixelZoom`] is that factor, and it is a whole
-//! number for the same reason: a zoom of 2.5 would give neighbouring texels
-//! different widths and break the grid the pipeline exists to protect. Zooming
+//! **Zooming is changing N.** [`PixelZoom`] uses integer upscales, plus a
+//! half-size overview that downsamples the canvas by exactly two. The overview
+//! sacrifices fine detail; the integer levels preserve every canvas pixel. Zooming
 //! in therefore makes the canvas *smaller* — fewer, bigger pixels — so the
 //! canvas is rebuilt at the new resolution exactly as it is on a resize. Only
 //! the canvas's *resolution* jumps, though: the quad blitting it to the
@@ -93,12 +93,10 @@ impl Plugin for PixelRenderPlugin {
     }
 }
 
-/// Screen pixels per canvas pixel: the zoom.
-///
-/// Whole numbers only, which is the whole reason zooming lives here rather
-/// than on the camera's scale. Changing it rebuilds the canvas at
-/// `window / zoom`, so zooming in shows less of the world at a larger size and
-/// every sprite stays on exact pixel blocks at either end.
+/// Screen pixels per canvas pixel: x0.5, then the integer levels x1 through x8.
+/// Changing it rebuilds the canvas at `window / zoom`. The half-size overview
+/// samples every other canvas pixel; the integer levels keep exact pixel blocks.
+/// Internally zero names the overview, and 1..=8 name the integer factors.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PixelZoom(u32);
 
@@ -109,32 +107,35 @@ impl Default for PixelZoom {
 }
 
 impl PixelZoom {
-    /// One screen pixel per canvas pixel: the whole map at its smallest, and
-    /// the point where the art stops being legible.
-    pub const MIN: u32 = 1;
+    pub const LEVELS: [f32; 9] = [0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    pub const MIN: f32 = 0.5;
     /// Twice the default. Past this a 48px cell fills a third of the window.
-    pub const MAX: u32 = 8;
+    pub const MAX: f32 = 8.0;
 
     /// A zoom chosen from outside — the debug harness's `CROWD2X_ZOOM`.
     /// Clamped rather than refused: an out-of-range number is a typo, and the
     /// nearest zoom that exists is a more useful answer than a panic.
-    pub fn new(zoom: u32) -> Self {
-        Self(zoom.clamp(Self::MIN, Self::MAX))
+    pub fn new(zoom: f32) -> Self {
+        if !zoom.is_finite() {
+            return Self::default();
+        }
+        let zoom = zoom.clamp(Self::MIN, Self::MAX);
+        Self(if zoom < 0.75 { 0 } else { zoom.round() as u32 })
     }
 
-    pub fn get(self) -> u32 {
-        self.0
+    pub fn get(self) -> f32 {
+        Self::LEVELS[self.0 as usize]
     }
 
     pub fn factor(self) -> f32 {
-        self.0 as f32
+        self.get()
     }
 
-    /// Zoom by whole steps, clamped. Answers whether it actually moved, so a
+    /// Move along the zoom levels, clamped. Answers whether it actually moved, so a
     /// caller can leave the HUD alone when it did not.
     pub fn step(&mut self, steps: i32) -> bool {
         let wanted =
-            (self.0 as i32 + steps).clamp(Self::MIN as i32, Self::MAX as i32) as u32;
+            (self.0 as i32).saturating_add(steps).clamp(0, Self::MAX as i32) as u32;
         if wanted == self.0 {
             return false;
         }
@@ -275,7 +276,7 @@ pub struct CameraPan(pub Vec2);
 /// catching up to a step that has already happened underneath it, not a
 /// second, fractional zoom. It lands exactly on the target (see
 /// [`ease_toward`]) rather than trailing forever, so a screenshot taken once
-/// the ease is done is exactly as pixel-perfect as before this existed.
+/// the ease is done reaches the exact chosen scale, including the x0.5 overview.
 #[derive(Resource)]
 struct ZoomQuadScale(f32);
 
@@ -324,8 +325,12 @@ fn create_canvas_image(size: UVec2) -> Image {
 /// Canvas resolution for a given window size, rounded up so the upscaled quad
 /// always covers the whole window even when the size is not a multiple of the
 /// zoom.
-fn canvas_size_for(window: &Window, zoom: u32) -> UVec2 {
-    (window_size(window) + zoom - 1) / zoom
+fn canvas_size_for(window: &Window, zoom: f32) -> UVec2 {
+    canvas_size(window_size(window), zoom)
+}
+
+fn canvas_size(window: UVec2, zoom: f32) -> UVec2 {
+    (window.as_vec2() / zoom).ceil().as_uvec2()
 }
 
 fn window_size(window: &Window) -> UVec2 {
@@ -344,10 +349,9 @@ fn window_size(window: &Window) -> UVec2 {
 /// It shows up at any zoom whose rounding is odd (a window 602 tall at zoom 3
 /// is a 201-pixel canvas drawn 603 tall), so it cannot be fixed by choosing a
 /// better canvas size — only by putting the quad back on the grid.
-fn quad_offset(window: UVec2, canvas: UVec2, zoom: u32) -> Vec2 {
-    let quad = canvas * zoom;
-    let odd = |quad: u32, window: u32| if (quad.abs_diff(window)) % 2 == 1 { 0.5 } else { 0.0 };
-    Vec2::new(odd(quad.x, window.x), odd(quad.y, window.y))
+fn quad_offset(window: UVec2, canvas: UVec2, zoom: f32) -> Vec2 {
+    let edge = (window.as_vec2() - canvas.as_vec2() * zoom) * 0.5;
+    edge.ceil() - edge
 }
 
 fn setup_pipeline(
@@ -514,10 +518,16 @@ fn apply_camera_target(
 /// Keep the rendered camera position on whole canvas pixels, whatever is
 /// driving it. Without this a camera at a fractional offset samples every
 /// sprite between texels and the whole grid shimmers.
-fn snap_camera_to_pixels(mut cameras: Query<(&mut Transform, &CameraPan), With<WorldCamera>>) {
+fn snap_camera_to_pixels(
+    zoom: Res<PixelZoom>,
+    mut cameras: Query<(&mut Transform, &CameraPan), With<WorldCamera>>,
+) {
+    // At x0.5 a screen pixel spans two world pixels. Keep the sampling phase
+    // fixed while panning rather than alternating which canvas pixels survive.
+    let grid = (1.0 / zoom.factor()).max(1.0);
     for (mut transform, pan) in &mut cameras {
-        transform.translation.x = pan.0.x.round();
-        transform.translation.y = pan.0.y.round();
+        transform.translation.x = (pan.0.x / grid).round() * grid;
+        transform.translation.y = (pan.0.y / grid).round() * grid;
     }
 }
 
@@ -562,7 +572,7 @@ fn light_canvas(
 ///
 /// `camera` is the world camera's (already snapped) translation, and `zoom`
 /// the factor the canvas is currently drawn at.
-pub fn cursor_world_pos(window: &Window, camera: Vec2, zoom: u32) -> Option<Vec2> {
+pub fn cursor_world_pos(window: &Window, camera: Vec2, zoom: f32) -> Option<Vec2> {
     let window_size = Vec2::new(window.width(), window.height());
     Some(window_to_world(
         window.cursor_position()?,
@@ -577,8 +587,8 @@ pub fn cursor_world_pos(window: &Window, camera: Vec2, zoom: u32) -> Option<Vec2
 /// Half of it, because every caller wants the distance from the middle: what
 /// the camera can see either side of itself is what decides how far it may be
 /// panned before the map runs out.
-pub fn half_view(window: &Window, zoom: u32) -> Vec2 {
-    Vec2::new(window.width(), window.height()) / (2.0 * zoom as f32)
+pub fn half_view(window: &Window, zoom: f32) -> Vec2 {
+    Vec2::new(window.width(), window.height()) / (2.0 * zoom)
 }
 
 /// The mapping itself, split out from the `Window` so it can be tested.
@@ -591,8 +601,8 @@ pub fn half_view(window: &Window, zoom: u32) -> Vec2 {
 /// Window coordinates are in logical pixels running *down* the screen. The
 /// window's scale factor is overridden to 1.0 in `main`, so logical pixels are
 /// physical pixels and the divisor really is the zoom.
-fn window_to_world(cursor: Vec2, window: Vec2, camera: Vec2, zoom: u32) -> Vec2 {
-    let offset = (cursor - window * 0.5) / zoom as f32;
+fn window_to_world(cursor: Vec2, window: Vec2, camera: Vec2, zoom: f32) -> Vec2 {
+    let offset = (cursor - window * 0.5) / zoom;
     camera + Vec2::new(offset.x, -offset.y)
 }
 
@@ -606,7 +616,7 @@ mod tests {
     fn centre_of_the_window_is_the_camera() {
         let camera = Vec2::new(37.0, -12.0);
         assert_eq!(
-            window_to_world(WINDOW * 0.5, WINDOW, camera, PIXEL_SCALE),
+            window_to_world(WINDOW * 0.5, WINDOW, camera, PIXEL_SCALE as f32),
             camera
         );
     }
@@ -616,7 +626,7 @@ mod tests {
         let scale = PIXEL_SCALE as f32;
         let cursor = WINDOW * 0.5 + Vec2::new(scale, 0.0);
         assert_eq!(
-            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE),
+            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE as f32),
             Vec2::new(1.0, 0.0)
         );
     }
@@ -627,7 +637,7 @@ mod tests {
         // space, which is *negative* y.
         let cursor = WINDOW * 0.5 + Vec2::new(0.0, PIXEL_SCALE as f32);
         assert_eq!(
-            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE),
+            window_to_world(cursor, WINDOW, Vec2::ZERO, PIXEL_SCALE as f32),
             Vec2::new(0.0, -1.0)
         );
     }
@@ -636,9 +646,9 @@ mod tests {
     fn the_corners_span_the_canvas() {
         // A 1280x720 window is a 320x180 canvas, so the top-left corner is
         // half of that up and to the left of a camera at the origin.
-        let top_left = window_to_world(Vec2::ZERO, WINDOW, Vec2::ZERO, PIXEL_SCALE);
+        let top_left = window_to_world(Vec2::ZERO, WINDOW, Vec2::ZERO, PIXEL_SCALE as f32);
         assert_eq!(top_left, Vec2::new(-160.0, 90.0));
-        let bottom_right = window_to_world(WINDOW, WINDOW, Vec2::ZERO, PIXEL_SCALE);
+        let bottom_right = window_to_world(WINDOW, WINDOW, Vec2::ZERO, PIXEL_SCALE as f32);
         assert_eq!(bottom_right, Vec2::new(160.0, -90.0));
     }
 
@@ -649,16 +659,20 @@ mod tests {
     fn zooming_in_puts_the_same_pixel_closer_to_the_camera() {
         let cursor = WINDOW * 0.5 + Vec2::new(80.0, 0.0);
         assert_eq!(
-            window_to_world(cursor, WINDOW, Vec2::ZERO, 4),
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 4.0),
             Vec2::new(20.0, 0.0)
         );
         assert_eq!(
-            window_to_world(cursor, WINDOW, Vec2::ZERO, 8),
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 8.0),
             Vec2::new(10.0, 0.0)
         );
         assert_eq!(
-            window_to_world(cursor, WINDOW, Vec2::ZERO, 1),
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 1.0),
             Vec2::new(80.0, 0.0)
+        );
+        assert_eq!(
+            window_to_world(cursor, WINDOW, Vec2::ZERO, 0.5),
+            Vec2::new(160.0, 0.0)
         );
     }
 
@@ -666,13 +680,13 @@ mod tests {
     /// edge on half a pixel; half a pixel of nudge puts it back.
     #[test]
     fn the_canvas_quad_lands_on_whole_pixels_at_every_zoom() {
-        for zoom in PixelZoom::MIN..=PixelZoom::MAX {
+        for zoom in PixelZoom::LEVELS {
             for window in [UVec2::new(1280, 720), UVec2::new(1002, 602), UVec2::new(999, 601)] {
-                let canvas = (window + zoom - 1) / zoom;
+                let canvas = canvas_size(window, zoom);
                 let offset = quad_offset(window, canvas, zoom);
                 // Where the quad's left and bottom edges land, in window
                 // pixels from the window's own edge.
-                let edge = (window.as_vec2() - (canvas * zoom).as_vec2()) / 2.0 + offset;
+                let edge = (window.as_vec2() - canvas.as_vec2() * zoom) / 2.0 + offset;
                 assert_eq!(edge.x.fract(), 0.0, "{zoom}x in {window}");
                 assert_eq!(edge.y.fract(), 0.0, "{zoom}x in {window}");
             }
@@ -683,18 +697,18 @@ mod tests {
     fn a_canvas_covers_the_window_at_every_zoom() {
         // Rounded up, never down: a canvas a pixel short of the window leaves
         // an unpainted strip down the edge of the screen.
-        for zoom in PixelZoom::MIN..=PixelZoom::MAX {
-            let size = (UVec2::new(1002, 602) + zoom - 1) / zoom;
-            assert!(size.x * zoom >= 1002 && size.y * zoom >= 602, "zoom {zoom}");
+        for zoom in PixelZoom::LEVELS {
+            let size = canvas_size(UVec2::new(1002, 602), zoom);
+        assert!(size.x as f32 * zoom >= 1002.0 && size.y as f32 * zoom >= 602.0, "zoom {zoom}");
         }
     }
 
     #[test]
     fn the_zoom_stops_at_both_ends_and_says_when_it_did_not_move() {
         let mut zoom = PixelZoom::default();
-        assert_eq!(zoom.get(), PIXEL_SCALE);
+        assert_eq!(zoom.get(), PIXEL_SCALE as f32);
         assert!(zoom.step(1));
-        assert_eq!(zoom.get(), PIXEL_SCALE + 1);
+        assert_eq!(zoom.get(), (PIXEL_SCALE + 1) as f32);
 
         assert!(zoom.step(100));
         assert_eq!(zoom.get(), PixelZoom::MAX);
@@ -706,7 +720,20 @@ mod tests {
         assert!(!zoom.step(-1));
 
         zoom.reset();
-        assert_eq!(zoom.get(), PIXEL_SCALE);
+        assert_eq!(zoom.get(), PIXEL_SCALE as f32);
+    }
+
+    #[test]
+    fn overview_is_one_step_below_one_and_doubles_the_view() {
+        let mut zoom = PixelZoom::new(1.0);
+        let at_one = canvas_size(UVec2::new(1002, 602), zoom.factor());
+        assert!(zoom.step(-1));
+        assert_eq!(zoom.get(), 0.5);
+        assert_eq!(canvas_size(UVec2::new(1002, 602), zoom.factor()), at_one * 2);
+        assert!(!zoom.step(-1));
+        assert!(zoom.step(1));
+        assert_eq!(zoom.get(), 1.0);
+        assert_eq!(PixelZoom::new(f32::NAN), PixelZoom::default());
     }
 
     /// Repeated small steps reach the target and stop there, rather than

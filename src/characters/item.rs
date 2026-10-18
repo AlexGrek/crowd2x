@@ -46,6 +46,7 @@ pub const fn art(kind: ItemKind) -> ItemArt {
         ItemKind::Food => ItemArt::Emoji("🍔"),
         ItemKind::Water => ItemArt::Emoji("💧"),
         ItemKind::Scrap => ItemArt::Emoji("🔩"),
+        ItemKind::Body => ItemArt::Emoji("⚰"),
     }
 }
 

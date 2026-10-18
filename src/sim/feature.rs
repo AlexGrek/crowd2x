@@ -8,7 +8,7 @@
 //! none of the editor's.
 //!
 //! A prop with no entry here is scenery, which today is every prop but the
-//! fridge, the toilet, the computer, the beds and the scrap bin. A prop with two entries is
+//! fridge, the toilet, the computer, the beds, the scrap bin and the guard post. A prop with two entries is
 //! two things at once: a fridge is food and water.
 //!
 //! **A feature that does not work is not one.** A fridge with no power, a
@@ -49,6 +49,12 @@ pub enum FeatureKind {
     /// worker's; what each holds is [`crate::sim::bins::Bins`]'. Needs no
     /// power.
     ScrapBin,
+    /// Somewhere to keep watch: a guard post by a gate in the district's
+    /// wall, stood at from beside it. A guard's workplace; needs no power.
+    GuardPost,
+    /// Somewhere to put the dead: a crematorium, loaded from beside it. An
+    /// undertaker's workplace; needs no power.
+    Crematorium,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -80,7 +86,9 @@ impl FeatureKind {
             | FeatureKind::Water
             | FeatureKind::Entertainment
             | FeatureKind::Workstation
-            | FeatureKind::ScrapBin => Access::Beside,
+            | FeatureKind::ScrapBin
+            | FeatureKind::GuardPost
+            | FeatureKind::Crematorium => Access::Beside,
             // A bed is lain in, not stood next to, and one sleeper to a bed:
             // the toilet's arrangement, and for the same reason.
             FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
@@ -133,6 +141,16 @@ pub const FEATURES: &[Feature] = &[
         name: "scrap bin",
         kind: FeatureKind::ScrapBin,
     },
+    // Where a guard keeps its watch.
+    Feature {
+        name: "guard post",
+        kind: FeatureKind::GuardPost,
+    },
+    // Where an undertaker brings the dead.
+    Feature {
+        name: "crematorium",
+        kind: FeatureKind::Crematorium,
+    },
     // The six beds the editor can place. Their art is 48x48 and has no
     // "somebody is in it" strip yet, so a bed does not show that it is being
     // slept in (see `game::props`); the sleeper is what shows it.
@@ -184,6 +202,8 @@ pub struct Features {
     bed: Vec<Point>,
     workstation: Vec<Point>,
     scrap_bin: Vec<Point>,
+    guard_post: Vec<Point>,
+    crematorium: Vec<Point>,
     /// Cells with passable terrain and exactly one blocking prop, a working
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
@@ -227,6 +247,8 @@ impl Features {
                     FeatureKind::Bed => features.bed.push(cell),
                     FeatureKind::Workstation => features.workstation.push(cell),
                     FeatureKind::ScrapBin => features.scrap_bin.push(cell),
+                    FeatureKind::GuardPost => features.guard_post.push(cell),
+                    FeatureKind::Crematorium => features.crematorium.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
@@ -243,6 +265,8 @@ impl Features {
             &mut features.bed,
             &mut features.workstation,
             &mut features.scrap_bin,
+            &mut features.guard_post,
+            &mut features.crematorium,
         ] {
             cells.sort_unstable();
         }
@@ -268,6 +292,8 @@ impl Features {
             FeatureKind::Bed => &self.bed,
             FeatureKind::Workstation => &self.workstation,
             FeatureKind::ScrapBin => &self.scrap_bin,
+            FeatureKind::GuardPost => &self.guard_post,
+            FeatureKind::Crematorium => &self.crematorium,
         }
     }
 
@@ -583,6 +609,23 @@ mod tests {
         assert!(!features.is_enterable(bin));
         assert_eq!(kinds_of("scrap bin").collect::<Vec<_>>(), [FeatureKind::ScrapBin]);
         assert_eq!(features.count(FeatureKind::Workstation), 0, "a bin is not a desk");
+    }
+
+    /// A guard post is stood at from beside it, needs nothing plugged in,
+    /// and is one even set into a wall, which is where a district has them.
+    #[test]
+    fn a_guard_post_is_somewhere_to_keep_watch_from_beside_it_even_in_a_wall() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let post = Point::new(0, 4);
+        map.set_terrain(post, crate::map::WALL);
+        map.add_object(ObjectLayer::Props, prop("guard post", post));
+
+        let features = Features::from_map(&map, &Supply::from_map(&map));
+        assert!(features.has(FeatureKind::GuardPost, post));
+        assert_eq!(FeatureKind::GuardPost.access(), Access::Beside);
+        assert!(!features.is_enterable(post));
+        assert_eq!(kinds_of("guard post").collect::<Vec<_>>(), [FeatureKind::GuardPost]);
+        assert_eq!(features.count(FeatureKind::Workstation), 0, "a post is not a desk");
     }
 
     #[test]

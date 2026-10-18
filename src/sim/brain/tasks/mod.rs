@@ -7,11 +7,13 @@
 
 pub mod close_fridge;
 pub mod consume_item;
+pub mod cremate;
 pub mod deposit;
 pub mod move_to;
 pub mod open_fridge;
 pub mod salvage;
 pub mod sleep;
+pub mod take_body;
 pub mod take_item;
 pub mod use_computer;
 pub mod use_toilet;
@@ -20,11 +22,13 @@ pub mod work;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
+pub use cremate::{Cremate, CREMATE_SECONDS};
 pub use deposit::{Deposit, DEPOSIT_SECONDS};
 pub use move_to::MoveTo;
 pub use open_fridge::{OpenFridge, OPEN_SECONDS};
 pub use salvage::Salvage;
 pub use sleep::Sleep;
+pub use take_body::{TakeBody, TAKE_BODY_SECONDS};
 pub use take_item::TakeItem;
 pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;

@@ -1,6 +1,6 @@
 ---
 name: map-generator
-description: Knowledge base for crowd2x's procedural district generator - the seeded 131x100 district of 6x5 blocks, lots and streets (pavement, road, grass parks), the 92 houses with beds, fridges, toilets and resident spawners, the bank, the shops, the mandatory lot buildings (the warehouse and its four scrap bins, on the edge lot nearest the scrap), roofs, lamps, windows, street lamps and their controllers, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
+description: Knowledge base for crowd2x's procedural district generator - the seeded 131x100 district of 6x5 blocks, lots and streets (pavement, road, grass parks), the 92 houses with beds, fridges, toilets and resident spawners, the bank, the shops, the mandatory lot buildings (the warehouse and its four scrap bins, on the edge lot nearest the scrap; four public restaurants with fridges and toilets, one to each quarter; the crematorium and its two crematoria, on the edge), the perimeter wall with its 8 gates and their guard posts, roofs, lamps, windows, street lamps and their controllers, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
 ---
 
 # Map generator: `map::district`
@@ -14,7 +14,7 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 
 | Who | Where | What |
 | --- | --- | --- |
-| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, warehouse: Rect, parks }`, `District::residents()`, `District::buildings()` (every building's walls: houses, shops, warehouse, bank) |
+| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, warehouse: Rect, restaurants: Vec<Rect>, crematorium: Rect, parks, gates: Vec<Gate> }` (`Gate { leaves: [Point; 2], post, outward }`), `District::residents()`, `District::buildings()` (every building's walls: houses, shops, warehouse, restaurants, crematorium, bank) |
 | Browser button `district` | `src/browser.rs` (`Action::District`) | fresh seed, name from the name field or `district <seed>`, saved, opened in the game |
 | By hand | `src/debug.rs` | `CROWD2X_DISTRICT=<seed>` (with `CROWD2X_STATE=game`) |
 | QA fixture | `src/qa/mod.rs` | `given.maps: [{"name": ..., "district": seed}]` |
@@ -26,7 +26,7 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 `STREET` = 5 cells between and around blocks: a `PAVEMENT` each side of three cells of `ROAD`,
 the main under the middle one, lamps in the road's outer lanes (`CURB` = 1 in from each edge).
 `WIDTH` x `HEIGHT` = 131 x 100. **Lots**: 30 blocks less the bank's two and the shops' one
-leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (1, the warehouse) take theirs first, `HOUSES`
+leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (6: the warehouse, `RESTAURANTS` = 4, the crematorium) take theirs first, `HOUSES`
 = 92 of the rest (about 86%), and `EMPTY_LOTS` = `RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES`
 (15) are parks — all derived, so a geometry change only needs `HOUSES` chosen. Seed 7 has 136
 residents (0 has 135, 42 has 136). Helpers:
@@ -44,9 +44,10 @@ not**, so adding or changing anything in 7-10 never changes a seed's streets, ho
 everything, so every seed's district looks different afterwards; a seed's resident count is
 re-read, never assumed.)
 
-0. **The ground** (`pave`, no RNG): the map starts as `ROAD`; every block, the cell round it
-   and the map's edge become `PAVEMENT`, so each street reads pavement, road x3, pavement and
-   the pavements wrap round the corners. The bank's two blocks and the street between count as
+0. **The ground** (`pave`, no RNG): the map starts as `ROAD`; every block and the cell round it
+   become `PAVEMENT`, and **the map's edge becomes the `PERIMETER_WALL`** (`wall brown big`),
+   so each street reads pavement, road x3, pavement — the street round the edge wall, road x3,
+   pavement — and the pavements wrap round the corners. The bank's two blocks and the street between count as
    one block, since the bank stands across it. Walk costs (`map` skill) make the crowd keep to
    the pavement and cross the road straight over.
 
@@ -70,6 +71,19 @@ re-read, never assumed.)
    (`WAREHOUSE_BINS`, which is what caps a district at four scrap collectors, `jobs`). Picking
    the lot nearest the scrap rather than the first edge lot took the walk from the warehouse to
    the nearest heap from a median of 55 cells (max 137) to 21-33 for 63 of 64 seeds.
+   Then the **`restaurant`s**, `RESTAURANTS` = 4, one per quarter: the lot whose middle is
+   nearest `(WIDTH * q / 4, HEIGHT * q / 4)` for q in 1, 3 — so nobody is far from public food.
+   `public_room` (7x6, a plain `DOOR` on a random outer side kept two off the corners, a
+   `Room` that lays out cells `across` the door's wall and `deep` in from it, whichever side
+   the door is on): `RESTAURANT_WALL` (`wall red`), `RESTAURANT_FLOOR` (`tiles yellow`),
+   `FRIDGE`s along the far wall (both corners, and the middle when the width is odd) and a
+   `TOILET` against each side wall one row in from the door — public food, drink and
+   toilets, powered and plumbed by `connect` like any building. Then the **`crematorium`**:
+   the first edge lot left (rank 0), `public_room` with the door on an edge side,
+   `CREMATORIUM_WALL` (`wall purple`), `CREMATORIUM_FLOOR` (`floor white`), a `CREMATORIUM`
+   (`"crematorium"`) in each far corner (`CREMATORIA` = 2, so 6 undertakers, `jobs`).
+   **Adding the restaurants and the crematorium changed every seed's houses** (the lots and
+   the RNG draws after the warehouse); the bank, shops and warehouse are as they were.
 5. **Lots -> houses**: the rest, `EMPTY_LOTS` split off (leaving `HOUSES` = 92), re-sorted
    into street order (so spawner/arrival order reads bottom-left
    first), then **`house`** for each: 1-2 `RESIDENTS`, 7-8 x 6-7 walls (`HOUSE_WALL`,
@@ -77,6 +91,13 @@ re-read, never assumed.)
    `exhaustively`: beds, `FRIDGE`, `TOILET` against the inner walls, spawners beside beds.
    Then the **parks**: the split-off lots and the shops' fourth, each a whole lot of `GRASS`
    (`District::parks`), no RNG.
+5b. **`gates`** (no RNG, so no seed changed): `GATES_PER_SIDE` (2) a side, `GATES` = 8, each
+   at the end of one of the streets running out to that side — street `i * (blocks + 1) / 3`
+   for i = 1, 2, so streets 2 and 4 both ways — two `DOOR` leaves (public) on `ROAD` in the
+   street's first two road lanes, and a `GUARD_POST` (`"guard post"`, the guards' workplace,
+   `jobs`) **on the wall tile** two cells from the nearer leaf on the far side of the street's
+   pavement line, a cell of wall between: its only side on the map is the road cell inside,
+   so a guard stands in the district and out of the gateway. Pushed to `props` before step 6.
 6. Props and spawners are added to the map only now (painting terrain after a prop would
    recompute passability against it).
 7. **`roof_and_light(map, rooms, bank)`**: ceiling over every building rect (walls
@@ -88,8 +109,8 @@ re-read, never assumed.)
    floor (so not where a partition meets the wall). Windows are impassable but see-through
    (`Terrain::is_see_through`), so light and sight cross them.
 9. **`connect`** (power and sewer; the warehouse's lamp gets a box and wiring like any
-   building's): `TRANSFORMER` at `(WIDTH-1, 0)`, `SEWER` at
-   `(0, HEIGHT-1)`; a `LINE` and a `PIPE` main down the middle cell of every street, skipping
+   building's): `TRANSFORMER` at `(WIDTH-2, 1)`, `SEWER` at
+   `(1, HEIGHT-2)` — the road corners inside the wall; a `LINE` and a `PIPE` main down the middle cell of every street, skipping
    cells inside any building (the bank sits across a street); each source joined to the ring
    main with `utilities::lay`. Per building, if it holds powered things: `service_entry` picks
    the middle of the inside wall whose straight run outward hits a main soonest without
@@ -104,7 +125,9 @@ re-read, never assumed.)
    wired a block at a time, starting beside the row below and stopping one cell short of the
    row above, so each joins one row's circuit and never ties two together. `STREET_LAMP`s
    every `STREET_LAMP_SPACING` (8) cells, the far side staggered by half, nudged up to 2 cells,
-   none within 2 of another (`no_lamp_near`). Then `place_controllers`: one
+   none within 2 of another (`no_lamp_near`). Posts and cabinets keep a cell clear of every door
+   **and guard post** (the `doors` list includes `GUARD_POST`: a lamp on a post's one inside
+   cell would send its guard out through the gate to stand at it). Then `place_controllers`: one
    `utilities::CONTROLLER` per circuit, on a wiring cell beside a line nearest the circuit's
    middle, with a `BOX` under it; a circuit with no lamp or no site is taken up again. Posts and
    cabinets keep clear of doors (Chebyshev 1) and stand only where `blocks_nothing` says the
@@ -127,9 +150,11 @@ re-read, never assumed.)
 | No line indoors; outdoor wiring only on circuits with a controlled box and nothing indoors | voltages meet only in a box; street lights never share a house's circuit | `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` |
 | Street lamps powered at night only (controlled boxes off = day), everything else all day; >= 30 lamps; 1..=10 controllers | street lights, and not a cabinet per stretch | `the_street_lamps_have_power_at_night_only_and_everything_else_all_day` |
 | >= 90% of main cells within a street lamp's radius | the streets are lit | `the_streets_are_lit` |
-| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; one warehouse holding its 4 bins and nothing else, no bin elsewhere, nobody's property, on the edge, on the edge lot to be had nearest the scrap | the brief | `a_district_has_what_it_was_asked_for` |
+| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; one warehouse holding its 4 bins and nothing else, no bin elsewhere, nobody's property, on the edge, on the edge lot to be had nearest the scrap; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's | the brief | `a_district_has_what_it_was_asked_for` |
 | The warehouse's door opens onto the edge street (or the yard cell before it), facing out | collectors step out towards the wasteland | `the_warehouse_door_opens_onto_the_street_round_the_edge` |
-| Every street off the crossroads reads pavement, road x3, pavement | people keep to the pavement | `every_street_is_a_pavement_each_side_of_three_cells_of_road` |
+| Every edge cell is the perimeter wall but the gates' leaves (`DOOR` on `ROAD`, opening off the map, reachable inside); `GATES_PER_SIDE` a side | a walled district, ways out | `the_district_is_walled_in_but_for_its_gates` |
+| One guard post per gate and none elsewhere, on the wall, two from its gate, its only on-map side a free cell inside, not in the gateway | guards stand inside, out of the way | `every_gate_has_a_guard_post_in_the_wall_with_room_inside_to_stand_at_it` |
+| Every street off the crossroads reads pavement, road x3, pavement (the edge streets: wall for the outer pavement) | people keep to the pavement | `every_street_is_a_pavement_each_side_of_three_cells_of_road` |
 | Parks are exactly the empty lots and the shops' fourth, whole lots of grass, with nothing built on them | green zones | `the_empty_lots_are_parks_and_nothing_else_is_grass` |
 | Nothing on the pavement but the transformer and the sewer (two corners) | a post on a one-cell pavement sends everyone into the road | `nothing_stands_on_the_pavement_but_the_transformer_and_the_sewer` |
 | Routes between front doors (seeds 0..8): >= 80% of outdoor cells pavement, no road run longer than a crossing (3) | people prefer pavements | `people_keep_to_the_pavement_and_cross_the_road_straight_over` |
@@ -173,7 +198,12 @@ desk in the bank, then the four bins in the warehouse) and
 
 - Anything placed on a street cell blocks it (the transformer and sewer take two pavement
   corners; street lamps and controllers take road cells in the outer lanes, never pavement);
-  `nothing_in_a_district_is_sealed_off` starts its BFS at `(0, 0)`, which must stay passable.
+  `nothing_in_a_district_is_sealed_off` starts its BFS at `(1, 1)`, the road corner inside the
+  wall, which must stay passable.
+- The wall is on the site's edge, so the wasteland is only reached through a gate: a unit's
+  way out (a collector's to the heaps) goes round by the nearest gate. Cells off the map are
+  passable (the wasteland), so a test asking for "the only open side" of something on the edge
+  has to keep to `map.size()`.
 - Painting terrain checks props already in the map; that is why props are collected and added
   after the terrain (step 5) - `glaze` runs after them and only changes wall cells.
 - The bank spans the street between its two blocks: anything that runs along streets must skip
@@ -185,5 +215,7 @@ desk in the bank, then the four bins in the warehouse) and
   parched at midnight; the 136-resident one works 35 on Monday and **none after**, with 19, 27
   and 10 starving and parched at midnight, everybody piled up in the bank's lobby (its fridges,
   restrooms and the computers the bored go to play on) — and its scrap collectors, caught in
-  it, store nothing all week. Fixing it is the brain's (crowd-aware choice of fridge, toilet and
+  it, store nothing all week. The 24 guards go the same way (measured 2026-10-18, seeds 7 and
+  0): with needs on, 6-8 posts kept on Monday morning, a few after noon, **none from Tuesday**;
+  with the guards' needs off every post is kept nearly round the clock for two days. Fixing it is the brain's (crowd-aware choice of fridge, toilet and
   computer, or residents keeping to their own house), or more public places to spread over.

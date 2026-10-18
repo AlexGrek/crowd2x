@@ -635,6 +635,7 @@ mod tests {
                 fridges: &self.fridges,
                 doors: &self.doors,
                 properties: &self.properties,
+                corpses: &crate::sim::corpses::NONE,
                 dt: 1.0 / 60.0,
                 tick,
                 clock: crate::sim::clock::Clock::after_watching(0.0),

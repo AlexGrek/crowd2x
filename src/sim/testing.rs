@@ -16,6 +16,9 @@ use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
 use super::bins::Bins;
+use super::corpses::Corpses;
+use super::homes::Homes;
+use super::job::Workplaces;
 use super::fridge::Fridges;
 use super::door::Doors;
 use super::property::Properties;
@@ -43,6 +46,14 @@ pub struct World {
     /// leaves on, as [`super::world_step`] does.
     pub doors: Doors,
     pub properties: Properties,
+    /// Who lies dead where, filed and taken off by [`World::step`] as
+    /// [`super::world_step`] does; put a body in it to give an undertaker
+    /// one to find.
+    pub corpses: Corpses,
+    /// The bodies taken up, which a real tick would take out of the world.
+    pub burials: Vec<Uid>,
+    homes: Homes,
+    workplaces: Workplaces,
     pub tick: u64,
     pub dt: f32,
     /// What time it is. Opening time, until a test sets it: a test about
@@ -77,6 +88,10 @@ impl World {
             bins: Bins::from_map(&map),
             doors: Doors::from_map(&map, &properties),
             properties,
+            corpses: Corpses::new(),
+            burials: Vec::new(),
+            homes: Homes::new(),
+            workplaces: Workplaces::new(),
             map,
             log: Log::new(),
             tick: 0,
@@ -95,6 +110,7 @@ impl World {
             fridges: &self.fridges,
             doors: &self.doors,
             properties: &self.properties,
+            corpses: &self.corpses,
             dt: self.dt,
             tick: self.tick,
             clock: self.clock,
@@ -143,11 +159,34 @@ impl World {
             }
             Effect::Salvage { at } => super::salvage(entity, &mut self.map, &self.log, at),
             Effect::Deposit { at, pieces } => super::deposit(entity.uid(), &mut self.bins, &self.log, at, pieces),
+            Effect::Died { cause } => {
+                let log = Log::new();
+                super::died(entity, &mut self.people(), &log, cause);
+                self.lines.extend(log.drain());
+            }
+            Effect::TakeBody { at } => {
+                let log = Log::new();
+                super::take_body(entity, &mut self.people(), &log, at);
+                self.lines.extend(log.drain());
+            }
+            Effect::Cremate { at } => {
+                self.log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
+            }
             Effect::None => {}
         }
         self.doors.advance(self.dt, &self.occupancy);
         self.fridges.advance(self.dt * super::clock::TIME_SCALE);
         self.lines.extend(self.log.drain());
+    }
+
+    fn people(&mut self) -> super::People<'_> {
+        super::People {
+            occupancy: &mut self.occupancy,
+            homes: &mut self.homes,
+            workplaces: &mut self.workplaces,
+            corpses: &mut self.corpses,
+            burials: &mut self.burials,
+        }
     }
 
     /// [`World::step`], with the clock moving on by the tick, as a

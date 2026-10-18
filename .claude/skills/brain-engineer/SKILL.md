@@ -75,6 +75,7 @@ This order has consequences:
 | do a new kind of single step ("sit", "open door") | a **task executor** |
 | show a new kind of body activity (animation) | an **action** variant |
 | use a prop on the map | a **feature** entry (+ palette entry if the prop is new) |
+| die of something new | make the **`Health`** process (`biology/health.rs`) hurt for it: `harm` adds a rate per need at its worst (`STARVING`, `PARCHED`, `SPENT`), `cause_of_death` names it. Health at 0 is death — `Human::react` checks it after `Biology::advance` (see "Health and death" below) |
 | carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`, `mass`, `volume`), **and its art** in `characters/item.rs` — a texture or an emoji; `item::art` has no wildcard arm, so it will not compile without one |
 | change *when* something is chosen | the routine's priority curve, not the goal |
 | change *how* something is done | the goal executor, not the routine |
@@ -89,6 +90,28 @@ variant one in `Action::save`/`restore`, a routine with memory one in `Routine::
 a process with state a field in `Biology::save`, a memory key nothing (memory is saved whole).
 Every `save` destructures its struct exhaustively, so the build points at what was missed; the
 side-by-side tests in `save::tests` catch what changes behaviour after a load.
+
+## Health and death
+
+`Stats::health` (0-100, born 70-100 like every need) is moved by the **`Health` process**
+(`ProcessId::Health` = 6, `biology/health.rs`): it **drains** while a need is at the end of its
+range — starving (hunger 100, dead in `HOURS_TO_STARVE` = 24 h from full), parched (thirst 100,
+12 h), spent (stamina 0, 48 h), summed when several — **heals** in `HOURS_TO_HEAL` = 24 h while
+hunger, thirst and tiredness are all below `WELL` (80), and holds still in between. Switched off
+(`Command::SetProcess`), a body cannot die.
+
+**Death** is the kind's: `Human::react`, after time passes, sees health ≤ 0, halts the walk,
+marks `Body::dead` (saved, `pb::Body.dead` tag 6) and returns `Effect::Died { cause }`
+(`health::cause_of_death`: `thirst`, `starvation`, `exhaustion`). The world step (`sim::died`)
+frees its cell (the crowd walks over the body, and perception no longer sees it), its bed and
+workplace, dismisses it, logs `"{uid} died of {cause}"` and files it in `sim::Corpses`. From then
+on `think_for`/`react_for` skip it like a frozen unit — **for good**: no thinking, moving or
+ageing — `current_goal`, `action_progress` and `interacting_with` are `None`, and the debug
+fields say `condition: dead`. The game draws it turned 90° (`game-screen`). The undertakers
+carry it away (`jobs`, "The undertaker"); `GameState::hire` refuses the dead.
+
+Tests: `biology/health.rs` (heals, starving kills in a day, thirst faster, exhaustion, holds
+still between); the sim test `the_dead_are_carried_to_the_crematorium_and_leave_the_world`.
 
 ## Rules that were each a bug, or would be
 
@@ -193,8 +216,8 @@ Priorities are unitless `f32`s compared only against each other.
 | `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
 | `NeedRoutine(BOREDOM)` → play | `boredom / 50`: 1.2 at `BORED` (60), released at `AMUSED` (20). `Stats::boredom` is `fun` turned over — the one stat that falls on its own, read the same way up as every other need |
-| `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90) |
-| `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk, `Collect` for a scrap collector) while the shift is due (`Shift::is_due`: 09:00-17:00 Mon-Fri, from 08:30 for the walk in), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
+| `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night — **the unit's own night**, `job::is_bedtime(job, clock)`: the clock's 22-06, or the 8 hours ending 3 before a worker's shift (the night watch sleeps 13-21), see `jobs` — the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90) |
+| `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk or a guard post, `Collect` for a scrap collector) while the job is due (`Job::is_due`: 09:00-17:00 Mon-Fri from 08:30 for the walk in; a guard's watch from two hours before), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
 | `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 

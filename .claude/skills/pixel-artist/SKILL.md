@@ -19,7 +19,7 @@ why). Art is linked to code and map files **by name, never by index**.
 | Eyes | `assets/human/eyes_<colour>.png` | `human::EYES` |
 | Floors / walls | `assets/<name>.png` | `src/editor/background.rs` palette, `PaletteItem::upscaled("name", "file.png")` |
 | Outdoor ground | `assets/pavement.png`, `road.png`, `grass.png`, drawn by `uv run tools/ground_art.py` from masks (must tile seamlessly) | the same palette; the walk cost is the terrain's (`map` skill) |
-| Props | `assets/<name>.png` | `src/editor/props.rs` palette; `animated(name, path, frames)` for a strip, `.used(path, frames)` for an in-use look, `posed(name, path, frames)` for a strip the game picks the frame of (doors, the light switch, `scrap_bin.png`: empty, a few pieces, half full, heaped — drawn by `tools/scrap_bin_art.py` in `tools/scrap_art.py`'s colours, `preview` for an enlarged look) |
+| Props | `assets/<name>.png` | `src/editor/props.rs` palette; `animated(name, path, frames)` for a strip, `.used(path, frames)` for an in-use look, `posed(name, path, frames)` for a strip the game picks the frame of (doors, the light switch, `scrap_bin.png`: empty, a few pieces, half full, heaped — drawn by `tools/scrap_bin_art.py` in `tools/scrap_art.py`'s colours, `preview` for an enlarged look); `upscaled("guard post", "guard_post.png")`, one 16x16 sentry box drawn by `tools/guard_post_art.py` (`preview` shows it in a strip of brick wall, since it stands on a wall tile) |
 | Held items | `assets/<name>.png` (any size) | `src/characters/item.rs` `art()` → `ItemArt::Texture` |
 | Dog | `assets/dog_idle*.png`, 4 frames side by side | `src/characters/dog.rs` |
 
@@ -78,7 +78,20 @@ Which combinations exist is data too: `NATURAL` colours get every hairstyle, `DY
 names the few styles each fantasy colour comes in (that is the weighting — `Look::random`
 picks uniformly from the list), `DRESSES` and `SEPARATES` pick the outfit colourways.
 
+The **crematorium** prop (`assets/crematorium.png`, 16x16, `upscaled` in the editor palette) is
+drawn by `tools/crematorium_art.py` like `tools/guard_post_art.py`: a stone furnace, a chimney,
+a gold cross over an iron door with the fire showing through (`preview` shows it on a floor).
+A carried body is the emoji ⚰ (`characters/item.rs`), and so is the undertaker's goal label.
+
 ### Adding a layer kind that is not hair or clothes
+
+**Work uniforms** are in `tools/human_art.py` too: `UNIFORMS`, a mask and its own colours per
+job (`t` a tie, `s` a reflective band, `k` brass; the undertaker's black cassock to the ankles
+with a white collar `w` and a gold cross `y`), written by `generate` as
+`assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
+the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
+everybody's seeded look); each is a `Clothing::Uniform*` variant, in `Clothing::UNIFORMS`, with a
+`clothing_path` arm, and `JobKind::uniform` says whose it is (`jobs`). A new job needs one.
 
 A new slot (a hat, glasses) means a new array in `human.rs`, a new entry in
 `slot_paths`, `SLOT_DEPTHS` and `SLOTS`, and the tests in that file — it changes the

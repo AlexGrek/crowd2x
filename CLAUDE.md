@@ -18,9 +18,16 @@ runs a simulation, saved games (`.saves/*.savegame`, a zip of Protobuf files, lo
 main menu), and a scripted QA harness that drives all of it. The simulation is one
 `GameState` advanced by one function; every unit runs a brain (routines, goals, tasks,
 actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
-energy, satisfaction). Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
+energy, satisfaction, health). A need left at its worst — starving, parched, spent — drains
+health, and at none a unit dies: it lies where it fell (drawn turned 90°), thinks and moves no
+more. Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
-the heaps in the wasteland and stores it in its own bin in the district's warehouse.
+the heaps in the wasteland and stores it in its own bin in the district's warehouse. A
+district is walled in, with eight gates, and each gate's guard post is kept round the clock by
+three guards on eight-hour watches, every day, each sleeping by its watch; undertakers on the
+same watches carry the dead to the crematoria in the district's crematorium. Four public
+restaurants, one to each quarter of a district, have fridges and toilets anybody may use.
+Every worker wears its job's uniform while its shift is due.
 
 ## Commands
 
@@ -61,13 +68,14 @@ to `screenshots/`.
 | Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
-| The seeded district generator | `map-generator` |
+| The seeded district generator, its perimeter wall, gates and guard posts | `map-generator` |
 | The endless world past a map's edge: the wasteland generator, chunks, streaming and reclaiming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
 | `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, weekdays, desks and scrap bins (`Workplaces`, `Bins`), hiring order, hire/dismiss, the work routine, collecting scrap, the job menu | `jobs` (+ `brain-engineer`) |
-| Drawing new art: hair, dresses, outfits, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
+| Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
@@ -123,8 +131,9 @@ src/sim/                GameState, passes, entities, clock, items           [sim
 src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell  [simulation, wasteland]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
-src/sim/job.rs          jobs, shifts, who works at which desk or bin        [jobs]
+src/sim/job.rs          jobs, shifts, watches, who works which workplace    [jobs]
 src/sim/bins.rs         what each scrap bin holds                           [jobs]
+src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]
@@ -139,6 +148,8 @@ tools/switch_art.py     draws the light switch (on and off)                 [ele
 tools/ground_art.py     draws the pavement, road and grass tiles            [pixel-artist]
 tools/wasteland_art.py  draws the wasteland's dirt, scrub, meadow, mud, water [wasteland]
 tools/scrap_bin_art.py  draws the warehouse's scrap bin, empty to heaped     [pixel-artist]
+tools/guard_post_art.py draws the guard post in the district's wall         [pixel-artist]
+tools/crematorium_art.py draws the crematorium the undertakers bring the dead to [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

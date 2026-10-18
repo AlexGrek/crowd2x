@@ -58,6 +58,7 @@
 pub mod bladder;
 pub mod energy;
 pub mod fun;
+pub mod health;
 pub mod hunger;
 pub mod recollection;
 pub mod satisfaction;
@@ -67,6 +68,7 @@ pub mod thirst;
 pub use bladder::Bladder;
 pub use energy::Energy;
 pub use fun::Fun;
+pub use health::Health;
 pub use hunger::Hunger;
 pub use recollection::{Experience, Recollection};
 pub use satisfaction::Satisfaction;
@@ -91,10 +93,11 @@ pub enum ProcessId {
     Fun = 3,
     Energy = 4,
     Satisfaction = 5,
+    Health = 6,
 }
 
 impl ProcessId {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [ProcessId; ProcessId::COUNT] = [
         ProcessId::Hunger,
         ProcessId::Thirst,
@@ -102,6 +105,7 @@ impl ProcessId {
         ProcessId::Fun,
         ProcessId::Energy,
         ProcessId::Satisfaction,
+        ProcessId::Health,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -112,6 +116,7 @@ impl ProcessId {
             ProcessId::Fun => "fun",
             ProcessId::Energy => "energy",
             ProcessId::Satisfaction => "satisfaction",
+            ProcessId::Health => "health",
         }
     }
 
@@ -238,6 +243,7 @@ pub struct Biology {
     fun: Fun,
     energy: Energy,
     satisfaction: Satisfaction,
+    health: Health,
 }
 
 impl Biology {
@@ -253,6 +259,7 @@ impl Biology {
             fun: Fun,
             energy: Energy,
             satisfaction: Satisfaction,
+            health: Health,
         }
     }
 
@@ -346,14 +353,15 @@ impl Biology {
             fun,
             energy,
             satisfaction,
+            health,
             recent: _,
         } = self;
-        (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction])
+        (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction, health])
     }
 
     /// Every process, read-only. Slot `i` is `ProcessId` `i`.
     fn processes(&self) -> [&dyn Process; ProcessId::COUNT] {
-        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy, &self.satisfaction]
+        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy, &self.satisfaction, &self.health]
     }
 
     /// The stats, which processes are running, and what each running process
@@ -404,6 +412,7 @@ impl Biology {
             fun: Fun,
             energy: Energy,
             satisfaction: Satisfaction,
+            health: Health,
         } = self;
         pb::Biology {
             stats: Some(stats.save()),
@@ -440,6 +449,7 @@ impl From<ProcessId> for pb::ProcessId {
             ProcessId::Fun => pb::ProcessId::Fun,
             ProcessId::Energy => pb::ProcessId::Energy,
             ProcessId::Satisfaction => pb::ProcessId::Satisfaction,
+            ProcessId::Health => pb::ProcessId::Health,
         }
     }
 }
@@ -453,6 +463,7 @@ impl From<pb::ProcessId> for ProcessId {
             pb::ProcessId::Fun => ProcessId::Fun,
             pb::ProcessId::Energy => ProcessId::Energy,
             pb::ProcessId::Satisfaction => ProcessId::Satisfaction,
+            pb::ProcessId::Health => ProcessId::Health,
         }
     }
 }
@@ -498,6 +509,7 @@ mod tests {
         assert!(switches.is_on(ProcessId::Fun));
         assert!(switches.is_on(ProcessId::Energy));
         assert!(switches.is_on(ProcessId::Satisfaction));
+        assert!(switches.is_on(ProcessId::Health));
         assert_eq!(switches.with(ProcessId::Thirst, true), Switches::ALL);
         assert_eq!(
             ProcessId::ALL.iter().fold(Switches::ALL, |s, &p| s.with(p, false)),
@@ -595,13 +607,14 @@ mod tests {
                 .find(|(name, _)| *name == "processes")
                 .map(|(_, value)| value)
         };
-        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy, satisfaction"));
+        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy, satisfaction, health"));
 
         biology.set_running(ProcessId::Hunger, false);
         biology.set_running(ProcessId::Bladder, false);
         biology.set_running(ProcessId::Fun, false);
         biology.set_running(ProcessId::Energy, false);
         biology.set_running(ProcessId::Satisfaction, false);
+        biology.set_running(ProcessId::Health, false);
         assert_eq!(processes(&biology).as_deref(), Some("thirst"));
         assert_eq!(names(&biology), before, "the unit panel lays these out once");
     }

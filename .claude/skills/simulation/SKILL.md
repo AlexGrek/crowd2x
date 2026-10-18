@@ -62,7 +62,7 @@ it are four steps:
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
    the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
-   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack) or `Effect::Deposit { at, pieces }` (a packful into a scrap bin, `sim/bins.rs`; the `jobs` skill) — into a
+   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack), `Effect::Deposit { at, pieces }` (a packful into a scrap bin, `sim/bins.rs`; the `jobs` skill), `Effect::Died { cause }` (the unit just died: `sim::died` frees its cell, bed and workplace and files it in `Corpses`), `Effect::TakeBody { at }` (an undertaker takes up a body: into its hand, off `Corpses`, onto `burials`) or `Effect::Cremate { at }` (logged) — into a
    third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
    door directly: that is a fact about the world, read by every entity beside it, not about
    the one entity that opened it.
@@ -72,6 +72,16 @@ it are four steps:
    `salvage`, `deposit` → `Bins::add`), the slot
    reset to `Effect::None`, and then `Fridges::advance` moves every fridge's temperature on
    by the tick's worth of world time — see `sim::world_step` and "Features" in `brain-engineer`'s `architecture.md`.
+   `world_step` takes the people-shaped parts as one borrow, `People { occupancy, homes,
+   workplaces, corpses, burials }`.
+5. **bury** (`process_game_state`, after the processing pass, which may remove nobody): the
+   bodies taken up this tick (`GameState::burials`) are despawned, so nothing waits between
+   ticks and nothing new is saved.
+
+**The dead** (`Body::dead`, `GameEntity::is_dead`) are skipped by think and react exactly as
+the frozen are, and for good; `sim::Corpses` (`corpses.rs`, rebuilt from the entities on load,
+`Think::corpses`) is where they lie — the list an undertaker searches, never the crowd. See
+`brain-engineer`, "Health and death".
 
 **Passability is at the tile level, on the centre cell**, and it is two layers asked in
 order: `map`'s `PassabilityMap` for the terrain and the furniture, then `sim/occupancy.rs`
@@ -198,7 +208,8 @@ world watched faster.
 
 `Think` also carries the time of day, `Think::clock` — one reading of the world's clock per
 pass, shared by the whole crowd — and `Clock::is_night` (22:00 to 06:00, across midnight) is
-the one question a routine asks of it so far. **The sun** is a function of the clock too:
+what a routine asks of it for somebody with no job (a worker's night follows its shift,
+`job::is_bedtime`; `Weekday::next` is for a shift from midnight, due the evening before). **The sun** is a function of the clock too:
 `Clock::sun()` / `sim::sun::Sun::at(hours)` gives elevation, intensity and colour
 (`Clock::hours()` is the fractional hour). The canvas is lit by it (`lighting`) and the street
 light controllers switch by `Sun::is_dark`; nothing about it is stored.

@@ -31,10 +31,9 @@
 //! * **It does not edit anything.** The map is read and never written — the
 //!   simulation gets a clone — which is why leaving is instant and there is
 //!   nothing to save.
-//! * **It does not zoom the camera.** Zooming is [`PixelZoom`], a whole-number
-//!   change to the size of the canvas the world is drawn into, so a sprite is
-//!   on exact pixel blocks at every zoom level rather than only at the default
-//!   one. See `render`.
+//! * **It does not zoom the camera.** Zooming is [`PixelZoom`], changing the
+//!   canvas resolution: integer upscales preserve exact pixel blocks, and the
+//!   x0.5 overview downsamples by two. See `render`.
 //!
 //! The camera is kept inside the map. A map has edges and nothing outside
 //! them, so flying off into the void is not navigation, it is getting lost —
@@ -386,7 +385,7 @@ mod tests {
         assert_eq!(at_default, PAN_SPEED);
 
         zoom.step(PIXEL_SCALE as i32);
-        assert_eq!(zoom.get(), PIXEL_SCALE * 2);
+        assert_eq!(zoom.get(), (PIXEL_SCALE * 2) as f32);
         // Twice as close, so half as far through the world per second.
         assert_eq!(pan_speed(zoom), PAN_SPEED / 2.0);
     }

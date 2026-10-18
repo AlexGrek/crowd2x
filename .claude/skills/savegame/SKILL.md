@@ -101,7 +101,19 @@ routines at the end**: `Brain::restore` takes a saved list that is a prefix of t
 skill). Tags added with the scrap collectors: `pb::GoalId::Collect` = 9 (`CollectGoal` is a
 `pb::Executor::Seek`), `pb::TaskKind::Deposit(Timed)` = 12 and
 `pb::TaskKind::SalvageForWork(Timed)` = 13 (`Salvage { for_work: true }`; an order's salvage
-stays `Salvage(Timed)` = 10), `pb::World.bins` = 12.
+stays `Salvage(Timed)` = 10), `pb::World.bins` = 12. With the guards: `pb::JobKind::Guard` = 2,
+`pb::TaskKind::KeepWatch(Timed)` = 14 (`Work { watch: true }`), and `pb::Workplace.start`
+(tag 3, `optional uint32`: a post is three workplaces, told apart by the shift's start hour;
+absent = 9, office hours, all an older save held). With health, death and the undertakers:
+`pb::ProcessId::Health` = 6 (an older save's units come back with it running, since `off`
+lists the processes off), `pb::Body.dead` (tag 6, absent = alive), `pb::JobKind::Undertaker` =
+3, `pb::GoalId::Bury` = 10 (`BuryGoal` is a `pb::Executor::Seek`), `pb::TaskKind::TakeBody(Timed)`
+= 15 and `Cremate(Timed)` = 16, and the item `"body"` by name. `sim::Corpses` is **not saved**:
+`GameState::restore` rebuilds it from the dead entities (`Corpses::of`), and a dead unit's
+`holds_cell` is false, its cell freed when it died. `GameState::burials` is empty between ticks.
+Test: `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with
+`dead` not restored). **A new oneof variant must also go in the
+field's `tags = "..."` list** (`pb::Task.kind`) or it decodes as "a task of no kind".
 
 ## Fast
 

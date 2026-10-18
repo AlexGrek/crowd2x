@@ -135,6 +135,7 @@ pub mod brain;
 pub mod census;
 pub mod clock;
 pub mod clothing;
+pub mod corpses;
 pub mod door;
 pub mod entities;
 pub mod entity;
@@ -172,6 +173,7 @@ pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
 pub use census::Census;
 pub use clock::Clock;
+pub use corpses::Corpses;
 pub use sun::Sun;
 pub use door::Doors;
 pub use entities::{Entities, FrozenEntities, Slot};
@@ -285,6 +287,20 @@ pub enum Effect {
     /// finished emptying its pack into it ([`brain::tasks::Deposit`], which
     /// has already taken them out of the pack). See [`bins`].
     Deposit { at: Point, pieces: u8 },
+    /// The unit died this tick, of `cause` ([`biology::health`]): it has
+    /// already marked its own body dead, and the world gives back what it
+    /// held — its cell, its bed, its workplace (with the job, so a worker is
+    /// not left on the books) — and says so in the log.
+    Died { cause: &'static str },
+    /// Take up the body lying at `at`: the unit, an undertaker, has finished
+    /// lifting it ([`brain::tasks::TakeBody`]). Granted to a free hand while
+    /// the body is still there, so two undertakers at one body get one
+    /// between them, the lower slot's; the body is then carried as an item
+    /// and leaves the world at the end of the tick — see [`world_step`].
+    TakeBody { at: Point },
+    /// A body was put in the crematorium at `at` ([`brain::tasks::Cremate`],
+    /// which has already taken it out of the hand). Logged.
+    Cremate { at: Point },
 }
 
 /// Something done *to* the world, from outside it.
@@ -552,6 +568,14 @@ pub struct GameState {
     /// spawn pass, read by nothing in a tick — a worker knows its own desk,
     /// see [`job`].
     workplaces: Workplaces,
+    /// Who lies dead where: filed by [`Effect::Died`], taken off by
+    /// [`Effect::TakeBody`]. Worked out again from the entities on load. See
+    /// [`corpses`].
+    corpses: Corpses,
+    /// The bodies taken up this tick, to leave the world when the processing
+    /// pass is over ([`process_game_state`]) — the one pass that may not
+    /// remove anybody. Empty between ticks, so never saved.
+    burials: Vec<Uid>,
     /// Mints ids and seeds new entities. Seeded, so a run replays; and a
     /// named generator, so a save can keep its state ([`rng::WorldRng`]).
     rng: rng::WorldRng,
@@ -617,6 +641,8 @@ impl GameState {
             supply_generation: 0,
             homes: Homes::new(),
             workplaces: Workplaces::new(),
+            corpses: Corpses::new(),
+            burials: Vec::new(),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -886,6 +912,11 @@ impl GameState {
         &self.fridges
     }
 
+    /// Who lies dead where. See [`corpses`].
+    pub fn corpses(&self) -> &Corpses {
+        &self.corpses
+    }
+
     /// What every scrap bin holds. See [`bins`].
     pub fn bins(&self) -> &Bins {
         &self.bins
@@ -1087,10 +1118,12 @@ impl GameState {
     /// Hand somebody a job at the nearest free workplace it may use — one
     /// nobody else works at, and not one in somebody else's house — if it is
     /// the kind that works and there is one. **Jobs are offered in
-    /// [`JobKind::ALL`]'s order**: a desk if any is free, then a scrap bin;
-    /// the first kind with a workplace free wins. **A workplace is only given
-    /// while it is free**: an arrival that finds every one taken is
-    /// unemployed.
+    /// [`JobKind::ALL`]'s order**: a desk if any is free, then a scrap bin,
+    /// then a guard post; the first kind with a workplace free wins. **A
+    /// workplace is only given while it is free** — a cell and a shift: a
+    /// guard post is three, one a watch, and the first watch free at the
+    /// nearest post with one is the arrival's. One that finds every one
+    /// taken is unemployed.
     ///
     /// One scan of the workplaces per arrival, like
     /// [`GameState::give_a_bed`]. `false` when no job was given.
@@ -1100,24 +1133,27 @@ impl GameState {
         };
         let key = entity.body().home();
         let (workplaces, properties) = (&self.workplaces, &self.properties);
-        let free = |cell: Point| !workplaces.is_taken(cell) && properties.may_use(cell, key);
-        let Some(job) = JobKind::ALL
-            .into_iter()
-            .find_map(|kind| Some(Job::new(kind, self.features.nearest_where(kind.workplace(), near, free)?)))
-        else {
+        let Some(job) = JobKind::ALL.into_iter().find_map(|kind| {
+            let free = |cell: Point| {
+                workplaces.free_shift(cell, kind.shifts()).is_some() && properties.may_use(cell, key)
+            };
+            let at = self.features.nearest_where(kind.workplace(), near, free)?;
+            Some(Job::new(kind, at, workplaces.free_shift(at, kind.shifts())?))
+        }) else {
             return false;
         };
         if !entity.hire(job) {
             return false;
         }
         let at = job.workplace;
-        self.workplaces.claim(at, uid);
+        self.workplaces.claim(at, job.shift, uid);
         self.log.push(format!(
-            "{uid} was hired as {} at the {} at {}, {}",
+            "{uid} was hired as {} at the {} at {}, {}, {}",
             job.kind.with_article(),
             job.kind.workplace_name(),
             at.x,
-            at.y
+            at.y,
+            job.shift.hours()
         ));
         true
     }
@@ -1131,6 +1167,10 @@ impl GameState {
             self.log.push(format!("hire: no such entity {uid}"));
             return false;
         };
+        if entity.is_dead() {
+            self.log.push(format!("hire: {uid} is dead"));
+            return false;
+        }
         if let Some(job) = entity.job() {
             self.log.push(format!("hire: {uid} is already {}", job.kind.with_article()));
             return false;
@@ -1369,6 +1409,19 @@ fn flood_supply(
 pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
     spawn_pass(state, input);
     process_pass(state, dt);
+    bury(state);
+}
+
+/// The bodies undertakers took up this tick ([`Effect::TakeBody`]) leave the
+/// world: they are in a hand now, as an item. After the processing pass,
+/// which may remove nobody, and before the tick is over, so nothing is left
+/// waiting between ticks.
+fn bury(state: &mut GameState) {
+    let mut burials = std::mem::take(&mut state.burials);
+    for uid in burials.drain(..) {
+        state.despawn(uid);
+    }
+    state.burials = burials;
 }
 
 /// **The spawn pass: the only thing that changes which entities exist.**
@@ -1487,6 +1540,10 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         bins,
         doors,
         properties,
+        homes,
+        workplaces,
+        corpses,
+        burials,
         tick,
         intents,
         moves,
@@ -1519,6 +1576,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             fridges,
             doors,
             properties,
+            corpses,
             dt,
             tick: *tick,
             clock,
@@ -1540,6 +1598,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             fridges,
             doors,
             properties,
+            corpses,
             dt,
             tick: *tick,
             clock,
@@ -1554,7 +1613,8 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    world_step(&mut table, map, log, fridges, bins, doors, occupancy, effects, dt);
+    let mut people = People { occupancy, homes, workplaces, corpses, burials };
+    world_step(&mut table, map, log, fridges, bins, doors, &mut people, effects, dt);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1601,7 +1661,7 @@ fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent
 /// is the [`Intent::Idle`] the move step wants anyway — so the freeze costs a
 /// bool per entity here rather than a decision per entity everywhere else.
 fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
-    if entity.is_frozen() {
+    if entity.is_frozen() || entity.is_dead() {
         Intent::Idle
     } else {
         entity.think(ctx)
@@ -1838,7 +1898,8 @@ fn react_for(
     left: &mut usize,
     kept: &mut usize,
 ) -> Effect {
-    if entity.is_frozen() {
+    // The dead the same, and for good.
+    if entity.is_frozen() || entity.is_dead() {
         return Effect::None;
     }
     let Some(walker) = entity.walker_mut() else {
@@ -1884,6 +1945,11 @@ fn react_for(
 ///
 /// Every [`Effect::Deposit`] puts its pieces in its bin, which the task that
 /// asked has already taken them out of the pack for.
+///
+/// Every [`Effect::Died`] gives back what the dead held — see [`died`] —
+/// and every [`Effect::TakeBody`] puts a body in an undertaker's hand
+/// ([`take_body`]), in slot order, so two at one body settle it the same way
+/// every run.
 #[allow(clippy::too_many_arguments)]
 fn world_step(
     table: &mut FrozenEntities<'_>,
@@ -1892,7 +1958,7 @@ fn world_step(
     fridges: &mut Fridges,
     bins: &mut Bins,
     doors: &mut Doors,
-    occupancy: &Occupancy,
+    people: &mut People<'_>,
     effects: &mut [Effect],
     dt: f32,
 ) {
@@ -1916,12 +1982,60 @@ fn world_step(
                     deposit(entity.uid(), bins, log, at, pieces);
                 }
             }
+            Effect::Died { cause } => {
+                if let Some(entity) = table.slot_mut(slot as Slot) {
+                    died(entity, people, log, cause);
+                }
+            }
+            Effect::TakeBody { at } => {
+                if let Some(entity) = table.slot_mut(slot as Slot) {
+                    take_body(entity, people, log, at);
+                }
+            }
+            Effect::Cremate { at } => {
+                if let Some(entity) = table.slot(slot as Slot) {
+                    log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
+                }
+            }
             Effect::None => {}
         }
         *effect = Effect::None;
     }
     fridges.advance(dt * clock::TIME_SCALE);
-    doors.advance(dt, occupancy);
+    doors.advance(dt, people.occupancy);
+}
+
+/// The parts of the world that say where people are and what is theirs,
+/// borrowed apart for [`world_step`]: who stands where, whose beds and
+/// workplaces are whose, who lies dead where, and who is to leave.
+pub(crate) struct People<'a> {
+    pub occupancy: &'a mut Occupancy,
+    pub homes: &'a mut Homes,
+    pub workplaces: &'a mut Workplaces,
+    pub corpses: &'a mut Corpses,
+    pub burials: &'a mut Vec<Uid>,
+}
+
+/// [`Effect::TakeBody`], for the unit in one slot: the body at `at` into its
+/// hand, while there is one there and the hand is free — and off the list of
+/// the dead and on its way out of the world. Logged either way, once a body.
+pub(crate) fn take_body(entity: &mut dyn GameEntity, people: &mut People<'_>, log: &Log, at: Point) {
+    let uid = entity.uid();
+    let Some(inventory) = entity.inventory_mut() else {
+        return;
+    };
+    let Some(dead) = people.corpses.at(at) else {
+        log.push(format!("{uid} found no body at {}, {}", at.x, at.y));
+        return;
+    };
+    if inventory.hand().is_some() {
+        log.push(format!("{uid} has no hand free for the body at {}, {}", at.x, at.y));
+        return;
+    }
+    let _ = inventory.set_hand(Some(ItemKind::Body));
+    people.corpses.remove(dead);
+    people.burials.push(dead);
+    log.push(format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
 }
 
 /// [`Effect::Salvage`], for the unit in one slot: a piece off the heap and
@@ -1947,6 +2061,22 @@ pub(crate) fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at:
         }
         None => log.push(format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
     }
+}
+
+/// [`Effect::Died`], for the unit in one slot: its cell is let go, so the
+/// crowd walks over the body rather than round it and nobody sees it there;
+/// its bed goes back to be given to the next arrival, and its workplace and
+/// job with it, as a despawn's do. The body stays where it fell, filed with
+/// the [`Corpses`] for an undertaker to find.
+pub(crate) fn died(entity: &mut dyn GameEntity, people: &mut People<'_>, log: &Log, cause: &'static str) {
+    let uid = entity.uid();
+    let cell = entity.center_position();
+    people.occupancy.release(cell, uid);
+    people.homes.release(uid);
+    people.workplaces.release(uid);
+    people.corpses.add(uid, cell);
+    let _ = entity.dismiss();
+    log.push(format!("{uid} died of {cause}"));
 }
 
 /// [`Effect::Deposit`], for the unit `uid`: its pieces into the bin at
@@ -2948,13 +3078,13 @@ mod tests {
         let (near, far) = (Point::new(2, 2), Point::new(20, 12));
         let mut state = with_desks(&[near, far], 5);
         let first = state.spawn(EntityType::Human, Point::new(4, 4));
-        assert_eq!(state.workplaces().worker(near), Some(first), "the nearer of the two");
+        assert_eq!(state.workplaces().worker(near, job::OFFICE_HOURS), Some(first), "the nearer of the two");
         let job = state.entities().get(first).unwrap().job().expect("hired");
         assert_eq!((job.kind, job.workplace), (JobKind::OfficeWorker, near));
         assert!(state.log.drain().iter().any(|line| line.contains("was hired as an office worker at the computer at 2, 2")));
 
         let second = state.spawn(EntityType::Human, Point::new(4, 4));
-        assert_eq!(state.workplaces().worker(far), Some(second), "only a free desk is given");
+        assert_eq!(state.workplaces().worker(far, job::OFFICE_HOURS), Some(second), "only a free desk is given");
 
         let third = state.spawn(EntityType::Human, Point::new(4, 4));
         assert_eq!(state.entities().get(third).unwrap().job(), None, "every desk taken: unemployed");
@@ -2968,7 +3098,7 @@ mod tests {
         state.spawn(EntityType::Dog, Point::new(3, 3));
         assert!(state.workplaces().is_empty());
         let human = state.spawn(EntityType::Human, Point::new(3, 3));
-        assert_eq!(state.workplaces().worker(desk), Some(human));
+        assert_eq!(state.workplaces().worker(desk, job::OFFICE_HOURS), Some(human));
     }
 
     #[test]
@@ -2977,9 +3107,9 @@ mod tests {
         let mut state = with_desks(&[desk], 5);
         let first = state.spawn(EntityType::Human, Point::new(3, 3));
         assert!(state.despawn(first));
-        assert!(!state.workplaces().is_taken(desk));
+        assert!(!state.workplaces().is_taken(desk, job::OFFICE_HOURS));
         let next = state.spawn(EntityType::Human, Point::new(3, 3));
-        assert_eq!(state.workplaces().worker(desk), Some(next));
+        assert_eq!(state.workplaces().worker(desk, job::OFFICE_HOURS), Some(next));
     }
 
     /// The two commands the job menu sends: let somebody go, and the desk is
@@ -3006,7 +3136,7 @@ mod tests {
         assert!(state.workplaces().is_empty());
 
         process_game_state(&mut state, 1.0 / 60.0, Input::new().hire(worker).hire(worker));
-        assert_eq!(state.workplaces().worker(desk), Some(worker));
+        assert_eq!(state.workplaces().worker(desk, job::OFFICE_HOURS), Some(worker));
         assert_eq!(state.entities().get(worker).unwrap().job().map(|job| job.workplace), Some(desk));
         let lines = state.log.drain();
         assert!(lines.iter().any(|line| line.contains("is already an office worker")), "{lines:?}");
@@ -3066,6 +3196,114 @@ mod tests {
         assert_eq!(job(&state, arrivals[4]).map(|job| job.kind), Some(JobKind::ScrapCollector));
         let lines = state.log.drain();
         assert!(lines.iter().any(|line| line.contains("is already a scrap collector")), "{lines:?}");
+    }
+
+    /// A gate kept round the clock: three arrivals hired to one guard post,
+    /// a watch each in hiring order, each with a bed of its own and
+    /// everything but tiredness switched off. Sampled every quarter of an
+    /// hour for a day from the first watch, somebody is standing at the post
+    /// at nearly every look — the changes of watch, when one walks off as
+    /// the next walks up, are the gaps — and each of the three keeps its
+    /// watch, sleeping at its own time.
+    /// Somebody dies, and the undertaker on watch takes the body up, carries
+    /// it to the crematorium and cremates it; the dead leave the world, the
+    /// cell they lay in is nobody's, and a dead unit thinks no more.
+    #[test]
+    fn the_dead_are_carried_to_the_crematorium_and_leave_the_world() {
+        let crematorium = Point::new(1, 1);
+        let mut map = Map::new(Size::new(16, 10), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "crematorium", crematorium);
+        let mut state = GameState::new(map, 3);
+        let undertaker = state.spawn(EntityType::Human, Point::new(2, 1));
+        let job = state.entities().get(undertaker).unwrap().job().expect("hired");
+        assert_eq!((job.kind, job.shift.start()), (JobKind::Undertaker, 8));
+        let victim = state.spawn(EntityType::Human, Point::new(13, 7));
+        assert!(state.dismiss(victim));
+        state
+            .entity_mut(victim)
+            .unwrap()
+            .biology_mut()
+            .unwrap()
+            .edit(|stats| stats.with_health(0.5).with_hunger(100.0).with_thirst(100.0));
+
+        let mut input = Input::new();
+        for process in ProcessId::ALL {
+            input.set_process(undertaker, process, false);
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let mut lines = Vec::new();
+        let mut lay_dead = false;
+        for _ in 0..(3 * 1800) {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if let Some(body) = state.entities().get(victim) {
+                if body.is_dead() {
+                    lay_dead = true;
+                    assert_eq!(body.current_goal(), None);
+                    assert_eq!(state.occupancy.occupant(body.center_position()), None, "the dead hold no cell");
+                    assert_eq!(state.corpses().len(), 1);
+                }
+            }
+            if lines.iter().any(|line| line.contains("cremated a body")) {
+                break;
+            }
+        }
+        assert!(lay_dead);
+        assert!(lines.iter().any(|line| line == &format!("{victim} died of thirst")), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{undertaker} took up the body of {victim}"))), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("cremated a body in the crematorium at 1, 1")), "{lines:?}");
+        assert!(state.entities().get(victim).is_none(), "the body left the world");
+        assert!(state.corpses().is_empty());
+        assert_eq!(state.entities().get(undertaker).unwrap().inventory().unwrap().hand(), None);
+    }
+
+    #[test]
+    fn a_guard_post_is_kept_round_the_clock_by_its_three_watches() {
+        let post = Point::new(22, 8);
+        let mut map = Map::new(Size::new(24, 17), FLOOR);
+        for x in [2, 6, 10] {
+            crate::sim::testing::prop_at(&mut map, "bed 1", Point::new(x, 14));
+        }
+        crate::sim::testing::prop_at(&mut map, "guard post", post);
+        let mut state = GameState::new(map, 3);
+        let guards: Vec<Uid> = [2, 6, 10].into_iter().map(|x| state.spawn(EntityType::Human, Point::new(x, 13))).collect();
+        let watch = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| (job.kind, job.shift.start()));
+        let watches: Vec<_> = guards.iter().map(|&uid| watch(&state, uid)).collect();
+        assert_eq!(watches, [Some((JobKind::Guard, 8)), Some((JobKind::Guard, 16)), Some((JobKind::Guard, 0))]);
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("was hired as a guard at the guard post at 22, 8, 00:00-08:00")), "{lines:?}");
+        let fourth = state.spawn(EntityType::Human, Point::new(14, 13));
+        assert_eq!(watch(&state, fourth), None, "three guards to a post");
+        assert!(state.despawn(fourth));
+
+        let mut input = Input::new();
+        for &uid in &guards {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+                input.set_process(uid, process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        // 1800 ticks a world hour at `run`'s 60Hz: to half past eight, then
+        // a look every quarter of an hour for a day.
+        run(&mut state, 900);
+        let (mut looks, mut kept) = (0, 0);
+        let mut watched = Vec::new();
+        for _ in 0..96 {
+            run(&mut state, 450);
+            looks += 1;
+            let at_post: Vec<Uid> = guards
+                .iter()
+                .copied()
+                .filter(|&uid| state.entities().get(uid).unwrap().interacting_with() == Some(post))
+                .collect();
+            kept += usize::from(!at_post.is_empty());
+            watched.extend(state.log.drain().into_iter().filter(|line| line.contains("kept watch an hour at the guard post")));
+        }
+        assert!(kept * 10 >= looks * 9, "the post kept at {kept} of {looks} looks, by {}", state.clock());
+        for &uid in &guards {
+            let hours = watched.iter().filter(|line| line.starts_with(&format!("{uid} "))).count();
+            assert!(hours >= 5, "{uid} kept {hours} hours of its watch: {watched:?}");
+        }
     }
 
     #[test]
@@ -3214,9 +3452,12 @@ mod tests {
         // salvage task's `for_work` flag, which takes the byte the task enum
         // kept its tag in (`TakeItem`'s item kind) — a task is 20 bytes, not
         // 16, and a brain holds ten (744).
+        //
+        // Raised from 768 to 832, a cache line, on purpose: the undertaker's
+        // goal slot and executor, and a count of the body item kind (776).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 768, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 832, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3654,7 +3895,13 @@ mod tests {
             &mut state.fridges,
             &mut state.bins,
             &mut state.doors,
-            &state.occupancy,
+            &mut People {
+                occupancy: &mut state.occupancy,
+                homes: &mut state.homes,
+                workplaces: &mut state.workplaces,
+                corpses: &mut state.corpses,
+                burials: &mut state.burials,
+            },
             &mut state.effects,
             0.0,
         );
@@ -3690,13 +3937,19 @@ mod tests {
             assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
             // The bank's computers are the district's desks, and nobody's
             // house has one: every desk is given out, every one in the bank;
-            // then the warehouse's four bins, one collector each.
+            // then the warehouse's four bins, one collector each; then the
+            // gates' posts, three watches to a post.
             let desks = state.features().count(FeatureKind::Workstation);
             assert!(desks >= 12, "seed {seed}: {desks} desks");
             let bins = crate::map::district::WAREHOUSE_BINS;
-            assert!(district.residents() >= desks + bins, "seed {seed}: more jobs than people");
-            assert_eq!(state.workplaces().len(), desks + bins, "seed {seed}");
+            let watches = crate::map::district::GATES * job::WATCHES.len();
+            assert_eq!(watches, 24);
+            let undertakers = crate::map::district::CREMATORIA * job::WATCHES.len();
+            assert!(district.residents() >= desks + bins + watches + undertakers, "seed {seed}: more jobs than people");
+            assert_eq!(state.workplaces().len(), desks + bins + watches + undertakers, "seed {seed}");
+            let mut cremating = 0;
             let (mut clerks, mut collectors) = (0, 0);
+            let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
                 let Some(job) = entity.job() else { continue };
                 match job.kind {
@@ -3708,16 +3961,35 @@ mod tests {
                         collectors += 1;
                         assert!(district.warehouse.contains(job.workplace), "seed {seed}: a bin outside the warehouse");
                     }
+                    JobKind::Guard => {
+                        assert!(
+                            district.gates.iter().any(|gate| gate.post == job.workplace),
+                            "seed {seed}: a guard at {:?}, which is no gate's post",
+                            job.workplace
+                        );
+                        posts.entry(job.workplace).or_default().push(job.shift.start());
+                    }
+                    JobKind::Undertaker => {
+                        cremating += 1;
+                        assert!(district.crematorium.contains(job.workplace), "seed {seed}: a crematorium outside the crematorium");
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
-            assert_eq!((clerks, collectors), (desks, bins), "seed {seed}");
+            assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
+            // Every gate's post kept by three guards, one a watch, round the
+            // clock.
+            assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
+            for (post, mut starts) in posts {
+                starts.sort_unstable();
+                assert_eq!(starts, [0, 8, 16], "seed {seed}: the watches at {post:?}");
+            }
             // In the order they arrived: every desk taken before the first
-            // collector was hired.
+            // collector was hired, every bin before the first guard.
             let kinds: Vec<JobKind> =
                 state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).collect();
-            let first_collector = kinds.iter().position(|&kind| kind == JobKind::ScrapCollector).unwrap();
-            assert!(kinds[first_collector..].iter().all(|&kind| kind == JobKind::ScrapCollector), "seed {seed}");
+            let order = |kind: JobKind| JobKind::ALL.iter().position(|&k| k == kind).unwrap();
+            assert!(kinds.windows(2).all(|pair| order(pair[0]) <= order(pair[1])), "seed {seed}: {kinds:?}");
 
             for house in &district.houses {
                 for &bed in &house.beds {
@@ -3727,6 +3999,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A district's gates on a Monday, from ten in the morning to six in the
+    /// evening, the guards' needs switched off as the collectors' are below
+    /// (with them on, the district's crowd limit takes the guards into the
+    /// bank's jam with everybody else): the day watch at its posts, the
+    /// evening watch walking up across the district before four and taking
+    /// over. Looked at every quarter of an hour, nearly every post is kept
+    /// at nearly every look.
+    #[test]
+    fn a_district_keeps_its_gates_through_the_change_of_watch() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        for guard in state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::Guard)) {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+                input.set_process(guard.uid(), process, false);
+            }
+        }
+        assert_eq!(input.commands.len(), 4 * 24);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let posts: Vec<Point> = district.gates.iter().map(|gate| gate.post).collect();
+        // 1800 ticks a world hour: to ten, then a look every quarter of an
+        // hour to six.
+        run(&mut state, 2 * 1800);
+        let (mut looks, mut kept) = (0, 0);
+        for _ in 0..32 {
+            run(&mut state, 450);
+            state.log.drain();
+            looks += posts.len();
+            kept += posts
+                .iter()
+                .filter(|&&post| state.entities().iter().any(|entity| entity.interacting_with() == Some(post)))
+                .count();
+        }
+        assert!(kept * 10 >= looks * 9, "{kept} of {looks} post-looks kept, by {}", state.clock());
     }
 
     /// A district's collectors, on a Monday: out to the heaps round it from

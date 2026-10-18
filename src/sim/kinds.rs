@@ -31,7 +31,7 @@ use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 
 use super::background::{Due, Schedule};
-use super::biology::{Biology, Stats};
+use super::biology::{health, Biology, Stats};
 use super::brain::{Brain, GoalId};
 use super::clothing::Clothing;
 use super::entity::{Body, GameEntity, Think};
@@ -210,6 +210,11 @@ impl GameEntity for Human {
     /// Background upkeep ([`crate::sim::background`]) comes with it, on the
     /// ticks it is due — and so does the brain looking round, which is handed
     /// the same schedule.
+    ///
+    /// Health run out ([`health`](crate::sim::biology::health)) is death: the
+    /// walk stops, the body is marked dead, the brain is not asked, and the
+    /// world is told ([`Effect::Died`]) so it can take back the cell, the bed
+    /// and the job.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
         // Asleep as of last tick's brain: a body lying in bed ages at the
         // pace of a sleeper (`Process::asleep_pace`).
@@ -217,6 +222,11 @@ impl GameEntity for Human {
             self.biology.advance_asleep(ctx.game_dt());
         } else {
             self.biology.advance(ctx.game_dt());
+        }
+        if self.biology.stats().health() <= 0.0 {
+            self.walk.halt();
+            self.walk.body_mut().set_dead();
+            return Effect::Died { cause: health::cause_of_death(self.biology.stats()) };
         }
         let due = self.schedule.tick(ctx.game_dt());
         self.biology.background(&due);
@@ -254,14 +264,16 @@ impl GameEntity for Human {
         Some(&mut self.talents)
     }
 
+    /// None for the dead: nobody is after anything any more.
     fn current_goal(&self) -> Option<GoalId> {
-        Some(self.brain.top_goal())
+        (!self.is_dead()).then(|| self.brain.top_goal())
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         let mut fields = vec![
             ("name", self.identity.name().to_string()),
             ("gender", self.identity.gender().label().to_string()),
+            ("condition", if self.is_dead() { "dead" } else { "alive" }.to_string()),
             ("clothing", self.clothing.name().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
             (
@@ -284,11 +296,18 @@ impl GameEntity for Human {
         self.walk.path_cells()
     }
 
+    /// None for the dead, whatever it was in the middle of.
     fn action_progress(&self) -> Option<f32> {
+        if self.is_dead() {
+            return None;
+        }
         self.brain.action().progress()
     }
 
     fn interacting_with(&self) -> Option<Point> {
+        if self.is_dead() {
+            return None;
+        }
         self.brain.action().interacting_with()
     }
 
@@ -560,6 +579,49 @@ mod tests {
 
     fn room() -> Map {
         Map::new(Size::new(9, 9), FLOOR)
+    }
+
+    /// A worker is in its job's uniform from setting off for the shift until
+    /// it ends, and in its own clothes the rest of the time, which is also
+    /// what changing clothes changes; let go, it is out of uniform at once.
+    #[test]
+    fn a_worker_wears_its_jobs_uniform_while_its_shift_is_due_and_its_own_clothes_otherwise() {
+        use crate::sim::clock::{Clock, DAY, HOUR, TIME_SCALE};
+        use crate::sim::clothing::Clothing;
+        use crate::sim::job::{Job, WATCHES};
+        let at = |day: u32, hours: f32| {
+            let world = (day - 1) as f64 * DAY as f64 + (hours as f64 - 8.0) * HOUR as f64;
+            Clock::after_watching(world / TIME_SCALE as f64)
+        };
+        let mut human = crate::sim::testing::needy_human(Point::new(1, 1), 0.0, 0.0, 0.0);
+        *human.clothing_mut().unwrap() = Clothing::SundressRed;
+        assert_eq!(human.worn(at(1, 10.0)), Some(Clothing::SundressRed), "no job, no uniform");
+
+        assert!(human.hire(Job::office(Point::new(3, 3))));
+        assert_eq!(human.worn(at(1, 8.4)), Some(Clothing::SundressRed), "not yet");
+        assert_eq!(human.worn(at(1, 8.6)), Some(Clothing::UniformOfficeWorker), "dressed for the walk in");
+        assert_eq!(human.worn(at(1, 16.9)), Some(Clothing::UniformOfficeWorker));
+        assert_eq!(human.worn(at(1, 17.1)), Some(Clothing::SundressRed), "home time");
+        assert_eq!(human.worn(at(6, 10.0)), Some(Clothing::SundressRed), "Saturday");
+        *human.clothing_mut().unwrap() = Clothing::GownBlack;
+        assert_eq!(human.worn(at(2, 10.0)), Some(Clothing::UniformOfficeWorker), "changing changes what it goes home in");
+        assert_eq!(human.worn(at(2, 18.0)), Some(Clothing::GownBlack));
+        assert_eq!(human.clothing(), Some(Clothing::GownBlack), "the uniform is never its own");
+
+        human.dismiss();
+        assert!(human.hire(Job::guard(Point::new(0, 3), WATCHES[2])));
+        assert_eq!(human.worn(at(2, 21.0)), Some(Clothing::GownBlack));
+        assert_eq!(human.worn(at(2, 22.5)), Some(Clothing::UniformGuard), "the night watch dresses before midnight");
+        assert_eq!(human.worn(at(3, 3.0)), Some(Clothing::UniformGuard));
+        assert_eq!(human.worn(at(3, 8.5)), Some(Clothing::GownBlack));
+        human.dismiss();
+        assert!(human.hire(Job::collector(Point::new(3, 3))));
+        assert_eq!(human.worn(at(3, 11.0)), Some(Clothing::UniformScrapCollector));
+        human.dismiss();
+        assert_eq!(human.worn(at(3, 11.0)), Some(Clothing::GownBlack), "let go");
+
+        let dog = Dog::new(Uid::new(EntityType::Dog, 1), Point::new(0, 0), Facing::Left, &mut rand::rngs::SmallRng::seed_from_u64(1));
+        assert_eq!(dog.worn(at(1, 10.0)), None);
     }
 
     /// A human with no needs to speak of, so what these tests watch is

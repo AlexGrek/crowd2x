@@ -51,12 +51,16 @@ pub enum GoalId {
     Work = 8,
     /// Bring scrap in from the wasteland and store it in one's own bin
     /// ([`CollectGoal`](super::goals::CollectGoal)): a scrap collector's
-    /// shift. Last, for the reason work is.
+    /// shift. After work, for the reason work is after every need.
     Collect = 9,
+    /// Carry the dead to one's own crematorium
+    /// ([`BuryGoal`](super::goals::BuryGoal)): an undertaker's watch. Last,
+    /// for the same reason.
+    Bury = 10,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 10;
+    pub const COUNT: usize = 11;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -68,6 +72,7 @@ impl GoalId {
         GoalId::Salvage,
         GoalId::Work,
         GoalId::Collect,
+        GoalId::Bury,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -82,6 +87,7 @@ impl GoalId {
             GoalId::Salvage => "salvage",
             GoalId::Work => "work",
             GoalId::Collect => "collect",
+            GoalId::Bury => "bury",
         }
     }
 
@@ -102,6 +108,7 @@ impl GoalId {
             GoalId::Salvage => "🔧",
             GoalId::Work => "💼",
             GoalId::Collect => "🧲",
+            GoalId::Bury => "⚰",
         }
     }
 
@@ -438,6 +445,7 @@ impl From<GoalId> for pb::GoalId {
             GoalId::Salvage => pb::GoalId::Salvage,
             GoalId::Work => pb::GoalId::Work,
             GoalId::Collect => pb::GoalId::Collect,
+            GoalId::Bury => pb::GoalId::Bury,
         }
     }
 }
@@ -455,6 +463,7 @@ impl From<pb::GoalId> for GoalId {
             pb::GoalId::Salvage => GoalId::Salvage,
             pb::GoalId::Work => GoalId::Work,
             pb::GoalId::Collect => GoalId::Collect,
+            pb::GoalId::Bury => GoalId::Bury,
         }
     }
 }
@@ -587,7 +596,8 @@ mod tests {
                 (GoalId::Sleep, 0.0),
                 (GoalId::Salvage, 0.0),
                 (GoalId::Work, 0.0),
-                (GoalId::Collect, 0.0)
+                (GoalId::Collect, 0.0),
+                (GoalId::Bury, 0.0)
             ]
         );
     }

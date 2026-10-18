@@ -31,6 +31,10 @@ Plain Rust in `src/sim/door.rs` and `src/sim/property.rs`; drawn by `editor/prop
    `held = HELD_OPEN`; then `Doors::advance(dt, occupancy)`: held → opens, else shuts —
    **never while the door cell is occupied**.
 
+**The district's gates** (`map-generator`, `gates`) are plain `"door"`s, two leaves on road in
+the perimeter wall at the map's edge: anybody's, locked to nobody, the only ways between the
+district and the wasteland. A leaf's outer side is off the site; the door state works the same.
+
 Not logged per opening on purpose: a district opens doors all day and it flushed the log
 panel (a district QA test broke on it).
 

@@ -37,6 +37,9 @@ there; it is terrain only. Every map loaded from a file stands in one.
   `Map::take_scrap(cell)` — the one edit play makes to a map, through `Effect::Salvage` in
   `sim::world_step`; a salvage tally is kept per cell forever (and saved), so **heaps never
   grow back**.
+- **A district is walled in** (`map-generator`): its edge is a perimeter wall with 8 gates, so
+  everybody who goes out to the wasteland — collectors to the heaps — leaves and comes back by a
+  gate. A painted map has no wall unless somebody painted one.
 - **Who takes it**: a unit told to (`Command::Salvage`, `SalvageGoal`), and the district's
   **scrap collectors** (`jobs` skill, `CollectGoal`), who go to the nearest heap they can get
   to **within the navigation area** (the site and `NAV_MARGIN` round it — always loaded in a

@@ -73,6 +73,8 @@ pub struct Job {
 pub enum JobKind {
     OfficeWorker = 0,
     ScrapCollector = 1,
+    Guard = 2,
+    Undertaker = 3,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -195,6 +197,7 @@ pub enum GoalId {
     Salvage = 7,
     Work = 8,
     Collect = 9,
+    Bury = 10,
 }
 
 /// One goal executor's state.
@@ -270,7 +273,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16")]
     pub kind: Option<TaskKind>,
 }
 
@@ -305,6 +308,16 @@ pub enum TaskKind {
     /// work, and it tires (`Salvage::for_work`).
     #[prost(message, tag = "13")]
     SalvageForWork(Timed),
+    /// A stretch at a guard post: the office's `Work`, kept as a watch
+    /// (`Work::watch`).
+    #[prost(message, tag = "14")]
+    KeepWatch(Timed),
+    /// An undertaker taking up the body lying in a cell.
+    #[prost(message, tag = "15")]
+    TakeBody(Timed),
+    /// ...and putting it in a crematorium.
+    #[prost(message, tag = "16")]
+    Cremate(Timed),
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

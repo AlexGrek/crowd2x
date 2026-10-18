@@ -1,6 +1,7 @@
 //! The routines that exist.
 
 use crate::sim::biology::{ProcessId, Stats};
+use crate::sim::job::{is_bedtime, JobKind};
 
 use super::goal::{GoalId, Goals};
 use super::memory::SALVAGE_ORDER;
@@ -175,9 +176,10 @@ impl RoutineExecutor for NeedRoutine {
         }
         if self.committed {
             let mut priority = level / NEED_PER_PRIORITY;
-            if self.need.goal == GoalId::Play && ctx.think.clock.is_night() && biology.is_running(ProcessId::Energy) {
+            if self.need.goal == GoalId::Play && is_bedtime(ctx.job, ctx.think.clock) && biology.is_running(ProcessId::Energy) {
                 // Entertainment can fill time if no bed is usable, but must
-                // never keep somebody up or wake them during the night.
+                // never keep somebody up or wake them during the night —
+                // their own night, which a night watch keeps by day.
                 priority = priority.min(SLEEPY / NEED_PER_PRIORITY / 2.0);
             }
             goals.raise_to(self.need.goal, priority);
@@ -222,7 +224,12 @@ pub const CRITICALLY_TIRED: f32 = 90.0;
 /// * **By day** it commits at [`EXHAUSTED`] and lets go at [`RESTED`]: a nap
 ///   when somebody cannot go on.
 /// * **By night** it commits regardless of tiredness, and **does not let go
-///   until it is day**. The priority has a floor of [`SLEEPY`] so a rested
+///   until it is day**. Night is the unit's own: the clock's
+///   ([`BEDTIME`](crate::sim::clock::BEDTIME) to
+///   [`GETTING_UP`](crate::sim::clock::GETTING_UP)), or for somebody with a
+///   job the eight hours before its shift's morning
+///   ([`Shift::is_bedtime`](crate::sim::job::Shift::is_bedtime)), which for
+///   office hours is the same thing. The priority has a floor of [`SLEEPY`] so a rested
 ///   human goes to bed and stays there against wandering and entertainment.
 ///   Food, water and a bursting bladder can still get somebody up, and they
 ///   come back afterwards.
@@ -259,7 +266,9 @@ impl RoutineExecutor for SleepRoutine {
             return;
         };
         let tiredness = biology.stats().tiredness();
-        let night = ctx.think.clock.is_night();
+        // Their own night: the clock's, unless a shift moves it
+        // (`Shift::is_bedtime` — the night watch sleeps the afternoon).
+        let night = is_bedtime(ctx.job, ctx.think.clock);
 
         if night || tiredness >= EXHAUSTED {
             self.committed = true;
@@ -335,7 +344,7 @@ pub const WORKING: f32 = 1.5;
 /// Go to work: want the job's goal ([`JobKind::goal`](crate::sim::job::JobKind::goal)
 /// — [`GoalId::Work`] at a desk, [`GoalId::Collect`] for a scrap collector)
 /// at [`WORKING`] for as long as the shift is due
-/// ([`Shift::is_due`](crate::sim::job::Shift::is_due) — its hours on its
+/// ([`Job::is_due`](crate::sim::job::Job::is_due) — its hours on its
 /// days, and the commute before them).
 ///
 /// It reads the clock and the job and no stat, so it needs no hysteresis:
@@ -368,10 +377,19 @@ impl RoutineExecutor for WorkRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        let due = ctx.job.filter(|job| job.shift.is_due(ctx.think.clock));
+        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock));
         self.on_shift = due.is_some();
         if let Some(job) = due {
             goals.raise_to(job.kind.goal(), WORKING);
+        }
+        // An undertaker with a body in hand sees it to the fire, shift over
+        // or not: it is not taken home, and nothing else may be done with
+        // the hand full of it.
+        if let Some(job) = ctx.job
+            && job.kind == JobKind::Undertaker
+            && ctx.carrying == Some(crate::sim::item::ItemKind::Body)
+        {
+            goals.raise_to(GoalId::Bury, WORKING);
         }
     }
 
@@ -434,6 +452,7 @@ mod tests {
             fridges: &fridges,
             doors: &Default::default(),
             properties: &Default::default(),
+            corpses: &crate::sim::corpses::NONE,
             dt: 1.0 / 60.0,
             tick: 0,
             clock: crate::sim::clock::Clock::after_watching(0.0),
@@ -447,6 +466,7 @@ mod tests {
                 biology: Some(biology),
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job: None,
+                carrying: None,
             },
             &mut goals,
         );
@@ -591,6 +611,16 @@ mod tests {
 
     /// The priority `routine` gives sleep for `biology`, at `clock`.
     fn sleep_priority(routine: &mut SleepRoutine, biology: &Biology, clock: Clock) -> f32 {
+        sleep_priority_for(routine, biology, clock, None)
+    }
+
+    /// ...for somebody with `job`.
+    fn sleep_priority_for(
+        routine: &mut SleepRoutine,
+        biology: &Biology,
+        clock: Clock,
+        job: Option<&crate::sim::job::Job>,
+    ) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
         let (occupancy, log, features, fridges) = (
             Occupancy::new(map.size()),
@@ -606,6 +636,7 @@ mod tests {
             fridges: &fridges,
             doors: &Default::default(),
             properties: &Default::default(),
+            corpses: &crate::sim::corpses::NONE,
             dt: 1.0 / 60.0,
             tick: 0,
             clock,
@@ -618,11 +649,29 @@ mod tests {
                 body: &body,
                 biology: Some(biology),
                 memory: &crate::sim::brain::memory::Memory::new(),
-                job: None,
+                job,
+                carrying: None,
             },
             &mut goals,
         );
         goals.priority(GoalId::Sleep)
+    }
+
+    /// The night watch keeps its night in the afternoon: in bed from one
+    /// whether tired or not, up at nine in the evening, and awake on watch at
+    /// two in the morning, when everybody else is asleep.
+    #[test]
+    fn a_guard_on_the_night_watch_goes_to_bed_in_the_afternoon_and_stays_up_all_night() {
+        use crate::sim::job::{Job, WATCHES};
+        let job = Job::guard(Point::new(3, 3), WATCHES[2]);
+        let mut routine = SleepRoutine::new();
+        assert!(sleep_priority_for(&mut routine, &tired(0.0), on(2, 14.0), Some(&job)) > BUSY, "two in the afternoon is its night");
+        assert_eq!(sleep_priority_for(&mut routine, &tired(0.0), on(2, 21.5), Some(&job)), 0.0, "up by half past nine");
+        let mut routine = SleepRoutine::new();
+        assert_eq!(sleep_priority_for(&mut routine, &tired(SLEEPY + 10.0), on(3, 2.0), Some(&job)), 0.0, "on watch at two");
+        assert!(sleep_priority_for(&mut SleepRoutine::new(), &tired(0.0), on(3, 2.0), None) > BUSY, "everybody else is in bed");
+        let office = Job::office(Point::new(3, 3));
+        assert!(sleep_priority_for(&mut SleepRoutine::new(), &tired(0.0), on(3, 2.0), Some(&office)) > BUSY, "and the office");
     }
 
     fn tired(tiredness: f32) -> Biology {
@@ -714,6 +763,7 @@ mod tests {
             fridges: &fridges,
             doors: &Default::default(),
             properties: &Default::default(),
+            corpses: &crate::sim::corpses::NONE,
             dt: 1.0 / 60.0,
             tick: 0,
             clock,
@@ -727,6 +777,7 @@ mod tests {
                 biology: Some(&Biology::new(Stats::calm())),
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job,
+                carrying: None,
             },
             &mut goals,
         );
@@ -776,6 +827,7 @@ mod tests {
                 fridges: &fridges,
                 doors: &Default::default(),
                 properties: &Default::default(),
+                corpses: &crate::sim::corpses::NONE,
                 dt: 1.0 / 60.0,
                 tick: 0,
                 clock,
@@ -789,6 +841,7 @@ mod tests {
                     biology: Some(&Biology::new(Stats::calm())),
                     memory: &crate::sim::brain::memory::Memory::new(),
                     job: Some(&job),
+                    carrying: None,
                 },
                 &mut goals,
             );

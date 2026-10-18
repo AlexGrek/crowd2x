@@ -23,7 +23,7 @@ use crate::save::{invalid, pb, Invalid};
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Hunger, thirst, bladder, fun, stamina and satisfaction are the stats that move so far —
+/// Hunger, thirst, bladder, fun, stamina, satisfaction and health are the stats that move so far —
 /// the rest are rolled at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
@@ -55,7 +55,7 @@ pub const BORN_AT_LEAST_SATISFIED: f32 = 70.0;
 
 impl Stats {
     /// A new body: every need 70 to 100 percent satisfied
-    /// ([`BORN_AT_LEAST_SATISFIED`]) and as content with life, everything else
+    /// ([`BORN_AT_LEAST_SATISFIED`]), as content with life and as healthy, everything else
     /// anywhere in its range.
     ///
     /// Satisfaction is what is rolled, and each need turns it the way up it
@@ -67,7 +67,7 @@ impl Stats {
         let (stamina, fun) = (satisfied(), satisfied());
         let (hunger, thirst, bladder) = (100.0 - satisfied(), 100.0 - satisfied(), 100.0 - satisfied());
         Stats {
-            health: rng.random_range(0.0..=100.0),
+            health: rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0),
             stamina,
             fun,
             hunger,
@@ -102,6 +102,10 @@ impl Stats {
 
     pub(super) fn change_satisfaction(&mut self, by: f32) {
         self.satisfaction = need(self.satisfaction + by);
+    }
+
+    pub(super) fn change_health(&mut self, by: f32) {
+        self.health = need(self.health + by);
     }
 
     // --- saving ---
@@ -165,6 +169,12 @@ impl Stats {
     #[cfg(test)]
     pub(crate) fn with_stamina(mut self, stamina: f32) -> Stats {
         self.stamina = stamina;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_health(mut self, health: f32) -> Stats {
+        self.health = health;
         self
     }
 
@@ -303,6 +313,7 @@ mod tests {
     }
 
     /// Every need, both ways up: the ones that rise and the ones that drain.
+    /// And nobody is born at death's door.
     #[test]
     fn a_new_person_is_at_least_seventy_percent_satisfied_in_every_need() {
         let least = 100.0 - BORN_AT_LEAST_SATISFIED;
@@ -315,6 +326,7 @@ mod tests {
             assert!(stats.boredom() <= least, "boredom {}", stats.boredom());
             assert!(stats.tiredness() <= least, "tiredness {}", stats.tiredness());
             assert!(stats.satisfaction() >= BORN_AT_LEAST_SATISFIED, "satisfaction {}", stats.satisfaction());
+            assert!(stats.health() >= BORN_AT_LEAST_SATISFIED, "health {}", stats.health());
         }
     }
 

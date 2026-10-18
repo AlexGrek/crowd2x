@@ -56,6 +56,9 @@ pub struct RoutineCtx<'a> {
     /// Its job, if it has one — when the shift is, for
     /// [`WorkRoutine`](super::routines::WorkRoutine).
     pub job: Option<&'a Job>,
+    /// What is in its hand — a body an undertaker has still to see to the
+    /// crematorium, for [`WorkRoutine`](super::routines::WorkRoutine).
+    pub carrying: Option<crate::sim::item::ItemKind>,
 }
 
 /// What one routine does.

@@ -27,7 +27,7 @@ use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
 use super::tasks::{
-    CloseFridge, ConsumeItem, Deposit, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait,
+    CloseFridge, ConsumeItem, Cremate, Deposit, MoveTo, TakeBody, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait,
     Work,
 };
 
@@ -129,6 +129,8 @@ pub enum Task {
     Salvage(Salvage),
     Work(Work),
     Deposit(Deposit),
+    TakeBody(TakeBody),
+    Cremate(Cremate),
 }
 
 impl Task {
@@ -155,8 +157,11 @@ impl Task {
             Task::CloseFridge(CloseFridge { fridge, seconds }) => pb::TaskKind::CloseFridge(timed(fridge, seconds)),
             Task::Salvage(Salvage { heap, seconds, for_work: false }) => pb::TaskKind::Salvage(timed(heap, seconds)),
             Task::Salvage(Salvage { heap, seconds, for_work: true }) => pb::TaskKind::SalvageForWork(timed(heap, seconds)),
-            Task::Work(Work { desk, seconds }) => pb::TaskKind::Work(timed(desk, seconds)),
+            Task::Work(Work { desk, seconds, watch: false }) => pb::TaskKind::Work(timed(desk, seconds)),
+            Task::Work(Work { desk, seconds, watch: true }) => pb::TaskKind::KeepWatch(timed(desk, seconds)),
             Task::Deposit(Deposit { bin, seconds }) => pb::TaskKind::Deposit(timed(bin, seconds)),
+            Task::TakeBody(TakeBody { body, seconds }) => pb::TaskKind::TakeBody(timed(body, seconds)),
+            Task::Cremate(Cremate { crematorium, seconds }) => pb::TaskKind::Cremate(timed(crematorium, seconds)),
         };
         pb::Task { kind: Some(kind) }
     }
@@ -197,8 +202,15 @@ impl Task {
             pb::TaskKind::SalvageForWork(task) => {
                 Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)?, for_work: true })
             }
-            pb::TaskKind::Work(task) => Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Work(task) => Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)?, watch: false }),
+            pb::TaskKind::KeepWatch(task) => {
+                Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)?, watch: true })
+            }
             pb::TaskKind::Deposit(task) => Task::Deposit(Deposit { bin: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::TakeBody(task) => Task::TakeBody(TakeBody { body: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Cremate(task) => {
+                Task::Cremate(Cremate { crematorium: at(task)?, seconds: seconds(task.seconds)? })
+            }
         })
     }
 
@@ -277,9 +289,26 @@ impl Task {
         Task::Deposit(Deposit { bin, seconds })
     }
 
+    /// Take up the body lying in `body`, from beside it or over it.
+    pub const fn take_body(body: Point, seconds: f32) -> Task {
+        Task::TakeBody(TakeBody { body, seconds })
+    }
+
+    /// Put the body in hand into the crematorium in `crematorium`, from a
+    /// cell beside it.
+    pub const fn cremate(crematorium: Point, seconds: f32) -> Task {
+        Task::Cremate(Cremate { crematorium, seconds })
+    }
+
     /// Work the desk in `desk`, from a cell beside it, for `seconds`.
     pub const fn work(desk: Point, seconds: f32) -> Task {
-        Task::Work(Work { desk, seconds })
+        Task::Work(Work { desk, seconds, watch: false })
+    }
+
+    /// Keep watch at the guard post in `post`, from a cell beside it, for
+    /// `seconds`: a guard's stretch, which is work ([`Work::watch`]).
+    pub const fn keep_watch(post: Point, seconds: f32) -> Task {
+        Task::Work(Work { desk: post, seconds, watch: true })
     }
 
     /// Run this task's executor for a tick.
@@ -297,6 +326,8 @@ impl Task {
             Task::Salvage(task) => task.execute(ctx),
             Task::Work(task) => task.execute(ctx),
             Task::Deposit(task) => task.execute(ctx),
+            Task::TakeBody(task) => task.execute(ctx),
+            Task::Cremate(task) => task.execute(ctx),
         }
     }
 
@@ -316,6 +347,8 @@ impl Task {
             Task::Salvage(task) => task.interrupted(action, biology),
             Task::Work(task) => task.interrupted(action, biology),
             Task::Deposit(task) => task.interrupted(action, biology),
+            Task::TakeBody(task) => task.interrupted(action, biology),
+            Task::Cremate(task) => task.interrupted(action, biology),
         }
     }
 
@@ -333,6 +366,8 @@ impl Task {
             Task::Salvage(task) => task.describe(),
             Task::Work(task) => task.describe(),
             Task::Deposit(task) => task.describe(),
+            Task::TakeBody(task) => task.describe(),
+            Task::Cremate(task) => task.describe(),
         }
     }
 }

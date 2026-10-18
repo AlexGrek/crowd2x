@@ -92,6 +92,9 @@ pub const PROPS: &[Prop] = &[
     // A warehouse's skip, where a scrap collector stores the scrap it brings
     // in (`sim::bins`). Used from beside it, like a fridge.
     Prop::blocking("scrap bin"),
+    Prop::blocking("guard post"),
+    // Where an undertaker puts the dead (`sim::job`). Used from beside it.
+    Prop::blocking("crematorium"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

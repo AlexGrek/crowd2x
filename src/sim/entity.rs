@@ -46,6 +46,12 @@ pub struct Body {
     /// pass ([`super::property`]). `None` for a body that owns nowhere, which
     /// may still go anywhere that is nobody's.
     home: Option<PropertyId>,
+    /// Dead: it thinks, moves and ages no more, and lies where it fell. Like
+    /// `frozen`, read by [`super::think_step`] and [`super::react_step`];
+    /// unlike it, there is no letting go. Set by the kind itself when its
+    /// health runs out (`Human::react`), and settled with the world by
+    /// [`super::Effect::Died`].
+    dead: bool,
 }
 
 impl Body {
@@ -55,6 +61,7 @@ impl Body {
             position,
             frozen: false,
             home: None,
+            dead: false,
         }
     }
 
@@ -97,6 +104,14 @@ impl Body {
         self.frozen = frozen;
     }
 
+    pub fn is_dead(&self) -> bool {
+        self.dead
+    }
+
+    pub fn set_dead(&mut self) {
+        self.dead = true;
+    }
+
     /// The property it holds the key to, if any.
     pub fn home(&self) -> Option<PropertyId> {
         self.home
@@ -109,8 +124,8 @@ impl Body {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home } = *self;
-        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32) }
+        let Body { uid, position: (x, y), frozen, home, dead } = *self;
+        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32), dead }
     }
 
     pub(crate) fn restore(saved: &pb::Body) -> Result<Body, Invalid> {
@@ -127,7 +142,7 @@ impl Body {
                 None => return invalid(format!("{uid}'s home is property {home}")),
             },
         };
-        Ok(Body { uid, position: (saved.x, saved.y), frozen: saved.frozen, home })
+        Ok(Body { uid, position: (saved.x, saved.y), frozen: saved.frozen, home, dead: saved.dead })
     }
 }
 
@@ -250,6 +265,11 @@ pub trait GameEntity: Send + Sync {
         self.body_mut().set_frozen(frozen);
     }
 
+    /// Dead, and so neither asked to think nor to react — see [`Body`].
+    fn is_dead(&self) -> bool {
+        self.body().is_dead()
+    }
+
     /// This kind's body — its stats and the processes that change them — or
     /// `None` for a kind that has none. On the trait for the reason
     /// [`GameEntity::facing`] is: a test, the debug view and
@@ -294,6 +314,20 @@ pub trait GameEntity: Send + Sync {
 
     fn clothing_mut(&mut self) -> Option<&mut super::clothing::Clothing> {
         None
+    }
+
+    /// What it has on at `clock`: its job's uniform while the job is due
+    /// (`Job::is_due` — from setting off for the shift until it ends), its own
+    /// [`clothing`](GameEntity::clothing) otherwise. Worked out, never
+    /// stored, so nothing about it needs saving and a loaded world dresses
+    /// the same; the clothing menu changes the own clothes, which a worker
+    /// is back in after the shift. `None` for a kind that wears nothing.
+    fn worn(&self, clock: super::clock::Clock) -> Option<super::clothing::Clothing> {
+        let own = self.clothing()?;
+        Some(match self.job() {
+            Some(job) if job.is_due(clock) => job.kind.uniform(),
+            _ => own,
+        })
     }
 
     /// What this kind would tell a debugger about itself, beyond the body.
@@ -492,6 +526,10 @@ pub struct Think<'a> {
     /// Which cells are whose property. Built once with the world: what a
     /// goal asks before choosing somewhere to go ([`Think::may_use`]).
     pub properties: &'a super::property::Properties,
+    /// Who lies dead where — what an undertaker looks through for the
+    /// nearest body. As of the start of this tick, changed only by
+    /// [`super::world_step`].
+    pub corpses: &'a super::corpses::Corpses,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —

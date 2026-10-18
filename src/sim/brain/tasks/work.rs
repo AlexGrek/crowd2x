@@ -1,4 +1,6 @@
-//! [`Work`]: sit at one's own desk and work it for a while.
+//! [`Work`]: sit at one's own desk and work it for a while — or stand at
+//! one's own guard post and keep watch, which is the same task
+//! ([`Work::watch`]).
 //!
 //! [`UseComputer`](super::UseComputer)'s shape — a prop used from beside it,
 //! time passing and nothing changing hands — with what the body gets out of it
@@ -29,6 +31,21 @@ pub struct Work {
     /// How long this stretch lasts, in **watched** seconds. The body is told
     /// it in world seconds ([`TIME_SCALE`] more).
     pub seconds: f32,
+    /// A watch at a guard post rather than a stretch at a computer: `desk`
+    /// is the post, which needs no power. The same work otherwise, as
+    /// tiring and as little fun.
+    pub watch: bool,
+}
+
+impl Work {
+    /// What the workplace has to be for the stretch to go on.
+    const fn place(&self) -> FeatureKind {
+        if self.watch {
+            FeatureKind::GuardPost
+        } else {
+            FeatureKind::Workstation
+        }
+    }
 }
 
 impl TaskExecutor for Work {
@@ -43,7 +60,7 @@ impl TaskExecutor for Work {
         if ctx.here().manhattan_distance(self.desk) > 1 || ctx.biology.is_none() {
             return TaskResult::Failed;
         }
-        if !ctx.think.features.has(FeatureKind::Workstation, self.desk) {
+        if !ctx.think.features.has(self.place(), self.desk) {
             return TaskResult::Failed;
         }
 
@@ -78,7 +95,11 @@ impl TaskExecutor for Work {
     }
 
     fn describe(&self) -> String {
-        format!("work at the computer at {}, {}", self.desk.x, self.desk.y)
+        if self.watch {
+            format!("keep watch at the guard post at {}, {}", self.desk.x, self.desk.y)
+        } else {
+            format!("work at the computer at {}, {}", self.desk.x, self.desk.y)
+        }
     }
 }
 

@@ -443,7 +443,7 @@ pub enum Step {
     /// Zooming changes the size of the canvas rather than the scale of a
     /// camera, so it cannot be read off a screenshot without counting texels —
     /// which is exactly the kind of thing a test should not have to do.
-    ExpectZoom(u32),
+    ExpectZoom(f32),
     /// The focused widget's label, which is how a test says "the highlight is
     /// where I think it is" without knowing about entities.
     ExpectFocus(String),

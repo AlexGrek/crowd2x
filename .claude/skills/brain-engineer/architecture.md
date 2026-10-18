@@ -58,11 +58,12 @@ talking only to the one below:
   threshold, every need on the same `/ 50` priority scale, and nothing wanted while the
   process behind the need is switched off. **Sleep is the routine that is not a `Need`**,
   because it reads the clock as well as a stat: by day it commits at 75 tired and lets go at
-  10; by night it commits at 30 and *does not let go until morning*, holding a priority
+  10; by night — its own: a worker's is the 8 hours ending 3 before its shift
+  (`Shift::is_bedtime`), which for office hours is the clock's — it commits at 30 and *does not let go until morning*, holding a priority
   floor of 0.6 so somebody rested at one o'clock stays in bed — above wandering, below any
   committed hunger, thirst, bladder or boredom, so a sleeper gets up for the toilet and
   comes back. **Work is the other clock routine**: `WorkRoutine` wants the job's goal
-  (`GoalId::Work` at a desk, `GoalId::Collect` for a scrap collector) at a
+  (`GoalId::Work` at a desk or guard post, `GoalId::Collect` for a scrap collector) at a
   flat 1.5 while the job's shift is due (09:00-17:00 Mon-Fri, from 08:30 on the way) — over
   every need at its commit level, under any need past 75, and tied with (so losing to) a
   nap at `EXHAUSTED`. **There is no cap on how many a brain has**:

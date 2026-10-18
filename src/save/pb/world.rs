@@ -79,6 +79,11 @@ pub struct Workplace {
     pub desk: Option<Cell>,
     #[prost(fixed64, tag = "2")]
     pub worker: u64,
+    /// The hour the shift it is given for starts: a guard post is three
+    /// workplaces, one a watch. Absent in a save from before the watches,
+    /// which is office hours (9).
+    #[prost(uint32, optional, tag = "3")]
+    pub start: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

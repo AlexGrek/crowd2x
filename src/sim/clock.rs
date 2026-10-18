@@ -125,6 +125,11 @@ impl Weekday {
     pub const fn is_weekend(self) -> bool {
         matches!(self, Weekday::Saturday | Weekday::Sunday)
     }
+
+    /// The day after: Monday after Sunday.
+    pub const fn next(self) -> Weekday {
+        Weekday::ALL[(self as usize + 1) % 7]
+    }
 }
 
 /// How long `world_seconds` of world takes to watch, in watched seconds.

@@ -1,0 +1,124 @@
+{
+  "name": "three guards are hired to one guard post, a watch each, and keep it round the clock",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "gatehouse",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown big"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "1,1,1,1,1,1,1,1,1,1,1,2",
+                  "1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 72 }, "kind": "guard post" },
+              { "at": { "x": 24, "y": 168 }, "kind": "door" },
+              { "at": { "x": 24, "y": 216 }, "kind": "door" },
+              { "at": { "x": 504, "y": 72 }, "kind": "bed 1" },
+              { "at": { "x": 504, "y": 168 }, "kind": "bed 2" },
+              { "at": { "x": 504, "y": 264 }, "kind": "bed 3" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "gatehouse",
+  "steps": [
+    { "note": "a gatehouse laid out like a district's gate: two door leaves in the west wall at (0, 3) and (0, 4), the guard post set into the wall at (0, 1) with a cell of wall between, so its guard stands at (1, 1). Three beds by the east wall. A world opens at 08:00 on day 1, a Monday" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "one post is three workplaces: the day, the evening and the night watch, handed out in that order" },
+    { "spawn": { "kind": "human", "x": 9, "y": 1 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a guard at the guard post at 0, 1, 08:00-16:00" },
+    { "spawn": { "kind": "human", "x": 9, "y": 3 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a guard at the guard post at 0, 1, 16:00-24:00" },
+    { "spawn": { "kind": "human", "x": 9, "y": 5 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a guard at the guard post at 0, 1, 00:00-08:00" },
+    { "expect_entities": 3 },
+
+    { "note": "every need but tiredness switched off, so this is a test about the watches and when each guard sleeps" },
+    { "select": 2 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "select": 1 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "job" },
+    { "expect_text": "guard" },
+    { "expect_text": "guard post at 0, 1" },
+    { "expect_text": "08:00-16:00" },
+    { "expect_text": "Mon-Sun" },
+
+    { "note": "the day watch is due already: twenty world minutes on it is at the post" },
+    { "tick": 640 },
+    { "expect_text": "on watch" },
+    { "press": "brains" },
+    { "expect_text": "keep watch at the guard post at 0, 1" },
+    { "note": "on watch it is in the guard's uniform; the clothing menu says so, and what it goes home in" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform guard (own: " },
+    { "press": "job" },
+    { "look_at": { "x": 3, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "twenty past eight: the day watch at the post, the other two in bed or about" },
+
+    { "note": "an hour at the post is an hour kept" },
+    { "tick": 1920 },
+    { "expect_log": "kept watch an hour at the guard post at 0, 1" },
+
+    { "note": "half past four: the evening watch has taken over and the day watch is done" },
+    { "tick": 13824 },
+    { "expect_text": "done for the day" },
+    { "select": 1 },
+    { "press": "job" },
+    { "expect_text": "16:00-24:00" },
+    { "expect_text": "on watch" },
+    { "shot": "half past four: the evening watch at the post" },
+
+    { "note": "half past midnight: the night watch, which slept the afternoon, is at the post" },
+    { "tick": 15360 },
+    { "select": 2 },
+    { "press": "job" },
+    { "expect_text": "00:00-08:00" },
+    { "expect_text": "on watch" },
+    { "shot": "half past midnight: the night watch at the post" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

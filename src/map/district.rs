@@ -32,9 +32,23 @@
 //!   so far only the **warehouse** ([`warehouse`]), on the lot facing the
 //!   street round the edge of the district that is nearest a heap of the
 //!   district's own wasteland ([`heaps_round`]), so its collectors' trips are
-//!   short, with a [`SCRAP_BIN`] in each corner;
+//!   short, with a [`SCRAP_BIN`] in each corner; and [`RESTAURANTS`]
+//!   **restaurants** ([`restaurant`]), one on the lot nearest the middle of
+//!   each quarter of the district so nobody is far from one: public, with
+//!   fridges anybody may eat and drink from and toilets anybody may use;
+//!   and the **crematorium** ([`crematorium`]), on a lot on the edge of the
+//!   district, with [`CREMATORIA`] furnaces the undertakers bring the dead
+//!   to (`sim::job`);
 //! * **the houses** — every lot of every other block, less [`EMPTY_LOTS`]
 //!   left as parks, which leaves [`HOUSES`].
+//!
+//! **A wall round the whole of it** ([`PERIMETER_WALL`]) takes the place of
+//! the pavement along the map's edge, so the street round the edge reads
+//! wall, three cells of road, pavement. It is broken only by [`GATES`]
+//! gates, [`GATES_PER_SIDE`] a side, each a two-leaf [`DOOR`] where a street
+//! running out to the edge meets it, with a [`GUARD_POST`] set into the
+//! wall two cells along — the guards' workplaces (`sim::job`), three watches
+//! to a post. Laid from the geometry alone, drawing nothing from the seed.
 //!
 //! A **park** is a whole lot of [`GRASS`]: walkable, dearer than the
 //! pavement, so it is cut across when that saves enough and walked round
@@ -123,8 +137,11 @@ const BLOCKS_Y: i32 = 5;
 /// four to a block.
 const RESIDENTIAL_LOTS: usize = 4 * (BLOCKS_X * BLOCKS_Y - 3) as usize;
 /// The buildings that must be in every district and take a lot each before
-/// any house is built ([`generate`]'s mandatory step): the warehouse.
-const LOT_BUILDINGS: usize = 1;
+/// any house is built ([`generate`]'s mandatory step): the warehouse, the
+/// restaurants and the crematorium.
+const LOT_BUILDINGS: usize = 1 + RESTAURANTS + 1;
+/// How many restaurants: one to each quarter of the district.
+pub const RESTAURANTS: usize = 4;
 /// The residential lots left as parks: what neither a mandatory building nor
 /// a house took.
 const EMPTY_LOTS: usize = RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES;
@@ -154,6 +171,15 @@ const RESTROOM_FLOOR: &str = "tiles blue";
 const SHOP_WALL: &str = "wall brown";
 const SHOP_FLOORS: [&str; 3] = ["floor red", "tiles yellow", "floor colorful"];
 const WINDOW: &str = "window";
+/// The wall round the district, in place of the pavement on the map's edge.
+pub const PERIMETER_WALL: &str = "wall brown big";
+/// How many gates each side of the perimeter wall has.
+pub const GATES_PER_SIDE: i32 = 2;
+/// How many gates the perimeter wall has, all four sides.
+pub const GATES: usize = 4 * GATES_PER_SIDE as usize;
+/// A sentry box set into the perimeter wall beside each gate: where its
+/// guards keep watch (`sim::job::JobKind::Guard`).
+pub const GUARD_POST: &str = "guard post";
 /// Cells between the windows along a wall: one every third cell.
 const WINDOW_SPACING: i32 = 3;
 const BEDS: [&str; 6] = ["bed 1", "bed 2", "bed 3", "bed 4", "bed 5", "bed 6"];
@@ -168,6 +194,16 @@ pub const SCRAP_BIN: &str = "scrap bin";
 pub const WAREHOUSE_BINS: usize = 4;
 const WAREHOUSE_WALL: &str = "wall brown";
 const WAREHOUSE_FLOOR: &str = "floor diagonal";
+const RESTAURANT_WALL: &str = "wall red";
+const RESTAURANT_FLOOR: &str = "tiles yellow";
+/// Where the dead are brought: an undertaker's workplace, three watches to
+/// each (`sim::job`).
+pub const CREMATORIUM: &str = "crematorium";
+/// How many crematoria the crematorium has, and so how many undertakers a
+/// district takes: three to each.
+pub const CREMATORIA: usize = 2;
+const CREMATORIUM_WALL: &str = "wall purple";
+const CREMATORIUM_FLOOR: &str = "floor white";
 /// The door of a shop, the bank and its restrooms: anybody may open it.
 const DOOR: &str = "door";
 /// A house's door, which only the people living there may open: the
@@ -211,7 +247,12 @@ const TILES: &[&str] = &[
     SHOP_FLOORS[2],
     WAREHOUSE_WALL,
     WAREHOUSE_FLOOR,
+    RESTAURANT_WALL,
+    RESTAURANT_FLOOR,
+    CREMATORIUM_WALL,
+    CREMATORIUM_FLOOR,
     WINDOW,
+    PERIMETER_WALL,
 ];
 
 /// A rectangle of cells: `x`, `y` is its lowest corner.
@@ -266,6 +307,19 @@ pub struct House {
     pub residents: u8,
 }
 
+/// A way through the perimeter wall.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Gate {
+    /// Its two [`DOOR`] leaves, side by side in the wall.
+    pub leaves: [Point; 2],
+    /// Its [`GUARD_POST`], in the wall two cells along from the nearer leaf
+    /// with wall between, so a guard standing at it stands inside the
+    /// district and out of the gateway.
+    pub post: Point,
+    /// One step out through it: off the map, into the wasteland.
+    pub outward: Point,
+}
+
 /// A generated district: the map, and where everything in it went.
 ///
 /// The layout is kept beside the map so a test can make claims about each
@@ -279,9 +333,17 @@ pub struct District {
     /// Where the scrap collectors store their scrap: on a lot facing the
     /// edge street, a [`SCRAP_BIN`] in each corner.
     pub warehouse: Rect,
+    /// Where anybody may eat, drink and use a toilet: [`RESTAURANTS`] of
+    /// them, a lot each, spread over the district's quarters.
+    pub restaurants: Vec<Rect>,
+    /// Where the undertakers bring the dead: on a lot facing the edge
+    /// street, [`CREMATORIA`] furnaces in it.
+    pub crematorium: Rect,
     /// The lots left as grass: the residential lots without a house, and the
     /// shop block's fourth.
     pub parks: Vec<Rect>,
+    /// The ways through the perimeter wall, each with its guard post.
+    pub gates: Vec<Gate>,
 }
 
 impl District {
@@ -291,13 +353,15 @@ impl District {
     }
 
     /// The outside of every building's walls: the houses, the shops, the
-    /// warehouse and the bank.
+    /// warehouse, the restaurants and the bank.
     pub fn buildings(&self) -> Vec<Rect> {
         self.houses
             .iter()
             .map(|house| house.walls)
             .chain(self.shops.iter().copied())
-            .chain([self.warehouse, self.bank])
+            .chain([self.warehouse])
+            .chain(self.restaurants.iter().copied())
+            .chain([self.crematorium, self.bank])
             .collect()
     }
 }
@@ -474,6 +538,19 @@ pub fn generate(seed: u64) -> District {
     };
     let warehouse_lot = take_lot(&mut lots, |lot| lot.edge_sides().next().is_some(), to_scrap);
     let warehouse = warehouse(&mut rng, &mut map, &mut props, warehouse_lot);
+    // The restaurants: one to each quarter, on the lot nearest its middle.
+    let restaurants: Vec<Rect> = [(1, 1), (3, 1), (1, 3), (3, 3)]
+        .into_iter()
+        .map(|(qx, qy)| {
+            let target = Point::new(WIDTH * qx / 4, HEIGHT * qy / 4);
+            let lot = take_lot(&mut lots, |_| true, |lot| lot.origin.offset(LOT_W / 2, LOT_H / 2).manhattan_distance(target));
+            restaurant(&mut rng, &mut map, &mut props, lot)
+        })
+        .collect();
+    // The crematorium: out on the edge of the district, the first edge lot
+    // left in the shuffled order.
+    let crematorium_lot = take_lot(&mut lots, |lot| lot.edge_sides().next().is_some(), |_| 0);
+    let crematorium = crematorium(&mut rng, &mut map, &mut props, crematorium_lot);
     let empty = lots.split_off(lots.len() - EMPTY_LOTS);
     // Back into street order, so the spawners — and so the order people
     // arrive in — read the map from the bottom left rather than at random.
@@ -490,14 +567,22 @@ pub fn generate(seed: u64) -> District {
         map.set_terrain(cell, grass);
     }
 
+    let gates = gates(&mut map, &mut props);
+
     for prop in props {
         map.add_object(ObjectLayer::Props, prop);
     }
     for spawner in spawners {
         map.add_object(ObjectLayer::Spawners, spawner);
     }
-    let rooms: Vec<Rect> =
-        houses.iter().map(|house| house.walls).chain(shops.iter().copied()).chain([warehouse]).collect();
+    let rooms: Vec<Rect> = houses
+        .iter()
+        .map(|house| house.walls)
+        .chain(shops.iter().copied())
+        .chain([warehouse])
+        .chain(restaurants.iter().copied())
+        .chain([crematorium])
+        .collect();
     roof_and_light(&mut map, &rooms, bank);
     let buildings: Vec<Rect> = rooms.iter().copied().chain([bank]).collect();
     for &walls in &buildings {
@@ -517,7 +602,10 @@ pub fn generate(seed: u64) -> District {
         bank,
         shops,
         warehouse,
+        restaurants,
+        crematorium,
         parks,
+        gates,
     }
 }
 
@@ -545,14 +633,15 @@ fn heaps_round(seed: u64) -> Vec<Point> {
         .collect()
 }
 
-/// The ground before anything is built on it: [`PAVEMENT`] over every block,
-/// one cell round it and along the map's edge, and [`ROAD`] — what the map
-/// starts as — everywhere else. So each street reads pavement, three cells
-/// of road, pavement, and where two meet the pavements wrap round the
+/// The ground before anything is built on it: [`PAVEMENT`] over every block
+/// and one cell round it, the [`PERIMETER_WALL`] along the map's edge, and
+/// [`ROAD`] — what the map starts as — everywhere else. So each street reads
+/// pavement, three cells of road, pavement — the street round the edge
+/// wall, road, pavement — and where two meet the pavements wrap round the
 /// corners and the road runs on through. `blocks` counts the bank's two
 /// blocks as one, street between and all, since the bank stands across it.
 fn pave(map: &mut Map, blocks: &[Rect]) {
-    let pavement = tile(PAVEMENT);
+    let (pavement, wall) = (tile(PAVEMENT), tile(PERIMETER_WALL));
     let near_a_block = |cell: Point| {
         blocks.iter().any(|block| {
             cell.x >= block.x - 1 && cell.x <= block.right() + 1 && cell.y >= block.y - 1 && cell.y <= block.top() + 1
@@ -560,10 +649,50 @@ fn pave(map: &mut Map, blocks: &[Rect]) {
     };
     for cell in map.size().points().collect::<Vec<_>>() {
         let edge = cell.x == 0 || cell.y == 0 || cell.x == WIDTH - 1 || cell.y == HEIGHT - 1;
-        if edge || near_a_block(cell) {
+        if edge {
+            map.set_terrain(cell, wall);
+        } else if near_a_block(cell) {
             map.set_terrain(cell, pavement);
         }
     }
+}
+
+/// The gates in the perimeter wall: [`GATES_PER_SIDE`] a side, each where
+/// one of the streets running out to that side meets the wall — the ones
+/// that split the side most evenly — opening straight off its road. Two
+/// [`DOOR`] leaves on [`ROAD`] in the first two of its three lanes, and a
+/// [`GUARD_POST`] in the wall on the far side of the street's pavement, two
+/// cells from the nearer leaf with a cell of wall between: a guard stands
+/// at it on the road inside, out of the gateway, and could only get round
+/// to the outside of it through the gate. From the geometry alone, drawing
+/// nothing from the seed.
+fn gates(map: &mut Map, props: &mut Vec<Object>) -> Vec<Gate> {
+    // The streets that split `blocks` blocks most evenly, by number.
+    let streets = |blocks: i32| (1..=GATES_PER_SIDE).map(move |i| i * (blocks + 1) / (GATES_PER_SIDE + 1));
+    let mut gates = Vec::new();
+    for k in streets(BLOCKS_X) {
+        let x0 = k * (BLOCK_W + STREET);
+        for (y, outward) in [(0, Point::new(0, -1)), (HEIGHT - 1, Point::new(0, 1))] {
+            let leaves = [Point::new(x0 + 1, y), Point::new(x0 + 2, y)];
+            gates.push(Gate { leaves, post: Point::new(x0 - 1, y), outward });
+        }
+    }
+    for k in streets(BLOCKS_Y) {
+        let y0 = k * (BLOCK_H + STREET);
+        for (x, outward) in [(0, Point::new(-1, 0)), (WIDTH - 1, Point::new(1, 0))] {
+            let leaves = [Point::new(x, y0 + 1), Point::new(x, y0 + 2)];
+            gates.push(Gate { leaves, post: Point::new(x, y0 - 1), outward });
+        }
+    }
+    let road = tile(ROAD);
+    for gate in &gates {
+        for leaf in gate.leaves {
+            map.set_terrain(leaf, road);
+            props.push(object(DOOR, leaf));
+        }
+        props.push(object(GUARD_POST, gate.post));
+    }
+    gates
 }
 
 /// A roof over every building, and the lamps under them: one in the middle
@@ -662,10 +791,10 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
         map.set_grid(GridLayer::Water, cell, water::PIPE);
     }
 
-    // The sources, in two corners of the street round the edge, each on its
-    // network and joined to the main.
-    let transformer = Point::new(WIDTH - 1, 0);
-    let sewer = Point::new(0, HEIGHT - 1);
+    // The sources, in two corners of the street round the edge, inside the
+    // perimeter wall, each on its network and joined to the main.
+    let transformer = Point::new(WIDTH - 2, 1);
+    let sewer = Point::new(1, HEIGHT - 2);
     map.add_object(ObjectLayer::Props, object(TRANSFORMER, transformer));
     map.add_object(ObjectLayer::Props, object(SEWER, sewer));
     utilities::lay(map, GridLayer::Power, power::LINE, transformer, Point::new(WIDTH - 1 - STREET / 2, STREET / 2));
@@ -728,10 +857,13 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
 /// controller on each, which switches every box on it.
 fn light_streets(map: &mut Map, buildings: &[Rect]) {
     let inside_any = |cell: Point| buildings.iter().any(|walls| walls.contains(cell));
+    // Kept clear of, as doors are: a post in a gate's wall has one cell
+    // inside to be stood at from, and a lamp there would send its guard
+    // round through the gate to stand outside.
     let doors: Vec<Point> = map
         .objects(ObjectLayer::Props)
         .iter()
-        .filter(|prop| [DOOR, HOUSE_DOOR].contains(&prop.kind.as_str()))
+        .filter(|prop| [DOOR, HOUSE_DOOR, GUARD_POST].contains(&prop.kind.as_str()))
         .map(Object::cell)
         .collect();
     let streets_x: Vec<i32> = (0..=BLOCKS_X).map(|k| k * (BLOCK_W + STREET)).collect();
@@ -1082,6 +1214,83 @@ fn warehouse(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lo
     walls
 }
 
+/// A restaurant, on `lot`: a room as big as a shop with a plain door —
+/// nobody's property, so anybody may come in and use what is inside — on one
+/// of the lot's street sides, kept two cells off the corners. Fridges along
+/// the wall facing the door, and a toilet against each side wall a row in from
+/// the door, so the row inside the door stays clear and everything has free
+/// cells beside it to be used from. Laid out facing the door whichever side it
+/// is on.
+fn restaurant(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
+    let side = lot.outer[rng.random_range(0..2)];
+    let room = public_room(rng, map, props, lot, side, RESTAURANT_WALL, RESTAURANT_FLOOR);
+    let mut fridges = vec![0, room.wide - 1];
+    if room.wide % 2 == 1 {
+        fridges.push(room.wide / 2);
+    }
+    for across in fridges {
+        props.push(object(FRIDGE, room.at(across, room.deep - 1)));
+    }
+    for across in [0, room.wide - 1] {
+        props.push(object(TOILET, room.at(across, 1)));
+    }
+    room.walls
+}
+
+/// The crematorium, on `lot`: a room as big as a shop with a plain door —
+/// nobody's property — on a side facing the edge street, and a
+/// [`CREMATORIUM`] in each of the [`CREMATORIA`] corners facing the door.
+fn crematorium(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
+    let sides: Vec<Side> = lot.edge_sides().collect();
+    let side = sides[rng.random_range(0..sides.len())];
+    let room = public_room(rng, map, props, lot, side, CREMATORIUM_WALL, CREMATORIUM_FLOOR);
+    for across in [0, room.wide - 1] {
+        props.push(object(CREMATORIUM, room.at(across, room.deep - 1)));
+    }
+    room.walls
+}
+
+/// A building of one room laid out from its door: its walls, and the room
+/// inside measured `across` the door's wall and `deep` in from it.
+struct Room {
+    walls: Rect,
+    side: Side,
+    wide: i32,
+    deep: i32,
+}
+
+impl Room {
+    /// The cell `across` along the door's wall and `depth` in from it.
+    fn at(&self, across: i32, depth: i32) -> Point {
+        let inside = self.walls.interior();
+        match self.side {
+            Side::South => Point::new(inside.x + across, inside.y + depth),
+            Side::North => Point::new(inside.x + across, inside.top() - depth),
+            Side::West => Point::new(inside.x + depth, inside.y + across),
+            Side::East => Point::new(inside.right() - depth, inside.y + across),
+        }
+    }
+}
+
+/// A room as big as a shop somewhere on `lot`, `wall` round `floor`, with a
+/// plain door — nobody's property — in the wall on `side`, kept two cells
+/// off the corners so the row inside it stays clear of what stands in them.
+#[allow(clippy::too_many_arguments)]
+fn public_room(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot, side: Side, wall: &str, floor: &str) -> Room {
+    let walls = place_in(rng, lot, LOT_W - 1, LOT_H - 1);
+    build(map, walls, wall, floor);
+    for cell in door_clear_of_corners(rng, walls, side, DOOR_WIDTH, 2) {
+        map.set_terrain(cell, tile(floor));
+        props.push(object(DOOR, cell));
+    }
+    let inside = walls.interior();
+    let (wide, deep) = match side {
+        Side::South | Side::North => (inside.w, inside.h),
+        Side::West | Side::East => (inside.h, inside.w),
+    };
+    Room { walls, side, wide, deep }
+}
+
 /// A house with its residents' beds, a fridge, a toilet and their spawners.
 fn house(
     rng: &mut SmallRng,
@@ -1245,8 +1454,8 @@ mod tests {
     fn reachable(map: &Map) -> Vec<bool> {
         let size = map.size();
         let mut seen = vec![false; size.area()];
-        let start = Point::new(0, 0);
-        assert!(map.is_passable(start), "the corner of the map is street");
+        let start = Point::new(1, 1);
+        assert!(map.is_passable(start), "the corner of the street round the edge is road");
         let mut queue = vec![start];
         seen[size.index_of(start).unwrap()] = true;
         while let Some(cell) = queue.pop() {
@@ -1321,6 +1530,10 @@ mod tests {
                 assert_eq!(in_room(shop, HOUSE_LAMP), 1, "seed {seed}, shop at {shop:?}");
             }
             assert_eq!(in_room(district.warehouse, HOUSE_LAMP), 1, "seed {seed}: the warehouse");
+            for &restaurant in &district.restaurants {
+                assert_eq!(in_room(restaurant, HOUSE_LAMP), 1, "seed {seed}, restaurant at {restaurant:?}");
+            }
+            assert_eq!(in_room(district.crematorium, HOUSE_LAMP), 1, "seed {seed}: the crematorium");
             assert!(in_room(district.bank, OFFICE_LAMP) >= 12, "seed {seed}: {}", in_room(district.bank, OFFICE_LAMP));
             for lamp in lamps {
                 assert!(district.map.sight().is_passable(lamp.cell()), "seed {seed}: a lamp in a wall");
@@ -1336,7 +1549,7 @@ mod tests {
         }
         for name in BEDS
             .iter()
-            .chain(&[FRIDGE, TOILET, COMPUTER, SCRAP_BIN, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
+            .chain(&[FRIDGE, TOILET, COMPUTER, SCRAP_BIN, GUARD_POST, CREMATORIUM, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
         {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
         }
@@ -1488,6 +1701,39 @@ mod tests {
             assert!(props_in(map, district.bank, COMPUTER) >= 12, "seed {seed}");
             assert!(props_in(map, district.bank, TOILET) >= 2, "seed {seed}");
 
+            // The restaurants: one to each quarter, fridges and toilets and
+            // nothing else, open to anybody.
+            assert_eq!(district.restaurants.len(), RESTAURANTS, "seed {seed}");
+            let properties = crate::sim::Properties::from_map(map);
+            for (i, &restaurant) in district.restaurants.iter().enumerate() {
+                assert!(props_in(map, restaurant, FRIDGE) >= 2, "seed {seed} {restaurant:?}");
+                assert_eq!(props_in(map, restaurant, TOILET), 2, "seed {seed} {restaurant:?}");
+                let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| restaurant.interior().contains(prop.cell()));
+                assert!(inside.clone().all(|prop| [FRIDGE, TOILET].contains(&prop.kind.as_str())), "seed {seed} {restaurant:?}");
+                for cell in restaurant.cells() {
+                    assert_eq!(properties.of(cell), None, "seed {seed}: a restaurant is nobody's property");
+                }
+                let (qx, qy) = ((i % 2) as i32, (i / 2) as i32);
+                let (mx, my) = (restaurant.x + restaurant.w / 2, restaurant.y + restaurant.h / 2);
+                assert_eq!((mx * 2 / WIDTH, my * 2 / HEIGHT), (qx, qy), "seed {seed}: restaurant {i} at {restaurant:?} is out of its quarter");
+            }
+
+            // The crematorium: its furnaces and nothing else, nobody's, on
+            // the edge, and none anywhere else.
+            let crematorium = district.crematorium;
+            let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| crematorium.interior().contains(prop.cell()));
+            assert!(inside.clone().all(|prop| prop.kind.as_str() == CREMATORIUM), "seed {seed}: the crematorium holds crematoria only");
+            assert_eq!(inside.count(), CREMATORIA, "seed {seed}");
+            assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), CREMATORIUM), CREMATORIA, "seed {seed}: none elsewhere");
+            for cell in crematorium.cells() {
+                assert_eq!(properties.of(cell), None, "seed {seed}: the crematorium is nobody's property");
+            }
+            let on_the_edge = crematorium.x - STREET <= 1
+                || WIDTH - STREET - 1 - crematorium.right() <= 1
+                || crematorium.y - STREET <= 1
+                || HEIGHT - STREET - 1 - crematorium.top() <= 1;
+            assert!(on_the_edge, "seed {seed}: the crematorium at {crematorium:?} is not on the edge");
+
             // One warehouse, its bins and nothing else in it, open to
             // anybody, on a lot facing the street round the edge.
             let warehouse = district.warehouse;
@@ -1560,6 +1806,73 @@ mod tests {
         }
     }
 
+    /// The whole edge of the map is the perimeter wall but for the gates:
+    /// two leaves of an ordinary door on road, [`GATES_PER_SIDE`] to a side,
+    /// each with a way in behind it and the wasteland in front.
+    #[test]
+    fn the_district_is_walled_in_but_for_its_gates() {
+        let (wall, road) = (tile(PERIMETER_WALL), tile(ROAD));
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            assert_eq!(district.gates.len(), GATES, "seed {seed}");
+            let leaves: Vec<Point> = district.gates.iter().flat_map(|gate| gate.leaves).collect();
+            let size = map.size();
+            for cell in size.points().filter(|&c| c.x == 0 || c.y == 0 || c.x == WIDTH - 1 || c.y == HEIGHT - 1) {
+                if leaves.contains(&cell) {
+                    assert_eq!(map.terrain(cell), Some(road), "seed {seed}: a gate at {cell:?}");
+                    assert!(map.is_passable(cell), "seed {seed}: a gate at {cell:?}");
+                } else {
+                    assert_eq!(map.terrain(cell), Some(wall), "seed {seed}: a gap in the wall at {cell:?}");
+                    assert!(!map.is_passable(cell), "seed {seed}: {cell:?}");
+                }
+            }
+            let doors = doors_of(map);
+            let seen = reachable(map);
+            for gate in &district.gates {
+                for leaf in gate.leaves {
+                    assert!(doors.contains(&(leaf, DOOR)), "seed {seed}: the gate at {leaf:?} is a door anybody may use");
+                    assert!(!size.contains(leaf + gate.outward), "seed {seed}: {leaf:?} opens off the map");
+                    let inside = leaf - gate.outward;
+                    assert!(seen[size.index_of(inside).unwrap()], "seed {seed}: nothing leads to the gate at {leaf:?}");
+                }
+            }
+            for outward in [Point::new(-1, 0), Point::new(1, 0), Point::new(0, -1), Point::new(0, 1)] {
+                let on_side = district.gates.iter().filter(|gate| gate.outward == outward).count();
+                assert_eq!(on_side, GATES_PER_SIDE as usize, "seed {seed}: gates facing {outward:?}");
+            }
+        }
+    }
+
+    /// Every gate has a guard post in the wall beside it, with a free cell
+    /// inside to stand at it from, and that cell is not in the gateway.
+    #[test]
+    fn every_gate_has_a_guard_post_in_the_wall_with_room_inside_to_stand_at_it() {
+        let wall = tile(PERIMETER_WALL);
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let posts: Vec<Point> = map
+                .objects(ObjectLayer::Props)
+                .iter()
+                .filter(|prop| prop.kind.as_str() == GUARD_POST)
+                .map(Object::cell)
+                .collect();
+            assert_eq!(posts.len(), GATES, "seed {seed}: a post to a gate and none elsewhere");
+            for gate in &district.gates {
+                assert!(posts.contains(&gate.post), "seed {seed}: {gate:?}");
+                assert_eq!(map.terrain(gate.post), Some(wall), "seed {seed}: the post is set into the wall");
+                let nearer = gate.leaves.iter().map(|&leaf| leaf.manhattan_distance(gate.post)).min().unwrap();
+                assert_eq!(nearer, 2, "seed {seed}: two along from its gate, wall between");
+                let stand = gate.post - gate.outward;
+                assert!(map.is_passable(stand), "seed {seed}: nowhere to stand at the post at {:?}", gate.post);
+                assert!(gate.leaves.iter().all(|&leaf| stand.manhattan_distance(leaf) > 1), "seed {seed}: in the gateway");
+                let beside: Vec<Point> = gate.post.cardinal_neighbours().into_iter().filter(|&cell| map.size().contains(cell) && map.is_passable(cell)).collect();
+                assert_eq!(beside, [stand], "seed {seed}: the only side of the post on the map is inside");
+            }
+        }
+    }
+
     #[test]
     fn nothing_in_a_district_is_sealed_off() {
         for seed in SEEDS {
@@ -1612,6 +1925,8 @@ mod tests {
                 .iter()
                 .map(|house| (house.walls, HOUSE_DOOR))
                 .chain(district.shops.iter().map(|&shop| (shop, DOOR)))
+                .chain(district.restaurants.iter().map(|&restaurant| (restaurant, DOOR)))
+                .chain([(district.crematorium, DOOR)])
                 .chain([(district.warehouse, DOOR), (district.bank, DOOR)])
                 .collect();
             for &(walls, kind) in &buildings {
@@ -1672,8 +1987,14 @@ mod tests {
 
     #[test]
     fn every_street_is_a_pavement_each_side_of_three_cells_of_road() {
-        let (pavement, road) = (tile(PAVEMENT), tile(ROAD));
-        let street = [pavement, road, road, road, pavement];
+        let (pavement, road, wall) = (tile(PAVEMENT), tile(ROAD), tile(PERIMETER_WALL));
+        // The street round the edge has the perimeter wall for its outer
+        // pavement.
+        let street_at = |k: i32, last: i32| match k {
+            0 => [wall, road, road, road, pavement],
+            k if k == last => [pavement, road, road, road, wall],
+            _ => [pavement, road, road, road, pavement],
+        };
         for seed in SEEDS {
             let district = generate(seed);
             let map = &district.map;
@@ -1683,6 +2004,7 @@ mod tests {
                 let y0 = k * (BLOCK_H + STREET);
                 for bx in 0..BLOCKS_X {
                     let x = block_origin(bx, 0).x + BLOCK_W / 2;
+                    let street = street_at(k, BLOCKS_Y);
                     assert_eq!(cross_section(map, Point::new(x, y0), Point::new(0, 1)), street, "seed {seed}: across at x {x}");
                 }
             }
@@ -1693,6 +2015,7 @@ mod tests {
                     if district.bank.contains(Point::new(x0 + STREET / 2, y)) {
                         continue;
                     }
+                    let street = street_at(k, BLOCKS_X);
                     assert_eq!(cross_section(map, Point::new(x0, y), Point::new(1, 0)), street, "seed {seed}: across at y {y}");
                 }
             }

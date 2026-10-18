@@ -92,6 +92,9 @@ pub struct Body {
     /// The property it holds the key to.
     #[prost(uint32, optional, tag = "5")]
     pub home: Option<u32>,
+    /// Dead: it thinks and moves no more. Absent, alive.
+    #[prost(bool, tag = "6")]
+    pub dead: bool,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -244,6 +247,7 @@ pub enum ProcessId {
     Fun = 3,
     Energy = 4,
     Satisfaction = 5,
+    Health = 6,
 }
 
 /// How used to one experience a body is.

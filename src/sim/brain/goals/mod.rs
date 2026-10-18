@@ -7,6 +7,7 @@
 //! What they genuinely share — where to stand to use something, how long to
 //! wait for a gap — is here.
 
+pub mod bury;
 pub mod collect;
 pub mod drink;
 pub mod eat;
@@ -17,6 +18,7 @@ pub mod sleep;
 pub mod wander;
 pub mod work;
 
+pub use bury::BuryGoal;
 pub use collect::CollectGoal;
 pub use drink::DrinkGoal;
 pub use eat::EatGoal;

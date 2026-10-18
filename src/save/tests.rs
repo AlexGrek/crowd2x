@@ -269,21 +269,23 @@ fn a_district_saved_in_the_middle_of_everything_carries_on_exactly() {
 }
 
 /// The same district on a Monday morning, saved with the bank's desks
-/// taken: workers on their way in and at their desks, hours half worked,
-/// one let go and one hired while the two worlds run.
+/// taken and the gates' day watch at their posts: workers on their way in
+/// and at their desks, hours half worked, one let go and one hired while
+/// the two worlds run.
 #[test]
 fn a_district_saved_in_the_middle_of_a_working_day_carries_on_exactly() {
     let mut state = busy_district();
-    let at_work = |state: &GameState| {
+    let doing = |state: &GameState, task: &str| {
         state.entities().iter().any(|entity| {
-            entity.brain_fields().iter().any(|(name, value)| *name == "task" && value.starts_with("work at the computer"))
+            entity.brain_fields().iter().any(|(name, value)| *name == "task" && value.starts_with(task))
         })
     };
+    let at_work = |state: &GameState| doing(state, "work at the computer") && doing(state, "keep watch at the guard post");
     let mut ticks = 0;
     while !at_work(&state) {
         run(&mut state, 60);
         ticks += 60;
-        assert!(ticks < 4000, "nobody sat down at a desk by {}", state.clock());
+        assert!(ticks < 4000, "nobody sat down at a desk or stood at a post by {}", state.clock());
     }
     // Into the hour, so a stretch is part done when it is saved.
     run(&mut state, 300);
@@ -351,6 +353,40 @@ fn a_district_saved_with_scrap_in_its_bins_and_its_collectors_out_carries_on_exa
     assert_eq!(copy.bins(), state.bins());
 }
 
+/// Two dead, one of them already in an undertaker's hands and the other
+/// still lying where it fell: the dead stay dead, the one carried is still
+/// carried and the one lying is still there to be found, and the world goes
+/// on as it would have.
+#[test]
+fn a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly() {
+    let mut map = Map::new(Size::new(20, 12), FLOOR);
+    prop_at(&mut map, "crematorium", Point::new(1, 1));
+    let mut state = GameState::new(map, 5);
+    let undertaker = state.spawn(EntityType::Human, Point::new(2, 1));
+    let dead: Vec<Uid> = [Point::new(9, 5), Point::new(18, 10)].into_iter().map(|at| state.spawn(EntityType::Human, at)).collect();
+    let mut input = Input::new();
+    for &uid in &dead {
+        assert!(state.dismiss(uid));
+        set_stats(&mut state, uid, Stats::calm().with_health(0.5).with_hunger(100.0).with_thirst(100.0));
+    }
+    for process in ProcessId::ALL {
+        input.set_process(undertaker, process, false);
+    }
+    process_game_state(&mut state, DT, &input);
+    let carrying = |state: &GameState| {
+        state.entities().get(undertaker).unwrap().inventory().unwrap().hand() == Some(ItemKind::Body)
+    };
+    let mut ticks = 0;
+    while !carrying(&state) {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 3 * 3600, "nobody taken up by {}", state.clock());
+    }
+    assert_eq!(state.corpses().len(), 1, "one carried, one lying");
+    let copy = side_by_side(&mut state, 600, |_, _| Input::new());
+    assert_eq!(copy.corpses(), state.corpses());
+}
+
 #[test]
 fn saving_a_loaded_world_gives_back_the_same_files() {
     let mut state = busy_district();
@@ -367,7 +403,7 @@ fn saving_a_loaded_world_gives_back_the_same_files() {
 #[test]
 fn a_save_holds_the_files_it_says_it_does() {
     let state = fixture_world();
-    let view = pb::View { camera_x: 10.0, camera_y: -4.0, zoom: 3, speed: 2.0, paused: true };
+    let view = pb::View { camera_x: 10.0, camera_y: -4.0, zoom: 3, speed: 2.0, paused: true, ..Default::default() };
     let files = snapshot(&state, &meta(), Some(&view));
     let names: Vec<&str> = files.files.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(&names[..3], [MANIFEST, MAP, WORLD]);
@@ -661,4 +697,3 @@ fn saving_twenty_thousand_humans() {
     );
     assert_eq!(loaded.state.len(), 20_000);
 }
-

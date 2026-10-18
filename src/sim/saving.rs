@@ -168,6 +168,7 @@ impl GameState {
         for (slot, entity) in state.entities.iter_slots() {
             state.census.file(slot, entity.center_position());
         }
+        state.corpses = crate::sim::Corpses::of(&state.entities);
         for (cell, uid) in holders {
             if let Err(other) = state.occupancy.claim(cell, uid) {
                 return invalid(format!("{uid} and {other} both hold {}, {}", cell.x, cell.y));
@@ -186,7 +187,7 @@ impl GameState {
         // its desk.
         for (_, entity) in state.entities.iter_slots() {
             if let Some(job) = entity.job()
-                && state.workplaces.worker(job.workplace) != Some(entity.uid())
+                && state.workplaces.worker(job.workplace, job.shift) != Some(entity.uid())
             {
                 let at = job.workplace;
                 return invalid(format!("{} works at {}, {}, which is not their desk", entity.uid(), at.x, at.y));
@@ -195,7 +196,8 @@ impl GameState {
         for place in &world.workplaces {
             let worker = crate::sim::Uid::from_raw(place.worker);
             let works_here = worker.and_then(|uid| state.entities.get(uid)).and_then(|entity| entity.job());
-            if works_here.map(|job| Some(pb::Cell::from(job.workplace))) != Some(place.desk) {
+            let start = place.start.unwrap_or(crate::sim::job::OFFICE_HOURS.start() as u32);
+            if works_here.map(|job| (Some(pb::Cell::from(job.workplace)), job.shift.start() as u32)) != Some((place.desk, start)) {
                 return invalid(format!("a desk belongs to {:#x}, who does not work there", place.worker));
             }
         }

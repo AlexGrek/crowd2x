@@ -67,7 +67,9 @@ impl Stage {
                 | Task::Sleep(_)
                 | Task::Salvage(_)
                 | Task::Work(_)
-                | Task::Deposit(_),
+                | Task::Deposit(_)
+                | Task::TakeBody(_)
+                | Task::Cremate(_),
             ) => Stage::Finding,
         }
     }
@@ -130,6 +132,11 @@ impl EatGoal {
     /// in charge that wants to drink it.
     fn plan(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
         let held = held(ctx);
+        // A body in hand is not put down for a meal: it is seen to the
+        // crematorium first (`BuryGoal`), and this goal is held off meanwhile.
+        if held == Some(ItemKind::Body) {
+            return false;
+        }
         if held != Some(ItemKind::Food) {
             let Some(fridge) = self.seek.target else {
                 return false;

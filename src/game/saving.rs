@@ -202,7 +202,8 @@ impl ViewParams<'_, '_> {
         pb::View {
             camera_x: centre.x,
             camera_y: centre.y,
-            zoom: self.zoom.get(),
+            zoom: self.zoom.get().max(1.0) as u32,
+            zoom_factor: self.zoom.get(),
             speed: speed.multiplier(),
             paused: speed.is_paused(),
         }
@@ -379,8 +380,10 @@ fn look_where_it_was(
     if view.camera_x.is_finite() && view.camera_y.is_finite() {
         target.0 = Some(Vec2::new(view.camera_x, view.camera_y));
     }
-    if view.zoom != 0 {
-        *zoom = PixelZoom::new(view.zoom);
+    if view.zoom_factor.is_finite() && view.zoom_factor > 0.0 {
+        *zoom = PixelZoom::new(view.zoom_factor);
+    } else if view.zoom != 0 {
+        *zoom = PixelZoom::new(view.zoom as f32);
     }
     if view.speed != 0.0 && !speed.restore(view.speed, view.paused) {
         warn!("saves: no game speed x{}, keeping the default", view.speed);

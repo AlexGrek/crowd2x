@@ -81,6 +81,19 @@ pub const SCRAP_VOLUME: f32 = 2.0;
 /// one in a hand, salvage stowing it straight away.
 pub const DROP_SECONDS: f32 = watched(MINUTE);
 
+/// What a body carried to the crematorium weighs, in kilograms. Far over
+/// what anybody can stow, so it is only ever **in a hand** — which is never
+/// refused (`Inventory::set_hand`) — and nothing else can be taken up while
+/// it is carried.
+pub const BODY_MASS: f32 = 70.0;
+
+/// ...and the space it takes up, in litres.
+pub const BODY_VOLUME: f32 = 70.0;
+
+/// How long a body in a hand takes a goal that wants the hand to be rid of:
+/// laid down, a moment, and gone — a corpse put down is not picked up again.
+pub const LAY_DOWN_SECONDS: f32 = watched(MINUTE);
+
 /// What is being held.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ItemKind {
@@ -89,6 +102,9 @@ pub enum ItemKind {
     /// A piece of scrap metal, salvaged from a heap in the wasteland
     /// (`brain::tasks::Salvage`). Nothing a body can use: it is carried.
     Scrap,
+    /// The dead, taken up by an undertaker (`brain::tasks::TakeBody`) and
+    /// carried to a crematorium. Nothing a body can use.
+    Body,
 }
 
 impl ItemKind {
@@ -98,11 +114,11 @@ impl ItemKind {
     /// indexed by this, and its debug view walks it — so the order here is the
     /// order a unit's items are listed in, and iterating it can never be a hash
     /// order.
-    pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water, ItemKind::Scrap];
+    pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water, ItemKind::Scrap, ItemKind::Body];
 
     /// How many kinds there are. A literal, because it sizes an array.
     /// `every_kind_is_in_all` fails if the two stop agreeing.
-    pub const COUNT: usize = 3;
+    pub const COUNT: usize = 4;
 
     /// How it reads in a debug view.
     pub const fn name(self) -> &'static str {
@@ -110,6 +126,7 @@ impl ItemKind {
             ItemKind::Food => "food",
             ItemKind::Water => "water",
             ItemKind::Scrap => "scrap metal",
+            ItemKind::Body => "body",
         }
     }
 
@@ -129,6 +146,7 @@ impl ItemKind {
             ItemKind::Food => CHEW_SECONDS,
             ItemKind::Water => SIP_SECONDS,
             ItemKind::Scrap => DROP_SECONDS,
+            ItemKind::Body => LAY_DOWN_SECONDS,
         }
     }
 
@@ -136,14 +154,14 @@ impl ItemKind {
     pub const fn nutrition(self) -> f32 {
         match self {
             ItemKind::Food => MEAL,
-            ItemKind::Water | ItemKind::Scrap => 0.0,
+            ItemKind::Water | ItemKind::Scrap | ItemKind::Body => 0.0,
         }
     }
 
     /// How much water is in it, on the thirst scale.
     pub const fn hydration(self) -> f32 {
         match self {
-            ItemKind::Food | ItemKind::Scrap => 0.0,
+            ItemKind::Food | ItemKind::Scrap | ItemKind::Body => 0.0,
             ItemKind::Water => DRINK,
         }
     }
@@ -154,7 +172,7 @@ impl ItemKind {
     pub const fn taste(self) -> f32 {
         match self {
             ItemKind::Food => TASTY,
-            ItemKind::Water | ItemKind::Scrap => 0.0,
+            ItemKind::Water | ItemKind::Scrap | ItemKind::Body => 0.0,
         }
     }
 
@@ -167,6 +185,7 @@ impl ItemKind {
             ItemKind::Food => MEAL_MASS,
             ItemKind::Water => DRINK_MASS,
             ItemKind::Scrap => SCRAP_MASS,
+            ItemKind::Body => BODY_MASS,
         }
     }
 
@@ -180,6 +199,7 @@ impl ItemKind {
             ItemKind::Food => MEAL_VOLUME,
             ItemKind::Water => DRINK_VOLUME,
             ItemKind::Scrap => SCRAP_VOLUME,
+            ItemKind::Body => BODY_VOLUME,
         }
     }
 }
