@@ -89,6 +89,9 @@ pub const PROPS: &[Prop] = &[
     // (`super::utilities::CONTROLLER`). Both solid, both on the street.
     Prop::blocking("street lamp"),
     Prop::blocking("street light controller"),
+    // A warehouse's skip, where a scrap collector stores the scrap it brings
+    // in (`sim::bins`). Used from beside it, like a fridge.
+    Prop::blocking("scrap bin"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

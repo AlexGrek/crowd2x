@@ -94,6 +94,10 @@ pub const PALETTE: &[PaletteItem] = &[
     // game ([`SwitchPlate`]); drawn for a wall above and turned to fit its
     // own. Drawn by `tools/switch_art.py`.
     PaletteItem::posed("light switch", "light_switch.png", 2),
+    // A warehouse's skip (`sim::bins`): empty, a few pieces, half full and
+    // heaped, the game showing whichever the simulation's count says
+    // ([`BinFill`]). Drawn by `tools/scrap_bin_art.py`.
+    PaletteItem::posed("scrap bin", "scrap_bin.png", 4),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in
@@ -232,6 +236,16 @@ pub struct SwitchPlate {
     /// Whether the frame showing is the "on" one, so a switch nobody flipped
     /// costs no write.
     pub showing_on: bool,
+}
+
+/// A scrap bin: a [`PaletteItem::posed`] strip of four frames — empty, a few
+/// pieces, half full, heaped — of which the game screen shows the one for
+/// how much the simulation says it holds (`game::props`). The editor shows it
+/// empty.
+#[derive(Component)]
+pub struct BinFill {
+    /// The frame showing, so a bin nobody filled costs no write.
+    pub showing: u32,
 }
 
 /// How a prop is turned to fit where it stands.
@@ -451,7 +465,7 @@ pub fn sync_prop_window(
                     // One on no wall — a hand-written file — is drawn where
                     // it stands, rather than left out or turned to nothing.
                     mount::wall_of(map, object.at).map_or(Fit::Free, Fit::Wall)
-                } else if palette_of(layer)[item].posed {
+                } else if crate::sim::door::is_door(object.kind.as_str()) {
                     let doors = doors.get_or_insert_with(|| door_cells(map));
                     let (vertical, mirrored) = DoorLeaf::pose(map, object.cell(), doors);
                     Fit::Door { vertical, mirrored }
@@ -523,8 +537,11 @@ fn spawn_prop(
             frames: item.art.frames,
             showing: 0,
         });
+    } else if item.posed && item.name == crate::sim::bins::SCRAP_BIN {
+        // A bin, showing empty until the game says otherwise.
+        commands.entity(prop).insert(BinFill { showing: 0 });
     } else if item.posed {
-        // Posed and not a door: a switch's plate, showing on.
+        // Posed and not a door or a bin: a switch's plate, showing on.
         commands.entity(prop).insert(SwitchPlate { showing_on: true });
     } else if item.art.frames > 1 {
         commands.entity(prop).insert(StripAnimation::new(

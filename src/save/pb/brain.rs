@@ -72,6 +72,7 @@ pub struct Job {
 #[repr(i32)]
 pub enum JobKind {
     OfficeWorker = 0,
+    ScrapCollector = 1,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -193,6 +194,7 @@ pub enum GoalId {
     Sleep = 6,
     Salvage = 7,
     Work = 8,
+    Collect = 9,
 }
 
 /// One goal executor's state.
@@ -268,7 +270,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13")]
     pub kind: Option<TaskKind>,
 }
 
@@ -296,6 +298,13 @@ pub enum TaskKind {
     Salvage(Timed),
     #[prost(message, tag = "11")]
     Work(Timed),
+    /// Emptying the pack into a scrap bin.
+    #[prost(message, tag = "12")]
+    Deposit(Timed),
+    /// Salvaging a heap for a living rather than to an order: the same
+    /// work, and it tires (`Salvage::for_work`).
+    #[prost(message, tag = "13")]
+    SalvageForWork(Timed),
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

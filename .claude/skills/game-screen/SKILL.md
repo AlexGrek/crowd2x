@@ -87,7 +87,8 @@ menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains`
 goal in charge, the priority list, the task, its result and action — live, like `debug`),
 `items` (the hand, what is stowed, and both totals against both limits — live too,
 since a unit picks things up while you are reading), `talents`, `clothing` and `job` (the
-job, its desk, hours and days, and `now` — working, on the way, on a break, off, weekend —
+job, `at` (`computer at x, y` or `scrap bin at x, y`), hours and days, and `now` — working,
+on the way, collecting scrap, storing scrap, on a break, off, weekend —
 live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command::Hire`; the
 `jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
 them.
@@ -175,6 +176,12 @@ deciding whether `esc` closes it or leaves the game.
 **Doors swing on screen** (`game/props.rs` `swing_doors`): every `DoorLeaf` on the canvas
 shows the frame of its strip for `GameState::doors()` openness, written only when it changes.
 A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.
+
+**Scrap bins fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed
+`"scrap bin"`, `editor::props`) shows frame `bin_frame(GameState::bins().stored(cell))` of its
+four — 0 empty, 1-5 a few pieces, 6-20 half full, more heaped — written only on a change. The
+HUD's map stats (`hud::stats`) end in `scrap  N stored` on a map with any bin (the `jobs`
+skill).
 
 ### Saving, and opening a loaded game (`game/saving.rs`)
 

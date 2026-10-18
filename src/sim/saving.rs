@@ -63,6 +63,7 @@ impl GameState {
             street_lights_on: self.street_lights_on,
             switches_off: pb::pack(self.light_switches.cells().filter(|&cell| !self.light_switches.is_on(cell))),
             fridges: self.fridges.save(),
+            bins: self.bins.save(),
             doors: self.doors.save(),
             homes: self.homes.save(),
             arena: Some(self.entities.save_arena()),
@@ -143,6 +144,7 @@ impl GameState {
         // the switches as saved.
         state.refresh_supply();
         state.fridges.restore(&world.fridges)?;
+        state.bins.restore(&world.bins)?;
         state.doors.restore(&world.doors)?;
         state.homes = Homes::restore(&world.homes)?;
         state.workplaces = Workplaces::restore(&world.workplaces)?;

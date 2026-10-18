@@ -100,12 +100,13 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
   not wired to this format yet and still spawns its own tile entities.
 
 **The district generator** (`map/district.rs`, plain Rust like the rest of `map/`):
-`district::generate(seed)` builds an 89x62 district — a grid of 2x2-lot blocks with
+`district::generate(seed)` builds a 131x100 district — a 6x5 grid of 2x2-lot blocks with
 5-cell streets between and around them (pavement, three cells of road, pavement; yards
-paved, the empty lots grass parks) — holding 32
+paved, the empty lots grass parks) — holding 92
 houses of 1-2 residents (a bed each, a fridge, a toilet, and a `"human"` spawner beside
 each bed), a bank across two merged blocks (a lobby lined with fridges, desk rows of
-computers, two restrooms at each end) and three empty shops. One `SmallRng`, drawn in a
+computers, two restrooms at each end), three empty shops, and the mandatory lot buildings —
+so far the warehouse, four `"scrap bin"`s on the edge lot nearest the scrap. One `SmallRng`, drawn in a
 fixed order, so a seed is a district. Three rules keep it livable, and its tests check
 them over 64 seeds: **a door is always in a wall facing the lot's street side** (so
 nothing is sealed off), **doors are two wide** (one person in and one out of a one-cell
@@ -127,8 +128,8 @@ consumer being served. Reached from the browser's `district` button (a fresh
 seed, saved and opened in the game), `CROWD2X_DISTRICT=<seed>`, and a QA fixture
 `{"name": ..., "district": seed}`. **Known limit:** a brain goes to the nearest fridge or
 toilet as the crow flies and has no idea of a crowd, so the district's crowd — drawn to the
-bank's computers — converges on one fridge and jams; `qa/district.json` observes a day and
-records the numbers instead of asserting on needs.
+bank's computers — converges on one fridge and jams, and 136 residents jam it worse than the
+old 53 did (`map-generator`).
 
 `MapStore::save` writes to a unique temporary file in the same directory, syncs and
 closes it, then atomically renames it over the destination. A failed write or replacement

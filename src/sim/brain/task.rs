@@ -27,7 +27,8 @@ use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
 use super::tasks::{
-    CloseFridge, ConsumeItem, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait, Work,
+    CloseFridge, ConsumeItem, Deposit, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait,
+    Work,
 };
 
 /// What a task may touch while it runs: the world to read, the body it moves,
@@ -51,8 +52,9 @@ pub struct TaskCtx<'a> {
     /// what makes food arrive in a hand when a `TakeItem` *finishes* rather
     /// than when a goal hears that it did.
     pub inventory: Option<&'a mut Inventory>,
-    /// What this task asks of the world beyond its own unit — so far, only a
-    /// fridge's door. Starts each tick as [`Effect::None`]; a task that wants
+    /// What this task asks of the world beyond its own unit — a fridge's
+    /// door, a door's leaf, a piece off a heap of scrap, a packful into a
+    /// scrap bin. Starts each tick as [`Effect::None`]; a task that wants
     /// to ask for something writes it once, the tick its action finishes, and
     /// [`super::super::world_step`](crate::sim::world_step) is what actually
     /// grants it, sequentially, after every entity has reacted.
@@ -126,6 +128,7 @@ pub enum Task {
     CloseFridge(CloseFridge),
     Salvage(Salvage),
     Work(Work),
+    Deposit(Deposit),
 }
 
 impl Task {
@@ -150,8 +153,10 @@ impl Task {
             Task::Wait(Wait { seconds }) => pb::TaskKind::Wait(pb::Timed { cell: None, seconds }),
             Task::OpenFridge(OpenFridge { fridge, seconds }) => pb::TaskKind::OpenFridge(timed(fridge, seconds)),
             Task::CloseFridge(CloseFridge { fridge, seconds }) => pb::TaskKind::CloseFridge(timed(fridge, seconds)),
-            Task::Salvage(Salvage { heap, seconds }) => pb::TaskKind::Salvage(timed(heap, seconds)),
+            Task::Salvage(Salvage { heap, seconds, for_work: false }) => pb::TaskKind::Salvage(timed(heap, seconds)),
+            Task::Salvage(Salvage { heap, seconds, for_work: true }) => pb::TaskKind::SalvageForWork(timed(heap, seconds)),
             Task::Work(Work { desk, seconds }) => pb::TaskKind::Work(timed(desk, seconds)),
+            Task::Deposit(Deposit { bin, seconds }) => pb::TaskKind::Deposit(timed(bin, seconds)),
         };
         pb::Task { kind: Some(kind) }
     }
@@ -186,8 +191,14 @@ impl Task {
             pb::TaskKind::CloseFridge(task) => {
                 Task::CloseFridge(CloseFridge { fridge: at(task)?, seconds: seconds(task.seconds)? })
             }
-            pb::TaskKind::Salvage(task) => Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Salvage(task) => {
+                Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)?, for_work: false })
+            }
+            pb::TaskKind::SalvageForWork(task) => {
+                Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)?, for_work: true })
+            }
             pb::TaskKind::Work(task) => Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Deposit(task) => Task::Deposit(Deposit { bin: at(task)?, seconds: seconds(task.seconds)? }),
         })
     }
 
@@ -248,9 +259,22 @@ impl Task {
     }
 
     /// Work the heap of scrap in `heap`, from a cell beside it, for one
-    /// piece of scrap metal.
+    /// piece of scrap metal: to an order, so no more tiring than any other
+    /// errand.
     pub const fn salvage(heap: Point, seconds: f32) -> Task {
-        Task::Salvage(Salvage { heap, seconds })
+        Task::Salvage(Salvage { heap, seconds, for_work: false })
+    }
+
+    /// The same, for a living: a scrap collector's, which tires like a
+    /// stretch at a desk ([`Salvage::for_work`]).
+    pub const fn salvage_for_work(heap: Point, seconds: f32) -> Task {
+        Task::Salvage(Salvage { heap, seconds, for_work: true })
+    }
+
+    /// Empty every piece of scrap metal in the pack into the bin in `bin`,
+    /// from a cell beside it.
+    pub const fn deposit(bin: Point, seconds: f32) -> Task {
+        Task::Deposit(Deposit { bin, seconds })
     }
 
     /// Work the desk in `desk`, from a cell beside it, for `seconds`.
@@ -272,6 +296,7 @@ impl Task {
             Task::CloseFridge(task) => task.execute(ctx),
             Task::Salvage(task) => task.execute(ctx),
             Task::Work(task) => task.execute(ctx),
+            Task::Deposit(task) => task.execute(ctx),
         }
     }
 
@@ -290,6 +315,7 @@ impl Task {
             Task::CloseFridge(task) => task.interrupted(action, biology),
             Task::Salvage(task) => task.interrupted(action, biology),
             Task::Work(task) => task.interrupted(action, biology),
+            Task::Deposit(task) => task.interrupted(action, biology),
         }
     }
 
@@ -306,6 +332,7 @@ impl Task {
             Task::CloseFridge(task) => task.describe(),
             Task::Salvage(task) => task.describe(),
             Task::Work(task) => task.describe(),
+            Task::Deposit(task) => task.describe(),
         }
     }
 }

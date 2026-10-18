@@ -19,7 +19,7 @@ why). Art is linked to code and map files **by name, never by index**.
 | Eyes | `assets/human/eyes_<colour>.png` | `human::EYES` |
 | Floors / walls | `assets/<name>.png` | `src/editor/background.rs` palette, `PaletteItem::upscaled("name", "file.png")` |
 | Outdoor ground | `assets/pavement.png`, `road.png`, `grass.png`, drawn by `uv run tools/ground_art.py` from masks (must tile seamlessly) | the same palette; the walk cost is the terrain's (`map` skill) |
-| Props | `assets/<name>.png` | `src/editor/props.rs` palette; `animated(name, path, frames)` for a strip, `.used(path, frames)` for an in-use look |
+| Props | `assets/<name>.png` | `src/editor/props.rs` palette; `animated(name, path, frames)` for a strip, `.used(path, frames)` for an in-use look, `posed(name, path, frames)` for a strip the game picks the frame of (doors, the light switch, `scrap_bin.png`: empty, a few pieces, half full, heaped — drawn by `tools/scrap_bin_art.py` in `tools/scrap_art.py`'s colours, `preview` for an enlarged look) |
 | Held items | `assets/<name>.png` (any size) | `src/characters/item.rs` `art()` → `ItemArt::Texture` |
 | Dog | `assets/dog_idle*.png`, 4 frames side by side | `src/characters/dog.rs` |
 

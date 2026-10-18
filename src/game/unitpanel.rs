@@ -50,7 +50,7 @@ use bevy::prelude::*;
 
 use crate::characters::{dog, human};
 use crate::sim::clothing::Clothing;
-use crate::sim::{Clock, EntityType, GameEntity, GoalId, ItemKind, MoveOutcome, Talent, Uid};
+use crate::sim::{Clock, EntityType, GameEntity, GoalId, ItemKind, JobKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -93,9 +93,9 @@ enum Menu {
     /// Lasting aptitudes, shown live so explicit changes appear immediately.
     Talents,
     Clothing,
-    /// What it does for a living: the job, the desk, the hours, and what it
-    /// is doing about them right now — live — with a button to let it go or
-    /// take it on.
+    /// What it does for a living: the job, where it is done, the hours, and
+    /// what it is doing about them right now — live — with a button to let it
+    /// go or take it on.
     Job,
 }
 
@@ -685,21 +685,25 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
     }
 }
 
-/// What it does for a living, as a block of lines: the job, the desk, the
-/// hours and days, and — `now` — what it is doing about them at `clock`,
-/// which is the line worth watching: on the way in, at the desk, away from
-/// it for something more pressing, or off.
+/// What it does for a living, as a block of lines: the job, where it is done
+/// (`computer at 12, 4`, `scrap bin at 30, 2`), the hours and days, and —
+/// `now` — what it is doing about them at `clock`, which is the line worth
+/// watching: on the way in, at the desk, out collecting scrap or storing it,
+/// away from it for something more pressing, or off.
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
     };
     let shift = job.shift;
+    let at_work = entity.interacting_with() == Some(job.workplace);
     let now = if shift.is_due(clock) {
-        match entity.current_goal() {
-            Some(GoalId::Work) if entity.interacting_with() == Some(job.workplace) => "working".to_string(),
-            Some(GoalId::Work) => "on the way to work".to_string(),
-            Some(goal) => format!("on a break: {}", goal.name()),
-            None => "off".to_string(),
+        match (entity.current_goal(), job.kind) {
+            (Some(GoalId::Work), JobKind::OfficeWorker) if at_work => "working".to_string(),
+            (Some(GoalId::Work), JobKind::OfficeWorker) => "on the way to work".to_string(),
+            (Some(GoalId::Collect), JobKind::ScrapCollector) if at_work => "storing scrap".to_string(),
+            (Some(GoalId::Collect), JobKind::ScrapCollector) => "collecting scrap".to_string(),
+            (Some(goal), _) => format!("on a break: {}", goal.name()),
+            (None, _) => "off".to_string(),
         }
     } else if !shift.works_on(clock.weekday()) {
         if clock.weekday().is_weekend() { "weekend" } else { "day off" }.to_string()
@@ -710,7 +714,7 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     };
     field_block(vec![
         ("job", job.kind.name().to_string()),
-        ("desk", format!("{}, {}", job.workplace.x, job.workplace.y)),
+        ("at", format!("{} at {}, {}", job.kind.workplace_name(), job.workplace.x, job.workplace.y)),
         ("hours", shift.hours()),
         ("days", shift.days()),
         ("now", now),
@@ -984,7 +988,7 @@ mod tests {
         assert_eq!(employ_label(&person), "dismiss");
         let block = job_block(&person, on(2, 7.0));
         assert_eq!(field(&block, "job"), "office worker");
-        assert_eq!(field(&block, "desk"), "12, 4");
+        assert_eq!(field(&block, "at"), "computer at 12, 4");
         assert_eq!(field(&block, "hours"), "09:00-17:00");
         assert_eq!(field(&block, "days"), "Mon-Fri");
         assert_eq!(field(&block, "now"), "off until 09:00");
@@ -993,6 +997,17 @@ mod tests {
         // On shift, and not yet thinking about it — a brain that has not run
         // is idle: away from the desk for something else.
         assert_eq!(field(&job_block(&person, on(2, 11.0)), "now"), "on a break: idle");
+    }
+
+    #[test]
+    fn a_scrap_collectors_job_menu_names_its_bin() {
+        let mut person = human();
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::collector(Point::new(30, 2))));
+        let block = job_block(&person, on(2, 7.0));
+        assert_eq!(field(&block, "job"), "scrap collector");
+        assert_eq!(field(&block, "at"), "scrap bin at 30, 2");
+        assert_eq!(field(&block, "hours"), "09:00-17:00");
+        assert_eq!(field(&block, "now"), "off until 09:00");
     }
 
     #[test]

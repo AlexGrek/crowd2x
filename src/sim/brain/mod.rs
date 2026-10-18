@@ -89,7 +89,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal, WorkGoal};
+use goals::{CollectGoal, DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal, WorkGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -164,7 +164,8 @@ impl Brain {
 
     /// A person: keeps fed, hydrated, comfortable, entertained and rested,
     /// stays busy, goes to work if it has a job; wanders, eats, drinks, uses
-    /// the toilet, has a go on a computer, sleeps in a bed, works at a desk.
+    /// the toilet, has a go on a computer, sleeps in a bed, works at a desk
+    /// or collects scrap.
     ///
     /// **A routine added here goes on the end.** A save keeps the routines'
     /// state in this order, and [`Brain::restore`] reads a shorter list from
@@ -190,6 +191,7 @@ impl Brain {
                 Box::new(SleepGoal::new()),
                 Box::new(SalvageGoal::new()),
                 Box::new(WorkGoal::new()),
+                Box::new(CollectGoal::new()),
             ],
         )
     }

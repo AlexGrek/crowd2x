@@ -61,9 +61,10 @@
 //!    to itself, and hands back an [`Effect`] for anything it wants to ask of
 //!    the world beyond itself, into a third slot-indexed buffer.
 //! 4. **World.** Single-threaded, slots in ascending order, like move: every
-//!    [`Effect`] is applied — today, a fridge's door — and then the world's
-//!    own state that is not any one entity's, so far only [`Fridges`], moves
-//!    on by the tick's worth of world time. See [`world_step`].
+//!    [`Effect`] is applied — a fridge's door, a door's leaf, a piece off a
+//!    heap, a pack emptied into a bin — and then the world's own state that
+//!    is not any one entity's moves on by the tick's worth of time. See
+//!    [`world_step`].
 //!
 //! **The intent buffer is the double buffer.** The `dev` skill asks for
 //! read-from-A-write-to-B, and this is that, without cloning an entity: think
@@ -128,6 +129,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod background;
+pub mod bins;
 pub mod biology;
 pub mod brain;
 pub mod census;
@@ -165,6 +167,7 @@ use rayon::prelude::*;
 use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 
+pub use bins::Bins;
 pub use biology::{Biology, ProcessId, Stats};
 pub use brain::{Brain, GoalId};
 pub use census::Census;
@@ -278,6 +281,10 @@ pub enum Effect {
     /// so two finishing on the last piece in one tick get one between them,
     /// the lower slot's — see [`world_step`].
     Salvage { at: Point },
+    /// Put `pieces` of scrap metal in the bin at `at`: a collector has
+    /// finished emptying its pack into it ([`brain::tasks::Deposit`], which
+    /// has already taken them out of the pack). See [`bins`].
+    Deposit { at: Point, pieces: u8 },
 }
 
 /// Something done *to* the world, from outside it.
@@ -335,14 +342,16 @@ pub enum Command {
     SwitchLight { at: Point, on: bool },
     /// Tell a unit to salvage the heap of scrap at `at`: walk to it and work
     /// it a piece at a time, until it is empty or the unit can carry no more
-    /// ([`GameState::order_salvage`]). The only thing that sends anybody to
-    /// a heap yet: nothing in a brain wants scrap of its own accord.
+    /// ([`GameState::order_salvage`]). An errand: a scrap collector goes to
+    /// the heaps of its own accord (`brain::goals::CollectGoal`).
     Salvage { uid: Uid, at: Point },
-    /// Give a unit a job: an office worker's, at the free desk nearest where
-    /// it stands ([`GameState::hire`]). The other way a job is handed out —
-    /// the first is arriving to find a desk free.
+    /// Give a unit a job, at the free workplace nearest where it stands —
+    /// a desk if there is one, a scrap bin if not ([`GameState::hire`]). The
+    /// other way a job is handed out — the first is arriving to find one
+    /// free.
     Hire(Uid),
-    /// Take a unit's job away and give its desk back ([`GameState::dismiss`]).
+    /// Take a unit's job away and give its workplace back
+    /// ([`GameState::dismiss`]).
     Dismiss(Uid),
 }
 
@@ -497,6 +506,10 @@ pub struct GameState {
     /// `features` — but unlike it, what is stored here changes every tick a
     /// door is open, through [`Effect::Fridge`] and [`world_step`].
     fridges: Fridges,
+    /// What every scrap bin holds. Derived from `map` once, like `fridges`,
+    /// and filled through [`Effect::Deposit`] and [`world_step`]. See
+    /// [`bins`].
+    bins: Bins,
     /// Which cells are whose property: the rooms behind the house doors.
     /// Derived from `map` once, like `features`. See [`property`].
     properties: Properties,
@@ -591,6 +604,7 @@ impl GameState {
             crowded: Vec::new(),
             features: Features::from_map(&map, &supply),
             fridges: Fridges::from_map(&map, &supply),
+            bins: Bins::from_map(&map),
             doors: Doors::from_map(&map, &properties),
             properties,
             supply,
@@ -872,6 +886,11 @@ impl GameState {
         &self.fridges
     }
 
+    /// What every scrap bin holds. See [`bins`].
+    pub fn bins(&self) -> &Bins {
+        &self.bins
+    }
+
     /// Every door's leaf and lock. See [`door`].
     pub fn doors(&self) -> &Doors {
         &self.doors
@@ -887,7 +906,8 @@ impl GameState {
         &self.homes
     }
 
-    /// Which desks belong to whom. See [`job`].
+    /// Which workplaces — desks and scrap bins — belong to whom. See
+    /// [`job`].
     pub fn workplaces(&self) -> &Workplaces {
         &self.workplaces
     }
@@ -1064,67 +1084,66 @@ impl GameState {
         }
     }
 
-    /// Hand somebody a job at the nearest free desk it may use — a computer
+    /// Hand somebody a job at the nearest free workplace it may use — one
     /// nobody else works at, and not one in somebody else's house — if it is
-    /// the kind that works and there is one. **A desk is only given while it
-    /// is free**: an arrival that finds every desk taken is unemployed. The
-    /// only job there is so far is the office worker's.
+    /// the kind that works and there is one. **Jobs are offered in
+    /// [`JobKind::ALL`]'s order**: a desk if any is free, then a scrap bin;
+    /// the first kind with a workplace free wins. **A workplace is only given
+    /// while it is free**: an arrival that finds every one taken is
+    /// unemployed.
     ///
-    /// One scan of the desks per arrival, like [`GameState::give_a_bed`].
-    /// `false` when no job was given.
+    /// One scan of the workplaces per arrival, like
+    /// [`GameState::give_a_bed`]. `false` when no job was given.
     fn give_a_job(&mut self, uid: Uid, near: Point) -> bool {
-        let kind = JobKind::OfficeWorker;
         let Some(entity) = self.entities.get_mut(uid) else {
             return false;
         };
         let key = entity.body().home();
         let (workplaces, properties) = (&self.workplaces, &self.properties);
-        let Some(desk) = self
-            .features
-            .nearest_where(kind.workplace(), near, |cell| !workplaces.is_taken(cell) && properties.may_use(cell, key))
+        let free = |cell: Point| !workplaces.is_taken(cell) && properties.may_use(cell, key);
+        let Some(job) = JobKind::ALL
+            .into_iter()
+            .find_map(|kind| Some(Job::new(kind, self.features.nearest_where(kind.workplace(), near, free)?)))
         else {
             return false;
-        };
-        let job = Job {
-            kind,
-            workplace: desk,
-            shift: kind.shift(),
         };
         if !entity.hire(job) {
             return false;
         }
-        self.workplaces.claim(desk, uid);
+        let at = job.workplace;
+        self.workplaces.claim(at, uid);
         self.log.push(format!(
-            "{uid} was hired as an {} at the computer at {}, {}",
-            kind.name(),
-            desk.x,
-            desk.y
+            "{uid} was hired as {} at the {} at {}, {}",
+            job.kind.with_article(),
+            job.kind.workplace_name(),
+            at.x,
+            at.y
         ));
         true
     }
 
-    /// Give `uid` a job at the free desk nearest where it stands — see
-    /// [`Command::Hire`]. `false`, and a line in the log saying why, for
-    /// nobody, somebody already employed, a kind that cannot work, or no free
-    /// desk.
+    /// Give `uid` a job at the free workplace nearest where it stands, in
+    /// the order arrivals are offered one — see [`Command::Hire`]. `false`,
+    /// and a line in the log saying why, for nobody, somebody already
+    /// employed, a kind that cannot work, or no workplace free.
     pub fn hire(&mut self, uid: Uid) -> bool {
         let Some(entity) = self.entities.get(uid) else {
             self.log.push(format!("hire: no such entity {uid}"));
             return false;
         };
         if let Some(job) = entity.job() {
-            self.log.push(format!("hire: {uid} is already an {}", job.kind.name()));
+            self.log.push(format!("hire: {uid} is already {}", job.kind.with_article()));
             return false;
         }
         let here = entity.center_position();
         if !self.give_a_job(uid, here) {
-            self.log.push(format!("hire: no desk free for {uid}"));
+            self.log.push(format!("hire: no workplace free for {uid}"));
             return false;
         }
         true
     }
 
-    /// Take `uid`'s job away and give its desk back — see
+    /// Take `uid`'s job away and give its workplace back — see
     /// [`Command::Dismiss`]. `false`, and a line in the log, for nobody or
     /// somebody with no job.
     pub fn dismiss(&mut self, uid: Uid) -> bool {
@@ -1138,8 +1157,10 @@ impl GameState {
         };
         self.workplaces.release(uid);
         self.log.push(format!(
-            "{uid} was let go from the computer at {}, {}",
-            job.workplace.x, job.workplace.y
+            "{uid} was let go from the {} at {}, {}",
+            job.kind.workplace_name(),
+            job.workplace.x,
+            job.workplace.y
         ));
         true
     }
@@ -1463,6 +1484,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         log,
         features,
         fridges,
+        bins,
         doors,
         properties,
         tick,
@@ -1532,7 +1554,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    world_step(&mut table, map, log, fridges, doors, occupancy, effects, dt);
+    world_step(&mut table, map, log, fridges, bins, doors, occupancy, effects, dt);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1859,12 +1881,16 @@ fn react_for(
 /// heap is the world's while the pack is the unit's, so the step that
 /// settles races between units is the one place both are in reach. In slot
 /// order, so the last piece goes to the same unit on every run.
+///
+/// Every [`Effect::Deposit`] puts its pieces in its bin, which the task that
+/// asked has already taken them out of the pack for.
 #[allow(clippy::too_many_arguments)]
 fn world_step(
     table: &mut FrozenEntities<'_>,
     map: &mut Map,
     log: &Log,
     fridges: &mut Fridges,
+    bins: &mut Bins,
     doors: &mut Doors,
     occupancy: &Occupancy,
     effects: &mut [Effect],
@@ -1883,6 +1909,11 @@ fn world_step(
             Effect::Salvage { at } => {
                 if let Some(entity) = table.slot_mut(slot as Slot) {
                     salvage(entity, map, log, at);
+                }
+            }
+            Effect::Deposit { at, pieces } => {
+                if let Some(entity) = table.slot(slot as Slot) {
+                    deposit(entity.uid(), bins, log, at, pieces);
                 }
             }
             Effect::None => {}
@@ -1915,6 +1946,18 @@ pub(crate) fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at:
             });
         }
         None => log.push(format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
+    }
+}
+
+/// [`Effect::Deposit`], for the unit `uid`: its pieces into the bin at
+/// `at`, and a line in the log — once a packful, so never a flood.
+pub(crate) fn deposit(uid: Uid, bins: &mut Bins, log: &Log, at: Point, pieces: u8) {
+    match bins.add(at, pieces as u32) {
+        Some(stored) => log.push(format!(
+            "{uid} stored {pieces} scrap metal in the bin at {}, {}: {stored} stored",
+            at.x, at.y
+        )),
+        None => log.push(format!("{uid} found no scrap bin at {}, {}", at.x, at.y)),
     }
 }
 
@@ -2959,7 +3002,7 @@ mod tests {
         process_game_state(&mut state, 1.0 / 60.0, Input::new().dismiss(worker).hire(dog));
         let lines = state.log.drain();
         assert!(lines.iter().any(|line| line.contains("has no job")), "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("no desk free")), "a dog cannot work: {lines:?}");
+        assert!(lines.iter().any(|line| line.contains("no workplace free")), "a dog cannot work: {lines:?}");
         assert!(state.workplaces().is_empty());
 
         process_game_state(&mut state, 1.0 / 60.0, Input::new().hire(worker).hire(worker));
@@ -2967,6 +3010,62 @@ mod tests {
         assert_eq!(state.entities().get(worker).unwrap().job().map(|job| job.workplace), Some(desk));
         let lines = state.log.drain();
         assert!(lines.iter().any(|line| line.contains("is already an office worker")), "{lines:?}");
+    }
+
+    /// A world with a working computer in each of `desks` and a scrap bin in
+    /// each of `bins`.
+    fn with_desks_and_bins(desks: &[Point], bins: &[Point], seed: u64) -> GameState {
+        let mut map = Map::new(Size::new(24, 17), FLOOR);
+        for &desk in desks {
+            crate::sim::testing::prop_at(&mut map, "computer", desk);
+        }
+        for &bin in bins {
+            crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
+        }
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
+        GameState::new(map, seed)
+    }
+
+    /// The desks are offered first, however near the bins are; then one
+    /// collector to a bin; then nobody. `Command::Hire` offers them in the
+    /// same order.
+    #[test]
+    fn an_arrival_is_offered_a_desk_before_a_scrap_bin_and_a_bin_is_one_collectors() {
+        let desks = [Point::new(20, 12), Point::new(22, 12)];
+        let bins = [Point::new(2, 2), Point::new(4, 2)];
+        let mut state = with_desks_and_bins(&desks, &bins, 5);
+        let arrivals: Vec<Uid> = (0..5).map(|_| state.spawn(EntityType::Human, Point::new(3, 3))).collect();
+        let job = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().job();
+
+        for &uid in &arrivals[..2] {
+            let job = job(&state, uid).expect("hired");
+            assert_eq!(job.kind, JobKind::OfficeWorker, "a desk first, though the bins are beside it");
+            assert!(desks.contains(&job.workplace));
+        }
+        for &uid in &arrivals[2..4] {
+            let job = job(&state, uid).expect("hired");
+            assert_eq!(job.kind, JobKind::ScrapCollector);
+            assert!(bins.contains(&job.workplace));
+        }
+        assert_eq!(job(&state, arrivals[3]).unwrap().workplace, bins[1], "the bin nobody had");
+        assert_eq!(job(&state, arrivals[4]), None, "every workplace taken: unemployed");
+        assert_eq!(state.workplaces().len(), 4);
+        let lines = state.log.drain();
+        assert!(
+            lines.iter().any(|line| line.contains("was hired as a scrap collector at the scrap bin at 2, 2")),
+            "{lines:?}"
+        );
+
+        // A desk and a bin free again: hiring gives the desk.
+        let (clerk, collector) = (arrivals[0], arrivals[2]);
+        process_game_state(&mut state, 1.0 / 60.0, Input::new().dismiss(clerk).dismiss(collector));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("was let go from the scrap bin at 2, 2")), "{lines:?}");
+        process_game_state(&mut state, 1.0 / 60.0, Input::new().hire(collector).hire(arrivals[4]).hire(arrivals[3]));
+        assert_eq!(job(&state, collector).map(|job| job.kind), Some(JobKind::OfficeWorker), "the office first");
+        assert_eq!(job(&state, arrivals[4]).map(|job| job.kind), Some(JobKind::ScrapCollector));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("is already a scrap collector")), "{lines:?}");
     }
 
     #[test]
@@ -3109,9 +3208,15 @@ mod tests {
         //
         // Raised from 640 to 704, a cache line, on purpose: salvaging scrap
         // is a goal slot and a count of an item kind more (648).
+        //
+        // Raised from 704 to 768, a cache line, on purpose: a job (688), then
+        // the scrap collector's goal slot and executor (24 bytes), and the
+        // salvage task's `for_work` flag, which takes the byte the task enum
+        // kept its tag in (`TakeItem`'s item kind) — a task is 20 bytes, not
+        // 16, and a brain holds ten (744).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 704, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 768, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3547,6 +3652,7 @@ mod tests {
             &mut state.map,
             &state.log,
             &mut state.fridges,
+            &mut state.bins,
             &mut state.doors,
             &state.occupancy,
             &mut state.effects,
@@ -3583,17 +3689,35 @@ mod tests {
             assert_eq!(state.len(), district.residents());
             assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
             // The bank's computers are the district's desks, and nobody's
-            // house has one: every desk is given out, and every one is in the
-            // bank.
+            // house has one: every desk is given out, every one in the bank;
+            // then the warehouse's four bins, one collector each.
             let desks = state.features().count(FeatureKind::Workstation);
             assert!(desks >= 12, "seed {seed}: {desks} desks");
-            assert_eq!(state.workplaces().len(), desks.min(district.residents()), "seed {seed}");
+            let bins = crate::map::district::WAREHOUSE_BINS;
+            assert!(district.residents() >= desks + bins, "seed {seed}: more jobs than people");
+            assert_eq!(state.workplaces().len(), desks + bins, "seed {seed}");
+            let (mut clerks, mut collectors) = (0, 0);
             for entity in state.entities().iter() {
-                if let Some(job) = entity.job() {
-                    assert!(district.bank.contains(job.workplace), "seed {seed}: a desk outside the bank");
-                    assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
+                let Some(job) = entity.job() else { continue };
+                match job.kind {
+                    JobKind::OfficeWorker => {
+                        clerks += 1;
+                        assert!(district.bank.contains(job.workplace), "seed {seed}: a desk outside the bank");
+                    }
+                    JobKind::ScrapCollector => {
+                        collectors += 1;
+                        assert!(district.warehouse.contains(job.workplace), "seed {seed}: a bin outside the warehouse");
+                    }
                 }
+                assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
+            assert_eq!((clerks, collectors), (desks, bins), "seed {seed}");
+            // In the order they arrived: every desk taken before the first
+            // collector was hired.
+            let kinds: Vec<JobKind> =
+                state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).collect();
+            let first_collector = kinds.iter().position(|&kind| kind == JobKind::ScrapCollector).unwrap();
+            assert!(kinds[first_collector..].iter().all(|&kind| kind == JobKind::ScrapCollector), "seed {seed}");
 
             for house in &district.houses {
                 for &bed in &house.beds {
@@ -3602,6 +3726,45 @@ mod tests {
                     assert!(house.walls.contains(lives_at), "seed {seed}: {owner} sleeps away from home");
                 }
             }
+        }
+    }
+
+    /// A district's collectors, on a Monday: out to the heaps round it from
+    /// half past eight, and before the shift is over the first packfuls are
+    /// in the warehouse's bins. Their needs are switched off: seed 7's
+    /// collectors live across the district from the warehouse, and a thirsty
+    /// one out at the yards walks home through a district jammed round the
+    /// bank (the crowd limit `map-generator` describes) — this is about the
+    /// job.
+    #[test]
+    fn a_district_on_a_monday_stores_scrap_in_its_warehouse() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        for collector in state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::ScrapCollector)) {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+                input.set_process(collector.uid(), process, false);
+            }
+        }
+        assert_eq!(input.commands.len(), 4 * crate::map::district::WAREHOUSE_BINS);
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let mut lines = Vec::new();
+        // 1800 ticks a world hour at `run`'s 60Hz: until five o'clock at the
+        // latest.
+        for _ in 0..9 * 1800 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain().into_iter().filter(|line| line.contains("scrap")));
+            if state.bins().total() > 0 {
+                break;
+            }
+        }
+        assert!(state.bins().total() > 0, "nothing stored by {}; {:?}", state.clock(), &lines[lines.len().saturating_sub(20)..]);
+        assert!(lines.iter().any(|line| line.contains("salvaged scrap metal")));
+        let stored = lines.iter().find(|line| line.contains("in the bin at")).expect("a line about it");
+        assert!(stored.contains("scrap metal in the bin at"), "{stored}");
+        for (bin, _) in state.bins().iter() {
+            assert!(district.warehouse.contains(bin));
         }
     }
 
@@ -4127,6 +4290,53 @@ mod tests {
         let lines = state.log.drain();
         assert!(lines.iter().any(|l| l.contains("salvage: no scrap at -5, 3")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("cannot salvage")), "{lines:?}");
+    }
+
+    /// More scrap collectors than the parallel threshold, each with a bin of
+    /// its own, all after the same yard: who gets which piece and which heap
+    /// is next is settled by the world step and the order of the slots, and
+    /// has to come out the same twice — down to what each bin holds.
+    #[test]
+    fn determinism_survives_a_crowd_of_scrap_collectors_in_the_parallel_rounds() {
+        let build = || {
+            let mut map = Map::new(Size::new(24, 24), FLOOR).with_wasteland(3);
+            // Rows of bins with a free row between, one a collector.
+            let bins: Vec<Point> = (0..PARALLEL_AT as i32 + 6).map(|i| Point::new(1 + i % 22, 1 + 2 * (i / 22))).collect();
+            for &bin in &bins {
+                crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
+            }
+            let cells = dry_cells(&map, Point::new(-30, 4), bins.len());
+            let mut state = GameState::new(map, 13);
+            for &cell in &cells {
+                calm_human(&mut state, cell);
+            }
+            state
+        };
+        let (mut a, mut b) = (build(), build());
+        assert!(a.len() > PARALLEL_AT);
+        let collectors = a.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::ScrapCollector)).count();
+        assert!(collectors > PARALLEL_AT, "{collectors} collectors");
+        let count = |lines: Vec<String>| lines.iter().filter(|l| l.contains("salvaged scrap metal")).count();
+        let (mut salvaged_a, mut salvaged_b) = (0, 0);
+        // From eight until a quarter past eleven, at `run`'s 1800 ticks a
+        // world hour.
+        for _ in 0..(3.25 * 1800.0) as u32 {
+            run(&mut a, 1);
+            run(&mut b, 1);
+            salvaged_a += count(a.log.drain());
+            salvaged_b += count(b.log.drain());
+        }
+        let snapshot = |state: &GameState| {
+            let positions: Vec<(u64, (f32, f32))> =
+                state.entities().iter().map(|e| (e.uid().raw(), e.position())).collect();
+            let carried: Vec<u8> = state.entities().iter().map(|e| stowed_scrap(state, e.uid())).collect();
+            let bins: Vec<(Point, u32)> = state.bins().iter().collect();
+            (positions, carried, bins)
+        };
+        assert!(salvaged_a > 0, "nobody salvaged anything, so the collecting never ran");
+        assert!(a.bins().total() > 0, "nothing was stored, so the deposits never ran");
+        assert_eq!(salvaged_a, salvaged_b);
+        assert_eq!(snapshot(&a), snapshot(&b));
     }
 
     #[test]

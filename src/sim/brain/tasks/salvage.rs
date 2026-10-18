@@ -8,8 +8,15 @@
 //! ([`Effect::Salvage`]) and the world step gives the piece to one of them and
 //! stows it in their pack (`sim::world_step`). The goal that queued it hears
 //! of it a tick later, when the pack and the heap already say what happened.
+//!
+//! **Salvaging for a living tires** ([`Salvage::for_work`]): a scrap
+//! collector's piece of work is [`Event::Worked`] for the time it took, as a
+//! stretch at a desk is (`tasks/work.rs`) — and for as much as was done of it
+//! if it is cut short. An order carried out is an errand, and does not.
 
 use crate::map::Point;
+use crate::sim::biology::{Biology, Event};
+use crate::sim::clock::TIME_SCALE;
 use crate::sim::item::ItemKind;
 use crate::sim::Effect;
 
@@ -23,6 +30,13 @@ pub struct Salvage {
     pub heap: Point,
     /// How long working one piece loose takes.
     pub seconds: f32,
+    /// Whether this is a scrap collector's work ([`Task::salvage_for_work`],
+    /// `CollectGoal`) rather than an order ([`Task::salvage`]): work tires
+    /// the body, [`Event::Worked`], the way a stretch at a desk does.
+    ///
+    /// [`Task::salvage_for_work`]: super::super::task::Task::salvage_for_work
+    /// [`Task::salvage`]: super::super::task::Task::salvage
+    pub for_work: bool,
 }
 
 impl Salvage {
@@ -51,9 +65,29 @@ impl TaskExecutor for Salvage {
         match ctx.advance_action() {
             ActionState::Finished => {
                 *ctx.effect = Effect::Salvage { at: self.heap };
+                if self.for_work
+                    && let Some(biology) = ctx.biology.as_deref_mut()
+                {
+                    biology.handle(Event::Worked {
+                        world_seconds: self.seconds * TIME_SCALE,
+                    });
+                }
                 TaskResult::Success
             }
             state => TaskResult::of(state),
+        }
+    }
+
+    /// Pulled away from a heap worked for a living: what was worked of the
+    /// piece still tired the collector, as a stretch at a desk cut short
+    /// does. An order owes nothing.
+    fn interrupted(&mut self, action: &Action, biology: Option<&mut Biology>) {
+        if let (true, Action::Interact { elapsed, .. }, Some(biology)) = (self.for_work, action, biology)
+            && *elapsed > 0.0
+        {
+            biology.handle(Event::Worked {
+                world_seconds: elapsed * TIME_SCALE,
+            });
         }
     }
 
@@ -115,6 +149,46 @@ mod tests {
         assert_eq!(rig.world.map.take_scrap(heap), Some(0), "somebody else got there first");
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.effect, Effect::None);
+    }
+
+    /// Salvaging for a living tires the body once the piece is worked loose,
+    /// and for the part done when it is cut short; an order does neither.
+    #[test]
+    fn salvaging_for_a_living_tires_and_an_order_does_not() {
+        let (mut rig, heap) = rig_beside_heap(2, 1);
+        rig.biology.edit(|stats| stats.with_stamina(80.0));
+        let mut ordered = Task::salvage(heap, 0.5);
+        assert_eq!(rig.run(&mut ordered, 600), TaskResult::Success);
+        assert_eq!(rig.biology.stats().stamina(), 80.0, "an errand is not work");
+
+        let mut work = Task::salvage_for_work(heap, 0.5);
+        rig.action = Action::None;
+        assert_eq!(rig.run(&mut work, 600), TaskResult::Success);
+        assert_eq!(rig.effect, Effect::Salvage { at: heap });
+        let after_one = rig.biology.stats().stamina();
+        assert!(after_one < 80.0, "a piece worked loose for a living tires: {after_one}");
+
+        // Cut short half way: half the work's worth.
+        let mut work = Task::salvage_for_work(heap, 10.0);
+        rig.action = Action::None;
+        let half = (5.0 / rig.world.dt) as usize;
+        for _ in 0..half {
+            assert_eq!(rig.tick(&mut work), TaskResult::Executing);
+        }
+        assert_eq!(rig.biology.stats().stamina(), after_one, "nothing until it is over or cut short");
+        work.interrupted(&rig.action, Some(&mut rig.biology));
+        let spent = after_one - rig.biology.stats().stamina();
+        let whole = crate::sim::biology::energy::WORK_FATIGUE_PER_SECOND * 10.0 * TIME_SCALE;
+        assert!((spent - whole / 2.0).abs() < whole * 0.05, "spent {spent}, half is {}", whole / 2.0);
+
+        let mut ordered = Task::salvage(heap, 10.0);
+        rig.action = Action::None;
+        for _ in 0..half {
+            rig.tick(&mut ordered);
+        }
+        let before = rig.biology.stats().stamina();
+        ordered.interrupted(&rig.action, Some(&mut rig.biology));
+        assert_eq!(rig.biology.stats().stamina(), before, "an errand cut short owes nothing");
     }
 
     #[test]

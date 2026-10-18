@@ -46,13 +46,17 @@ pub enum GoalId {
     /// ([`SalvageGoal`](super::goals::SalvageGoal)).
     Salvage = 7,
     /// Go to one's own desk and work a shift at it
-    /// ([`WorkGoal`](super::goals::WorkGoal)). Last, so every need it ties
-    /// with wins the tie.
+    /// ([`WorkGoal`](super::goals::WorkGoal)). After every need, so every
+    /// need it ties with wins the tie.
     Work = 8,
+    /// Bring scrap in from the wasteland and store it in one's own bin
+    /// ([`CollectGoal`](super::goals::CollectGoal)): a scrap collector's
+    /// shift. Last, for the reason work is.
+    Collect = 9,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 10;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -63,6 +67,7 @@ impl GoalId {
         GoalId::Sleep,
         GoalId::Salvage,
         GoalId::Work,
+        GoalId::Collect,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -76,6 +81,7 @@ impl GoalId {
             GoalId::Sleep => "sleep",
             GoalId::Salvage => "salvage",
             GoalId::Work => "work",
+            GoalId::Collect => "collect",
         }
     }
 
@@ -95,6 +101,7 @@ impl GoalId {
             GoalId::Sleep => "😴",
             GoalId::Salvage => "🔧",
             GoalId::Work => "💼",
+            GoalId::Collect => "🧲",
         }
     }
 
@@ -430,6 +437,7 @@ impl From<GoalId> for pb::GoalId {
             GoalId::Sleep => pb::GoalId::Sleep,
             GoalId::Salvage => pb::GoalId::Salvage,
             GoalId::Work => pb::GoalId::Work,
+            GoalId::Collect => pb::GoalId::Collect,
         }
     }
 }
@@ -446,6 +454,7 @@ impl From<pb::GoalId> for GoalId {
             pb::GoalId::Sleep => GoalId::Sleep,
             pb::GoalId::Salvage => GoalId::Salvage,
             pb::GoalId::Work => GoalId::Work,
+            pb::GoalId::Collect => GoalId::Collect,
         }
     }
 }
@@ -577,7 +586,8 @@ mod tests {
                 (GoalId::Play, 0.0),
                 (GoalId::Sleep, 0.0),
                 (GoalId::Salvage, 0.0),
-                (GoalId::Work, 0.0)
+                (GoalId::Work, 0.0),
+                (GoalId::Collect, 0.0)
             ]
         );
     }

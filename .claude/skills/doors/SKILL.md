@@ -32,7 +32,7 @@ Plain Rust in `src/sim/door.rs` and `src/sim/property.rs`; drawn by `editor/prop
    **never while the door cell is occupied**.
 
 Not logged per opening on purpose: a district opens doors all day and it flushed the log
-panel (`qa/district.json` broke on it).
+panel (a district QA test broke on it).
 
 ## Who may go where
 

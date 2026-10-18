@@ -2,7 +2,8 @@
 //! while somebody is sitting at it, and goes dark when they leave; a door's
 //! leaf slides open and shut as the simulation moves it ([`swing_doors`]);
 //! a light switch's rocker shows whether its room's lights are on
-//! ([`flip_switches`]).
+//! ([`flip_switches`]); a scrap bin fills up as the collectors store scrap in
+//! it ([`fill_bins`]).
 //!
 //! The art is not this module's — a prop's pictures are both on its palette
 //! entry ([`PaletteItem::in_use`](crate::editor::PaletteItem::in_use)), drawn
@@ -38,7 +39,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::animation::StripAnimation;
-use crate::editor::props::{DoorLeaf, Prop, SwitchPlate, Usable};
+use crate::editor::props::{BinFill, DoorLeaf, Prop, SwitchPlate, Usable};
 use crate::map::Point;
 use crate::state::AppState;
 
@@ -53,7 +54,7 @@ impl Plugin for PropsPlugin {
         // put right on the frame it appears rather than the one after.
         app.add_systems(
             Update,
-            (light_up_props_in_use, swing_doors, flip_switches)
+            (light_up_props_in_use, swing_doors, flip_switches, fill_bins)
                 .in_set(super::SpriteSync)
                 .after(crate::editor::props::sync_prop_window)
                 .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
@@ -140,10 +141,47 @@ fn flip_switches(sim: Res<Sim>, mut plates: Query<(&Prop, &mut SwitchPlate, &mut
     }
 }
 
+/// The frame of a bin's strip for `stored` pieces: empty, a few (up to
+/// five, a packful or so), half full (up to twenty), heaped.
+pub fn bin_frame(stored: u32) -> u32 {
+    match stored {
+        0 => 0,
+        1..=5 => 1,
+        6..=20 => 2,
+        _ => 3,
+    }
+}
+
+/// Show every scrap bin on screen as full as the simulation says it is
+/// ([`bin_frame`]). A binary search per bin on the canvas, and a write only
+/// on a frame somebody filled it past a step.
+fn fill_bins(sim: Res<Sim>, mut bins: Query<(&Prop, &mut BinFill, &mut Sprite)>) {
+    let state = sim.0.bins();
+    for (prop, mut fill, mut sprite) in &mut bins {
+        let frame = bin_frame(state.stored(prop.cell()));
+        if frame == fill.showing {
+            continue;
+        }
+        fill.showing = frame;
+        show_frame(&mut sprite, frame);
+    }
+}
+
 /// Put frame `frame` of a posed strip on its sprite.
 fn show_frame(sprite: &mut Sprite, frame: u32) {
     if let Some(rect) = sprite.rect.as_mut() {
         let side = rect.width();
         *rect = Rect::new(frame as f32 * side, 0.0, (frame + 1) as f32 * side, side);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bin_frame;
+
+    #[test]
+    fn a_bin_shows_fuller_the_more_is_stored_in_it() {
+        let frames: Vec<u32> = [0, 1, 3, 5, 6, 20, 21, 500].into_iter().map(bin_frame).collect();
+        assert_eq!(frames, [0, 1, 1, 1, 2, 2, 3, 3]);
     }
 }

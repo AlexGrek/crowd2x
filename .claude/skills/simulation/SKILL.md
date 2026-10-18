@@ -62,13 +62,14 @@ it are four steps:
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
    the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
-   request for a change outside itself — `Effect::Fridge { at, open }`, or `Effect::Door { at, key }` (hold a door open; the `doors` skill) — into a
+   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack) or `Effect::Deposit { at, pieces }` (a packful into a scrap bin, `sim/bins.rs`; the `jobs` skill) — into a
    third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
    door directly: that is a fact about the world, read by every entity beside it, not about
    the one entity that opened it.
 4. **world** — single-threaded, slots ascending, like move, and for the same reason: two
    units opening and closing one fridge on the same tick is a race, and this is what settles
-   it the same way on every run. Every `Effect` is applied (`fridges.set_open`), the slot
+   it the same way on every run. Every `Effect` is applied (`fridges.set_open`, `doors.want`,
+   `salvage`, `deposit` → `Bins::add`), the slot
    reset to `Effect::None`, and then `Fridges::advance` moves every fridge's temperature on
    by the tick's worth of world time — see `sim::world_step` and "Features" in `brain-engineer`'s `architecture.md`.
 

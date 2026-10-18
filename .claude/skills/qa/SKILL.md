@@ -81,10 +81,13 @@ Four ways to say a map exists before the test starts, in `given.maps`:
 Use a bare name for anything about the *list* (browsing, copying, deleting), a `file` for
 a fixture worth looking at or sharing between tests, and an inline `map` when the test
 depends on exactly which cells are painted — that keeps the map and the assertions about
-it in one place. A `district` is `map::district::generate(seed)`: 79x54, 32 houses, the
-bank and three shops, and a `"human"` spawner per resident — so opening it in the game
-puts its residents in the world before the first step runs. The resident count depends on
-the seed (53 for seed 7); `qa/district.json` is the example. A file or an inline document is loaded through the real map format, so a
+it in one place. A `district` is `map::district::generate(seed)`: 131x100, 92 houses, the
+bank, three shops and the warehouse, and a `"human"` spawner per resident — so opening it in
+the game puts its residents in the world before the first step runs. The resident count
+depends on the seed and on every change to the generator (136 for seed 7 now); a test that
+hard-codes it, or camera spots on a district's buildings, breaks with every generator change —
+`qa/district.json` did and was deleted. `qa/perf_district.json` names the count only to top
+the crowd up to 1000. A file or an inline document is loaded through the real map format, so a
 fixture that has drifted fails at startup with the format's own error.
 
 Remember terrain rows are written **bottom-up**: row 0 of the document is y 0.
@@ -224,6 +227,8 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
+| `{"expect_scrap": {"x": -43, "y": 11, "pieces": 3}}` | How many pieces the heap of scrap in a cell has left (`0`: emptied, or never there), and that the screen agrees — a heap with anything left is drawn on the canvas, an emptied one is not. Give the scrap window a frame (`wait`) after a `tick`. `qa/scrap.json`. |
+| `{"expect_stored": {"min": 3}}` | At least this many pieces of scrap metal in the map's scrap bins, all together (`GameState::bins().total()`): what the collectors have brought in. An outcome — tick generously first. `qa/scrap_collector.json`. |
 | `{"expect_prop_in_use": {"kind": "computer", "in_use": true}}` | Whether a prop that shows it is being used is showing that. |
 | `{"expect_door": {"x": 5, "y": 3, "min": 0.2, "max": 0.8}}` | How far open (0 shut, 1 open) the simulation says the door in a cell is; either bound optional. Pause first. `qa/doors.json`. |
 | `{"expect_lighting": {"lights_on": 2}}` | The GPU's lightmap, read back once the latest change is baked, agrees with the CPU reference on every texel; `lights_on` (optional) counts lights switched on. Waits for the bake by re-running itself (`Next::Again`) until the script's timeout. Game screen only. |

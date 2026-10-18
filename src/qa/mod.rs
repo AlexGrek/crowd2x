@@ -1021,6 +1021,20 @@ fn perform(
             }
         }
 
+        Step::ExpectStored { min } => {
+            let bins = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0
+                .bins();
+            let stored = bins.total();
+            (stored >= *min).then_some(Next::Now).ok_or(format!(
+                "expected at least {min} pieces of scrap stored, found {stored} in {} bins",
+                bins.len()
+            ))
+        }
+
         Step::Spawn { kind, x, y } => {
             let kind = entity_kind(kind)?;
             intents

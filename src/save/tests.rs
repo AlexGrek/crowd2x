@@ -304,6 +304,53 @@ fn a_district_saved_in_the_middle_of_a_working_day_carries_on_exactly() {
     });
 }
 
+/// The same district once the scrap collectors have stored a packful:
+/// saved with scrap in the warehouse's bins and collectors out at the heaps
+/// with some in their packs, mid-trip — a piece half worked loose, a walk
+/// half walked — and one let go while the two worlds run.
+#[test]
+fn a_district_saved_with_scrap_in_its_bins_and_its_collectors_out_carries_on_exactly() {
+    use crate::sim::JobKind;
+    let mut state = busy_district();
+    let collectors: Vec<Uid> = state
+        .entities()
+        .iter()
+        .filter(|entity| entity.job().is_some_and(|job| job.kind == JobKind::ScrapCollector))
+        .map(|entity| entity.uid())
+        .collect();
+    assert_eq!(collectors.len(), crate::map::district::WAREHOUSE_BINS);
+    // Only the job wanted, so a morning is enough for a trip.
+    let mut input = Input::new();
+    for &uid in &collectors {
+        for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+            input.set_process(uid, process, false);
+        }
+    }
+    process_game_state(&mut state, DT, &input);
+    let carrying = |state: &GameState| {
+        collectors
+            .iter()
+            .filter(|&&uid| state.entities().get(uid).unwrap().inventory().is_some_and(|i| i.count(ItemKind::Scrap) > 0))
+            .count()
+    };
+    let mut ticks = 0;
+    while state.bins().total() == 0 || carrying(&state) == 0 {
+        run(&mut state, 60);
+        ticks += 60;
+        assert!(ticks < 9 * 3600, "no scrap stored and more carried by {}", state.clock());
+    }
+    let stored = state.bins().total();
+    let copy = side_by_side(&mut state, 900, |tick, _| {
+        let mut input = Input::new();
+        if tick == 300 {
+            input.dismiss(collectors[0]);
+        }
+        input
+    });
+    assert!(copy.bins().total() >= stored);
+    assert_eq!(copy.bins(), state.bins());
+}
+
 #[test]
 fn saving_a_loaded_world_gives_back_the_same_files() {
     let mut state = busy_district();

@@ -63,8 +63,10 @@ respect the split:
   **second** strip for what it looks like while somebody is using it, which only the game
   screen ever shows (`game/props.rs`).
   `PaletteItem::posed(name, path, frames)` is a strip the game picks the frame of (no
-  `StripAnimation`): the doors, whose `DoorLeaf` is turned and mirrored to fit its wall at
-  spawn (`DoorLeaf::pose`) and set by `game::props::swing_doors` — the `doors` skill.
+  `StripAnimation`): the doors (told by name, `sim::door::is_door`, not by being posed), whose
+  `DoorLeaf` is turned and mirrored to fit its wall at spawn (`DoorLeaf::pose`) and set by
+  `game::props::swing_doors` — the `doors` skill; and the `"scrap bin"`, whose `BinFill` is set
+  by `game::props::fill_bins` from how much it holds (`game-screen`).
   **A wall-mounted prop** (`map::PROPS` `wall_mounted`: the `"light switch"`) is not free
   placement: `props::placement` sends it through `map::mount::mount`, so `place` refuses it
   (returns `false`) on a cell with no wall beside it or with anything standing in it, and

@@ -1,0 +1,85 @@
+{
+  "name": "a scrap collector is hired at the scrap bin, brings scrap in from the wasteland and stores it there",
+  "state": "game",
+  "timeout": 180,
+  "given": {
+    "maps": [
+      {
+        "name": "yard",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor"],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 216, "y": 168 }, "kind": "scrap bin" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "qa/scrap.json's site: no \"wasteland\" key, so seed 0, with a scrapyard to the west. The bin is in cell (4, 3), and there is no computer, so the only job is collecting" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "arriving to find the bin free is being hired to it" },
+    { "spawn": { "kind": "human", "x": 2, "y": 2 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a scrap collector at the scrap bin at 4, 3" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "every need but tiredness switched off, so this is a test about the job" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "job" },
+    { "expect_text": "scrap collector" },
+    { "expect_text": "scrap bin at 4, 3" },
+    { "expect_text": "09:00-17:00" },
+    { "expect_text": "off until 09:00" },
+    { "press": "close" },
+    { "look_at": { "x": 4, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "eight in the morning: hired to the bin, and it is empty" },
+
+    { "note": "it sets off at half past eight; an hour later it is out at the heaps" },
+    { "tick": 2880 },
+    { "select": 0 },
+    { "press": "job" },
+    { "expect_text": "collecting scrap" },
+    { "press": "close" },
+
+    { "note": "out to the yard, three pieces at twenty world minutes each, back, five minutes to empty the pack: well inside six world hours at 1920 ticks an hour. Asserted as an outcome, not a tick" },
+    { "tick": 11520 },
+    { "expect_stored": { "min": 3 } },
+    { "look_at": { "x": 4, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "the afternoon: the bin with scrap in it, and the count in the corner" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

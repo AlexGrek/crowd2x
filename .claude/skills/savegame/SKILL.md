@@ -35,7 +35,7 @@ does and then applies the saved state.
 | --- | --- | --- |
 | `manifest.pb` | `Manifest` | format, game version, name, quick flag, when, map title, tick, elapsed, population. The Load screen reads only this (`archive::read_manifest`). |
 | `map.pb` | `SiteMap` | the site, as a map file holds it: terrain by name (palette + indices), grids, objects by name, wasteland seed (`map/save.rs`) |
-| `world.pb` | `World` | tick, elapsed, id-RNG state, boxes off, street lights, switches off, fridges, doors, beds, arena layout, desks (`workplaces`, tag 11, cross-checked against each worker's job on load) (`sim/saving.rs`) |
+| `world.pb` | `World` | tick, elapsed, id-RNG state, boxes off, street lights, switches off, fridges, doors, beds, arena layout, workplaces (desks and scrap bins, `workplaces`, tag 11, cross-checked against each worker's job on load), what each scrap bin holds (`bins`, tag 12, `Bin { cell, stored }`, restored after the fridges; refuses a cell with no bin or another number of bins) (`sim/saving.rs`) |
 | `chunks/NNNN.pb` | `Chunks` | the endless world, `CHUNKS_PER_FILE` chunks a file: every loaded chunk's **ground stored verbatim** (tiles + heaps as found) and every salvage tally, loaded or not; stamped with `wasteland::GENERATION` |
 | `entities/NNNN.pb` | `EntityShard` | `SLOTS_PER_FILE` arena slots a file (holes left out): slot, serial, `holds_cell`, `Kind` oneof (`Human`/`Dog`) |
 | `view.pb` | `View` | optional, Bevy side: camera centre, zoom, speed multiplier, paused |
@@ -97,7 +97,11 @@ A new **kind** needs a `pb::Kind` variant; a new **task** a `pb::TaskKind` varia
 and filled in, so a routine list that changes order or names refuses old saves — **add
 routines at the end**: `Brain::restore` takes a saved list that is a prefix of the brain's
 (the routines added since start fresh; `WorkRoutine` came in that way). A unit's job is
-`pb::Brain.job` (tag 14), absent = unemployed (`jobs` skill).
+`pb::Brain.job` (tag 14), absent = unemployed; `pb::JobKind::ScrapCollector` = 1 (`jobs`
+skill). Tags added with the scrap collectors: `pb::GoalId::Collect` = 9 (`CollectGoal` is a
+`pb::Executor::Seek`), `pb::TaskKind::Deposit(Timed)` = 12 and
+`pb::TaskKind::SalvageForWork(Timed)` = 13 (`Salvage { for_work: true }`; an order's salvage
+stays `Salvage(Timed)` = 10), `pb::World.bins` = 12.
 
 ## Fast
 
@@ -111,7 +115,7 @@ decodes shards in parallel. Measured, release, this machine (2026-10-17,
 | | raw | zipped | encode (main thread) | compress | unzip + load |
 | --- | --- | --- | --- | --- | --- |
 | 20000 humans, 256×256 | 13.5 MB | 4.7 MB | 22.6 ms | 7.8 ms | 34 ms |
-| district 7, 53 units (debug build, QA) | | 34 KB | 2 ms | 2 ms | |
+| district 7, 53 units (debug build, QA; the 32-house district) | | 34 KB | 2 ms | 2 ms | |
 
 ## The store (`save/store.rs`)
 
@@ -147,7 +151,9 @@ decodes shards in parallel. Measured, release, this machine (2026-10-17,
 ## Tests
 
 - `save::tests` — side-by-side continuation (crowd with unfinished searches + despawn/spawn,
-  saved twice; busy district with sleepers, salvage, frozen, stacked, box/switch off), re-save
+  saved twice; busy district with sleepers, salvage, frozen, stacked, box/switch off; the same
+  district on a working morning; and once a packful of scrap is in the warehouse with collectors
+  out carrying more, one let go mid-run), re-save
   gives identical files, every refusal, unknown files/fields skipped, the store (names,
   listing, quick pruning), the golden fixture, the `--ignored` timing.
 - `map::save::tests` — site round trip, restored chunks = regenerated, refusals.

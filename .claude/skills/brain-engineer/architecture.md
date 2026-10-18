@@ -61,7 +61,8 @@ talking only to the one below:
   10; by night it commits at 30 and *does not let go until morning*, holding a priority
   floor of 0.6 so somebody rested at one o'clock stays in bed — above wandering, below any
   committed hunger, thirst, bladder or boredom, so a sleeper gets up for the toilet and
-  comes back. **Work is the other clock routine**: `WorkRoutine` wants `GoalId::Work` at a
+  comes back. **Work is the other clock routine**: `WorkRoutine` wants the job's goal
+  (`GoalId::Work` at a desk, `GoalId::Collect` for a scrap collector) at a
   flat 1.5 while the job's shift is due (09:00-17:00 Mon-Fri, from 08:30 on the way) — over
   every need at its commit level, under any need past 75, and tied with (so losing to) a
   nap at `EXHAUSTED`. **There is no cap on how many a brain has**:
@@ -72,7 +73,7 @@ talking only to the one below:
   chase per routine per unit per tick, which is what a human with dozens of routines in a
   crowd of thousands cannot afford.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
-  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`, `SalvageGoal`, `WorkGoal`) is a `Box` owned for
+  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`, `SalvageGoal`, `WorkGoal`, `CollectGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
   picked up. It reads the body, hands and memory, and manages the task queue; it never
   changes the world itself. **One goal per need, each in its own file**, even where two
@@ -99,9 +100,14 @@ talking only to the one below:
   `WorkGoal` is `SleepGoal`'s shape at a desk: **its own** computer (the job's), an hour a
   stretch, `Achieved` after each, the part of an hour worked still reported when it is cut
   short; no other desk to reroute to, so an unreachable or unpowered one is `Blocked`.
+  `CollectGoal` is a scrap collector's shift, a trip at a time: the nearest heap it can get to
+  (`nearest_heap`, a walk of the loaded heap lists of the navigation area, no route) while the
+  pack has room, its own bin once it is full, `Achieved` when the packful is stored — the
+  `jobs` skill.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`,
-  `OpenFridge`, `CloseFridge`, `Salvage`, `Work`), `match`-dispatched so
+  `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
+  `Deposit`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a

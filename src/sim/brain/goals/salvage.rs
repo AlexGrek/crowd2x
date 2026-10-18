@@ -1,8 +1,9 @@
 //! [`SalvageGoal`]: carry out an order to salvage a heap of scrap.
 //!
-//! Nothing in a brain wants scrap of its own accord yet. A unit goes to a
-//! heap because it was told to ([`crate::sim::Command::Salvage`]), and the
-//! order is what it remembers ([`SALVAGE_ORDER`]):
+//! An errand: a unit goes to a heap because it was told to
+//! ([`crate::sim::Command::Salvage`]) — a scrap collector goes for a living,
+//! and that is [`CollectGoal`](super::CollectGoal) — and the order is what it
+//! remembers ([`SALVAGE_ORDER`]):
 //! [`OrdersRoutine`](crate::sim::brain::routines::OrdersRoutine) wants this
 //! goal for as long as the order stands, and this goal lets the order go —
 //! when the heap is empty, when the unit can carry no more, or when there is

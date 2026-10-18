@@ -15,6 +15,7 @@ use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
 use super::feature::Features;
+use super::bins::Bins;
 use super::fridge::Fridges;
 use super::door::Doors;
 use super::property::Properties;
@@ -34,6 +35,9 @@ pub struct World {
     /// [`Effect::Fridge`] and advances it, the same as
     /// [`super::world_step`] does in a real tick.
     pub fridges: Fridges,
+    /// What every scrap bin holds. Built from `map` once; [`World::step`]
+    /// applies an [`Effect::Deposit`] to it, as [`super::world_step`] does.
+    pub bins: Bins,
     /// Every door, and the properties the house doors lock. Built from `map`
     /// once; [`World::step`] applies an [`Effect::Door`] and moves the
     /// leaves on, as [`super::world_step`] does.
@@ -70,6 +74,7 @@ impl World {
             occupancy: Occupancy::new(map.size()),
             features: Features::from_map(&map, &supply),
             fridges: Fridges::from_map(&map, &supply),
+            bins: Bins::from_map(&map),
             doors: Doors::from_map(&map, &properties),
             properties,
             map,
@@ -137,6 +142,7 @@ impl World {
                 let _ = self.doors.want(at, key);
             }
             Effect::Salvage { at } => super::salvage(entity, &mut self.map, &self.log, at),
+            Effect::Deposit { at, pieces } => super::deposit(entity.uid(), &mut self.bins, &self.log, at, pieces),
             Effect::None => {}
         }
         self.doors.advance(self.dt, &self.occupancy);
@@ -191,6 +197,11 @@ impl World {
     /// How many hours have been worked at a desk here.
     pub fn works(&self) -> usize {
         self.count("worked an hour at the computer")
+    }
+
+    /// How many packfuls of scrap have been stored in a bin here.
+    pub fn deposits(&self) -> usize {
+        self.count("scrap metal in the bin at")
     }
 
     fn count(&self, needle: &str) -> usize {

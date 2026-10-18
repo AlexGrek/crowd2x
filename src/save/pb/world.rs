@@ -38,6 +38,10 @@ pub struct World {
     /// Empty in a save from before there were jobs, which is nobody employed.
     #[prost(message, repeated, tag = "11")]
     pub workplaces: Vec<Workplace>,
+    /// What every scrap bin holds (`crate::sim::bins::Bins`). Empty in a
+    /// save from before there were bins, which is a map with none.
+    #[prost(message, repeated, tag = "12")]
+    pub bins: Vec<Bin>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -58,6 +62,15 @@ pub struct Door {
     pub openness: f32,
     #[prost(float, tag = "3")]
     pub held: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Bin {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    /// Pieces of scrap metal in it.
+    #[prost(uint32, tag = "2")]
+    pub stored: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

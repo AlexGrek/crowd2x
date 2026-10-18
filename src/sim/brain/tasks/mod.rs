@@ -7,6 +7,7 @@
 
 pub mod close_fridge;
 pub mod consume_item;
+pub mod deposit;
 pub mod move_to;
 pub mod open_fridge;
 pub mod salvage;
@@ -19,6 +20,7 @@ pub mod work;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
+pub use deposit::{Deposit, DEPOSIT_SECONDS};
 pub use move_to::MoveTo;
 pub use open_fridge::{OpenFridge, OPEN_SECONDS};
 pub use salvage::Salvage;

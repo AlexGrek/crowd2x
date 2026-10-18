@@ -586,8 +586,7 @@ pub enum Step {
     SwitchLight { x: i32, y: i32, on: bool },
     /// Tell the **selected** unit to salvage the heap of scrap in a cell, on
     /// the command queue the game uses — applied by the next tick, like
-    /// `give`. Nothing in a brain goes after scrap by itself, so this is the
-    /// way a heap gets worked at all.
+    /// `give`. The way to send anybody but a scrap collector to a heap.
     Salvage { x: i32, y: i32 },
     /// How many pieces of scrap metal the heap in a cell has left, as the
     /// simulation says — `0` for none: emptied, or never there — **and** that
@@ -595,6 +594,11 @@ pub enum Step {
     /// drawn and an emptied one is not, and off it nothing is drawn at all.
     /// Give the scrap window a frame after a `tick` (`wait`) before asking.
     ExpectScrap { x: i32, y: i32, pieces: u8 },
+    /// At least `min` pieces of scrap metal stored in the map's scrap bins,
+    /// all of them together, as the simulation says (`sim::bins`): what the
+    /// scrap collectors have brought in. An outcome, not a moment — give the
+    /// world ticks enough first.
+    ExpectStored { min: u32 },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.
     ///

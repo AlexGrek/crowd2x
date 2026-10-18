@@ -35,7 +35,7 @@ struct Sample {
     tick: u32,
     /// World hours since the world opened.
     hours: f64,
-    /// The time of day, `day 1  14:00:00`.
+    /// The time of day, `day 1 Mon  14:00:00`.
     clock: String,
     rows: Vec<Row>,
 }

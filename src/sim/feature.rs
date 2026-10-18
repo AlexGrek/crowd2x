@@ -8,7 +8,7 @@
 //! none of the editor's.
 //!
 //! A prop with no entry here is scenery, which today is every prop but the
-//! fridge, the toilet, the computer and the beds. A prop with two entries is
+//! fridge, the toilet, the computer, the beds and the scrap bin. A prop with two entries is
 //! two things at once: a fridge is food and water.
 //!
 //! **A feature that does not work is not one.** A fridge with no power, a
@@ -44,6 +44,11 @@ pub enum FeatureKind {
     /// it. Which one is somebody's own desk is a job's business
     /// ([`crate::sim::job`]); this only says what counts as a desk.
     Workstation,
+    /// Somewhere to store scrap metal: a warehouse's bin, filled from beside
+    /// it. A scrap collector's workplace, the way a computer is an office
+    /// worker's; what each holds is [`crate::sim::bins::Bins`]'. Needs no
+    /// power.
+    ScrapBin,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -71,9 +76,11 @@ pub enum Access {
 impl FeatureKind {
     pub const fn access(self) -> Access {
         match self {
-            FeatureKind::Food | FeatureKind::Water | FeatureKind::Entertainment | FeatureKind::Workstation => {
-                Access::Beside
-            }
+            FeatureKind::Food
+            | FeatureKind::Water
+            | FeatureKind::Entertainment
+            | FeatureKind::Workstation
+            | FeatureKind::ScrapBin => Access::Beside,
             // A bed is lain in, not stood next to, and one sleeper to a bed:
             // the toilet's arrangement, and for the same reason.
             FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
@@ -120,6 +127,11 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "computer",
         kind: FeatureKind::Workstation,
+    },
+    // Where a scrap collector stores what it brings in.
+    Feature {
+        name: "scrap bin",
+        kind: FeatureKind::ScrapBin,
     },
     // The six beds the editor can place. Their art is 48x48 and has no
     // "somebody is in it" strip yet, so a bed does not show that it is being
@@ -171,6 +183,7 @@ pub struct Features {
     entertainment: Vec<Point>,
     bed: Vec<Point>,
     workstation: Vec<Point>,
+    scrap_bin: Vec<Point>,
     /// Cells with passable terrain and exactly one blocking prop, a working
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
@@ -213,6 +226,7 @@ impl Features {
                     FeatureKind::Entertainment => features.entertainment.push(cell),
                     FeatureKind::Bed => features.bed.push(cell),
                     FeatureKind::Workstation => features.workstation.push(cell),
+                    FeatureKind::ScrapBin => features.scrap_bin.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
@@ -228,6 +242,7 @@ impl Features {
             &mut features.entertainment,
             &mut features.bed,
             &mut features.workstation,
+            &mut features.scrap_bin,
         ] {
             cells.sort_unstable();
         }
@@ -252,6 +267,7 @@ impl Features {
             FeatureKind::Entertainment => &self.entertainment,
             FeatureKind::Bed => &self.bed,
             FeatureKind::Workstation => &self.workstation,
+            FeatureKind::ScrapBin => &self.scrap_bin,
         }
     }
 
@@ -551,6 +567,22 @@ mod tests {
         assert_eq!(kinds_of("computer").collect::<Vec<_>>(), [FeatureKind::Entertainment, FeatureKind::Workstation]);
         assert_eq!(features.count(FeatureKind::Workstation), 1);
         assert!(!features.has(FeatureKind::Workstation, Point::new(0, 0)));
+    }
+
+    /// A scrap bin is where a collector stores scrap, used from beside it,
+    /// and it needs nothing plugged in to be one.
+    #[test]
+    fn a_scrap_bin_is_somewhere_to_store_scrap_from_beside_it_with_no_power() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let bin = Point::new(2, 7);
+        map.add_object(ObjectLayer::Props, prop("scrap bin", bin));
+
+        let features = Features::from_map(&map, &Supply::from_map(&map));
+        assert!(features.has(FeatureKind::ScrapBin, bin), "nothing wired, and still a bin");
+        assert_eq!(FeatureKind::ScrapBin.access(), Access::Beside);
+        assert!(!features.is_enterable(bin));
+        assert_eq!(kinds_of("scrap bin").collect::<Vec<_>>(), [FeatureKind::ScrapBin]);
+        assert_eq!(features.count(FeatureKind::Workstation), 0, "a bin is not a desk");
     }
 
     #[test]

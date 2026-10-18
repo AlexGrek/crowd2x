@@ -332,9 +332,11 @@ impl RoutineExecutor for OrdersRoutine {
 /// go to the lower [`GoalId`], and work is the last.
 pub const WORKING: f32 = 1.5;
 
-/// Go to work: want [`GoalId::Work`] at [`WORKING`] for as long as the
-/// shift is due ([`Shift::is_due`](crate::sim::job::Shift::is_due) — its
-/// hours on its days, and the commute before them).
+/// Go to work: want the job's goal ([`JobKind::goal`](crate::sim::job::JobKind::goal)
+/// — [`GoalId::Work`] at a desk, [`GoalId::Collect`] for a scrap collector)
+/// at [`WORKING`] for as long as the shift is due
+/// ([`Shift::is_due`](crate::sim::job::Shift::is_due) — its hours on its
+/// days, and the commute before them).
 ///
 /// It reads the clock and the job and no stat, so it needs no hysteresis:
 /// nothing the goal does moves when the shift is. What it remembers is only
@@ -366,9 +368,10 @@ impl RoutineExecutor for WorkRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        self.on_shift = ctx.job.is_some_and(|job| job.shift.is_due(ctx.think.clock));
-        if self.on_shift {
-            goals.raise_to(GoalId::Work, WORKING);
+        let due = ctx.job.filter(|job| job.shift.is_due(ctx.think.clock));
+        self.on_shift = due.is_some();
+        if let Some(job) = due {
+            goals.raise_to(job.kind.goal(), WORKING);
         }
     }
 
@@ -750,6 +753,51 @@ mod tests {
         assert_eq!(work_priority(&mut routine, Some(&job), on(7, 10.0)), 0.0, "Sunday");
         assert_eq!(routine.debug_fields(), [("on shift", "no".to_string())]);
         assert_eq!(work_priority(&mut routine, None, on(1, 10.0)), 0.0, "no job, nothing to go to");
+    }
+
+    /// A scrap collector's shift is the collect goal, at the same priority
+    /// and hours, and never the office's.
+    #[test]
+    fn a_scrap_collector_on_shift_wants_to_collect_rather_than_to_work() {
+        let job = crate::sim::job::Job::collector(Point::new(3, 3));
+        let wanted = |clock: Clock| {
+            let map = Map::new(Size::new(2, 2), FLOOR);
+            let (occupancy, log, features, fridges) = (
+                Occupancy::new(map.size()),
+                Log::new(),
+                Features::default(),
+                crate::sim::fridge::Fridges::default(),
+            );
+            let think = Think {
+                map: &map,
+                occupancy: &occupancy,
+                log: &log,
+                features: &features,
+                fridges: &fridges,
+                doors: &Default::default(),
+                properties: &Default::default(),
+                dt: 1.0 / 60.0,
+                tick: 0,
+                clock,
+            };
+            let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+            let mut goals = Goals::new();
+            WorkRoutine::new().arrange(
+                &RoutineCtx {
+                    think: &think,
+                    body: &body,
+                    biology: Some(&Biology::new(Stats::calm())),
+                    memory: &crate::sim::brain::memory::Memory::new(),
+                    job: Some(&job),
+                },
+                &mut goals,
+            );
+            (goals.priority(GoalId::Collect), goals.priority(GoalId::Work))
+        };
+        assert_eq!(wanted(on(2, 10.0)), (WORKING, 0.0));
+        assert_eq!(wanted(on(2, 8.75)), (WORKING, 0.0), "setting off at a quarter to nine");
+        assert_eq!(wanted(on(2, 17.5)), (0.0, 0.0), "home time");
+        assert_eq!(wanted(on(6, 10.0)), (0.0, 0.0), "Saturday");
     }
 
     /// Where 1.5 sits: over every need at the point it commits, under every

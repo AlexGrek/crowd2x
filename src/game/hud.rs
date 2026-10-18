@@ -745,7 +745,7 @@ fn update_readouts(
 fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: Option<Point>) -> String {
     let size = current.map.size();
     let at = at.unwrap_or(Point::ORIGIN);
-    format!(
+    let mut stats = format!(
         "map    {}  {}x{}\nactors {}  tick {}\ntime   {}\nwired  {}\nwhere  {}, {}  chunks {}",
         current.title(),
         size.width,
@@ -757,5 +757,11 @@ fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: O
         at.x,
         at.y,
         current.map.loaded_chunks(),
-    )
+    );
+    // What the scrap collectors have brought in, on a map with somewhere to
+    // keep it.
+    if let Some(bins) = world.map(GameState::bins).filter(|bins| !bins.is_empty()) {
+        stats.push_str(&format!("\nscrap  {} stored", bins.total()));
+    }
+    stats
 }

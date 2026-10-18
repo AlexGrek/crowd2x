@@ -101,9 +101,15 @@ impl GoalExecutor for WorkGoal {
         Ok(())
     }
 
-    /// The half-walked route is gone, the desk is not.
+    /// The half-walked route is gone, the desk is not — unless it is no
+    /// longer this worker's: let go and hired again elsewhere, the desk it was
+    /// on its way to is somebody else's business now.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
         if self.seek.target.is_none() {
+            return;
+        }
+        if self.seek.target != ctx.job.map(|job| job.workplace) {
+            self.forget();
             return;
         }
         self.seek.steady();
@@ -345,6 +351,38 @@ mod tests {
         let routes = crate::sim::walker::ROUTES_ASKED.with(|asked| asked.get());
         assert_eq!(world.works(), 0);
         assert!(routes < 100, "{routes} routes in 1000 ticks");
+    }
+
+    /// Let go on the way to one desk and hired at another: it goes to the new
+    /// one, not to where it was heading.
+    #[test]
+    fn a_worker_hired_at_another_desk_goes_to_the_new_one() {
+        let (old, new) = (Point::new(11, 7), Point::new(2, 7));
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "computer", old);
+        prop_at(&mut map, "computer", new);
+        let mut world = World::new(map);
+        world.clock = at(1, 10.0);
+        let mut human = worker(Point::new(6, 2), old);
+        for _ in 0..20 {
+            step(&mut world, &mut human);
+        }
+        assert_eq!(human.brain().top_goal(), GoalId::Work, "on its way to the old desk");
+
+        assert!(human.dismiss().is_some());
+        for _ in 0..5 {
+            step(&mut world, &mut human);
+        }
+        assert_ne!(human.brain().top_goal(), GoalId::Work);
+        assert!(human.hire(Job::office(new)));
+        for _ in 0..ticks(&world, 1.3) {
+            step(&mut world, &mut human);
+            if world.works() > 0 {
+                break;
+            }
+        }
+        assert!(world.log_contains("worked an hour at the computer at 2, 7"), "{:?}", world.lines());
+        assert!(!world.log_contains("at the computer at 11, 7"));
     }
 
     /// Somebody else at the desk already, on one side: the worker sits down

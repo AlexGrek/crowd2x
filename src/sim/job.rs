@@ -9,19 +9,26 @@
 //! module's [`Workplaces`] is only the bookkeeping that stops two arrivals
 //! being given one desk. Nothing in a tick reads it.
 //!
-//! What a job *does* to a unit is the brain's: `WorkRoutine` wants
-//! [`GoalId::Work`](super::brain::GoalId::Work) while the shift is due, and
-//! `WorkGoal` walks to the desk and works it an hour at a time. What working
-//! does to the body is `Energy`'s ([`Event::Worked`](super::biology::Event)).
+//! What a job *does* to a unit is the brain's: `WorkRoutine` wants the job's
+//! goal ([`JobKind::goal`]) while the shift is due, and that goal's executor
+//! does the work. What working does to the body is `Energy`'s
+//! ([`Event::Worked`](super::biology::Event)).
 //!
-//! The first and so far only job is the **office worker**: a computer, nine to
-//! five, Monday to Friday.
+//! Two jobs, both nine to five, Monday to Friday, offered in this order
+//! ([`JobKind::ALL`]):
+//!
+//! * the **office worker**: a computer, worked an hour at a time
+//!   (`WorkGoal`);
+//! * the **scrap collector**: a scrap bin in the warehouse, and the heaps of
+//!   scrap out in the wasteland — out to a heap, salvage a packful, back to
+//!   the bin and store it (`CollectGoal`). One collector to a bin.
 
 use std::collections::BTreeMap;
 
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 
+use super::brain::GoalId;
 use super::clock::{Clock, Weekday, HOUR};
 use super::feature::FeatureKind;
 use super::uid::Uid;
@@ -36,12 +43,29 @@ pub const COMMUTE: f32 = 0.5 * HOUR;
 pub enum JobKind {
     /// Sits at a computer and works it. Tiring, and no fun.
     OfficeWorker,
+    /// Brings scrap metal in from the heaps in the wasteland and stores it
+    /// in its own bin in the warehouse. As tiring as office work, and as
+    /// little fun.
+    ScrapCollector,
 }
 
 impl JobKind {
+    /// Every kind, **in the order a job is offered to an arrival**
+    /// (`GameState::give_a_job`): the bank's desks first, then the bins.
+    pub const ALL: [JobKind; 2] = [JobKind::OfficeWorker, JobKind::ScrapCollector];
+
     pub const fn name(self) -> &'static str {
         match self {
             JobKind::OfficeWorker => "office worker",
+            JobKind::ScrapCollector => "scrap collector",
+        }
+    }
+
+    /// "an office worker", "a scrap collector": for a log line.
+    pub const fn with_article(self) -> &'static str {
+        match self {
+            JobKind::OfficeWorker => "an office worker",
+            JobKind::ScrapCollector => "a scrap collector",
         }
     }
 
@@ -50,13 +74,31 @@ impl JobKind {
     pub const fn workplace(self) -> FeatureKind {
         match self {
             JobKind::OfficeWorker => FeatureKind::Workstation,
+            JobKind::ScrapCollector => FeatureKind::ScrapBin,
+        }
+    }
+
+    /// What its workplace is called, for a log line and the job menu.
+    pub const fn workplace_name(self) -> &'static str {
+        match self {
+            JobKind::OfficeWorker => "computer",
+            JobKind::ScrapCollector => "scrap bin",
+        }
+    }
+
+    /// The goal the job is done by: what `WorkRoutine` raises while the
+    /// shift is due.
+    pub const fn goal(self) -> GoalId {
+        match self {
+            JobKind::OfficeWorker => GoalId::Work,
+            JobKind::ScrapCollector => GoalId::Collect,
         }
     }
 
     /// The hours somebody hired for it keeps.
     pub const fn shift(self) -> Shift {
         match self {
-            JobKind::OfficeWorker => OFFICE_HOURS,
+            JobKind::OfficeWorker | JobKind::ScrapCollector => OFFICE_HOURS,
         }
     }
 }
@@ -65,6 +107,7 @@ impl From<JobKind> for pb::JobKind {
     fn from(kind: JobKind) -> pb::JobKind {
         match kind {
             JobKind::OfficeWorker => pb::JobKind::OfficeWorker,
+            JobKind::ScrapCollector => pb::JobKind::ScrapCollector,
         }
     }
 }
@@ -73,6 +116,7 @@ impl From<pb::JobKind> for JobKind {
     fn from(kind: pb::JobKind) -> JobKind {
         match kind {
             pb::JobKind::OfficeWorker => JobKind::OfficeWorker,
+            pb::JobKind::ScrapCollector => JobKind::ScrapCollector,
         }
     }
 }
@@ -168,13 +212,23 @@ pub struct Job {
 }
 
 impl Job {
+    /// `kind` at `workplace`, keeping the kind's hours.
+    pub const fn new(kind: JobKind, workplace: Point) -> Job {
+        Job {
+            kind,
+            workplace,
+            shift: kind.shift(),
+        }
+    }
+
     /// An office worker at the computer in `desk`, keeping office hours.
     pub const fn office(desk: Point) -> Job {
-        Job {
-            kind: JobKind::OfficeWorker,
-            workplace: desk,
-            shift: JobKind::OfficeWorker.shift(),
-        }
+        Job::new(JobKind::OfficeWorker, desk)
+    }
+
+    /// A scrap collector storing in the bin in `bin`, keeping office hours.
+    pub const fn collector(bin: Point) -> Job {
+        Job::new(JobKind::ScrapCollector, bin)
     }
 
     // --- saving ---
@@ -336,6 +390,23 @@ mod tests {
         assert_eq!(odd.days(), "Mon, Wed, Sat");
         let weekend = Shift::new(9, 12, 0b110_0000).unwrap();
         assert_eq!(weekend.days(), "Sat, Sun");
+    }
+
+    /// A collector keeps office hours, at a bin, by its own goal; and the
+    /// desks are offered before the bins.
+    #[test]
+    fn a_scrap_collector_works_office_hours_at_a_bin_and_is_hired_after_the_office() {
+        let kind = JobKind::ScrapCollector;
+        assert_eq!((kind.name(), kind.with_article()), ("scrap collector", "a scrap collector"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ScrapBin, "scrap bin"));
+        assert_eq!(kind.goal(), GoalId::Collect);
+        assert_eq!(kind.shift(), OFFICE_HOURS);
+        assert_eq!(JobKind::OfficeWorker.goal(), GoalId::Work);
+        assert_eq!(JobKind::OfficeWorker.with_article(), "an office worker");
+        assert_eq!(JobKind::ALL, [JobKind::OfficeWorker, JobKind::ScrapCollector], "the office first");
+        let job = Job::collector(Point::new(-4, 9));
+        assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
+        assert_eq!(Job::restore(&job.save()), Ok(job));
     }
 
     #[test]

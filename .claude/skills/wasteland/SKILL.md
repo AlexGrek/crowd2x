@@ -28,6 +28,23 @@ there; it is terrain only. Every map loaded from a file stands in one.
   `tools/wasteland_art.py` into `assets/{dirt,dirt_stones,dirt_cracked,scrub,meadow,mud,water}.png`
   at 16x16 (see `pixel-artist` for the rules).
 
+## Scrap, and who takes it
+
+- **Heaps** are the one thing standing out there: `Wasteland::scrap` / `scrap_on`, the same
+  pure function of seed and cell, in yards (the *junk* field), one to `MAX_SCRAP` pieces, at
+  most one heap to a two-by-two block, none in the `CLEARING`. `Map::scrap(cell)`,
+  `Map::heaps(area, each)` (a loaded chunk's list, or the generator cell by cell),
+  `Map::take_scrap(cell)` — the one edit play makes to a map, through `Effect::Salvage` in
+  `sim::world_step`; a salvage tally is kept per cell forever (and saved), so **heaps never
+  grow back**.
+- **Who takes it**: a unit told to (`Command::Salvage`, `SalvageGoal`), and the district's
+  **scrap collectors** (`jobs` skill, `CollectGoal`), who go to the nearest heap they can get
+  to **within the navigation area** (the site and `NAV_MARGIN` round it — always loaded in a
+  `GameState`, so `collect::nearest_heap` walks short in-memory heap lists and asks no route).
+  A district's yards empty over the days, nearest the warehouse first; then its collectors are
+  held off. The generator puts the warehouse on the edge lot nearest a heap of the district's
+  own wasteland (`map-generator`).
+
 ## Chunks: `src/map/chunk.rs`
 
 - `CHUNK` = 32 cells. `ChunkPos` (`of`, `covering`, `around`), `Chunk` (tiles plus passable
