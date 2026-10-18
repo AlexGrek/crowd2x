@@ -603,6 +603,9 @@ pub enum Step {
     /// human it put there. Selecting is a mouse act, so the step that gets a
     /// test into this state is a real `mouse` and `click` pair.
     ExpectSelected(Option<String>),
+    /// The selected person's outfit in the sim, portrait, and (when `drawn`)
+    /// actual world sprite. `drawn: false` verifies offscreen changes too.
+    ExpectClothing { worn: String, drawn: bool },
     /// How many actor sprites exist in the world.
     ///
     /// The renderer's half of the contract: `expect_entities` can pass while

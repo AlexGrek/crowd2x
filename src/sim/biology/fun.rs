@@ -132,4 +132,12 @@ mod tests {
         Fun.handle(Event::Relieved, FRESH, &mut stats);
         assert_eq!(stats.fun(), 30.0);
     }
+
+    /// The same computer, used for a living: no fun at all.
+    #[test]
+    fn a_shift_at_a_computer_is_no_fun() {
+        let mut stats = Stats::calm().with_fun(30.0);
+        Fun.handle(Event::Worked { world_seconds: 8.0 * HOUR }, FRESH, &mut stats);
+        assert_eq!(stats.fun(), 30.0);
+    }
 }

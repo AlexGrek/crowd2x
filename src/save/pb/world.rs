@@ -34,6 +34,10 @@ pub struct World {
     /// How the entity arena is laid out, beyond who is in it.
     #[prost(message, optional, tag = "10")]
     pub arena: Option<Arena>,
+    /// Which desks have been given to whom (`crate::sim::job::Workplaces`).
+    /// Empty in a save from before there were jobs, which is nobody employed.
+    #[prost(message, repeated, tag = "11")]
+    pub workplaces: Vec<Workplace>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -54,6 +58,14 @@ pub struct Door {
     pub openness: f32,
     #[prost(float, tag = "3")]
     pub held: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Workplace {
+    #[prost(message, optional, tag = "1")]
+    pub desk: Option<Cell>,
+    #[prost(fixed64, tag = "2")]
+    pub worker: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

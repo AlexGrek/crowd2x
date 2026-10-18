@@ -194,6 +194,8 @@ Priorities are unitless `f32`s compared only against each other.
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
 | `NeedRoutine(BOREDOM)` → play | `boredom / 50`: 1.2 at `BORED` (60), released at `AMUSED` (20). `Stats::boredom` is `fun` turned over — the one stat that falls on its own, read the same way up as every other need |
 | `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90) |
+| `WorkRoutine` → work | a flat `WORKING = 1.5` while the job's shift is due (`Shift::is_due`: 09:00-17:00 Mon-Fri, from 08:30 for the walk in), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` is last and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
+| `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 
 Put a new need on the same 0–2 scale so that urgency is comparable across needs. Give a
@@ -214,14 +216,20 @@ halfway there.
    (or a sibling) so the new goal actually runs in it.
 5. **Prove a new guard test fails** by breaking what it guards, run it, then restore. Tests in
    this repo have passed vacuously before.
-6. **Add a QA test** if the behaviour is visible, copying `qa/eating.json` (or
-   `qa/computer.json`, which watches one need in isolation):
+6. **Add a QA test** if the behaviour is visible, copying `qa/eating.json`. **Assert what
+   happened, not the tick it happened on**: a test that photographs an exact tick of an
+   unrelated need breaks whenever anything else changes what a unit does, and such tests
+   are deleted rather than patched (`qa/computer.json` and `qa/lighting.json` went that way
+   when jobs arrived):
    - an inline map with the props;
    - `spawn`, `tick`, `expect_log`;
    - a `shot` of the brains menu;
    - `{"process": {"name": "hunger", "on": false}}` on the selected unit to switch the
      other needs off, and `{"key": "p"}` to pause, when the test needs an exact moment
-     rather than "something happened eventually".
+     rather than "something happened eventually";
+   - on a map with a computer, the arrival is **hired** to work at it, and from 08:30 its
+     shift (1.5) beats most needs: `{"press": "job"}`, `{"press": "dismiss"}` on the selected
+     unit takes the job away, as `qa/office_job.json` does.
 7. **Run `uv run tools/qa.py`, then `qa/perf_simulation.json`.** Compare the 4000-humans median
    with the previous run on the same machine. The perf test runs only 200 ticks, so a behaviour
    that triggers later is not measured there; add a `measure` step to a test that reaches it if

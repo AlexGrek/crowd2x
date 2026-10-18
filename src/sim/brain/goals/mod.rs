@@ -1,7 +1,7 @@
 //! The goal executors that exist: how each goal is actually pursued.
 //!
 //! One executor per goal, and one goal per need: eating, drinking, the toilet,
-//! a go on the computer and a night in bed each have their own file even where their plans
+//! a go on the computer, a night in bed and a shift at a desk each have their own file even where their plans
 //! look alike today, because the processes behind them will not stay alike.
 //! What they genuinely share — where to stand to use something, how long to
 //! wait for a gap — is here.
@@ -13,6 +13,7 @@ pub mod relieve;
 pub mod salvage;
 pub mod sleep;
 pub mod wander;
+pub mod work;
 
 pub use drink::DrinkGoal;
 pub use eat::EatGoal;
@@ -21,6 +22,7 @@ pub use relieve::RelieveGoal;
 pub use salvage::SalvageGoal;
 pub use sleep::SleepGoal;
 pub use wander::WanderGoal;
+pub use work::WorkGoal;
 
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};

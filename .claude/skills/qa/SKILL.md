@@ -506,6 +506,14 @@ Read the PNGs afterwards — you can see them.
 The runner prints the failing step, its number and what it expected. `-v` streams the
 whole log, including the `note` lines, which is usually enough to see how far it got.
 
+**A test that breaks because the game changed somewhere else is deleted, not patched** (the
+owner's rule). A test that has to be fixed after every change to the game — one that
+photographs the exact tick some unrelated need comes round, or counts on a lone unit doing
+nothing else — tests the timing rather than the behaviour. `qa/computer.json` and
+`qa/lighting.json` were deleted for this when jobs arrived (the unit they timed was hired to
+the computer they watched). A test that fails because the *feature it is about* changed is
+fixed, as before.
+
 Common causes, in the order worth checking:
 
 - **`no widget on this screen is labelled "x"`** — the app is not on the screen the test

@@ -45,7 +45,12 @@ talking only to the one below:
   bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
   can never be a hash order. What a unit has *done* lately is a different memory, kept by
   the body because a task writes it every meal (`biology::Recollection`, under "Biology").
-- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`) own **priorities and nothing else**.
+- **job** — `Brain::job: Option<Job>` (`sim/job.rs`): what it does for a living, its own desk
+  and its shift. Handed out by the spawn pass beside the bed (`GameState::give_a_job`, the
+  nearest free desk it may use; `Workplaces` is the bookkeeping, read by nothing in a tick)
+  and by `Command::Hire`, taken back by `Command::Dismiss` and despawn. Routines and goals
+  read it as `RoutineCtx::job` / `GoalCtx::job`. The `jobs` skill has all of it.
+- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`, `OrdersRoutine`, `WorkRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
@@ -56,7 +61,10 @@ talking only to the one below:
   10; by night it commits at 30 and *does not let go until morning*, holding a priority
   floor of 0.6 so somebody rested at one o'clock stays in bed — above wandering, below any
   committed hunger, thirst, bladder or boredom, so a sleeper gets up for the toilet and
-  comes back. **There is no cap on how many a brain has**:
+  comes back. **Work is the other clock routine**: `WorkRoutine` wants `GoalId::Work` at a
+  flat 1.5 while the job's shift is due (09:00-17:00 Mon-Fri, from 08:30 on the way) — over
+  every need at its commit level, under any need past 75, and tied with (so losing to) a
+  nap at `EXHAUSTED`. **There is no cap on how many a brain has**:
   `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
   and a brain holds them in a `Box<[Routine]>` built once at spawn — one allocation per
   unit however many routines, state inline and contiguous, no `push` so the order cannot
@@ -64,7 +72,7 @@ talking only to the one below:
   chase per routine per unit per tick, which is what a human with dozens of routines in a
   crowd of thousands cannot afford.
 - **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
-  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`) is a `Box` owned for
+  `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`, `SalvageGoal`, `WorkGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
   picked up. It reads the body, hands and memory, and manages the task queue; it never
   changes the world itself. **One goal per need, each in its own file**, even where two
@@ -88,14 +96,18 @@ talking only to the one below:
   **any other free bed, at random, only when critically tired** (`CRITICALLY_TIRED`, 90), and
   once lying in a bed stays in it. A human that arrives to find every bed owned has none, and
   stays up until it is critical. Nothing in a tick reads `Homes`: the unit remembers.
+  `WorkGoal` is `SleepGoal`'s shape at a desk: **its own** computer (the job's), an hour a
+  stretch, `Achieved` after each, the part of an hour worked still reported when it is cut
+  short; no other desk to reroute to, so an unreachable or unpowered one is `Blocked`.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`,
-  `OpenFridge`, `CloseFridge`), `match`-dispatched so
+  `OpenFridge`, `CloseFridge`, `Salvage`, `Work`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a
   `TakeItem` ends, not when a goal hears that it did. A task never writes a stat — it tells
-  the body what happened (`Event::Ingested`, `Event::Relieved`, `Event::Slept`), below.
+  the body what happened (`Event::Ingested`, `Event::Relieved`, `Event::Slept`,
+  `Event::Worked`), below.
 - **actions** — pathfinding and timing only. `Action::walk_to` is the one place a far route
   is asked for.
 
@@ -309,7 +321,8 @@ What a body does *by itself* — getting hungry, getting thirsty, a bladder fill
 **The rates are in world time, and they are a person's**, which is what the time scale
 above is for: full to starving in 8 hours, quenched to parched in 5, an untouched bladder
 full in 6, fun draining from a great time to thoroughly bored in 10 and stamina from fully
-rested to exhausted in 16 (a waking day, undone by 8 hours in bed) — plus `0.5` of a
+rested to exhausted in 16 (a waking day, undone by 8 hours in bed; an hour at work tires
+like 1.1 of them, `Event::Worked`, and is no fun) — plus `0.5` of a
 bladder per point of hydration drunk, arriving over the half hour after the drink. So a
 human eats three or four times a day, drinks rather more often, goes to the toilet after a
 drink, looks for something to do about once a day and goes to bed at night; at 1x that is a meal

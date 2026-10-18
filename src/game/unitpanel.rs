@@ -6,7 +6,7 @@
 //! | [despawn] [freeze]                |
 //! +-----------------------------------+
 //! | [##] human                        |
-//! | [##] [life][debug][stats][brains][items][talents][close]
+//! | [##] [life][debug][stats][brains][items][talents][clothing][job][close]
 //! +-----------------------------------+
 //! ```
 //!
@@ -33,16 +33,15 @@
 //! itself sixty times a second:
 //!
 //! * **Structure** — which portrait, which menu — is rebuilt only when the
-//!   selection or the open menu changes, which is when somebody pressed
-//!   something.
-//! * **Numbers** — the debug menu's fields, the freeze button's own label —
+//!   selection, the open menu, or the worn outfit changes.
+//! * **Numbers** — the debug menu's fields, the freeze and hire buttons' own labels —
 //!   are rewritten in place every frame, because they follow the simulation
 //!   rather than the player. That is what "updated in real time" means for the
 //!   debug menu: a position that ticks along while you read it.
 //!
 //! # What it does to the world, it asks for
 //!
-//! `despawn` and `freeze` do not touch [`Sim`]. They push a [`Command`] onto
+//! `despawn`, `freeze`, `hire` and `dismiss` do not touch [`Sim`]. They push a [`Command`] onto
 //! [`SimInput`], and the next spawn pass carries it out — the same route a QA
 //! script's spawn takes, and the reason this screen still has exactly one
 //! writer of the world.
@@ -50,7 +49,8 @@
 use bevy::prelude::*;
 
 use crate::characters::{dog, human};
-use crate::sim::{EntityType, GameEntity, ItemKind, MoveOutcome, Talent, Uid};
+use crate::sim::clothing::Clothing;
+use crate::sim::{Clock, EntityType, GameEntity, GoalId, ItemKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -92,6 +92,11 @@ enum Menu {
     Items,
     /// Lasting aptitudes, shown live so explicit changes appear immediately.
     Talents,
+    Clothing,
+    /// What it does for a living: the job, the desk, the hours, and what it
+    /// is doing about them right now — live — with a button to let it go or
+    /// take it on.
+    Job,
 }
 
 impl Menu {
@@ -105,6 +110,8 @@ impl Menu {
             Menu::Brains => "brains",
             Menu::Items => "items",
             Menu::Talents => "talents",
+            Menu::Clothing => "clothing",
+            Menu::Job => "job",
         }
     }
 }
@@ -120,12 +127,19 @@ enum Action {
     Despawn,
     /// Hold it still, or let it go.
     ToggleFreeze,
+    Wear(Clothing),
+    /// Let it go from its job, or give it one.
+    ToggleJob,
 }
 
 /// The root of everything this module puts on screen. One at a time, and
 /// despawned whole when the panel is rebuilt.
 #[derive(Component)]
 struct UnitPanel;
+
+/// The portrait's worn layer, also inspected by the QA harness.
+#[derive(Component)]
+pub(crate) struct ClothingPortrait;
 
 /// A piece of text that follows the simulation rather than the player.
 #[derive(Component, Clone, Copy)]
@@ -140,6 +154,11 @@ enum Readout {
     Talents,
     /// The freeze button's own label, which flips to `unfreeze`.
     Freeze,
+    /// Every field of the job menu, rewritten as a block.
+    Job,
+    /// The job menu's button, which says `dismiss` to somebody with a job
+    /// and `hire` to somebody without.
+    Employ,
     /// The line by the portrait: what it is, and whether it is held.
     Title,
 }
@@ -226,6 +245,16 @@ fn press_actions(
             Action::ToggleFreeze => {
                 input.0.freeze(uid, !is_frozen(sim.as_deref(), uid));
             }
+            Action::Wear(clothing) => {
+                input.0.set_clothing(uid, clothing);
+            }
+            Action::ToggleJob => {
+                if is_employed(sim.as_deref(), uid) {
+                    input.0.dismiss(uid);
+                } else {
+                    input.0.hire(uid);
+                }
+            }
         }
     }
 }
@@ -252,10 +281,15 @@ fn rebuild(
     menu: Res<OpenMenu>,
     sim: Option<Res<Sim>>,
     panels: Query<Entity, With<UnitPanel>>,
+    mut shown: Local<Option<(Uid, Option<Clothing>)>>,
 ) {
-    if !selected.is_changed() && !menu.is_changed() {
+    let appearance = selected.get().and_then(|uid| {
+        sim.as_ref()?.0.entities().get(uid).map(|entity| (uid, entity.clothing()))
+    });
+    if !selected.is_changed() && !menu.is_changed() && *shown == appearance {
         return;
     }
+    *shown = appearance;
     for panel in &panels {
         commands.entity(panel).despawn();
     }
@@ -294,13 +328,15 @@ fn rebuild(
                 .spawn((
                     Name::new("unit menu"),
                     menu_node(),
-                    BackgroundColor(PANEL),
+                    BackgroundColor(if open == Menu::Clothing { crate::ui::MODAL } else { PANEL }),
+                    GlobalZIndex(1),
+                    bevy::ui::FocusPolicy::Block,
                     // So a press on the panel's own background is not a press
                     // on the map behind it.
                     hud::absorbs_clicks(),
                     children![label(open.label(), FONT_BODY, TEXT_DIM)],
                 ))
-                .with_children(|panel| menu_contents(panel, open, &sim, entity));
+                .with_children(|panel| menu_contents(panel, open, &sim, entity, &assets));
         });
     }
 
@@ -341,6 +377,8 @@ fn rebuild(
                                 (Action::Open(Menu::Brains), plain_button("brains", px(28))),
                                 (Action::Open(Menu::Items), plain_button("items", px(24))),
                                 (Action::Open(Menu::Talents), plain_button("talents", px(32))),
+                                (Action::Open(Menu::Clothing), plain_button("clothing", px(32))),
+                                (Action::Open(Menu::Job), plain_button("job", px(18))),
                                 (Action::Close, plain_button("close", px(24))),
                             ],
                         ),
@@ -365,8 +403,10 @@ fn menu_contents(
     menu: Menu,
     sim: &Sim,
     entity: &dyn GameEntity,
+    assets: &AssetServer,
 ) {
     match menu {
+        Menu::Clothing => clothing_menu(parent, entity, assets),
         Menu::Life => {
             parent.spawn((
                 Node {
@@ -416,6 +456,20 @@ fn menu_contents(
                 label(talents_block(entity), FONT_BODY, TEXT),
             ));
         }
+        Menu::Job => {
+            parent.spawn((
+                Readout::Job,
+                label(job_block(entity, sim.0.clock()), FONT_BODY, TEXT),
+            ));
+            // Only for a kind that can work: a dog has no job to lose and
+            // nobody would give it one.
+            if entity.kind() == Some(EntityType::Human) {
+                parent.spawn((
+                    Action::ToggleJob,
+                    labelled_button((Readout::Employ, label(employ_label(entity), FONT_BODY, TEXT)), px(34)),
+                ));
+            }
+        }
         // Deliberately empty, and saying so: a menu that opened onto nothing
         // at all would read as a menu that failed to load.
         Menu::Stats => {
@@ -450,8 +504,19 @@ fn portrait(
         Some(EntityType::Human) => {
             let look = look_from(entity);
             portrait.with_children(|stack| {
-                for path in human::portrait_layers(&look) {
-                    stack.spawn((layer_node(), ImageNode::new(assets.load(path))));
+                let paths = [Some(human::BASE), Some(look.eyes), look.clothes, Some(look.hair)];
+                for (slot, path) in paths.into_iter().enumerate() {
+                    let mut layer = stack.spawn((
+                        layer_node(),
+                        match path {
+                            Some(path) => ImageNode::new(assets.load(path)),
+                            None => ImageNode::default(),
+                        },
+                        if path.is_some() { Visibility::Inherited } else { Visibility::Hidden },
+                    ));
+                    if slot == 2 {
+                        layer.insert(ClothingPortrait);
+                    }
                 }
             });
         }
@@ -467,6 +532,48 @@ fn portrait(
         // An id tagged with a type this build has no art for. The rest of the
         // panel still works, which is the point of not guessing a picture.
         None => {}
+    }
+}
+
+fn clothing_menu(parent: &mut ChildSpawnerCommands, entity: &dyn GameEntity, assets: &AssetServer) {
+    let Some(worn) = entity.clothing() else {
+        parent.spawn(label("no clothing", FONT_BODY, TEXT_DIM));
+        return;
+    };
+    parent.spawn(label(format!("wearing: {}", worn.name()), FONT_BODY, TEXT_ACCENT));
+    let look = look_from(entity);
+    for row in Clothing::ALL.chunks(5) {
+        parent.spawn(Node { column_gap: px(2), ..default() }).with_children(|buttons| {
+            for &outfit in row {
+                buttons.spawn((
+                    Action::Wear(outfit),
+                    Button,
+                    Node {
+                        width: px(54),
+                        height: px(19),
+                        align_items: AlignItems::Center,
+                        column_gap: px(2), padding: UiRect::all(px(1)),
+                        ..default()
+                    },
+                    BackgroundColor(crate::ui::FIELD),
+                )).with_children(|button| {
+                    button.spawn(Node {
+                        width: px(16), height: px(16), flex_shrink: 0.0, ..default()
+                    })
+                        .with_children(|preview| {
+                            let preview_look = human::Look {
+                                clothes: human::clothing_path(outfit), ..look.clone()
+                            };
+                            for path in human::portrait_layers(&preview_look) {
+                                preview.spawn((layer_node(), ImageNode::new(assets.load(path))));
+                            }
+                        });
+                    button.spawn(label(
+                        outfit.name(), 5.0, if outfit == worn { TEXT_ACCENT } else { TEXT },
+                    ));
+                });
+            }
+        });
     }
 }
 
@@ -514,6 +621,8 @@ fn update_readouts(
             Readout::Items => items_block(entity),
             Readout::Talents => talents_block(entity),
             Readout::Freeze => freeze_label(entity).to_string(),
+            Readout::Job => job_block(entity, sim.0.clock()),
+            Readout::Employ => employ_label(entity).to_string(),
             Readout::Title => title(entity),
         };
         if **text != wanted {
@@ -565,6 +674,47 @@ fn freeze_label(entity: &dyn GameEntity) -> &'static str {
     } else {
         "freeze"
     }
+}
+
+/// What the job menu's button says, which is what pressing it will do.
+fn employ_label(entity: &dyn GameEntity) -> &'static str {
+    if entity.job().is_some() {
+        "dismiss"
+    } else {
+        "hire"
+    }
+}
+
+/// What it does for a living, as a block of lines: the job, the desk, the
+/// hours and days, and — `now` — what it is doing about them at `clock`,
+/// which is the line worth watching: on the way in, at the desk, away from
+/// it for something more pressing, or off.
+fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
+    let Some(job) = entity.job() else {
+        return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
+    };
+    let shift = job.shift;
+    let now = if shift.is_due(clock) {
+        match entity.current_goal() {
+            Some(GoalId::Work) if entity.interacting_with() == Some(job.workplace) => "working".to_string(),
+            Some(GoalId::Work) => "on the way to work".to_string(),
+            Some(goal) => format!("on a break: {}", goal.name()),
+            None => "off".to_string(),
+        }
+    } else if !shift.works_on(clock.weekday()) {
+        if clock.weekday().is_weekend() { "weekend" } else { "day off" }.to_string()
+    } else if clock.hours() < shift.start() as f32 {
+        format!("off until {:02}:00", shift.start())
+    } else {
+        "done for the day".to_string()
+    };
+    field_block(vec![
+        ("job", job.kind.name().to_string()),
+        ("desk", format!("{}, {}", job.workplace.x, job.workplace.y)),
+        ("hours", shift.hours()),
+        ("days", shift.days()),
+        ("now", now),
+    ])
 }
 
 /// The line beside the portrait: this person's name, or the kind's for one
@@ -700,6 +850,13 @@ fn yes_no(yes: bool) -> String {
     if yes { "yes" } else { "no" }.to_string()
 }
 
+/// Whether an entity has a job, for a caller that has an id and a world
+/// rather than the entity itself.
+fn is_employed(sim: Option<&Sim>, uid: Uid) -> bool {
+    sim.and_then(|sim| sim.0.entities().get(uid))
+        .is_some_and(|entity| entity.job().is_some())
+}
+
 /// Whether an entity is being held still, for a caller that has an id and a
 /// world rather than the entity itself.
 fn is_frozen(sim: Option<&Sim>, uid: Uid) -> bool {
@@ -808,6 +965,43 @@ mod tests {
             Point::new(0, 0),
         ));
         assert_eq!(items_block(&nobody), "carries nothing");
+    }
+
+    /// `hours` o'clock on day `day`; day 1 is a Monday.
+    fn on(day: u32, hours: f32) -> Clock {
+        use crate::sim::clock::{DAY, HOUR, TIME_SCALE};
+        let world = (day - 1) as f64 * DAY as f64 + (hours as f64 - 8.0) * HOUR as f64;
+        Clock::after_watching(world / TIME_SCALE as f64)
+    }
+
+    #[test]
+    fn the_job_menu_says_what_the_job_is_and_when() {
+        let mut person = human();
+        assert_eq!(job_block(&person, on(1, 10.0)), "unemployed");
+        assert_eq!(employ_label(&person), "hire");
+
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::office(Point::new(12, 4))));
+        assert_eq!(employ_label(&person), "dismiss");
+        let block = job_block(&person, on(2, 7.0));
+        assert_eq!(field(&block, "job"), "office worker");
+        assert_eq!(field(&block, "desk"), "12, 4");
+        assert_eq!(field(&block, "hours"), "09:00-17:00");
+        assert_eq!(field(&block, "days"), "Mon-Fri");
+        assert_eq!(field(&block, "now"), "off until 09:00");
+        assert_eq!(field(&job_block(&person, on(2, 18.0)), "now"), "done for the day");
+        assert_eq!(field(&job_block(&person, on(6, 11.0)), "now"), "weekend");
+        // On shift, and not yet thinking about it — a brain that has not run
+        // is idle: away from the desk for something else.
+        assert_eq!(field(&job_block(&person, on(2, 11.0)), "now"), "on a break: idle");
+    }
+
+    #[test]
+    fn a_dog_has_no_job_and_no_button_to_give_it_one() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let dog = crate::sim::Dog::new(
+            Uid::new(EntityType::Dog, 1), Point::new(0, 0), crate::sim::Facing::Left, &mut rng,
+        );
+        assert_eq!(job_block(&dog, on(1, 10.0)), "no job");
     }
 
     #[test]

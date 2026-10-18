@@ -71,7 +71,9 @@ impl Process for Satisfaction {
             Event::Ingested(item) => stats.change_satisfaction(item.taste() * novelty),
             Event::Entertained => stats.change_satisfaction(ENJOYMENT * novelty),
             Event::Met => stats.change_satisfaction(GLAD_TO_SEE * novelty),
-            Event::Relieved | Event::Slept { .. } => {}
+            // A shift is no treat: work does nothing for contentment either
+            // way, beyond leaving less of the day for what does.
+            Event::Relieved | Event::Slept { .. } | Event::Worked { .. } => {}
         }
     }
 }

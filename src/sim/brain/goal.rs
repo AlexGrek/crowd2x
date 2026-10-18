@@ -16,6 +16,7 @@ use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
 use crate::sim::inventory::Inventory;
+use crate::sim::job::Job;
 use crate::sim::uid::Uid;
 
 use super::memory::Memory;
@@ -44,10 +45,14 @@ pub enum GoalId {
     /// Carry out an order to salvage a heap of scrap
     /// ([`SalvageGoal`](super::goals::SalvageGoal)).
     Salvage = 7,
+    /// Go to one's own desk and work a shift at it
+    /// ([`WorkGoal`](super::goals::WorkGoal)). Last, so every need it ties
+    /// with wins the tie.
+    Work = 8,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -57,6 +62,7 @@ impl GoalId {
         GoalId::Play,
         GoalId::Sleep,
         GoalId::Salvage,
+        GoalId::Work,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -69,6 +75,7 @@ impl GoalId {
             GoalId::Play => "play",
             GoalId::Sleep => "sleep",
             GoalId::Salvage => "salvage",
+            GoalId::Work => "work",
         }
     }
 
@@ -87,6 +94,7 @@ impl GoalId {
             GoalId::Play => "🎮",
             GoalId::Sleep => "😴",
             GoalId::Salvage => "🔧",
+            GoalId::Work => "💼",
         }
     }
 
@@ -316,6 +324,10 @@ pub struct GoalCtx<'a> {
     /// What it is carrying, **read-only**: its hand, and what it has stowed.
     /// `None` for a kind that carries nothing.
     pub inventory: Option<&'a Inventory>,
+    /// What it does for a living, if anything: where its desk is, and its
+    /// hours. Read-only — a job is handed out and taken back from outside the
+    /// world (`GameState::give_a_job`), never by a goal.
+    pub job: Option<&'a Job>,
     /// Who refused the move that ended the last task, when a body did.
     ///
     /// A failed walk is two different things — somebody is in the way, and
@@ -417,6 +429,7 @@ impl From<GoalId> for pb::GoalId {
             GoalId::Play => pb::GoalId::Play,
             GoalId::Sleep => pb::GoalId::Sleep,
             GoalId::Salvage => pb::GoalId::Salvage,
+            GoalId::Work => pb::GoalId::Work,
         }
     }
 }
@@ -432,6 +445,7 @@ impl From<pb::GoalId> for GoalId {
             pb::GoalId::Play => GoalId::Play,
             pb::GoalId::Sleep => GoalId::Sleep,
             pb::GoalId::Salvage => GoalId::Salvage,
+            pb::GoalId::Work => GoalId::Work,
         }
     }
 }
@@ -562,7 +576,8 @@ mod tests {
                 (GoalId::Idle, 0.0),
                 (GoalId::Play, 0.0),
                 (GoalId::Sleep, 0.0),
-                (GoalId::Salvage, 0.0)
+                (GoalId::Salvage, 0.0),
+                (GoalId::Work, 0.0)
             ]
         );
     }

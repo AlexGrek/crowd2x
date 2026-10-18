@@ -83,7 +83,8 @@ impl Experience {
 
     /// Which experience an event is, if it is one. **Something with no taste is
     /// not an experience** — there is no flavour to tire of in a glass of
-    /// water — and neither is the toilet or a night's sleep. Meeting somebody
+    /// water — and neither is the toilet, a night's sleep or a shift at a
+    /// desk. Meeting somebody
     /// is: not *that* somebody, whose face is the brain's attention's to
     /// remember, but company in general.
     pub fn of(event: Event) -> Option<Experience> {
@@ -91,7 +92,7 @@ impl Experience {
             Event::Ingested(item) if item.taste() > 0.0 => Some(Experience::Taste(item)),
             Event::Entertained => Some(Experience::Entertainment),
             Event::Met => Some(Experience::Company),
-            Event::Ingested(_) | Event::Relieved | Event::Slept { .. } => None,
+            Event::Ingested(_) | Event::Relieved | Event::Slept { .. } | Event::Worked { .. } => None,
         }
     }
 

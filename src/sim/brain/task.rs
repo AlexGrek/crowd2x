@@ -26,7 +26,9 @@ use crate::sim::walker::Walker;
 use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
-use super::tasks::{CloseFridge, ConsumeItem, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait};
+use super::tasks::{
+    CloseFridge, ConsumeItem, MoveTo, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait, Work,
+};
 
 /// What a task may touch while it runs: the world to read, the body it moves,
 /// the action it drives, and the parts of its unit a task can change.
@@ -123,6 +125,7 @@ pub enum Task {
     OpenFridge(OpenFridge),
     CloseFridge(CloseFridge),
     Salvage(Salvage),
+    Work(Work),
 }
 
 impl Task {
@@ -148,6 +151,7 @@ impl Task {
             Task::OpenFridge(OpenFridge { fridge, seconds }) => pb::TaskKind::OpenFridge(timed(fridge, seconds)),
             Task::CloseFridge(CloseFridge { fridge, seconds }) => pb::TaskKind::CloseFridge(timed(fridge, seconds)),
             Task::Salvage(Salvage { heap, seconds }) => pb::TaskKind::Salvage(timed(heap, seconds)),
+            Task::Work(Work { desk, seconds }) => pb::TaskKind::Work(timed(desk, seconds)),
         };
         pb::Task { kind: Some(kind) }
     }
@@ -183,6 +187,7 @@ impl Task {
                 Task::CloseFridge(CloseFridge { fridge: at(task)?, seconds: seconds(task.seconds)? })
             }
             pb::TaskKind::Salvage(task) => Task::Salvage(Salvage { heap: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Work(task) => Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)? }),
         })
     }
 
@@ -248,6 +253,11 @@ impl Task {
         Task::Salvage(Salvage { heap, seconds })
     }
 
+    /// Work the desk in `desk`, from a cell beside it, for `seconds`.
+    pub const fn work(desk: Point, seconds: f32) -> Task {
+        Task::Work(Work { desk, seconds })
+    }
+
     /// Run this task's executor for a tick.
     pub fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         match self {
@@ -261,6 +271,7 @@ impl Task {
             Task::OpenFridge(task) => task.execute(ctx),
             Task::CloseFridge(task) => task.execute(ctx),
             Task::Salvage(task) => task.execute(ctx),
+            Task::Work(task) => task.execute(ctx),
         }
     }
 
@@ -278,6 +289,7 @@ impl Task {
             Task::OpenFridge(task) => task.interrupted(action, biology),
             Task::CloseFridge(task) => task.interrupted(action, biology),
             Task::Salvage(task) => task.interrupted(action, biology),
+            Task::Work(task) => task.interrupted(action, biology),
         }
     }
 
@@ -293,6 +305,7 @@ impl Task {
             Task::OpenFridge(task) => task.describe(),
             Task::CloseFridge(task) => task.describe(),
             Task::Salvage(task) => task.describe(),
+            Task::Work(task) => task.describe(),
         }
     }
 }

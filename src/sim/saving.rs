@@ -26,6 +26,7 @@ use crate::save::{invalid, pb, Invalid};
 use super::entities::{Entities, Slot};
 use super::entity::GameEntity;
 use super::homes::Homes;
+use super::job::Workplaces;
 use super::{kinds, rng, Effect, GameState, Intent, MoveOutcome};
 
 /// One entity read back from a save, before it is put in its world.
@@ -65,6 +66,7 @@ impl GameState {
             doors: self.doors.save(),
             homes: self.homes.save(),
             arena: Some(self.entities.save_arena()),
+            workplaces: self.workplaces.save(),
         }
     }
 
@@ -143,6 +145,7 @@ impl GameState {
         state.fridges.restore(&world.fridges)?;
         state.doors.restore(&world.doors)?;
         state.homes = Homes::restore(&world.homes)?;
+        state.workplaces = Workplaces::restore(&world.workplaces)?;
 
         let arena = pb::required(&world.arena, "arena")?;
         let mut holders: Vec<(Point, crate::sim::Uid)> = Vec::new();
@@ -174,6 +177,24 @@ impl GameState {
             let here = crate::sim::Uid::from_raw(home.owner).is_some_and(|owner| state.entities.contains(owner));
             if !here {
                 return invalid(format!("a bed belongs to {:#x}, who is not here", home.owner));
+            }
+        }
+        // A desk is given with a job, and taken back with it: whoever works
+        // at a desk has the job that says so, and everybody with a job has
+        // its desk.
+        for (_, entity) in state.entities.iter_slots() {
+            if let Some(job) = entity.job()
+                && state.workplaces.worker(job.workplace) != Some(entity.uid())
+            {
+                let at = job.workplace;
+                return invalid(format!("{} works at {}, {}, which is not their desk", entity.uid(), at.x, at.y));
+            }
+        }
+        for place in &world.workplaces {
+            let worker = crate::sim::Uid::from_raw(place.worker);
+            let works_here = worker.and_then(|uid| state.entities.get(uid)).and_then(|entity| entity.job());
+            if works_here.map(|job| Some(pb::Cell::from(job.workplace))) != Some(place.desk) {
+                return invalid(format!("a desk belongs to {:#x}, who does not work there", place.worker));
             }
         }
         Ok(state)

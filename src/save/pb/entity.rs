@@ -54,6 +54,9 @@ pub struct Human {
     pub talents: Vec<TalentValue>,
     #[prost(message, optional, tag = "7")]
     pub schedule: Option<Schedule>,
+    /// Stable outfit name. Absent in older saves: recover the seeded outfit.
+    #[prost(string, optional, tag = "8")]
+    pub clothing: Option<String>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

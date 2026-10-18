@@ -14,11 +14,11 @@
 //!
 //! # Nothing here knows what a human looks like
 //!
-//! A [`Human`] has no hairstyle, no outfit and no sprite. Which PNGs it is
+//! A [`Human`] has no hairstyle or sprite. Its mutable outfit is a
+//! [`Clothing`] value, independent of its identity. Which PNGs it is
 //! drawn from is a fact about the art, and the art lives in `src/characters/`;
-//! all the simulation owes the renderer is a number that is the same every
-//! time for this entity and different for the next one, which
-//! [`GameEntity::appearance_seed`] already gives it.
+//! personal appearance comes from a number that stays the same for this
+//! entity, [`GameEntity::appearance_seed`], while the worn outfit can change.
 //!
 //! Same line for [`Dog`]: its [`Facing`] is this module's own enum rather than
 //! `characters::dog::Facing`, because that one is a Bevy `Component` and
@@ -33,9 +33,11 @@ use crate::save::{invalid, pb, Invalid};
 use super::background::{Due, Schedule};
 use super::biology::{Biology, Stats};
 use super::brain::{Brain, GoalId};
+use super::clothing::Clothing;
 use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
+use super::job::Job;
 use super::item::ItemKind;
 use super::property::PropertyId;
 use super::talents::Talents;
@@ -56,10 +58,10 @@ pub enum Facing {
 
 /// A person.
 ///
-/// No appearance field: [`GameEntity::appearance_seed`] already gives the
-/// renderer a stable per-entity number, and storing a second one would be two
-/// sources of truth for the same hairstyle.
+/// Hair and eyes come from the stable appearance seed. Clothing is mutable
+/// state: changing an outfit never rerolls the person wearing it.
 pub struct Human {
+    clothing: Clothing,
     walk: Walker,
     brain: Brain,
     /// Needs and condition, and the processes that change them. Stats are
@@ -85,6 +87,7 @@ pub struct Human {
 impl Human {
     pub fn new(uid: Uid, cell: Point, rng: &mut SmallRng) -> Human {
         Human {
+            clothing: Clothing::initial(uid.body()),
             walk: Walker::new(uid, cell, HUMAN_SPEED),
             brain: Brain::human(),
             biology: Biology::new(Stats::random(rng)),
@@ -167,6 +170,13 @@ impl Human {
 }
 
 impl GameEntity for Human {
+    fn clothing(&self) -> Option<Clothing> {
+        Some(self.clothing)
+    }
+
+    fn clothing_mut(&mut self) -> Option<&mut Clothing> {
+        Some(&mut self.clothing)
+    }
     fn body(&self) -> &Body {
         self.walk.body()
     }
@@ -252,6 +262,7 @@ impl GameEntity for Human {
         let mut fields = vec![
             ("name", self.identity.name().to_string()),
             ("gender", self.identity.gender().label().to_string()),
+            ("clothing", self.clothing.name().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
             (
                 "home",
@@ -292,12 +303,25 @@ impl GameEntity for Human {
         true
     }
 
+    fn hire(&mut self, job: Job) -> bool {
+        self.brain.hire(job);
+        true
+    }
+
+    fn dismiss(&mut self) -> Option<Job> {
+        self.brain.dismiss()
+    }
+
+    fn job(&self) -> Option<Job> {
+        self.brain.job().copied()
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
 
     fn save(&self) -> pb::Kind {
-        let Human { walk, brain, biology, identity, inventory, talents, schedule } = self;
+        let Human { walk, brain, biology, identity, inventory, talents, schedule, clothing } = self;
         pb::Kind::Human(pb::Human {
             walker: Some(walk.save()),
             brain: Some(brain.save()),
@@ -306,6 +330,7 @@ impl GameEntity for Human {
             inventory: Some(inventory.save()),
             talents: talents.save(),
             schedule: Some(schedule.save()),
+            clothing: Some(clothing.name().to_string()),
         })
     }
 }
@@ -317,6 +342,16 @@ impl Human {
         let mut brain = Brain::human();
         brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
         Ok(Human {
+            clothing: match saved.clothing.as_deref() {
+                Some(name) => Clothing::from_name(name)
+                    .ok_or_else(|| Invalid::new(format!("unknown clothing {name:?}")))?,
+                None => {
+                    let walker = pb::required(&saved.walker, "walker")?;
+                    let body = pb::required(&walker.body, "body")?;
+                    let uid = Uid::from_raw(body.uid).ok_or_else(|| Invalid::new("zero uid"))?;
+                    Clothing::initial(uid.body())
+                }
+            },
             walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
             brain,
             biology: Biology::restore(pb::required(&saved.biology, "biology")?)?,

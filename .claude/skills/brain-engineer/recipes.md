@@ -530,6 +530,7 @@ the toilet's checklist with a `Beside` feature; what is new is everything after 
 8. **The screen.** `game/props.rs` asks every entity `interacting_with()` and lights the
    props standing in those cells. Nothing is added to the simulation for this: a feature
    has no state of its own, and "in use" is a fact about the unit using it.
-9. **QA.** `qa/computer.json` — pauses the game so only scripted ticks move the world,
-   switches the other three processes off on the selected unit, then photographs the exact
-   tick the screen is on and asserts `expect_prop_in_use`.
+9. **QA.** There was `qa/computer.json`, which photographed the exact tick a bored unit's
+   go was under way; it broke as soon as that unit was hired to the same computer, and was
+   deleted rather than patched. `qa/office_job.json` now shows a screen lit by its user
+   (`expect_prop_in_use`), by somebody working at it.

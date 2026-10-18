@@ -130,7 +130,9 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
 - **Humans** (`human.rs`): a layered paperdoll — a base body with eyes, clothes, hair as
   child sprites, each a separate PNG in `assets/human/`. Add a look by dropping a 16x16
   PNG in `assets/human/` and adding its path to the matching array (`CLOTHES`, `EYES`,
-  `HAIR`); `Look::random` and `spawn` handle the rest. The scale lives on the root, so
+  `HAIR`); outfits also need a stable `sim::clothing::Clothing` variant and an exhaustive
+  `human::clothing_path` mapping. Hair and eyes stay seeded; worn clothing is mutable
+  simulation state. The scale lives on the root, so
   the layers cannot drift apart.
 - **Dogs** (`dog.rs`): a 4-frame idle atlas of 16x16 frames — the atlas grid is in source
   texels, not screen pixels (`FrameAnimation`, `src/animation.rs`), with a
@@ -305,13 +307,17 @@ directly instead of listening for the `Cancelled` it would otherwise fire on eve
 #### Selecting somebody (`game/selection.rs`, `game/unitpanel.rs`)
 
 A left click on the map picks whoever is standing in that cell, a green frame
-(`selection.png`) says who, and a panel along the bottom shows their portrait and six
+(`selection.png`) says who, and a panel along the bottom shows their portrait and seven
 menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains` (the
 goal in charge, the priority list, the task, its result and action — live, like `debug`),
 `items` (the hand, what is stowed, and both totals against both limits — live too,
-since a unit picks things up while you are reading), and `talents` (nine integer aptitudes,
-each out of 100). Clicking empty ground, or `close`,
-selects nobody and the panel goes with them.
+since a unit picks things up while you are reading), `talents` (nine integer aptitudes,
+each out of 100), and `clothing` (the current outfit and selectable previews). Clicking empty ground, or `close`,
+selects nobody and the panel goes with them. The `clothing` menu previews all 24 outfits
+and `none`; selecting one queues `Command::SetClothing`, including while paused or frozen.
+The world layer and portrait update from the worn outfit, and culled or pooled sprites
+recover it from simulation state. Dogs have no clothing choices. Saves keep stable outfit
+names; a missing field in an older save recovers its original seeded outfit.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
   position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the
@@ -756,7 +762,8 @@ Positions are in **cell units, not pixels**: `(3.5, 2.5)` is the middle of cell 
 and `center_position()` is `position.floor()`, derived so the two cannot disagree. How
 many screen pixels a cell is drawn at is a fact about the art, and `actors.rs` is where it
 is applied. For the same reason nothing here knows what a human looks like — it supplies
-an `appearance_seed`, and `characters/` decides which PNGs that means.
+an `appearance_seed` for hair and eyes, plus mutable `Clothing` for the worn outfit,
+and `characters/` decides which PNGs those mean.
 
 ### Saved games (`src/save/`, `src/game/saving.rs`, `src/saves.rs`)
 

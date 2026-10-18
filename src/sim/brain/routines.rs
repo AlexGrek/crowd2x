@@ -319,6 +319,64 @@ impl RoutineExecutor for OrdersRoutine {
     }
 }
 
+/// How much [`WorkRoutine`] wants a worker at its desk while the shift is
+/// due.
+///
+/// **Over every need at the point it commits** — hunger, thirst and boredom
+/// at 1.2 ([`PECKISH`] / 50), a bursting bladder at 1.4 — so somebody only
+/// just peckish waits for the end of the shift, or an hour's break between
+/// two stretches does not happen at all. **Under every need once it is
+/// urgent**: past 75 any of them is worth more than 1.5 and takes the worker
+/// away from the desk, and work has it back once it is seen to. A nap at
+/// [`EXHAUSTED`] (75, so 1.5 exactly) ties, and the tie goes to sleep: ties
+/// go to the lower [`GoalId`], and work is the last.
+pub const WORKING: f32 = 1.5;
+
+/// Go to work: want [`GoalId::Work`] at [`WORKING`] for as long as the
+/// shift is due ([`Shift::is_due`](crate::sim::job::Shift::is_due) — its
+/// hours on its days, and the commute before them).
+///
+/// It reads the clock and the job and no stat, so it needs no hysteresis:
+/// nothing the goal does moves when the shift is. What it remembers is only
+/// what it decided last tick, for the brains menu and a save.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct WorkRoutine {
+    on_shift: bool,
+}
+
+impl WorkRoutine {
+    pub const fn new() -> WorkRoutine {
+        WorkRoutine { on_shift: false }
+    }
+
+    /// Whether it wanted work last tick — all a save keeps of it.
+    pub(crate) fn is_on_shift(&self) -> bool {
+        let WorkRoutine { on_shift } = *self;
+        on_shift
+    }
+
+    pub(crate) fn set_on_shift(&mut self, on_shift: bool) {
+        self.on_shift = on_shift;
+    }
+}
+
+impl RoutineExecutor for WorkRoutine {
+    fn name(&self) -> &'static str {
+        "go to work"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        self.on_shift = ctx.job.is_some_and(|job| job.shift.is_due(ctx.think.clock));
+        if self.on_shift {
+            goals.raise_to(GoalId::Work, WORKING);
+        }
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        vec![("on shift", if self.on_shift { "yes" } else { "no" }.to_string())]
+    }
+}
+
 /// Raises one goal to a priority read from a shared dial, so a test can turn a
 /// goal up and down from outside the brain — the brain's own tests drive
 /// handovers with it.
@@ -385,6 +443,7 @@ mod tests {
                 body: &body,
                 biology: Some(biology),
                 memory: &crate::sim::brain::memory::Memory::new(),
+                job: None,
             },
             &mut goals,
         );
@@ -556,6 +615,7 @@ mod tests {
                 body: &body,
                 biology: Some(biology),
                 memory: &crate::sim::brain::memory::Memory::new(),
+                job: None,
             },
             &mut goals,
         );
@@ -631,6 +691,99 @@ mod tests {
         let bladder = BURSTING / NEED_PER_PRIORITY;
         let hunger = PECKISH / NEED_PER_PRIORITY;
         assert!(asleep < bladder && asleep < hunger, "{asleep} vs {bladder}, {hunger}");
+    }
+
+    /// The priority a [`WorkRoutine`] gives work, for somebody with `job`,
+    /// at `clock`.
+    fn work_priority(routine: &mut WorkRoutine, job: Option<&crate::sim::job::Job>, clock: Clock) -> f32 {
+        let map = Map::new(Size::new(2, 2), FLOOR);
+        let (occupancy, log, features, fridges) = (
+            Occupancy::new(map.size()),
+            Log::new(),
+            Features::default(),
+            crate::sim::fridge::Fridges::default(),
+        );
+        let think = Think {
+            map: &map,
+            occupancy: &occupancy,
+            log: &log,
+            features: &features,
+            fridges: &fridges,
+            doors: &Default::default(),
+            properties: &Default::default(),
+            dt: 1.0 / 60.0,
+            tick: 0,
+            clock,
+        };
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+        let mut goals = Goals::new();
+        routine.arrange(
+            &RoutineCtx {
+                think: &think,
+                body: &body,
+                biology: Some(&Biology::new(Stats::calm())),
+                memory: &crate::sim::brain::memory::Memory::new(),
+                job,
+            },
+            &mut goals,
+        );
+        goals.priority(GoalId::Work)
+    }
+
+    /// `hours` o'clock on day `day`; day 1 is a Monday.
+    fn on(day: u32, hours: f32) -> Clock {
+        use crate::sim::clock::{DAY, HOUR, TIME_SCALE};
+        let world = (day - 1) as f64 * DAY as f64 + (hours as f64 - 8.0) * HOUR as f64;
+        Clock::after_watching(world / TIME_SCALE as f64)
+    }
+
+    #[test]
+    fn work_is_wanted_on_shift_and_only_by_somebody_with_a_job() {
+        let job = crate::sim::job::Job::office(Point::new(3, 3));
+        let mut routine = WorkRoutine::new();
+        assert_eq!(work_priority(&mut routine, Some(&job), on(1, 10.0)), WORKING);
+        assert_eq!(routine.debug_fields(), [("on shift", "yes".to_string())]);
+        assert_eq!(work_priority(&mut routine, Some(&job), on(1, 8.75)), WORKING, "on the way at a quarter to nine");
+        assert_eq!(work_priority(&mut routine, Some(&job), on(1, 8.0)), 0.0, "too early");
+        assert_eq!(work_priority(&mut routine, Some(&job), on(1, 17.5)), 0.0, "home time");
+        assert_eq!(work_priority(&mut routine, Some(&job), on(6, 10.0)), 0.0, "Saturday");
+        assert_eq!(work_priority(&mut routine, Some(&job), on(7, 10.0)), 0.0, "Sunday");
+        assert_eq!(routine.debug_fields(), [("on shift", "no".to_string())]);
+        assert_eq!(work_priority(&mut routine, None, on(1, 10.0)), 0.0, "no job, nothing to go to");
+    }
+
+    /// Where 1.5 sits: over every need at the point it commits, under every
+    /// need once it is urgent.
+    #[test]
+    fn work_outranks_every_need_at_its_commit_level_and_yields_to_an_urgent_one() {
+        for (need, commit) in [("hunger", PECKISH), ("thirst", THIRSTY), ("boredom", BORED), ("bladder", BURSTING)] {
+            assert!(WORKING > commit / NEED_PER_PRIORITY, "{need} at {commit} would leave the desk");
+            assert!(WORKING < 76.0 / NEED_PER_PRIORITY, "{need} at 76 would not");
+        }
+        assert!(WORKING > SLEEPY / NEED_PER_PRIORITY && WORKING > ORDERED && WORKING > BUSY);
+
+        // Hunger at 70 and a shift: the shift. At 80: lunch.
+        let job = crate::sim::job::Job::office(Point::new(3, 3));
+        let ranked = |hunger: f32| {
+            let mut goals = Goals::new();
+            goals.raise_to(GoalId::Work, work_priority(&mut WorkRoutine::new(), Some(&job), on(2, 11.0)));
+            goals.raise_to(GoalId::Eat, priority(&mut NeedRoutine::new(&HUNGER), Stats::calm().with_hunger(hunger)));
+            goals.best()
+        };
+        assert_eq!(ranked(70.0), GoalId::Work);
+        assert_eq!(ranked(80.0), GoalId::Eat);
+    }
+
+    /// Exhausted is 1.5, the same as work, and the tie goes to the bed: work
+    /// is the last goal, and ties go to the first.
+    #[test]
+    fn a_worker_exactly_exhausted_naps_rather_than_works() {
+        let job = crate::sim::job::Job::office(Point::new(3, 3));
+        let mut goals = Goals::new();
+        goals.raise_to(GoalId::Work, work_priority(&mut WorkRoutine::new(), Some(&job), on(1, 15.0)));
+        goals.raise_to(GoalId::Sleep, sleep_priority(&mut SleepRoutine::new(), &tired(EXHAUSTED), on(1, 15.0)));
+        assert_eq!(goals.priority(GoalId::Sleep), goals.priority(GoalId::Work));
+        assert_eq!(goals.best(), GoalId::Sleep);
     }
 
     #[test]

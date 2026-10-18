@@ -235,7 +235,7 @@ impl Plugin for ActorsPlugin {
             // itself who is on screen.
             .add_systems(
                 Update,
-                (sync_sprites, sync_action_bars, sync_goal_labels)
+                (sync_sprites, sync_clothing, sync_action_bars, sync_goal_labels)
                     .in_set(super::SpriteSync)
                     .run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
@@ -798,13 +798,45 @@ pub fn world_pos((x, y): (f32, f32)) -> Vec2 {
     snap_to_texel(Vec2::new(x, y) * background::TILE)
 }
 
-/// A paperdoll from a simulation seed.
+/// A paperdoll from a stable personal seed and the currently worn outfit.
 ///
-/// The simulation supplies a stable number and nothing else about how a human
-/// looks; which PNGs it turns into is decided here, next to the art, so adding
-/// a hairstyle never touches `src/sim/`.
+/// Hair and eyes stay seeded; clothing comes from mutable simulation state.
+/// Texture paths remain here, on the rendering side of the bridge.
 pub fn look_from(entity: &dyn GameEntity) -> human::Look {
-    human::Look::random(&mut SmallRng::seed_from_u64(entity.appearance_seed()))
+    let mut look = human::Look::random(&mut SmallRng::seed_from_u64(entity.appearance_seed()));
+    if let Some(clothing) = entity.clothing() {
+        look.clothes = human::clothing_path(clothing);
+    }
+    look
+}
+
+/// Change only the worn layer of visible humans. Offscreen humans get their
+/// current outfit through `look_from` when spawned or taken from the pool.
+fn sync_clothing(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    sim: Res<Sim>,
+    mut humans: Query<(&Actor, &human::Paperdoll, &mut human::Look)>,
+) {
+    for (actor, doll, mut look) in &mut humans {
+        let Some(clothing) = sim.0.entities().get(actor.0).and_then(|entity| entity.clothing()) else {
+            continue;
+        };
+        let path = human::clothing_path(clothing);
+        if look.clothes == path {
+            continue;
+        }
+        look.clothes = path;
+        let mut layer = commands.entity(doll.layers[1]);
+        match path {
+            Some(path) => {
+                layer.insert((Sprite::from_image(assets.load(path)), Visibility::Inherited));
+            }
+            None => {
+                layer.insert(Visibility::Hidden);
+            }
+        }
+    }
 }
 
 /// The simulation's facing, as the component the art uses.

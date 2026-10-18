@@ -18,7 +18,8 @@ runs a simulation, saved games (`.saves/*.savegame`, a zip of Protobuf files, lo
 main menu), and a scripted QA harness that drives all of it. The simulation is one
 `GameState` advanced by one function; every unit runs a brain (routines, goals, tasks,
 actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
-energy, satisfaction).
+energy, satisfaction). Some have a job: an office worker keeps its own desk nine to five,
+Monday to Friday (day 1 is a Monday).
 
 ## Commands
 
@@ -64,6 +65,7 @@ to `screenshots/`.
 | `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, weekdays, desks (`Workplaces`), hire/dismiss, the work routine, the job menu | `jobs` (+ `brain-engineer`) |
 | Drawing new art: hair, dresses, outfits, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
@@ -120,6 +122,7 @@ src/sim/                GameState, passes, entities, clock, items           [sim
 src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell  [simulation, wasteland]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
+src/sim/job.rs          jobs, shifts, who works at which desk               [jobs]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]

@@ -144,6 +144,16 @@ impl World {
         self.lines.extend(self.log.drain());
     }
 
+    /// [`World::step`], with the clock moving on by the tick, as a
+    /// `GameState`'s does. `step` holds it where a test put it, which is what
+    /// a test about one moment of the day wants; this is for one about the
+    /// day going by — a shift starting and ending.
+    pub fn step_in_time(&mut self, entity: &mut dyn GameEntity) {
+        self.step(entity);
+        let watched = self.clock.elapsed() / super::clock::TIME_SCALE as f64;
+        self.clock = Clock::after_watching(watched + self.dt as f64);
+    }
+
     /// Everything the log has said, oldest first.
     pub fn lines(&self) -> &[String] {
         &self.lines
@@ -176,6 +186,11 @@ impl World {
     /// How many hours have been slept in a bed here.
     pub fn sleeps(&self) -> usize {
         self.count("slept in the bed")
+    }
+
+    /// How many hours have been worked at a desk here.
+    pub fn works(&self) -> usize {
+        self.count("worked an hour at the computer")
     }
 
     fn count(&self, needle: &str) -> usize {

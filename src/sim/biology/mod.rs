@@ -153,8 +153,8 @@ impl Default for Switches {
 
 /// Something that happened to a body, for its processes to hear.
 ///
-/// `PartialEq` only: [`Event::Slept`] carries a duration, and an `f32` is not
-/// `Eq`.
+/// `PartialEq` only: [`Event::Slept`] and [`Event::Worked`] carry a duration,
+/// and an `f32` is not `Eq`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Event {
     /// Something was eaten or drunk and is gone.
@@ -171,6 +171,10 @@ pub enum Event {
     /// (`brain::attention`), not by a task: nothing was *done*, a face was
     /// noticed.
     Met,
+    /// Time was spent working — a stretch at a desk. **How long**, in world
+    /// seconds; what that costs the body is [`Energy`]'s to say, and what it
+    /// does *not* give — any fun — is [`Fun`]'s, by having no arm for it.
+    Worked { world_seconds: f32 },
 }
 
 /// One thing a body does by itself.

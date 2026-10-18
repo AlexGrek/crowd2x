@@ -82,12 +82,15 @@ directly instead of listening for the `Cancelled` it would otherwise fire on eve
 ### Selecting somebody (`game/selection.rs`, `game/unitpanel.rs`)
 
 A left click on the map picks whoever is standing in that cell, a green frame
-(`selection.png`) says who, and a panel along the bottom shows their portrait and five
+(`selection.png`) says who, and a panel along the bottom shows their portrait and its
 menus: `life` (despawn, freeze), `debug`, `stats` (deliberately empty), `brains` (the
-goal in charge, the priority list, the task, its result and action — live, like `debug`)
-and `items` (the hand, what is stowed, and both totals against both limits — live too,
-since a unit picks things up while you are reading). Clicking empty ground, or `close`,
-selects nobody and the panel goes with them.
+goal in charge, the priority list, the task, its result and action — live, like `debug`),
+`items` (the hand, what is stowed, and both totals against both limits — live too,
+since a unit picks things up while you are reading), `talents`, `clothing` and `job` (the
+job, its desk, hours and days, and `now` — working, on the way, on a break, off, weekend —
+live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command::Hire`; the
+`jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
+them.
 
 - **Picking is by cell**, not by sprite bounds: the click becomes a world position, the
   position a cell, and the cell is asked of `sim::Occupancy` — one lookup however big the

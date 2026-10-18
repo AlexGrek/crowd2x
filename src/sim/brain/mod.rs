@@ -6,9 +6,10 @@
 //! perception   what it can see                  a cone in front, every 7th tick
 //! attention    which of that is news            faces in mind, fading; a reaction
 //! memory       what it remembers                (its own bed, so far)
-//! routines     arrange the priority list        Need (fed, hydrated, ...), Sleep, StayBusy
-//! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve, Play, Sleep
-//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, UseToilet, ..., Wait
+//! job          what it does for a living        its desk and its hours (`sim::job`)
+//! routines     arrange the priority list        Need (fed, hydrated, ...), Sleep, StayBusy, Work
+//! goals        the list, and who is in charge   Idle, Wander, Eat, Drink, Relieve, Play, Sleep, Work
+//! tasks        the small steps a goal queued    MoveTo, TakeItem, ConsumeItem, UseToilet, ..., Work, Wait
 //! action       what a task is doing with body   pathfinding and timing only
 //! ```
 //!
@@ -83,11 +84,12 @@ use super::background::{Due, Priority};
 use super::biology::{Biology, Event};
 use super::entity::Think;
 use super::inventory::Inventory;
+use super::job::Job;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal};
+use goals::{DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal, WorkGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -95,6 +97,10 @@ pub struct Brain {
     /// Who has been seen lately — what makes a sighting news or not.
     attention: Attention,
     memory: Memory,
+    /// What it does for a living, if anything: its own desk and its hours.
+    /// Handed out and taken back from outside the world
+    /// ([`Brain::hire`], [`Brain::dismiss`]), read by routines and goals.
+    job: Option<Job>,
     /// Run in this order every tick, as many as the brain was built with.
     ///
     /// Sized once, at construction, in the spawn pass — the one pass allowed to
@@ -137,6 +143,7 @@ impl Brain {
             perception: Perception::default(),
             attention: Attention::default(),
             memory: Memory::new(),
+            job: None,
             routines: routines.into_iter().collect(),
             goals: Goals::new(),
             executors: [const { None }; GoalId::COUNT],
@@ -156,8 +163,12 @@ impl Brain {
     }
 
     /// A person: keeps fed, hydrated, comfortable, entertained and rested,
-    /// stays busy; wanders, eats, drinks, uses the toilet, has a go on a
-    /// computer, sleeps in a bed.
+    /// stays busy, goes to work if it has a job; wanders, eats, drinks, uses
+    /// the toilet, has a go on a computer, sleeps in a bed, works at a desk.
+    ///
+    /// **A routine added here goes on the end.** A save keeps the routines'
+    /// state in this order, and [`Brain::restore`] reads a shorter list from
+    /// before a routine was added as the start of this one.
     pub fn human() -> Brain {
         Brain::new(
             [
@@ -168,6 +179,7 @@ impl Brain {
                 Routine::sleep(),
                 Routine::orders(),
                 Routine::stay_busy(),
+                Routine::work(),
             ],
             [
                 Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
@@ -177,6 +189,7 @@ impl Brain {
                 Box::new(PlayGoal::new()),
                 Box::new(SleepGoal::new()),
                 Box::new(SalvageGoal::new()),
+                Box::new(WorkGoal::new()),
             ],
         )
     }
@@ -211,6 +224,7 @@ impl Brain {
             perception,
             attention,
             memory,
+            job,
             routines,
             goals,
             executors,
@@ -222,6 +236,7 @@ impl Brain {
             last_result,
         } = self;
         let body = *walk.body();
+        let job = job.as_ref();
 
         // 0. Face the way it is going, and when it is time, look round and
         // take in what is news. Asleep, its eyes are shut: it sees nobody, and
@@ -256,6 +271,7 @@ impl Brain {
                 body: &body,
                 biology: biology.as_deref(),
                 memory,
+                job,
             };
             for routine in routines.iter_mut() {
                 routine.arrange(&routine_ctx, goals);
@@ -282,6 +298,7 @@ impl Brain {
                 memory,
                 tasks,
                 inventory: inventory.as_deref(),
+                job,
                 blocked_by: *blocked_by,
                 finished: *finished,
             };
@@ -422,6 +439,24 @@ impl Brain {
         self.memory.remember(memory::SALVAGE_ORDER, Recall::Cell(heap));
     }
 
+    /// Take on `job`, replacing any job before it. From outside the world
+    /// only — the spawn pass, which also says which desk is free
+    /// (`GameState::give_a_job`, [`crate::sim::Command::Hire`]).
+    pub fn hire(&mut self, job: Job) {
+        self.job = Some(job);
+    }
+
+    /// Lose the job, and say what it was. The routine stops wanting work on
+    /// the next tick, and whatever stretch at the desk was going is put down.
+    pub fn dismiss(&mut self) -> Option<Job> {
+        self.job.take()
+    }
+
+    /// What it does for a living, if anything.
+    pub fn job(&self) -> Option<&Job> {
+        self.job.as_ref()
+    }
+
     // --- saving ---
 
     /// The mind's state: what it has seen and remembers, what each routine
@@ -433,6 +468,7 @@ impl Brain {
             perception,
             attention,
             memory,
+            job,
             routines,
             goals,
             executors,
@@ -465,16 +501,19 @@ impl Brain {
             finished: finished.map(|task| task.save()),
             blocked_by: blocked_by.map(Uid::raw),
             last_result: last_result.save(),
+            job: job.map(|job| job.save()),
         }
     }
 
     /// Fill a brain just built for its kind ([`Brain::human`],
-    /// [`Brain::dog`]) with the state [`Brain::save`] kept. The routines must
-    /// be the ones saved, in the same order; an executor the save says
-    /// nothing about — one added since — starts fresh, as it would in a unit
-    /// spawned today.
+    /// [`Brain::dog`]) with the state [`Brain::save`] kept. The routines saved
+    /// must be the brain's own, in the same order — **or the start of them**:
+    /// a save from before a routine was added on the end has fewer, and the
+    /// ones it does not mention start fresh, as they would in a unit spawned
+    /// today. An executor the save says nothing about starts fresh the same
+    /// way.
     pub(crate) fn restore(&mut self, saved: &pb::Brain) -> Result<(), Invalid> {
-        if saved.routines.len() != self.routines.len() {
+        if saved.routines.len() > self.routines.len() {
             return invalid(format!(
                 "{} routines saved for a brain that has {}",
                 saved.routines.len(),
@@ -487,6 +526,7 @@ impl Brain {
         self.perception = Perception::restore(pb::required(&saved.perception, "perception")?)?;
         self.attention = Attention::restore(pb::required(&saved.attention, "attention")?)?;
         self.memory = Memory::restore(pb::required(&saved.memory, "memory")?)?;
+        self.job = saved.job.as_ref().map(Job::restore).transpose()?;
         self.goals = Goals::restore(pb::required(&saved.goals, "goals")?)?;
         for state in &saved.executors {
             let goal = GoalId::from(pb::known::<pb::GoalId>(state.goal, "executor")?);
@@ -1164,10 +1204,47 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
+    }
+
+    /// A save from before a routine was added on the end has a shorter list,
+    /// and loads: what it has is the start of today's, and the new routine
+    /// starts as it would in somebody spawned today. A list that is not the
+    /// start of today's — or longer than it — is not this brain.
+    #[test]
+    fn a_brain_saved_before_a_routine_was_added_on_the_end_still_loads() {
+        let mut saved = Brain::human();
+        saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
+        let mut saved = saved.save();
+        let added = saved.routines.pop().expect("a routine to leave out");
+        assert_eq!(added.name, "go to work");
+        saved.job = None;
+
+        let mut brain = Brain::human();
+        brain.restore(&saved).expect("the start of today's routines");
+        assert_eq!(brain.job(), None, "a save with no job is somebody with none");
+
+        let mut wrong = saved.clone();
+        wrong.routines.swap(0, 1);
+        assert!(Brain::human().restore(&wrong).is_err(), "out of order");
+        let mut long = saved.clone();
+        long.routines.extend([added.clone(), added]);
+        assert!(Brain::human().restore(&long).is_err(), "more than it has");
+    }
+
+    #[test]
+    fn a_job_is_kept_in_a_save_and_taken_away_by_dismissing() {
+        let job = crate::sim::job::Job::office(Point::new(4, 2));
+        let mut brain = Brain::human();
+        brain.hire(job);
+        let mut back = Brain::human();
+        back.restore(&brain.save()).unwrap();
+        assert_eq!(back.job(), Some(&job));
+        assert_eq!(back.dismiss(), Some(job));
+        assert_eq!(back.job(), None);
     }
 
     /// A human boxed in by crates, so it cannot wander off or turn round: it

@@ -60,7 +60,7 @@ impl Stage {
             Some(Task::OpenFridge(_)) => Stage::Opening,
             Some(Task::TakeItem(_)) => Stage::Taking,
             Some(Task::CloseFridge(_)) => Stage::Closing,
-            None | Some(Task::UseToilet(_) | Task::UseComputer(_) | Task::Sleep(_) | Task::Salvage(_)) => Stage::Finding,
+            None | Some(Task::UseToilet(_) | Task::UseComputer(_) | Task::Sleep(_) | Task::Salvage(_) | Task::Work(_)) => Stage::Finding,
         }
     }
 
@@ -627,6 +627,7 @@ mod tests {
             memory: &mut memory,
             tasks: &mut tasks,
             inventory: Some(&inventory),
+            job: None,
             blocked_by: None,
             finished: None,
         };
@@ -669,6 +670,7 @@ mod tests {
             memory: &mut memory,
             tasks: &mut tasks,
             inventory: Some(&inventory),
+            job: None,
             blocked_by: None,
             finished: None,
         };

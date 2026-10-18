@@ -25,6 +25,32 @@ fn round_trip(state: &GameState) -> GameState {
     restore(&SaveFiles::from_zip(&zip).expect("a save unzips")).expect("a save loads").state
 }
 
+#[test]
+fn every_worn_outfit_including_none_survives_a_save_and_can_change_after_loading() {
+    use crate::sim::clothing::Clothing;
+    let mut state = GameState::new(Map::new(Size::new(8, 8), FLOOR), 7);
+    let people: Vec<_> = Clothing::ALL.into_iter().map(|outfit| {
+        let uid = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert!(state.set_clothing(uid, outfit));
+        (uid, outfit)
+    }).collect();
+    let mut copy = round_trip(&state);
+    for (uid, outfit) in people {
+        assert_eq!(copy.entities().get(uid).unwrap().clothing(), Some(outfit));
+        assert!(copy.set_clothing(uid, Clothing::SwimsuitPink));
+        assert_eq!(copy.entities().get(uid).unwrap().clothing(), Some(Clothing::SwimsuitPink));
+    }
+}
+
+#[test]
+fn old_saves_recover_the_original_seeded_clothing() {
+    use crate::sim::clothing::Clothing;
+    let loaded = restore(&SaveFiles::from_zip(FORMAT_1).unwrap()).unwrap().state;
+    for person in loaded.entities().iter().filter(|entity| entity.kind() == Some(EntityType::Human)) {
+        assert_eq!(person.clothing(), Some(Clothing::initial(person.appearance_seed())));
+    }
+}
+
 /// Everything a save keeps of a world, as bytes — but the ground loaded
 /// round it, which says only what is in memory, and which each world's
 /// reclaiming sweeps let go of on their own schedule.
@@ -242,6 +268,42 @@ fn a_district_saved_in_the_middle_of_everything_carries_on_exactly() {
     side_by_side(&mut state, 600, |_, _| Input::new());
 }
 
+/// The same district on a Monday morning, saved with the bank's desks
+/// taken: workers on their way in and at their desks, hours half worked,
+/// one let go and one hired while the two worlds run.
+#[test]
+fn a_district_saved_in_the_middle_of_a_working_day_carries_on_exactly() {
+    let mut state = busy_district();
+    let at_work = |state: &GameState| {
+        state.entities().iter().any(|entity| {
+            entity.brain_fields().iter().any(|(name, value)| *name == "task" && value.starts_with("work at the computer"))
+        })
+    };
+    let mut ticks = 0;
+    while !at_work(&state) {
+        run(&mut state, 60);
+        ticks += 60;
+        assert!(ticks < 4000, "nobody sat down at a desk by {}", state.clock());
+    }
+    // Into the hour, so a stretch is part done when it is saved.
+    run(&mut state, 300);
+    assert!(state.workplaces().len() >= 12, "{} desks given out", state.workplaces().len());
+    let workers: Vec<Uid> = state.entities().iter().filter(|entity| entity.job().is_some()).map(|entity| entity.uid()).collect();
+    let idle = state.entities().iter().find(|entity| entity.job().is_none() && entity.kind() == Some(EntityType::Human)).map(|entity| entity.uid());
+    side_by_side(&mut state, 600, |tick, _| {
+        let mut input = Input::new();
+        if tick == 100 {
+            input.dismiss(workers[0]);
+        }
+        if tick == 200
+            && let Some(idle) = idle
+        {
+            input.hire(idle);
+        }
+        input
+    });
+}
+
 #[test]
 fn saving_a_loaded_world_gives_back_the_same_files() {
     let mut state = busy_district();
@@ -333,6 +395,20 @@ fn terrain_this_build_does_not_know_is_refused() {
 
 fn first_shard(files: &SaveFiles) -> pb::EntityShard {
     pb::EntityShard::decode(files.get("entities/0000.pb").unwrap()).unwrap()
+}
+
+#[test]
+fn an_unknown_outfit_in_a_save_is_refused_by_name() {
+    let mut files = small_save();
+    let mut shard = first_shard(&files);
+    let human = shard.slots.iter_mut().find_map(|record| match &mut record.kind {
+        Some(pb::Kind::Human(human)) => Some(human),
+        _ => None,
+    }).unwrap();
+    human.clothing = Some("missing outfit".to_string());
+    replace(&mut files, "entities/0000.pb", shard.encode_to_vec());
+    let error = refused(&files);
+    assert!(error.contains("entities/0000.pb") && error.contains("missing outfit"), "{error}");
 }
 
 #[test]

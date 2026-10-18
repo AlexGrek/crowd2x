@@ -99,6 +99,10 @@ timing; the sequential path below `PARALLEL_AT` cuts the same blocks. A budget o
 delays a route, never changes it. Details in `brain-engineer`'s `architecture.md`, "The
 route budget".
 
+**Hiring and letting go** come from outside too: `Command::Hire` / `Command::Dismiss`, applied
+in the spawn pass like a freeze, with the desks (`Workplaces`) kept by `GameState` the way
+`Homes` keeps beds (`jobs` skill).
+
 **Freezing is the one thing done to an entity from outside it.** `Command::Freeze` rides
 the same queue as a spawn and is applied in the spawn pass, so a freeze asked for this tick
 is in force before anything thinks; the think step then hands a frozen entity an
@@ -118,7 +122,7 @@ freely because it is asked about the one entity somebody has selected and never 
 `sim/saving.rs`, a child of `sim` so they read the private fields; `restore` builds the world
 the way `new` does — everything derived from the map derived again — then applies the saved
 clock, id RNG, boxes, street lights, switches (through `refresh_supply`), fridges, doors,
-beds, the arena (slots, holes, serials, free-list order), and who holds which cell. It does
+beds, desks, the arena (slots, holes, serials, free-list order), and who holds which cell. It does
 not prepare or reclaim chunks: the next spawn pass does, as it would have. The id allocator
 is `rng::WorldRng` (xoshiro256++, the stream `SmallRng` always was) so its state can be saved.
 
@@ -170,7 +174,9 @@ the length of a meal.
 
 **A second of watching is two minutes of world** (`TIME_SCALE`), so an hour goes by in
 thirty seconds and a day in twelve minutes. `GameState::clock` is that time of day,
-derived from `elapsed` rather than counted beside it, and the HUD's left corner shows it.
+derived from `elapsed` rather than counted beside it, and the HUD's left corner shows it
+(`day 1 Mon  08:00:00`). **Day 1 is a Monday** (`Clock::weekday`, `Weekday::is_weekend`):
+jobs keep to it (`jobs` skill).
 
 Which leaves a tick measuring two different things, and the unit a duration is written in
 says which:

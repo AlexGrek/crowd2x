@@ -43,6 +43,35 @@ pub struct Brain {
     pub blocked_by: Option<u64>,
     #[prost(enumeration = "TaskResult", tag = "13")]
     pub last_result: i32,
+    /// Its job, if it has one. Absent — every save from before there were
+    /// jobs — is somebody with none.
+    #[prost(message, optional, tag = "14")]
+    pub job: Option<Job>,
+}
+
+/// A job: what it is, where, and when (`crate::sim::job::Job`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Job {
+    #[prost(enumeration = "JobKind", tag = "1")]
+    pub kind: i32,
+    /// The desk, or whatever the job is done at.
+    #[prost(message, optional, tag = "2")]
+    pub workplace: Option<Cell>,
+    /// The hour the shift starts, 0-23...
+    #[prost(uint32, tag = "3")]
+    pub start: u32,
+    /// ...and the hour it ends, after `start`, the same day.
+    #[prost(uint32, tag = "4")]
+    pub end: u32,
+    /// Which days it is worked: bit 0 Monday to bit 6 Sunday.
+    #[prost(uint32, tag = "5")]
+    pub days: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum JobKind {
+    OfficeWorker = 0,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -163,6 +192,7 @@ pub enum GoalId {
     Play = 5,
     Sleep = 6,
     Salvage = 7,
+    Work = 8,
 }
 
 /// One goal executor's state.
@@ -238,7 +268,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub kind: Option<TaskKind>,
 }
 
@@ -264,6 +294,8 @@ pub enum TaskKind {
     CloseFridge(Timed),
     #[prost(message, tag = "10")]
     Salvage(Timed),
+    #[prost(message, tag = "11")]
+    Work(Timed),
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

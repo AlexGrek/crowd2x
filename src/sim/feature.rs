@@ -40,6 +40,10 @@ pub enum FeatureKind {
     Entertainment,
     /// Somewhere to sleep: a bed, slept *in* rather than beside.
     Bed,
+    /// Somewhere to work: a computer again, worked at from the chair beside
+    /// it. Which one is somebody's own desk is a job's business
+    /// ([`crate::sim::job`]); this only says what counts as a desk.
+    Workstation,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -67,7 +71,9 @@ pub enum Access {
 impl FeatureKind {
     pub const fn access(self) -> Access {
         match self {
-            FeatureKind::Food | FeatureKind::Water | FeatureKind::Entertainment => Access::Beside,
+            FeatureKind::Food | FeatureKind::Water | FeatureKind::Entertainment | FeatureKind::Workstation => {
+                Access::Beside
+            }
             // A bed is lain in, not stood next to, and one sleeper to a bed:
             // the toilet's arrangement, and for the same reason.
             FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
@@ -109,6 +115,11 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "computer",
         kind: FeatureKind::Entertainment,
+    },
+    // ...and a desk somebody works at, the way a fridge is food and water.
+    Feature {
+        name: "computer",
+        kind: FeatureKind::Workstation,
     },
     // The six beds the editor can place. Their art is 48x48 and has no
     // "somebody is in it" strip yet, so a bed does not show that it is being
@@ -159,6 +170,7 @@ pub struct Features {
     toilet: Vec<Point>,
     entertainment: Vec<Point>,
     bed: Vec<Point>,
+    workstation: Vec<Point>,
     /// Cells with passable terrain and exactly one blocking prop, a working
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
@@ -200,6 +212,7 @@ impl Features {
                     FeatureKind::Toilet => features.toilet.push(cell),
                     FeatureKind::Entertainment => features.entertainment.push(cell),
                     FeatureKind::Bed => features.bed.push(cell),
+                    FeatureKind::Workstation => features.workstation.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
@@ -208,7 +221,14 @@ impl Features {
         }
         // Sorted, so nothing that picks among them depends on the order the
         // props were painted in.
-        for cells in [&mut features.food, &mut features.water, &mut features.toilet, &mut features.entertainment, &mut features.bed] {
+        for cells in [
+            &mut features.food,
+            &mut features.water,
+            &mut features.toilet,
+            &mut features.entertainment,
+            &mut features.bed,
+            &mut features.workstation,
+        ] {
             cells.sort_unstable();
         }
         features
@@ -231,6 +251,7 @@ impl Features {
             FeatureKind::Toilet => &self.toilet,
             FeatureKind::Entertainment => &self.entertainment,
             FeatureKind::Bed => &self.bed,
+            FeatureKind::Workstation => &self.workstation,
         }
     }
 
@@ -310,7 +331,7 @@ mod tests {
             map.add_object(ObjectLayer::Props, prop(name, cell));
         }
         let features = Features::from_map(&map, &Supply::from_map(&map));
-        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment] {
+        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment, FeatureKind::Workstation] {
             assert_eq!(features.count(kind), 0, "{kind:?} works without being connected");
         }
         assert!(!features.is_enterable(Point::new(7, 2)), "a broken toilet is not entered either");
@@ -318,7 +339,7 @@ mod tests {
 
         crate::map::utilities::serve_everything(&mut map, Point::new(0, 9), Point::new(9, 9));
         let features = Features::from_map(&map, &Supply::from_map(&map));
-        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment] {
+        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment, FeatureKind::Workstation] {
             assert_eq!(features.count(kind), 1, "{kind:?}, once connected");
         }
     }
@@ -513,6 +534,23 @@ mod tests {
         assert_eq!(FeatureKind::Entertainment.access(), Access::Beside);
         assert!(!features.is_enterable(computer));
         assert_eq!(features.count(FeatureKind::Food), 0, "a computer is not lunch");
+    }
+
+    /// The same computer is a desk somebody can be given a job at, and is
+    /// worked from beside it too.
+    #[test]
+    fn a_computer_is_a_workstation_as_well_as_something_to_do() {
+        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let computer = Point::new(4, 8);
+        map.add_object(ObjectLayer::Props, prop("computer", computer));
+
+        let features = features_of(&map);
+        assert!(features.has(FeatureKind::Workstation, computer));
+        assert!(features.has(FeatureKind::Entertainment, computer));
+        assert_eq!(FeatureKind::Workstation.access(), Access::Beside);
+        assert_eq!(kinds_of("computer").collect::<Vec<_>>(), [FeatureKind::Entertainment, FeatureKind::Workstation]);
+        assert_eq!(features.count(FeatureKind::Workstation), 1);
+        assert!(!features.has(FeatureKind::Workstation, Point::new(0, 0)));
     }
 
     #[test]

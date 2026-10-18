@@ -285,6 +285,17 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// The outfit currently worn, separate from the stable appearance seed.
+    /// `None` means this kind does not wear clothing; `Clothing::None` is a
+    /// person who has taken their outfit off.
+    fn clothing(&self) -> Option<super::clothing::Clothing> {
+        None
+    }
+
+    fn clothing_mut(&mut self) -> Option<&mut super::clothing::Clothing> {
+        None
+    }
+
     /// What this kind would tell a debugger about itself, beyond the body.
     ///
     /// Name and value, in the order they should be read. The universal facts —
@@ -370,6 +381,34 @@ pub trait GameEntity: Send + Sync {
     fn order_salvage(&mut self, heap: Point) -> bool {
         let _ = heap;
         false
+    }
+
+    /// Take on `job`, its desk handed out with it, and say whether it was
+    /// taken. Called by the spawn pass only — for an arrival
+    /// (`GameState::give_a_job`) and for [`Command::Hire`] — which is what
+    /// keeps one desk to one worker. `false` — the default — for a kind that
+    /// cannot work: a dog must not be holding a desk a person could have had.
+    ///
+    /// [`Command::Hire`]: super::Command::Hire
+    fn hire(&mut self, job: super::job::Job) -> bool {
+        let _ = job;
+        false
+    }
+
+    /// Lose its job, and say what it was. From the spawn pass only
+    /// ([`Command::Dismiss`]), which gives the desk back.
+    ///
+    /// [`Command::Dismiss`]: super::Command::Dismiss
+    fn dismiss(&mut self) -> Option<super::job::Job> {
+        None
+    }
+
+    /// What it does for a living, if anything — for the job menu, and for
+    /// whatever hires and lets go. `None` for a kind that cannot work and for
+    /// somebody with no job alike; [`GameEntity::hire`] is what tells them
+    /// apart.
+    fn job(&self) -> Option<super::job::Job> {
+        None
     }
 
     /// This entity's own name, for a kind that has one.

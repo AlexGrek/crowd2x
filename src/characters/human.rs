@@ -1,8 +1,9 @@
 //! Layered paperdoll humans.
 //!
 //! Every layer is a full 16x16 frame drawn at the same position, so a character
-//! is just a stack of sprites in a fixed order. Adding a new hairstyle or outfit
-//! means dropping a PNG into `assets/human/` and listing it here — or, for a
+//! is just a stack of sprites in a fixed order. Adding a new hairstyle
+//! means dropping a PNG into `assets/human/` and listing it here; outfits also
+//! need a stable [`Clothing`] variant and a [`clothing_path`] mapping. For a
 //! new style or colour, adding a mask or palette to `tools/human_art.py`, which
 //! draws every hair and outfit layer and prints these lists.
 //!
@@ -14,9 +15,42 @@ use rand::prelude::*;
 
 use super::{depth_for, snap_to_texel, upscale, Character, ART_SCALE};
 use crate::render::WORLD_LAYER;
+use crate::sim::clothing::Clothing;
 
 pub const BASE: &str = "human/human_base.png";
+
+/// Art for every wearable outfit. Exhaustive so a new outfit needs a texture.
+pub const fn clothing_path(clothing: Clothing) -> Option<&'static str> {
+    match clothing {
+        Clothing::None => None,
+        Clothing::SwimsuitBlue => Some("human/clothes_swimsuit_blue.png"),
+        Clothing::SwimsuitPink => Some("human/clothes_swimsuit_pink.png"),
+        Clothing::SundressRed => Some("human/clothes_sundress_red.png"),
+        Clothing::SundressYellow => Some("human/clothes_sundress_yellow.png"),
+        Clothing::SundressGreen => Some("human/clothes_sundress_green.png"),
+        Clothing::SundressWhite => Some("human/clothes_sundress_white.png"),
+        Clothing::SundressTeal => Some("human/clothes_sundress_teal.png"),
+        Clothing::SundressOrange => Some("human/clothes_sundress_orange.png"),
+        Clothing::SundressPurple => Some("human/clothes_sundress_purple.png"),
+        Clothing::GownRed => Some("human/clothes_gown_red.png"),
+        Clothing::GownBlack => Some("human/clothes_gown_black.png"),
+        Clothing::GownNavy => Some("human/clothes_gown_navy.png"),
+        Clothing::GownPurple => Some("human/clothes_gown_purple.png"),
+        Clothing::GownWhite => Some("human/clothes_gown_white.png"),
+        Clothing::GownGreen => Some("human/clothes_gown_green.png"),
+        Clothing::ShortsWhiteJeans => Some("human/clothes_shorts_white_jeans.png"),
+        Clothing::ShortsRedKhaki => Some("human/clothes_shorts_red_khaki.png"),
+        Clothing::ShortsYellowJeans => Some("human/clothes_shorts_yellow_jeans.png"),
+        Clothing::ShortsTealCharcoal => Some("human/clothes_shorts_teal_charcoal.png"),
+        Clothing::TrousersWhiteCharcoal => Some("human/clothes_trousers_white_charcoal.png"),
+        Clothing::TrousersBlackJeans => Some("human/clothes_trousers_black_jeans.png"),
+        Clothing::TrousersGreenKhaki => Some("human/clothes_trousers_green_khaki.png"),
+        Clothing::TrousersNavyBrown => Some("human/clothes_trousers_navy_brown.png"),
+        Clothing::TrousersOrangeJeans => Some("human/clothes_trousers_orange_jeans.png"),
+    }
+}
 // The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.
+#[cfg(test)]
 pub(super) const CLOTHES: [&str; 24] = [
     "human/clothes_swimsuit_blue.png",
     "human/clothes_swimsuit_pink.png",
@@ -133,11 +167,7 @@ impl Look {
     pub fn random<R: Rng + ?Sized>(rng: &mut R) -> Self {
         Self {
             // A small chance of no outfit at all, so the base body is visible.
-            clothes: if rng.random_range(0..100) < 85 {
-                CLOTHES.choose(rng).copied()
-            } else {
-                None
-            },
+            clothes: clothing_path(Clothing::random(rng)),
             eyes: EYES.choose(rng).copied().expect("no eye assets listed"),
             hair: HAIR.choose(rng).copied().expect("no hair assets listed"),
         }
@@ -280,6 +310,23 @@ mod tests {
     use super::*;
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
+
+    #[test]
+    fn every_outfit_has_the_existing_art_and_the_original_seeded_appearance() {
+        let paths: Vec<_> = Clothing::ALL.into_iter().filter_map(clothing_path).collect();
+        assert_eq!(paths, CLOTHES);
+        for seed in 0..1000 {
+            let look = Look::random(&mut SmallRng::seed_from_u64(seed));
+            assert_eq!(look.clothes, clothing_path(Clothing::initial(seed)));
+            // Mirror the original draw order: mutable clothing must not
+            // reroll someone's eyes or hair when old saves are loaded.
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let clothes = if rng.random_range(0..100) < 85 { CLOTHES.choose(&mut rng).copied() } else { None };
+            let eyes = EYES.choose(&mut rng).copied().unwrap();
+            let hair = HAIR.choose(&mut rng).copied().unwrap();
+            assert_eq!((look.clothes, look.eyes, look.hair), (clothes, eyes, hair));
+        }
+    }
 
     /// Every human is the same number of layer slots, dressed or not. This is
     /// what makes one body recyclable into another: a look with no outfit has

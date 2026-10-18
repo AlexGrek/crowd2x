@@ -132,6 +132,7 @@ pub mod biology;
 pub mod brain;
 pub mod census;
 pub mod clock;
+pub mod clothing;
 pub mod door;
 pub mod entities;
 pub mod entity;
@@ -141,6 +142,7 @@ pub mod homes;
 pub mod identity;
 pub mod inventory;
 pub mod item;
+pub mod job;
 pub mod kinds;
 pub mod light_switch;
 pub mod log;
@@ -176,6 +178,7 @@ pub use fridge::Fridges;
 pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
+pub use job::{Job, JobKind, Workplaces};
 pub use kinds::{Dog, Facing, Human};
 pub use light_switch::LightSwitches;
 pub use log::Log;
@@ -284,6 +287,8 @@ pub enum Effect {
 /// arrive by different routes and are applied in different phases.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
+    /// Change what a person wears, independently of their identity.
+    SetClothing { uid: Uid, clothing: clothing::Clothing },
     Spawn { kind: EntityType, at: Point },
     Despawn(Uid),
     /// Hold an entity still, or let it go again.
@@ -333,6 +338,12 @@ pub enum Command {
     /// ([`GameState::order_salvage`]). The only thing that sends anybody to
     /// a heap yet: nothing in a brain wants scrap of its own accord.
     Salvage { uid: Uid, at: Point },
+    /// Give a unit a job: an office worker's, at the free desk nearest where
+    /// it stands ([`GameState::hire`]). The other way a job is handed out —
+    /// the first is arriving to find a desk free.
+    Hire(Uid),
+    /// Take a unit's job away and give its desk back ([`GameState::dismiss`]).
+    Dismiss(Uid),
 }
 
 /// One frame's worth of input to the simulation.
@@ -349,6 +360,10 @@ pub struct Input {
 }
 
 impl Input {
+    pub fn set_clothing(&mut self, uid: Uid, clothing: clothing::Clothing) -> &mut Input {
+        self.commands.push(Command::SetClothing { uid, clothing });
+        self
+    }
     pub fn new() -> Input {
         Input::default()
     }
@@ -400,6 +415,16 @@ impl Input {
 
     pub fn hold(&mut self, uid: Uid, item: Option<ItemKind>) -> &mut Input {
         self.commands.push(Command::Hold { uid, item });
+        self
+    }
+
+    pub fn hire(&mut self, uid: Uid) -> &mut Input {
+        self.commands.push(Command::Hire(uid));
+        self
+    }
+
+    pub fn dismiss(&mut self, uid: Uid) -> &mut Input {
+        self.commands.push(Command::Dismiss(uid));
         self
     }
 
@@ -510,6 +535,10 @@ pub struct GameState {
     /// Which beds have been given to whom. Written by the spawn pass and read
     /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
     homes: Homes,
+    /// Which desks have been given to whom, the same way: written by the
+    /// spawn pass, read by nothing in a tick — a worker knows its own desk,
+    /// see [`job`].
+    workplaces: Workplaces,
     /// Mints ids and seeds new entities. Seeded, so a run replays; and a
     /// named generator, so a save can keep its state ([`rng::WorldRng`]).
     rng: rng::WorldRng,
@@ -573,6 +602,7 @@ impl GameState {
             light_switches: LightSwitches::from_map(&map),
             supply_generation: 0,
             homes: Homes::new(),
+            workplaces: Workplaces::new(),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -857,6 +887,11 @@ impl GameState {
         &self.homes
     }
 
+    /// Which desks belong to whom. See [`job`].
+    pub fn workplaces(&self) -> &Workplaces {
+        &self.workplaces
+    }
+
     /// Who is standing where. Read-only from outside the tick: the two places
     /// allowed to write it are the spawn pass and the move step, which is what
     /// keeps it in step with the entity positions it describes.
@@ -959,6 +994,9 @@ impl GameState {
 
         self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
         self.give_a_bed(uid, at);
+        // After the bed: the key that comes with it says which desks are
+        // somewhere it may go.
+        self.give_a_job(uid, at);
         uid
     }
 
@@ -1026,6 +1064,86 @@ impl GameState {
         }
     }
 
+    /// Hand somebody a job at the nearest free desk it may use — a computer
+    /// nobody else works at, and not one in somebody else's house — if it is
+    /// the kind that works and there is one. **A desk is only given while it
+    /// is free**: an arrival that finds every desk taken is unemployed. The
+    /// only job there is so far is the office worker's.
+    ///
+    /// One scan of the desks per arrival, like [`GameState::give_a_bed`].
+    /// `false` when no job was given.
+    fn give_a_job(&mut self, uid: Uid, near: Point) -> bool {
+        let kind = JobKind::OfficeWorker;
+        let Some(entity) = self.entities.get_mut(uid) else {
+            return false;
+        };
+        let key = entity.body().home();
+        let (workplaces, properties) = (&self.workplaces, &self.properties);
+        let Some(desk) = self
+            .features
+            .nearest_where(kind.workplace(), near, |cell| !workplaces.is_taken(cell) && properties.may_use(cell, key))
+        else {
+            return false;
+        };
+        let job = Job {
+            kind,
+            workplace: desk,
+            shift: kind.shift(),
+        };
+        if !entity.hire(job) {
+            return false;
+        }
+        self.workplaces.claim(desk, uid);
+        self.log.push(format!(
+            "{uid} was hired as an {} at the computer at {}, {}",
+            kind.name(),
+            desk.x,
+            desk.y
+        ));
+        true
+    }
+
+    /// Give `uid` a job at the free desk nearest where it stands — see
+    /// [`Command::Hire`]. `false`, and a line in the log saying why, for
+    /// nobody, somebody already employed, a kind that cannot work, or no free
+    /// desk.
+    pub fn hire(&mut self, uid: Uid) -> bool {
+        let Some(entity) = self.entities.get(uid) else {
+            self.log.push(format!("hire: no such entity {uid}"));
+            return false;
+        };
+        if let Some(job) = entity.job() {
+            self.log.push(format!("hire: {uid} is already an {}", job.kind.name()));
+            return false;
+        }
+        let here = entity.center_position();
+        if !self.give_a_job(uid, here) {
+            self.log.push(format!("hire: no desk free for {uid}"));
+            return false;
+        }
+        true
+    }
+
+    /// Take `uid`'s job away and give its desk back — see
+    /// [`Command::Dismiss`]. `false`, and a line in the log, for nobody or
+    /// somebody with no job.
+    pub fn dismiss(&mut self, uid: Uid) -> bool {
+        let Some(entity) = self.entities.get_mut(uid) else {
+            self.log.push(format!("dismiss: no such entity {uid}"));
+            return false;
+        };
+        let Some(job) = entity.dismiss() else {
+            self.log.push(format!("dismiss: {uid} has no job"));
+            return false;
+        };
+        self.workplaces.release(uid);
+        self.log.push(format!(
+            "{uid} was let go from the computer at {}, {}",
+            job.workplace.x, job.workplace.y
+        ));
+        true
+    }
+
     /// Remove an entity. Returns whether there was one.
     pub fn despawn(&mut self, uid: Uid) -> bool {
         if let Some(slot) = self.entities.slot_of(uid) {
@@ -1037,8 +1155,10 @@ impl GameState {
                 // spawned on top of somebody else must not free their cell on
                 // its way out.
                 self.occupancy.release(gone.center_position(), uid);
-                // Its bed goes back to be given to the next arrival.
+                // Its bed goes back to be given to the next arrival, and its
+                // desk.
                 self.homes.release(uid);
+                self.workplaces.release(uid);
                 self.log.push(format!("despawned {uid}"));
                 true
             }
@@ -1171,6 +1291,18 @@ impl GameState {
         true
     }
 
+    /// Change an outfit even while paused or frozen. Kinds without clothing
+    /// and ids that have left the world refuse the request.
+    pub fn set_clothing(&mut self, uid: Uid, clothing: clothing::Clothing) -> bool {
+        let Some(worn) = self.entities.get_mut(uid).and_then(|entity| entity.clothing_mut()) else {
+            self.log.push(format!("set clothing: {uid} has no clothing"));
+            return false;
+        };
+        *worn = clothing;
+        self.log.push(format!("{uid} clothing set to {}", clothing.name()));
+        true
+    }
+
     /// Where an entity is, in cell units.
     pub fn position_of(&self, uid: Uid) -> Option<(f32, f32)> {
         self.entities.get(uid).map(|entity| entity.position())
@@ -1225,7 +1357,7 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// a new entity stand still for a frame reads as a bug in whatever spawned it.
 ///
 /// [`Command::Freeze`], [`Command::SetProcess`], [`Command::GiveItem`],
-/// [`Command::Hold`] and [`Command::SetTalent`] are drained here too. They
+/// [`Command::Hold`], [`Command::SetClothing`] and [`Command::SetTalent`] are drained here too. They
 /// change nothing structural, but arrive on the same queue and want the same
 /// timing: a freeze asked for this tick is in
 /// force before anything thinks, rather than one tick after the button was
@@ -1238,6 +1370,9 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 pub fn spawn_pass(state: &mut GameState, input: &Input) {
     for command in &input.commands {
         match command {
+            Command::SetClothing { uid, clothing } => {
+                state.set_clothing(*uid, *clothing);
+            }
             Command::Spawn { kind, at } => {
                 state.spawn(*kind, *at);
             }
@@ -1275,6 +1410,12 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::Salvage { uid, at } => {
                 state.order_salvage(*uid, *at);
+            }
+            Command::Hire(uid) => {
+                state.hire(*uid);
+            }
+            Command::Dismiss(uid) => {
+                state.dismiss(*uid);
             }
         }
     }
@@ -1952,6 +2093,48 @@ mod tests {
     }
 
     #[test]
+    fn outfits_can_change_without_changing_the_person_or_advancing_time() {
+        use clothing::Clothing;
+        let mut state = world();
+        let uid = state.spawn(EntityType::Human, Point::new(4, 4));
+        let other = state.spawn(EntityType::Human, Point::new(5, 4));
+        let person = state.entities().get(uid).unwrap();
+        let seed = person.appearance_seed();
+        let name = person.display_name();
+        let talents = *person.talents().unwrap();
+        let other_outfit = state.entities().get(other).unwrap().clothing();
+        let mut input = Input::new();
+        input.freeze(uid, true).set_clothing(uid, Clothing::GownBlack);
+        spawn_pass(&mut state, &input);
+        assert_eq!(state.tick(), 0);
+        assert_eq!(state.entities().get(uid).unwrap().clothing(), Some(Clothing::GownBlack));
+        run(&mut state, 100);
+        let person = state.entities().get(uid).unwrap();
+        assert_eq!(person.clothing(), Some(Clothing::GownBlack));
+        assert_eq!(person.appearance_seed(), seed);
+        assert_eq!(person.display_name(), name);
+        assert_eq!(*person.talents().unwrap(), talents);
+        assert_eq!(state.entities().get(other).unwrap().clothing(), other_outfit);
+        input.clear();
+        input.set_clothing(uid, Clothing::None);
+        spawn_pass(&mut state, &input);
+        assert_eq!(state.entities().get(uid).unwrap().clothing(), Some(Clothing::None));
+        input.clear();
+        input.set_clothing(uid, Clothing::SwimsuitBlue);
+        spawn_pass(&mut state, &input);
+        assert_eq!(state.entities().get(uid).unwrap().clothing(), Some(Clothing::SwimsuitBlue));
+    }
+
+    #[test]
+    fn clothing_commands_refuse_dogs_and_missing_units() {
+        let mut state = world();
+        let dog = state.spawn(EntityType::Dog, Point::new(4, 4));
+        assert_eq!(state.entities().get(dog).unwrap().clothing(), None);
+        assert!(!state.set_clothing(dog, clothing::Clothing::GownBlack));
+        assert!(!state.set_clothing(Uid::new(EntityType::Human, 99), clothing::Clothing::None));
+    }
+
+    #[test]
     fn talents_are_reproducible_stable_over_time_and_mutable_by_command() {
         let mut a = world();
         let mut b = world();
@@ -2555,9 +2738,10 @@ mod tests {
                 count(lines, "used the toilet"),
                 count(lines, "had a go on the computer"),
                 count(lines, "opened the fridge"),
+                count(lines, "worked an hour at the computer"),
             ]
         };
-        let (mut done_a, mut done_b) = ([0; 5], [0; 5]);
+        let (mut done_a, mut done_b) = ([0; 6], [0; 6]);
         // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
         // parched, bursting or bored for hours: the slowest need to come round
         // is boredom, ten world hours from a great time to bored. `run` ticks
@@ -2580,12 +2764,16 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        let [meals, drinks, reliefs, plays, opened] = done_a;
+        let [meals, drinks, reliefs, plays, opened, worked] = done_a;
         assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
         assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
         assert!(plays > 0, "nobody had a go on a computer, so that part of the brain never ran");
         assert!(opened > 0, "nobody opened a fridge, so the world step never applied an effect");
+        // The first two arrivals were given the two computers as desks, and
+        // from eight to two on a Monday they worked.
+        assert!(worked > 0, "nobody worked a shift, so the work part of the brain never ran");
+        assert_eq!(a.workplaces().len(), 2);
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
         // Looking round and meeting people, which changes nothing a decision
@@ -2700,6 +2888,85 @@ mod tests {
         assert!(!state.homes().is_owned(bed));
         let next = state.spawn(EntityType::Human, Point::new(3, 3));
         assert_eq!(state.homes().owner(bed), Some(next));
+    }
+
+    /// A world with a working computer in each of `desks` and nothing else.
+    fn with_desks(desks: &[Point], seed: u64) -> GameState {
+        let mut map = Map::new(Size::new(24, 17), FLOOR);
+        for &desk in desks {
+            crate::sim::testing::prop_at(&mut map, "computer", desk);
+        }
+        crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
+        GameState::new(map, seed)
+    }
+
+    #[test]
+    fn an_arrival_is_hired_at_the_nearest_free_computer_until_there_are_none() {
+        let (near, far) = (Point::new(2, 2), Point::new(20, 12));
+        let mut state = with_desks(&[near, far], 5);
+        let first = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.workplaces().worker(near), Some(first), "the nearer of the two");
+        let job = state.entities().get(first).unwrap().job().expect("hired");
+        assert_eq!((job.kind, job.workplace), (JobKind::OfficeWorker, near));
+        assert!(state.log.drain().iter().any(|line| line.contains("was hired as an office worker at the computer at 2, 2")));
+
+        let second = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.workplaces().worker(far), Some(second), "only a free desk is given");
+
+        let third = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.entities().get(third).unwrap().job(), None, "every desk taken: unemployed");
+        assert_eq!(state.workplaces().len(), 2);
+    }
+
+    #[test]
+    fn a_dog_is_not_hired_and_does_not_use_a_desk_up() {
+        let desk = Point::new(2, 2);
+        let mut state = with_desks(&[desk], 5);
+        state.spawn(EntityType::Dog, Point::new(3, 3));
+        assert!(state.workplaces().is_empty());
+        let human = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert_eq!(state.workplaces().worker(desk), Some(human));
+    }
+
+    #[test]
+    fn leaving_gives_the_desk_back_to_be_given_to_the_next_arrival() {
+        let desk = Point::new(2, 2);
+        let mut state = with_desks(&[desk], 5);
+        let first = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert!(state.despawn(first));
+        assert!(!state.workplaces().is_taken(desk));
+        let next = state.spawn(EntityType::Human, Point::new(3, 3));
+        assert_eq!(state.workplaces().worker(desk), Some(next));
+    }
+
+    /// The two commands the job menu sends: let somebody go, and the desk is
+    /// free; hire them back, and they have it again — the free desk nearest
+    /// where they stand.
+    #[test]
+    fn a_unit_can_be_let_go_and_hired_again_from_outside_the_world() {
+        let desk = Point::new(2, 2);
+        let mut state = with_desks(&[desk], 5);
+        let worker = state.spawn(EntityType::Human, Point::new(3, 3));
+        let dog = state.spawn(EntityType::Dog, Point::new(5, 5));
+        state.log.drain();
+
+        process_game_state(&mut state, 1.0 / 60.0, Input::new().dismiss(worker));
+        assert_eq!(state.entities().get(worker).unwrap().job(), None);
+        assert!(state.workplaces().is_empty());
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("was let go from the computer at 2, 2")), "{lines:?}");
+
+        process_game_state(&mut state, 1.0 / 60.0, Input::new().dismiss(worker).hire(dog));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("has no job")), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains("no desk free")), "a dog cannot work: {lines:?}");
+        assert!(state.workplaces().is_empty());
+
+        process_game_state(&mut state, 1.0 / 60.0, Input::new().hire(worker).hire(worker));
+        assert_eq!(state.workplaces().worker(desk), Some(worker));
+        assert_eq!(state.entities().get(worker).unwrap().job().map(|job| job.workplace), Some(desk));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains("is already an office worker")), "{lines:?}");
     }
 
     #[test]
@@ -3315,6 +3582,18 @@ mod tests {
             assert_eq!(state.spawn_from_spawners(), district.residents(), "seed {seed}");
             assert_eq!(state.len(), district.residents());
             assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
+            // The bank's computers are the district's desks, and nobody's
+            // house has one: every desk is given out, and every one is in the
+            // bank.
+            let desks = state.features().count(FeatureKind::Workstation);
+            assert!(desks >= 12, "seed {seed}: {desks} desks");
+            assert_eq!(state.workplaces().len(), desks.min(district.residents()), "seed {seed}");
+            for entity in state.entities().iter() {
+                if let Some(job) = entity.job() {
+                    assert!(district.bank.contains(job.workplace), "seed {seed}: a desk outside the bank");
+                    assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
+                }
+            }
 
             for house in &district.houses {
                 for &bed in &house.beds {

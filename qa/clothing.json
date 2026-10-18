@@ -1,0 +1,251 @@
+{
+  "name": "clothing can change independently of identity and follows sprites, portraits and saves",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "yard",
+        "file": "qa/fixtures/yard.json"
+      }
+    ]
+  },
+  "open": "yard",
+  "timeout": 120,
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 7,
+        "y": 4
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "look_at": {
+        "x": 7,
+        "y": 4
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "press": "clothing"
+    },
+    { "note": "the expanded panel blocks the HUD menu button underneath its empty header" },
+    { "mouse": { "x": 300, "y": 12 } },
+    { "click": {} },
+    { "expect_state": "game" },
+    { "expect_selected": "human" },
+    { "shot": "clothing menu" },
+    { "mouse": { "x": 105, "y": 78 } },
+    { "click": {} },
+    {
+      "expect_clothing": {
+        "worn": "gown black",
+        "drawn": true
+      }
+    },
+    {
+      "expect_text": "wearing: gown black"
+    },
+    {
+      "shot": "outfit choices"
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "shot": "wearing the black gown"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "press": "none"
+    },
+    {
+      "expect_clothing": {
+        "worn": "none",
+        "drawn": true
+      }
+    },
+    { "press": "clothing" },
+    { "shot": "without an outfit" },
+    { "press": "clothing" },
+    {
+      "press": "trousers orange jeans"
+    },
+    {
+      "expect_clothing": {
+        "worn": "trousers orange jeans",
+        "drawn": true
+      }
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "shot": "changed while frozen"
+    },
+    {
+      "note": "park the selected body, change its clothing offscreen, then bring it back"
+    },
+    {
+      "look_at": {
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "press": "swimsuit blue"
+    },
+    {
+      "expect_clothing": {
+        "worn": "swimsuit blue",
+        "drawn": false
+      }
+    },
+    {
+      "look_at": {
+        "x": 7,
+        "y": 4
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_clothing": {
+        "worn": "swimsuit blue",
+        "drawn": true
+      }
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "press": "save"
+    },
+    {
+      "name": "new outfit"
+    },
+    {
+      "key": "enter"
+    },
+    {
+      "expect_saves": {
+        "count": 1
+      }
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "press": "gown red"
+    },
+    {
+      "expect_clothing": {
+        "worn": "gown red",
+        "drawn": true
+      }
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "press": "Load"
+    },
+    {
+      "press": "new outfit"
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "select": 0
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_clothing": {
+        "worn": "swimsuit blue",
+        "drawn": true
+      }
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "press": "none"
+    },
+    {
+      "expect_clothing": {
+        "worn": "none",
+        "drawn": true
+      }
+    },
+    {
+      "note": "dogs have no human clothing choices"
+    },
+    {
+      "spawn": {
+        "kind": "dog",
+        "x": 8,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "expect_text": "no clothing"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "expect_selected": null
+    }
+  ]
+}

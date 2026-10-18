@@ -176,10 +176,14 @@ impl Plugin for QaPlugin {
             .add_systems(Startup, (connect_virtual_gamepad, apply_present_mode, park_cursor))
             // After the input plugins have cleared last frame's state, so a
             // press made here is still `just_pressed` when the game reads it
-            // in `Update`.
+            // in `Update`. Before UI focus too: otherwise an injected click
+            // can miss `just_pressed` before a plain button sees it.
             .add_systems(
                 PreUpdate,
-                drive.after(bevy::input::InputSystems).run_if(unfinished),
+                drive
+                    .after(bevy::input::InputSystems)
+                    .before(bevy::ui::UiSystems::Focus)
+                    .run_if(unfinished),
             );
     }
 }
@@ -489,6 +493,10 @@ type DrawnInTheWorld = Or<(With<Sprite>, With<Text2d>)>;
 /// is aimed with.
 #[derive(SystemParam)]
 struct Checks<'w, 's> {
+    assets: Res<'w, AssetServer>,
+    paperdolls: Query<'w, 's, (&'static Actor, &'static crate::characters::human::Paperdoll)>,
+    clothing_sprites: Query<'w, 's, (&'static Sprite, &'static Visibility)>,
+    clothing_portraits: Query<'w, 's, (&'static ImageNode, &'static Visibility), With<crate::game::unitpanel::ClothingPortrait>>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     state: Res<'w, State<AppState>>,
     maps: Res<'w, Maps>,
@@ -1528,6 +1536,38 @@ fn perform(
                 info!("qa: waiting for {count} saves ({quick:?} quick); there are {} ({quicks} quick)", saves.len());
             }
             Ok(if matches { Next::Now } else { Next::Again })
+        }
+
+        Step::ExpectClothing { worn, drawn } => {
+            use crate::characters::human;
+            use crate::sim::clothing::Clothing;
+            let outfit = Clothing::from_name(worn).ok_or(format!("unknown clothing {worn:?}"))?;
+            let uid = intents.selected.get().ok_or("no selected unit")?;
+            let entity = intents.sim.as_ref().and_then(|sim| sim.0.entities().get(uid)).ok_or("no selected entity")?;
+            if entity.clothing() != Some(outfit) {
+                return Err(format!("expected clothing {worn}, found {:?}", entity.clothing()));
+            }
+            let path = human::clothing_path(outfit);
+            let expected = path.and_then(|path| checks.assets.get_handle::<Image>(path));
+            let matches = |image: &Handle<Image>, visibility: &Visibility| {
+                if path.is_none() { *visibility == Visibility::Hidden }
+                else { *visibility != Visibility::Hidden && expected.as_ref() == Some(image) }
+            };
+            let (portrait, visibility) = checks.clothing_portraits.single().map_err(|_| "missing clothing portrait")?;
+            if !matches(&portrait.image, visibility) {
+                return Err(format!("portrait does not show {worn}"));
+            }
+            let doll = checks.paperdolls.iter().find(|(actor, _)| actor.0 == uid);
+            if *drawn {
+                let (_, doll) = doll.ok_or("selected person has no world sprite")?;
+                let (sprite, visibility) = checks.clothing_sprites.get(doll.layers[1]).map_err(|_| "missing world clothing layer")?;
+                if !matches(&sprite.image, visibility) {
+                    return Err(format!("world sprite does not show {worn}"));
+                }
+            } else if doll.is_some() {
+                return Err("selected person should be offscreen".to_string());
+            }
+            Ok(Next::Now)
         }
 
         Step::ExpectSelected(wanted) => {

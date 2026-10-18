@@ -95,6 +95,8 @@ impl Process for Bladder {
             Event::Slept { .. } => {}
             // Nor does company.
             Event::Met => {}
+            // Nor does a day at the desk.
+            Event::Worked { .. } => {}
         }
     }
 

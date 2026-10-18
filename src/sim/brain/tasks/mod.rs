@@ -15,6 +15,7 @@ pub mod take_item;
 pub mod use_computer;
 pub mod use_toilet;
 pub mod wait;
+pub mod work;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
@@ -26,6 +27,7 @@ pub use take_item::TakeItem;
 pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;
 pub use wait::Wait;
+pub use work::Work;
 
 use crate::sim::biology::Experience;
 

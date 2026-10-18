@@ -72,6 +72,61 @@ pub const BEDTIME: u32 = 22;
 /// The hour of the morning at which night ends: six o'clock.
 pub const GETTING_UP: u32 = 6;
 
+/// A day of the week. **Day one is a Monday**, so a world opens at the start
+/// of a working week and its first weekend is days six and seven.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(u8)]
+pub enum Weekday {
+    Monday = 0,
+    Tuesday = 1,
+    Wednesday = 2,
+    Thursday = 3,
+    Friday = 4,
+    Saturday = 5,
+    Sunday = 6,
+}
+
+impl Weekday {
+    pub const ALL: [Weekday; 7] = [
+        Weekday::Monday,
+        Weekday::Tuesday,
+        Weekday::Wednesday,
+        Weekday::Thursday,
+        Weekday::Friday,
+        Weekday::Saturday,
+        Weekday::Sunday,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Weekday::Monday => "Monday",
+            Weekday::Tuesday => "Tuesday",
+            Weekday::Wednesday => "Wednesday",
+            Weekday::Thursday => "Thursday",
+            Weekday::Friday => "Friday",
+            Weekday::Saturday => "Saturday",
+            Weekday::Sunday => "Sunday",
+        }
+    }
+
+    /// Three letters, `Mon`: what the HUD and a schedule are written with.
+    pub const fn short(self) -> &'static str {
+        match self {
+            Weekday::Monday => "Mon",
+            Weekday::Tuesday => "Tue",
+            Weekday::Wednesday => "Wed",
+            Weekday::Thursday => "Thu",
+            Weekday::Friday => "Fri",
+            Weekday::Saturday => "Sat",
+            Weekday::Sunday => "Sun",
+        }
+    }
+
+    pub const fn is_weekend(self) -> bool {
+        matches!(self, Weekday::Saturday | Weekday::Sunday)
+    }
+}
+
 /// How long `world_seconds` of world takes to watch, in watched seconds.
 ///
 /// For the durations that are *measured* on the watched clock because they are
@@ -112,6 +167,12 @@ impl Clock {
     /// watching, so this moves often enough to be worth showing.
     pub fn day(&self) -> u32 {
         (self.since_midnight / DAY as f64) as u32 + 1
+    }
+
+    /// The day of the week: day one is a Monday, and the week comes round
+    /// every seven.
+    pub fn weekday(&self) -> Weekday {
+        Weekday::ALL[((self.day() - 1) % 7) as usize]
     }
 
     /// The hour of the day, 0 to 23.
@@ -161,10 +222,11 @@ impl Clock {
     }
 }
 
-/// `day 1  08:03:20` — what the HUD shows.
+/// `day 1 Mon  08:03:20` — what the HUD shows. The weekday is there because
+/// a job keeps to it: an office is empty on `Sat` and `Sun`.
 impl fmt::Display for Clock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "day {}  {}", self.day(), self.time())
+        write!(f, "day {} {}  {}", self.day(), self.weekday().short(), self.time())
     }
 }
 
@@ -245,6 +307,34 @@ mod tests {
         assert!(at(21.5).is_night(), "half past five");
         assert!(!at(22.5).is_night(), "half past six in the morning");
         assert_eq!(at(22.5).hour(), GETTING_UP);
+    }
+
+    #[test]
+    fn day_one_is_a_monday_and_the_week_comes_round_every_seven_days() {
+        let on_day = |day: u32| Clock::after_watching(((day - 1) as f64 * DAY as f64) / TIME_SCALE as f64);
+        assert_eq!(on_day(1).weekday(), Weekday::Monday);
+        assert_eq!(on_day(5).weekday(), Weekday::Friday);
+        assert_eq!(on_day(8).weekday(), Weekday::Monday);
+        assert_eq!(on_day(8).day(), 8);
+        // Midnight turns the day over, not opening time.
+        let before_midnight = Clock::after_watching(((16.0 * HOUR) / TIME_SCALE) as f64 - 1.0);
+        let after_midnight = Clock::after_watching(((16.0 * HOUR) / TIME_SCALE) as f64 + 1.0);
+        assert_eq!(before_midnight.weekday(), Weekday::Monday);
+        assert_eq!(after_midnight.weekday(), Weekday::Tuesday);
+    }
+
+    #[test]
+    fn saturday_and_sunday_are_the_weekend_and_nothing_else_is() {
+        let weekend: Vec<Weekday> = Weekday::ALL.into_iter().filter(|day| day.is_weekend()).collect();
+        assert_eq!(weekend, [Weekday::Saturday, Weekday::Sunday]);
+        let on_day = |day: u32| Clock::after_watching(((day - 1) as f64 * DAY as f64) / TIME_SCALE as f64);
+        assert!(on_day(6).weekday().is_weekend() && on_day(7).weekday().is_weekend());
+        assert!(!on_day(1).weekday().is_weekend());
+    }
+
+    #[test]
+    fn the_hud_says_which_day_of_the_week_it_is() {
+        assert_eq!(Clock::after_watching(0.0).to_string(), "day 1 Mon  08:00:00");
     }
 
     /// The conversion both ways round, since every duration in the brain is

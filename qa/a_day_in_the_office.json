@@ -28,6 +28,9 @@
     { "note": "a whole day from opening time, sampled every world hour: 1920 ticks an hour" },
     { "observe": { "name": "a day", "ticks": 46080, "every": 1920 } },
     { "expect_entities": 6 },
+    { "note": "the first two to arrive were given the two computers as desks, and the goals column of" },
+    { "note": "the observation has them at work from nine to five; the log panel only holds the last" },
+    { "note": "few lines, so qa/office_job.json is the test that asserts an hour was worked" },
 
     { "note": "the needs with a prop for them are kept in hand all day: the crowd's average" },
     { "note": "ran 12-60 for hunger, 16-56 thirst, 13-55 bladder when this was written" },

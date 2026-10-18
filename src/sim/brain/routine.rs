@@ -33,10 +33,11 @@
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
+use crate::sim::job::Job;
 
 use super::goal::Goals;
 use super::memory::Memory;
-use super::routines::{Need, NeedRoutine, OrdersRoutine, SleepRoutine, StayBusyRoutine};
+use super::routines::{Need, NeedRoutine, OrdersRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -52,6 +53,9 @@ pub struct RoutineCtx<'a> {
     /// What it remembers — an order it was given, so far
     /// ([`OrdersRoutine`]).
     pub memory: &'a Memory,
+    /// Its job, if it has one — when the shift is, for
+    /// [`WorkRoutine`](super::routines::WorkRoutine).
+    pub job: Option<&'a Job>,
 }
 
 /// What one routine does.
@@ -78,6 +82,7 @@ pub enum Routine {
     Sleep(SleepRoutine),
     StayBusy(StayBusyRoutine),
     Orders(OrdersRoutine),
+    Work(WorkRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -104,12 +109,18 @@ impl Routine {
         Routine::Orders(OrdersRoutine)
     }
 
+    /// Go to work while the shift is due, if it has a job.
+    pub const fn work() -> Routine {
+        Routine::Work(WorkRoutine::new())
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
             Routine::Sleep(routine) => routine.name(),
             Routine::StayBusy(routine) => routine.name(),
             Routine::Orders(routine) => routine.name(),
+            Routine::Work(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -122,6 +133,7 @@ impl Routine {
             Routine::Sleep(routine) => routine.arrange(ctx, goals),
             Routine::StayBusy(routine) => routine.arrange(ctx, goals),
             Routine::Orders(routine) => routine.arrange(ctx, goals),
+            Routine::Work(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -133,6 +145,7 @@ impl Routine {
             Routine::Sleep(routine) => routine.debug_fields(),
             Routine::StayBusy(routine) => routine.debug_fields(),
             Routine::Orders(routine) => routine.debug_fields(),
+            Routine::Work(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -149,6 +162,7 @@ impl Routine {
             Routine::Sleep(routine) => routine.is_committed(),
             Routine::StayBusy(StayBusyRoutine) => false,
             Routine::Orders(OrdersRoutine) => false,
+            Routine::Work(routine) => routine.is_on_shift(),
             // A test's dial is set from outside every tick; nothing to keep.
             #[cfg(test)]
             Routine::Dial(_) => false,
@@ -165,6 +179,7 @@ impl Routine {
         match self {
             Routine::Need(routine) => routine.set_committed(saved.committed),
             Routine::Sleep(routine) => routine.set_committed(saved.committed),
+            Routine::Work(routine) => routine.set_on_shift(saved.committed),
             Routine::StayBusy(_) | Routine::Orders(_) => {}
             #[cfg(test)]
             Routine::Dial(_) => {}
