@@ -14,12 +14,11 @@ use crate::state::AppState;
 use crate::ui::nav::{Activated, Cancelled, Focusable, NavSystems};
 use crate::ui::{button, label, FONT_BODY, FONT_TITLE, PANEL, TEXT_ACCENT, TEXT_DIM};
 
-/// One way in, because there is only one thing to choose first: a map. The
-/// browser is where that choice is made, and it is also where a map is edited,
-/// copied or thrown away.
-const ENTRIES: [(&str, MenuAction); 3] = [
+/// Start a map, resume a save, or adjust application preferences.
+const ENTRIES: [(&str, MenuAction); 4] = [
     ("Play", MenuAction::Maps),
     ("Load", MenuAction::Saves),
+    ("Settings", MenuAction::Settings),
     ("Quit", MenuAction::Quit),
 ];
 
@@ -28,6 +27,7 @@ enum MenuAction {
     Maps,
     /// The Load screen: the only way back into a saved game.
     Saves,
+    Settings,
     Quit,
 }
 
@@ -116,6 +116,7 @@ fn choose(
         match entries.get(*entity) {
             Ok(MenuAction::Maps) => next.set(AppState::Maps),
             Ok(MenuAction::Saves) => next.set(AppState::Saves),
+            Ok(MenuAction::Settings) => next.set(AppState::Settings),
             Ok(MenuAction::Quit) => {
                 exit.write(AppExit::Success);
             }

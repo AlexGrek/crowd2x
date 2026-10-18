@@ -699,7 +699,8 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// (`computer at 12, 4`, `scrap bin at 30, 2`), the hours and days, and —
 /// `now` — what it is doing about them at `clock`, which is the line worth
 /// watching: on the way in, at the desk, out collecting scrap or storing it,
-/// on watch at a gate, seeing to the dead, away from it for something more pressing, or off.
+/// on watch at a gate, seeing to the dead, away from it for something more
+/// pressing, or off.
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();

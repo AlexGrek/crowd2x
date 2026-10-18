@@ -23,3 +23,7 @@ __pycache__/
 
 # saved games (`src/save/`): somebody's games, not source
 /.saves
+
+# Local application preferences
+/.settings.json
+/.settings.json.tmp

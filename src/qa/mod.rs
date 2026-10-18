@@ -513,6 +513,7 @@ struct Checks<'w, 's> {
     plain_buttons: Query<'w, 's, Entity, (With<Button>, Without<Focusable>)>,
     scope: Res<'w, Scope>,
     zoom: Res<'w, PixelZoom>,
+    cameras: Query<'w, 's, &'static crate::render::CameraPan, With<crate::render::WorldCamera>>,
     speed: Res<'w, GameSpeed>,
     /// The sprites themselves, not the map that tracks them: a count taken
     /// from the bookkeeping would pass while nothing had actually reached the
@@ -1310,6 +1311,13 @@ fn perform(
             (actual == *wanted)
                 .then_some(Next::Now)
                 .ok_or(format!("expected zoom x{wanted}, found x{actual}"))
+        }
+
+        Step::ExpectCamera { x, y } => {
+            let camera = checks.cameras.single().map_err(|error| error.to_string())?.0 / background::TILE;
+            ((x[0]..=x[1]).contains(&camera.x) && (y[0]..=y[1]).contains(&camera.y))
+                .then_some(Next::Now)
+                .ok_or(format!("expected camera x in {x:?}, y in {y:?}, found {camera:?}"))
         }
 
         Step::ExpectMap(name) => checks

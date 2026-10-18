@@ -14,6 +14,7 @@ mod qa;
 mod render;
 mod save;
 mod saves;
+mod settings;
 mod sim;
 mod state;
 mod ui;
@@ -59,6 +60,7 @@ fn main() -> AppExit {
             animation::AnimationPlugin,
             characters::CharacterPlugin,
             menu::MainMenuPlugin,
+            settings::SettingsPlugin,
             browser::BrowserPlugin,
             editor::EditorPlugin,
             game::GamePlugin,

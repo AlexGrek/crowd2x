@@ -182,8 +182,8 @@ fn clamp_to_reach(centre: Vec2) -> Vec2 {
     centre.clamp(Vec2::splat(-reach), Vec2::splat(reach))
 }
 
-/// WASD, the arrows, the d-pad and the left stick all move the camera; the
-/// clamp then keeps it over the map.
+/// WASD, the arrows, the d-pad, the left stick and optional screen-edge
+/// scrolling move the camera; the clamp then keeps it over the map.
 ///
 /// One system rather than a move and a separate clamp, because the clamp has
 /// to run after a zoom as well as after a move: zooming out at the edge of the
@@ -204,13 +204,20 @@ fn move_camera(
     zoom: Res<PixelZoom>,
     current: Res<CurrentMap>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    settings: Res<crate::settings::Settings>,
+    scope: Res<Scope>,
+    interactions: Query<&Interaction>,
     mut cameras: Query<&mut CameraPan, With<WorldCamera>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
 
-    let mut dir = Vec2::ZERO;
+    let mut dir = crate::settings::edge_scroll(
+        window,
+        &settings,
+        scope.0 != 0 || interactions.iter().any(|interaction| *interaction != Interaction::None),
+    );
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
         dir.y += 1.0;
     }

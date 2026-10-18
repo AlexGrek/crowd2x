@@ -188,6 +188,7 @@ def run_one(path: Path, verbose: bool, release: bool) -> bool:
         "CROWD2X_QA": str(path),
         "CROWD2X_MAPS": str(maps),
         "CROWD2X_SAVES": str(saves),
+        "CROWD2X_SETTINGS": str(maps.parent / "settings.json"),
         "CROWD2X_QA_SHOTS": str(shots),
         "CROWD2X_QA_PERF": str(perf),
         "CROWD2X_QA_OBSERVE": str(observed),

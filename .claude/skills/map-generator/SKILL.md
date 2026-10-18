@@ -28,8 +28,8 @@ the main under the middle one, lamps in the road's outer lanes (`CURB` = 1 in fr
 `WIDTH` x `HEIGHT` = 131 x 100. **Lots**: 30 blocks less the bank's two and the shops' one
 leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (6: the warehouse, `RESTAURANTS` = 4, the crematorium) take theirs first, `HOUSES`
 = 92 of the rest (about 86%), and `EMPTY_LOTS` = `RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES`
-(15) are parks — all derived, so a geometry change only needs `HOUSES` chosen. Seed 7 has 136
-residents (0 has 135, 42 has 136). Helpers:
+(10) are parks — all derived, so a geometry change only needs `HOUSES` chosen. Seed 7 has 137 residents (0 has 134, 42 has 133;
+they moved with the restaurants and the crematorium). Helpers:
 `block_origin`, `lots_of` (each `Lot` knows its two street-facing `outer` sides, and
 `edge_sides()` — those facing the street round the edge, with the wasteland beyond), `Rect`
 (`interior`, `on_edge`, `cells`, `contains`), `Side::outward`, `place_in`, `door`, `build`
@@ -166,7 +166,7 @@ building is in all of them at once.
 
 QA: `qa/district_browser.json` (the button), `qa/district_lighting.json` (GPU vs CPU lightmap
 on a district), `qa/perf_district.json` (a tick with 1000 and 4000 wanderers on a district,
-where routes cross roads; it tops seed 7's 136 residents up to 1000, so it names the count).
+where routes cross roads; it tops seed 7's 137 residents up to 1000, so it names the count).
 `qa/district.json` observed a day with seed 7's resident count and camera spots hard-coded and
 needed re-adjusting with every generator change: deleted when the district grew. The sim
 side: `sim::tests::everybody_in_a_district_moves_into_a_bed_of_their_own_house` (beds, every

@@ -444,6 +444,8 @@ pub enum Step {
     /// camera, so it cannot be read off a screenshot without counting texels —
     /// which is exactly the kind of thing a test should not have to do.
     ExpectZoom(f32),
+    /// Camera position in cell units, bounded to allow for real-time panning.
+    ExpectCamera { x: [f32; 2], y: [f32; 2] },
     /// The focused widget's label, which is how a test says "the highlight is
     /// where I think it is" without knowing about entities.
     ExpectFocus(String),

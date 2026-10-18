@@ -154,7 +154,8 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
 
 ### Screens and interface
 
-`AppState` (`src/state.rs`) is `MainMenu`, `Maps` (the map browser), `Editor` or `Game`.
+`AppState` (`src/state.rs`) is `MainMenu`, `Settings`, `Maps` (the map browser),
+`Saves`, `Editor` or `Game`.
 Screen entities carry `DespawnOnExit(..)` instead of hand-written teardown, which is also
 why drawing a map takes the state it is being drawn for: the editor and the game draw the
 same map from the same palettes and each takes its own sprites away on the way out.
@@ -175,6 +176,14 @@ UI is rendered by the **upscale camera**, not the world camera. That is forced:
 is a window, and the world camera renders to an off-screen image, so `Interaction` would
 never fire there. `UiScale` is `PIXEL_SCALE`, so all `Val::Px` and font sizes are in
 canvas pixels (`ui::FONT_BODY` is 6, not 24).
+
+`Settings` is reached from the main menu. `src/settings.rs` stores application
+preferences in `.settings.json` (`CROWD2X_SETTINGS` overrides the path; QA isolates
+it per test). Screen edge scrolling defaults to off and applies to both the game
+and editor: a 16-window-pixel band pans with the existing camera controls and
+speed. UI hover, an open modal, an unfocused window, or a pointer outside the
+window suppresses edge scrolling. Changes save immediately; a failed save shows
+an error and retains the previous preference.
 
 #### One highlight, three devices (`src/ui/nav.rs`)
 

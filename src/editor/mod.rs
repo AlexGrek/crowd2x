@@ -800,7 +800,7 @@ fn track_cursor(
     }
 }
 
-/// WASD / arrows and the right stick pan the camera.
+/// WASD / arrows, the right stick and optional screen-edge scrolling pan the camera.
 ///
 /// This writes `CameraPan` and never the transform: `render` owns the transform
 /// and keeps it snapped to whole pixels.
@@ -808,9 +808,19 @@ fn pan_camera(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     time: Res<Time>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    settings: Res<crate::settings::Settings>,
+    scope: Res<crate::ui::nav::Scope>,
+    interactions: Query<&Interaction>,
     mut cameras: Query<&mut CameraPan, With<WorldCamera>>,
 ) {
-    let mut dir = Vec2::ZERO;
+    let mut dir = windows.single().map_or(Vec2::ZERO, |window| {
+        crate::settings::edge_scroll(
+            window,
+            &settings,
+            scope.0 != 0 || interactions.iter().any(|interaction| *interaction != Interaction::None),
+        )
+    });
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
         dir.y += 1.0;
     }
