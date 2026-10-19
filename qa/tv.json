@@ -1,0 +1,75 @@
+{
+  "name": "a bored human watches the TV from a seat in view of it",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "lounge",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B---------..",
+            ".........-..",
+            ".........-..",
+            ".........-..",
+            "............",
+            "............",
+            "............"
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 24 }, "kind": "transformer" },
+              { "at": { "x": 456, "y": 168 }, "kind": "tv" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "lounge",
+  "steps": [
+    { "note": "the TV stands in cell (9, 3), wired to the transformer; nothing else here is any use" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "expect_prop_in_use": { "kind": "tv", "in_use": false } },
+
+    { "spawn": { "kind": "human", "x": 2, "y": 3 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "every need but boredom switched off, so this is a test about the TV" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "tick": 1 },
+
+    { "note": "fun runs down over the hours; a bored unit goes to a seat in view and watches" },
+    { "tick": 28000 },
+    { "expect_log": "watched the TV at 9, 3" },
+    { "press": "brains" },
+    { "shot": "after a programme on the TV" }
+  ]
+}

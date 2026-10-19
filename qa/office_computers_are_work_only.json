@@ -1,0 +1,36 @@
+{
+  "name": "office computers remain work-only when unstaffed and outside office hours",
+  "state": "game",
+  "given": {
+    "maps": [{ "name": "office", "file": "qa/fixtures/office.json" }]
+  },
+  "open": "office",
+  "steps": [
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 1 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "spawn": { "kind": "human", "x": 7, "y": 4 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "expect_log": "was hired as an office worker" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "press": "job" },
+    { "press": "dismiss" },
+    { "tick": 2 },
+    { "expect_text": "unemployed" },
+    { "note": "Fun runs for over fourteen world hours. A bored unemployed human must never game on either office computer, including after the shift ends." },
+    { "tick": 28000 },
+    { "expect_stat": { "stat": "fun", "max": 1.0 } },
+    { "expect_prop_in_use": { "kind": "computer", "in_use": false } },
+    { "press": "brains" },
+    { "shot": "bored and wandering: office computers are work-only" },
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

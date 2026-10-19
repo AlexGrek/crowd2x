@@ -27,7 +27,7 @@ use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
 use super::tasks::{
-    CloseFridge, ConsumeItem, Cremate, Deposit, MoveTo, TakeBody, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait,
+    CloseFridge, ConsumeItem, Cremate, Deposit, MoveTo, TakeBody, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait, WatchTv,
     Work,
 };
 
@@ -122,6 +122,7 @@ pub enum Task {
     ConsumeItem(ConsumeItem),
     UseToilet(UseToilet),
     UseComputer(UseComputer),
+    WatchTv(WatchTv),
     Sleep(Sleep),
     Wait(Wait),
     OpenFridge(OpenFridge),
@@ -151,6 +152,7 @@ impl Task {
             }
             Task::UseToilet(UseToilet { toilet, seconds }) => pb::TaskKind::UseToilet(timed(toilet, seconds)),
             Task::UseComputer(UseComputer { computer, seconds }) => pb::TaskKind::UseComputer(timed(computer, seconds)),
+            Task::WatchTv(WatchTv { tv, seconds }) => pb::TaskKind::WatchTv(timed(tv, seconds)),
             Task::Sleep(Sleep { bed, seconds }) => pb::TaskKind::Sleep(timed(bed, seconds)),
             Task::Wait(Wait { seconds }) => pb::TaskKind::Wait(pb::Timed { cell: None, seconds }),
             Task::OpenFridge(OpenFridge { fridge, seconds }) => pb::TaskKind::OpenFridge(timed(fridge, seconds)),
@@ -190,6 +192,7 @@ impl Task {
             pb::TaskKind::UseComputer(task) => {
                 Task::UseComputer(UseComputer { computer: at(task)?, seconds: seconds(task.seconds)? })
             }
+            pb::TaskKind::WatchTv(task) => Task::WatchTv(WatchTv { tv: at(task)?, seconds: seconds(task.seconds)? }),
             pb::TaskKind::Sleep(task) => Task::Sleep(Sleep { bed: at(task)?, seconds: seconds(task.seconds)? }),
             pb::TaskKind::Wait(task) => Task::Wait(Wait { seconds: seconds(task.seconds)? }),
             pb::TaskKind::OpenFridge(task) => Task::OpenFridge(OpenFridge { fridge: at(task)?, seconds: seconds(task.seconds)? }),
@@ -246,6 +249,12 @@ impl Task {
     /// Have a go on the computer in `computer`, from a cell beside it.
     pub const fn use_computer(computer: Point, seconds: f32) -> Task {
         Task::UseComputer(UseComputer { computer, seconds })
+    }
+
+    /// Watch the TV in `tv` for `seconds`, from wherever this unit stands
+    /// within sight of it ([`crate::sim::feature::can_watch`]).
+    pub const fn watch_tv(tv: Point, seconds: f32) -> Task {
+        Task::WatchTv(WatchTv { tv, seconds })
     }
 
     /// Sleep in the bed in `bed`, from a cell beside it, for `seconds`.
@@ -319,6 +328,7 @@ impl Task {
             Task::ConsumeItem(task) => task.execute(ctx),
             Task::UseToilet(task) => task.execute(ctx),
             Task::UseComputer(task) => task.execute(ctx),
+            Task::WatchTv(task) => task.execute(ctx),
             Task::Sleep(task) => task.execute(ctx),
             Task::Wait(task) => task.execute(ctx),
             Task::OpenFridge(task) => task.execute(ctx),
@@ -340,6 +350,7 @@ impl Task {
             Task::ConsumeItem(task) => task.interrupted(action, biology),
             Task::UseToilet(task) => task.interrupted(action, biology),
             Task::UseComputer(task) => task.interrupted(action, biology),
+            Task::WatchTv(task) => task.interrupted(action, biology),
             Task::Sleep(task) => task.interrupted(action, biology),
             Task::Wait(task) => task.interrupted(action, biology),
             Task::OpenFridge(task) => task.interrupted(action, biology),
@@ -359,6 +370,7 @@ impl Task {
             Task::ConsumeItem(task) => task.describe(),
             Task::UseToilet(task) => task.describe(),
             Task::UseComputer(task) => task.describe(),
+            Task::WatchTv(task) => task.describe(),
             Task::Sleep(task) => task.describe(),
             Task::Wait(task) => task.describe(),
             Task::OpenFridge(task) => task.describe(),

@@ -465,13 +465,14 @@ mod tests {
     #[test]
     fn bedtime_interrupts_a_bored_humans_computer_session_and_keeps_it_in_bed() {
         let bed = Point::new(5, 5);
-        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        let mut map = crate::sim::testing::home_map(Size::new(14, 10));
         prop_at(&mut map, "bed 1", bed);
         prop_at(&mut map, "computer", Point::new(3, 3));
         let mut world = World::new(map);
         let mut human = owner(Point::new(3, 4), 0.0, bed);
         human.biology_mut().unwrap().set_running(ProcessId::Fun, true);
         human.set_fun(0.0);
+        human.body_mut().set_home(world.properties.of(bed));
         assert!(step_until(&mut world, &mut human, 100, |h| h.brain().top_goal() == GoalId::Play));
 
         world.clock = midnight();

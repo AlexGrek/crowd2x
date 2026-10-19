@@ -150,6 +150,7 @@ tools/wasteland_art.py  draws the wasteland's dirt, scrub, meadow, mud, water [w
 tools/scrap_bin_art.py  draws the warehouse's scrap bin, empty to heaped     [pixel-artist]
 tools/guard_post_art.py draws the guard post in the district's wall         [pixel-artist]
 tools/crematorium_art.py draws the crematorium the undertakers bring the dead to [pixel-artist]
+tools/tv_art.py         draws the TV, dark and showing a picture               [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

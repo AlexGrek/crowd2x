@@ -534,3 +534,39 @@ the toilet's checklist with a `Beside` feature; what is new is everything after 
    go was under way; it broke as soon as that unit was hired to the same computer, and was
    deleted rather than patched. `qa/office_job.json` now shows a screen lit by its user
    (`expect_prop_in_use`), by somebody working at it.
+
+## Worked example: watching TV (a feature used from across the room)
+
+The third way to use a feature, after `Beside` and `Entered`: **`Access::Watched`**, from any
+cell within `VIEWING_DISTANCE` (3, as the crow flies: `dx² + dy² <= 9`) of the prop with a
+clear line of sight. All of it is in `sim/feature.rs`: `within_viewing_distance`,
+`can_watch(map, cell, tv)` (distance plus `perception::in_sight`: walls and other opaque
+terrain block, furniture does not), and `VIEWING_OFFSETS`, the 28 cells in reach, nearest
+first, built at compile time.
+
+1. **Feature.** `FeatureKind::Television` ↔ `"tv"`, its own index (`Features::cells_of`).
+   Powered (`map::utilities::CONSUMERS`). Unlike a computer, a TV outside a home is anybody's.
+2. **Task.** `tasks/watch_tv.rs`: `WatchTv { tv, seconds }`. It never walks. It checks
+   `can_watch` from where the unit stands, and `features.has(Television, tv)` for power, every
+   tick. It gives `Event::Entertained` on finishing, as `UseComputer` does. Saved as
+   `pb::TaskKind::WatchTv` (tag 17).
+3. **Goal.** No new goal: `PlayGoal` answers boredom with whichever of a home computer
+   (`Entertainment`) or a TV is nearer (`choose_amusement`, `amusement_in_reach`). Which one
+   the `Seek` target is comes from the feature index, so nothing new is saved. For a TV,
+   `plan` queues `MoveTo(seat)` unless the TV is already in view, then `WatchTv`.
+   `seat_in_view` picks the seat from the 28 offsets: passable with the unit's key, usable,
+   `may_reach` (O(1)), `can_watch`, free before occupied, then nearest. That reads a fixed
+   handful of cells and never searches a route. The log line is `"{uid} watched the TV at x, y"`.
+4. **Art.** `tools/tv_art.py` → `tv_idle.png` (2 frames, standby light) and `tv.png`
+   (4 frames of picture), `PaletteItem::animated("tv", "tv_idle.png", 2).used("tv.png", 4)`.
+5. **Screen and light.** `game/props.rs` needs nothing: the watcher's `Action::interact` names
+   the TV's cell. The lighting's `switch_lights_in_use` asks the 28 viewing cells for a
+   `Watched` prop rather than the five round it (`lighting/mod.rs`, `is_watched`).
+   `game::props` asks only the units drawn, so a watcher just off the canvas leaves a TV at
+   the canvas edge dark until the camera moves. That is the computer's seam, three cells wide.
+6. **Tests.** `feature.rs` (`a_tv_is_watched_from_up_to_three_cells_away_in_sight_of_it`,
+   the offsets), `tasks/watch_tv.rs` (from three away, too far, behind a wall, out of sight
+   mid-programme, power lost), `goals/play.rs` (a seat in view rather than beside, round a
+   wall, nowhere in sight held off with `ROUTES_ASKED`, the nearer of computer and TV).
+
+Not done yet: the district generator places no TVs. They are placed in the editor.

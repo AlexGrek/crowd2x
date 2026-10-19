@@ -83,7 +83,7 @@ impl World {
         let properties = Properties::from_map(&map);
         World {
             occupancy: Occupancy::new(map.size()),
-            features: Features::from_map(&map, &supply),
+            features: Features::with_properties(&map, &supply, &properties),
             fridges: Fridges::from_map(&map, &supply),
             bins: Bins::from_map(&map),
             doors: Doors::from_map(&map, &properties),
@@ -261,6 +261,22 @@ pub fn prop_at(map: &mut Map, name: &str, cell: Point) {
             kind: ObjectKind::new(name),
         },
     );
+}
+
+/// A single home occupying the interior, for tests of home entertainment.
+pub fn home_map(size: crate::map::Size) -> Map {
+    let mut map = Map::new(size, crate::map::FLOOR);
+    for y in 0..size.height {
+        for x in 0..size.width {
+            if x == 0 || y == 0 || x == size.width - 1 || y == size.height - 1 {
+                map.set_terrain(Point::new(x, y), crate::map::WALL);
+            }
+        }
+    }
+    let door = Point::new(1, 0);
+    map.set_terrain(door, crate::map::FLOOR);
+    prop_at(&mut map, super::door::HOUSE_DOOR, door);
+    map
 }
 
 /// A human standing in `cell` with exactly these needs, so a test decides

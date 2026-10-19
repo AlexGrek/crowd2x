@@ -126,6 +126,12 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "computer",
         Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
     ),
+    // A TV's picture: a bigger, softer glow than a monitor's, on while
+    // anybody is watching.
+    (
+        "tv",
+        Emission { color: [0.45, 0.6, 0.85], radius: 3.5, always_on: false },
+    ),
     // A sodium lamp on a post: an orange pool on the street. Always on as
     // far as the lightmap knows — what puts it out by day is the street
     // light controller on its box taking the power away

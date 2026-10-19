@@ -106,7 +106,7 @@ talking only to the one below:
   pack has room, its own bin once it is full, `Achieved` when the packful is stored — the
   `jobs` skill.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `Sleep`, `Wait`,
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `Sleep`, `Wait`,
   `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
   `Deposit`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
@@ -182,7 +182,7 @@ a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by 
 indexes them again whenever a distribution box is switched (`GameState::switch_box`), the one
 thing during play that changes which features work.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
-`Toilet`, `"computer"` is `Entertainment` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never
+`Toilet`, `"computer"` is `Entertainment`, `"tv"` is `Television` and `"bed 1"` to `"bed 6"` are `Bed`. A fridge never
 runs out of food or drink, and is used from one of the four cells beside it — it blocks its
 own. Adding a use for a prop is an entry there, a palette entry in `editor/props.rs` and a
 `map::PROPS` entry (tests fail without them), and a goal that queues the tasks. **A feature
@@ -193,7 +193,7 @@ to one, exactly as if it were not there. If it needs power or water, add it to
 its compressor does not run: it starts at room temperature and stays there, and one that loses
 power warms toward the room from wherever it was (`Fridges::set_power`). Because the index can
 change under a goal's plan, tasks using powered features re-check power every tick,
-including `TakeItem` and `UseComputer`. The `map-layers` skill has the whole picture.
+including `TakeItem`, `UseComputer` and `WatchTv`. The `map-layers` skill has the whole picture.
 
 An entered feature (bed or toilet) is indexed only on passable terrain with exactly one
 blocking prop in its cell: the feature itself. Its entry exception cannot bypass a wall,

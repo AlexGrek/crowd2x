@@ -64,9 +64,9 @@ begins (simulation state, not saved). In the game a click on a switch cell flips
 | What a box feeds (for its panel) | `src/map/utilities.rs` | `fed_by(map, box_cell)` |
 | Laying cable programmatically | `src/map/utilities.rs` | `l_path`, `lay`, `lay_over_empty`, `serve_everything` |
 | Power in the simulation | `src/sim/mod.rs` | `GameState` fields `supply`, `boxes_off`, `supply_generation`; methods `supply`, `supply_generation`, `has_box`, `box_is_on`, `switch_box`; `Command::SwitchBox`, `Input::switch_box` (applied in `spawn_pass`) |
-| Unpowered fridge/computer is not a destination | `src/sim/feature.rs` | `Features::from_map(map, supply)` skips what `supply.serves` refuses |
+| Unpowered fridge/computer/TV is not a destination | `src/sim/feature.rs` | `Features::from_map(map, supply)` skips what `supply.serves` refuses |
 | Fridge compressor | `src/sim/fridge.rs` | `FridgeState::is_powered`, `closed(powered)` (unpowered starts at `AMBIENT`), `Fridges::set_power`, `advance` (unpowered closed fridge drifts to `AMBIENT` at the `COOLING` rate) |
-| A unit already on its way | `src/sim/brain/tasks/take_item.rs`, `use_computer.rs` | `TakeItem` refuses an unpowered fridge when the action would start; `UseComputer` fails any tick its computer is not in `features` (screen off mid-go, no fun given) |
+| A unit already on its way | `src/sim/brain/tasks/take_item.rs`, `use_computer.rs` | `TakeItem` refuses an unpowered fridge when the action would start; `UseComputer` fails any tick its computer is not in `features` (screen off mid-go, no fun given); `watch_tv.rs`'s `WatchTv` the same for a TV |
 | Lamps and screens | `src/lighting/scene.rs` | `Light::needs_power`, `Light::name` (the `EMITTERS` key); `LightScene::from_map(map, supply)` keeps every emitter, enabled only if powered; `apply_supply` re-switches always-on powered lights by `supply.serves(light.name, light.cell)`, so a light switch counts |
 | Lighting following a switch | `src/lighting/mod.rs` | `follow_power` (compares `Lighting::supply_generation` to the sim's), runs before `switch_lights_in_use` |
 | Editor palette | `src/editor/grids.rs` | `POWER_PALETTE`: `"wiring"`, `"power line"`, `"distribution box"` (entry i paints value i+1, `value_of`); layer row `"power"` in `editor::LAYERS` (key `5`) |

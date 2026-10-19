@@ -37,7 +37,7 @@
     { "expect_stat": { "stat": "hunger", "max": 75, "of": "crowd" } },
     { "expect_stat": { "stat": "thirst", "max": 75, "of": "crowd" } },
     { "expect_stat": { "stat": "bladder", "max": 75, "of": "crowd" } },
-    { "note": "a day of meals, goes on the computer and company leaves people content (~98)" },
+    { "note": "a day of meals and company leaves people content; office computers provide work only" },
     { "expect_stat": { "stat": "satisfaction", "min": 60, "of": "crowd" } },
     { "note": "and a night in bed rests them: the crowd's stamina ran 85 at 08:00, ~32 by" },
     { "note": "evening, and ~96 at 06:00 (86 at 08:00). It stayed under 45 all night while every" },

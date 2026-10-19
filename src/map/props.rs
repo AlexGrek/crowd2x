@@ -79,6 +79,9 @@ pub const PROPS: &[Prop] = &[
     Prop::blocking("crate tall"),
     Prop::blocking("fridge"),
     Prop::blocking("computer"),
+    // Watched from across the room (`sim::feature::can_watch`): a set on
+    // legs nobody walks through, though everybody sees over it.
+    Prop::blocking("tv"),
     // The two ends of the networks under the floor (`super::utilities`):
     // each stands on the street *and* in its network, a box of humming
     // iron and a manhole cover nobody walks across.

@@ -24,8 +24,9 @@
 //! the street. Which blocks are what is the seed's choice:
 //!
 //! * **the bank** — two neighbouring blocks merged across the street between
-//!   them: a lobby inside the door lined with fridges, an office of
-//!   computers in desk rows, and two restrooms walled off at each end;
+//!   them: two opposite exits joined by a clear aisle, a lobby lined with
+//!   fridges, an office of computers in desk rows, and two restrooms walled
+//!   off at each end;
 //! * **the shops** — one block, three of its lots a shop with a wide door and
 //!   nothing inside yet, the fourth left as a small park;
 //! * **the mandatory lot buildings** — one lot each, taken before any house:
@@ -1082,9 +1083,10 @@ fn service_entry(map: &mut Map, layer: GridLayer, main: u8, walls: Rect, others:
 /// The bank, across two blocks and the street between them.
 ///
 /// Laid out in a frame of its own — `(0, 0)` the inside corner by the door —
-/// and flipped into place, so which long side the door is on is a coin toss
-/// rather than a second layout. Symmetric end to end: restrooms at both ends
-/// and fridges all along the lobby.
+/// and flipped into place, so which long side the lobby is on is a coin toss
+/// rather than a second layout. Two exits on opposite long sides share a
+/// clear aisle. Symmetric end to end: restrooms at both ends and fridges all
+/// along the lobby.
 ///
 /// **Everything a desk needs is nearer than the houses outside.** A brain
 /// goes to the nearest fridge or toilet as the crow flies, walls and all, so
@@ -1105,13 +1107,15 @@ fn bank(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by:
 
     build(map, walls, BANK_WALL, BANK_FLOOR);
 
-    // The front door, two wide, in the middle.
+    // Two exits, each two wide, in the middle of opposite walls.
     let (wide, high) = (inside.w, inside.h);
     let floor = tile(BANK_FLOOR);
     let door = [wide / 2 - 1, wide / 2];
-    for x in door {
-        map.set_terrain(at(x, -1), floor);
-        props.push(object(DOOR, at(x, -1)));
+    for y in [-1, high] {
+        for x in door {
+            map.set_terrain(at(x, y), floor);
+            props.push(object(DOOR, at(x, y)));
+        }
     }
 
     // Two restrooms at each end: a partition wall across the bank, and one
@@ -1149,14 +1153,17 @@ fn bank(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by:
     }
 
     // The office: desks of one or two computers in rows, two-cell aisles
-    // between every desk and every row, the first rows clear for a lobby.
+    // between every desk and every row, the first rows clear for a lobby,
+    // and a two-cell aisle kept clear between the exits.
     let desk = rng.random_range(1..=2);
     let first_row = rng.random_range(3..=4);
     for y in (first_row..high).step_by(3) {
         let mut x = first + 2;
         while x + desk - 1 <= last - 1 {
             for seat in 0..desk {
-                props.push(object(COMPUTER, at(x + seat, y)));
+                if !door.contains(&(x + seat)) {
+                    props.push(object(COMPUTER, at(x + seat, y)));
+                }
             }
             x += desk + 2;
         }
@@ -1904,6 +1911,31 @@ mod tests {
     }
 
     #[test]
+    fn the_office_has_two_opposite_exits_with_a_clear_aisle_between_them() {
+        for seed in SEEDS {
+            let district = generate(seed);
+            let map = &district.map;
+            let walls = district.bank;
+            let exits: Vec<Point> = doors_of(map)
+                .into_iter()
+                .filter(|&(cell, name)| name == DOOR && walls.on_edge(cell))
+                .map(|(cell, _)| cell)
+                .collect();
+            assert_eq!(exits.len(), 2 * DOOR_WIDTH as usize, "seed {seed}: two double-width exits");
+            let south: Vec<Point> = exits.iter().copied().filter(|cell| cell.y == walls.y).collect();
+            assert_eq!(south.len(), DOOR_WIDTH as usize, "seed {seed}: a south exit");
+            assert_eq!((south[0].x - south[1].x).abs(), 1, "seed {seed}: adjacent leaves");
+            for leaf in south {
+                assert!(exits.contains(&Point::new(leaf.x, walls.top())), "seed {seed}: an opposite north exit");
+                for y in walls.y - 1..=walls.top() + 1 {
+                    let cell = Point::new(leaf.x, y);
+                    assert!(map.is_passable(cell), "seed {seed}: the exit aisle is blocked at {cell:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_doorway_is_a_door_at_least_two_leaves_wide() {
         for seed in SEEDS {
             let district = generate(seed);
@@ -1948,9 +1980,9 @@ mod tests {
                 let leaves = doors.iter().filter(|&&(cell, _)| house.walls.contains(cell)).count();
                 assert_eq!(leaves, DOOR_WIDTH as usize, "seed {seed}: {house:?}");
             }
-            // The front door, and one into each of the four restrooms.
+            // Two exits, and one doorway into each of the four restrooms.
             let bank = doors.iter().filter(|&&(cell, _)| district.bank.contains(cell)).count();
-            assert_eq!(bank, 5 * DOOR_WIDTH as usize, "seed {seed}");
+            assert_eq!(bank, 6 * DOOR_WIDTH as usize, "seed {seed}");
         }
     }
 
@@ -2108,4 +2140,3 @@ mod tests {
         }
     }
 }
-

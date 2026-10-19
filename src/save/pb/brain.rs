@@ -273,7 +273,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17")]
     pub kind: Option<TaskKind>,
 }
 
@@ -318,6 +318,9 @@ pub enum TaskKind {
     /// ...and putting it in a crematorium.
     #[prost(message, tag = "16")]
     Cremate(Timed),
+    /// Watching a TV from within sight of it.
+    #[prost(message, tag = "17")]
+    WatchTv(Timed),
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

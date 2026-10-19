@@ -86,6 +86,7 @@ pub const SOURCES: &[(&str, Utility)] = &[("transformer", Utility::Power), ("sew
 pub const CONSUMERS: &[(&str, Utility)] = &[
     ("fridge", Utility::Power),
     ("computer", Utility::Power),
+    ("tv", Utility::Power),
     ("ceiling lamp", Utility::Power),
     ("tube lamp", Utility::Power),
     ("street lamp", Utility::Power),

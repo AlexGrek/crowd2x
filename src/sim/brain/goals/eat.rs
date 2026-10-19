@@ -64,6 +64,7 @@ impl Stage {
             | Some(
                 Task::UseToilet(_)
                 | Task::UseComputer(_)
+                | Task::WatchTv(_)
                 | Task::Sleep(_)
                 | Task::Salvage(_)
                 | Task::Work(_)

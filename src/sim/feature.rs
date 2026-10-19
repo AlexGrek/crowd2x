@@ -8,7 +8,8 @@
 //! none of the editor's.
 //!
 //! A prop with no entry here is scenery, which today is every prop but the
-//! fridge, the toilet, the computer, the beds, the scrap bin and the guard post. A prop with two entries is
+//! fridge, the toilet, the computer, the TV, the beds, the scrap bin, the guard post and the
+//! crematorium. A prop with two entries is
 //! two things at once: a fridge is food and water.
 //!
 //! **A feature that does not work is not one.** A fridge with no power, a
@@ -30,14 +31,22 @@ use rand::RngExt;
 use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 
+use super::property::Properties;
+
 /// What a brain can get out of a feature.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FeatureKind {
     Food,
     Water,
     Toilet,
-    /// Something to do: a computer, used from the chair beside it.
+    /// Something to do: a home computer, used from the chair beside it.
     Entertainment,
+    /// Something to do from across the room: a TV, watched from anywhere
+    /// within [`VIEWING_DISTANCE`] that is in sight of it ([`can_watch`]).
+    /// The other way to be amused, so `goals::play` goes for whichever of the
+    /// two is nearer; needs power, like the computer, and is anybody's
+    /// outside a home.
+    Television,
     /// Somewhere to sleep: a bed, slept *in* rather than beside.
     Bed,
     /// Somewhere to work: a computer again, worked at from the chair beside
@@ -77,6 +86,58 @@ pub enum Access {
     /// the instant it leaves — the same bookkeeping every other cell already
     /// gets from ordinary movement, asked of one more kind of cell.
     Entered,
+    /// From any cell near enough to it and in sight of it — a TV, watched
+    /// ([`can_watch`]). The prop's own cell is off limits, as it is to
+    /// [`Access::Beside`], and any number of units may watch at once.
+    Watched,
+}
+
+/// How far from a TV it can be watched, in cells, as the crow flies:
+/// `dx² + dy² <= 3²` — three cells straight out, or two across and two along.
+pub const VIEWING_DISTANCE: i32 = 3;
+
+/// Whether `cell` is near enough to `screen` to watch it: within
+/// [`VIEWING_DISTANCE`], and not on it. Distance only; [`can_watch`] adds the
+/// line of sight.
+pub fn within_viewing_distance(cell: Point, screen: Point) -> bool {
+    let (dx, dy) = (cell.x - screen.x, cell.y - screen.y);
+    (dx, dy) != (0, 0) && dx * dx + dy * dy <= VIEWING_DISTANCE * VIEWING_DISTANCE
+}
+
+/// Whether a unit standing in `cell` can watch the TV in `screen`: within
+/// [`VIEWING_DISTANCE`] of it, with nothing but see-through terrain between
+/// the two ([`in_sight`](crate::sim::brain::perception::in_sight)) — a wall
+/// in the way hides the picture, furniture does not.
+pub fn can_watch(map: &Map, cell: Point, screen: Point) -> bool {
+    within_viewing_distance(cell, screen) && crate::sim::brain::perception::in_sight(map, cell, screen)
+}
+
+/// Every offset from a TV within [`VIEWING_DISTANCE`] of it, nearest first
+/// (then by row, then by column), so whatever picks a seat from them picks
+/// the same one however it is asked. Worked out at compile time: 28 cells.
+pub const VIEWING_OFFSETS: [(i8, i8); 28] = viewing_offsets();
+
+const fn viewing_offsets() -> [(i8, i8); 28] {
+    let mut out = [(0i8, 0i8); 28];
+    let mut len = 0;
+    let mut d2 = 1;
+    while d2 <= VIEWING_DISTANCE * VIEWING_DISTANCE {
+        let mut dy = -VIEWING_DISTANCE;
+        while dy <= VIEWING_DISTANCE {
+            let mut dx = -VIEWING_DISTANCE;
+            while dx <= VIEWING_DISTANCE {
+                if dx * dx + dy * dy == d2 {
+                    out[len] = (dx as i8, dy as i8);
+                    len += 1;
+                }
+                dx += 1;
+            }
+            dy += 1;
+        }
+        d2 += 1;
+    }
+    assert!(len == 28, "every cell in reach, once");
+    out
 }
 
 impl FeatureKind {
@@ -89,6 +150,7 @@ impl FeatureKind {
             | FeatureKind::ScrapBin
             | FeatureKind::GuardPost
             | FeatureKind::Crematorium => Access::Beside,
+            FeatureKind::Television => Access::Watched,
             // A bed is lain in, not stood next to, and one sleeper to a bed:
             // the toilet's arrangement, and for the same reason.
             FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
@@ -130,6 +192,11 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "computer",
         kind: FeatureKind::Entertainment,
+    },
+    // Something to watch, from across the room.
+    Feature {
+        name: "tv",
+        kind: FeatureKind::Television,
     },
     // ...and a desk somebody works at, the way a fridge is food and water.
     Feature {
@@ -199,6 +266,7 @@ pub struct Features {
     water: Vec<Point>,
     toilet: Vec<Point>,
     entertainment: Vec<Point>,
+    television: Vec<Point>,
     bed: Vec<Point>,
     workstation: Vec<Point>,
     scrap_bin: Vec<Point>,
@@ -212,8 +280,15 @@ pub struct Features {
 
 impl Features {
     /// Every prop on `map` a brain can use, *and that works*: one that needs
-    /// power or a drain `supply` does not give it is left out.
+    /// power or a drain `supply` does not give it is left out. Computers
+    /// outside a home provide work only, never entertainment.
+    #[cfg(test)]
     pub fn from_map(map: &Map, supply: &Supply) -> Features {
+        Self::with_properties(map, supply, &Properties::from_map(map))
+    }
+
+    /// Reuse the world's property index, including when its power changes.
+    pub(super) fn with_properties(map: &Map, supply: &Supply, properties: &Properties) -> Features {
         let mut features = Features::default();
         // Built once, not searched per feature or per move. Two means two or
         // more: all we need to know is whether the feature is the sole blocker.
@@ -231,6 +306,16 @@ impl Features {
                 continue;
             }
             for kind in kinds_of(object.kind.as_str()) {
+                // Computers in public buildings are office equipment, even
+                // when nobody has been hired at them or the shift is over.
+                // Only a home's computer is available for gaming; choosing
+                // it still requires that home's key.
+                if object.kind.as_str() == "computer"
+                    && kind == FeatureKind::Entertainment
+                    && properties.of(cell).is_none()
+                {
+                    continue;
+                }
                 if kind.access() == Access::Entered {
                     let can_enter = map.size().index_of(cell).is_some_and(|index| {
                         map.terrain(cell).is_some_and(|tile| tile.is_passable()) && blockers[index] == 1
@@ -244,6 +329,7 @@ impl Features {
                     FeatureKind::Water => features.water.push(cell),
                     FeatureKind::Toilet => features.toilet.push(cell),
                     FeatureKind::Entertainment => features.entertainment.push(cell),
+                    FeatureKind::Television => features.television.push(cell),
                     FeatureKind::Bed => features.bed.push(cell),
                     FeatureKind::Workstation => features.workstation.push(cell),
                     FeatureKind::ScrapBin => features.scrap_bin.push(cell),
@@ -262,6 +348,7 @@ impl Features {
             &mut features.water,
             &mut features.toilet,
             &mut features.entertainment,
+            &mut features.television,
             &mut features.bed,
             &mut features.workstation,
             &mut features.scrap_bin,
@@ -289,6 +376,7 @@ impl Features {
             FeatureKind::Water => &self.water,
             FeatureKind::Toilet => &self.toilet,
             FeatureKind::Entertainment => &self.entertainment,
+            FeatureKind::Television => &self.television,
             FeatureKind::Bed => &self.bed,
             FeatureKind::Workstation => &self.workstation,
             FeatureKind::ScrapBin => &self.scrap_bin,
@@ -381,9 +469,10 @@ mod tests {
 
         crate::map::utilities::serve_everything(&mut map, Point::new(0, 9), Point::new(9, 9));
         let features = Features::from_map(&map, &Supply::from_map(&map));
-        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Entertainment, FeatureKind::Workstation] {
+        for kind in [FeatureKind::Food, FeatureKind::Water, FeatureKind::Toilet, FeatureKind::Workstation] {
             assert_eq!(features.count(kind), 1, "{kind:?}, once connected");
         }
+        assert_eq!(features.count(FeatureKind::Entertainment), 0, "an office computer is work-only");
     }
 
     fn prop(name: &str, cell: Point) -> Object {
@@ -566,7 +655,7 @@ mod tests {
     /// other prop's.
     #[test]
     fn a_computer_on_the_map_is_somewhere_to_have_a_go_at_something_and_is_used_from_beside_it() {
-        let mut map = Map::new(Size::new(10, 10), FLOOR);
+        let mut map = crate::sim::testing::home_map(Size::new(10, 10));
         let computer = Point::new(4, 8);
         map.add_object(ObjectLayer::Props, prop("computer", computer));
 
@@ -578,17 +667,64 @@ mod tests {
         assert_eq!(features.count(FeatureKind::Food), 0, "a computer is not lunch");
     }
 
-    /// The same computer is a desk somebody can be given a job at, and is
-    /// worked from beside it too.
+    /// A TV is watched from across the room — near enough and in sight — and
+    /// needs power like a computer, but is not a home's alone.
     #[test]
-    fn a_computer_is_a_workstation_as_well_as_something_to_do() {
+    fn a_tv_is_watched_from_up_to_three_cells_away_in_sight_of_it() {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        let tv = Point::new(6, 6);
+        map.add_object(ObjectLayer::Props, prop("tv", tv));
+        let features = features_of(&map);
+        assert!(features.has(FeatureKind::Television, tv), "a public TV is anybody's");
+        assert_eq!(features.count(FeatureKind::Entertainment), 0, "a TV is not a computer");
+        assert_eq!(FeatureKind::Television.access(), Access::Watched);
+        assert!(!features.is_enterable(tv));
+        let unwired = Features::from_map(&map, &Supply::from_map(&map));
+        assert_eq!(unwired.count(FeatureKind::Television), 0, "no picture without power");
+
+        for (cell, watchable) in [
+            (Point::new(6, 3), true),  // three straight out
+            (Point::new(4, 4), true),  // two across, two along
+            (Point::new(5, 6), true),  // right beside it
+            (Point::new(6, 2), false), // four away
+            (Point::new(3, 4), false), // three across and two along is too far
+            (tv, false),               // on it
+        ] {
+            assert_eq!(can_watch(&map, cell, tv), watchable, "{cell:?}");
+        }
+        // A wall between them hides the picture...
+        map.set_terrain(Point::new(6, 4), crate::map::WALL);
+        assert!(!can_watch(&map, Point::new(6, 3), tv));
+        // ...and furniture does not.
+        map.add_object(ObjectLayer::Props, prop("crate", Point::new(5, 5)));
+        assert!(can_watch(&map, Point::new(4, 4), tv));
+    }
+
+    #[test]
+    fn the_viewing_offsets_are_every_cell_in_reach_once_and_nearest_first() {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut last = 0;
+        for (dx, dy) in VIEWING_OFFSETS {
+            let d2 = i32::from(dx).pow(2) + i32::from(dy).pow(2);
+            assert!(d2 >= last, "nearest first");
+            last = d2;
+            assert!(seen.insert((dx, dy)), "once");
+            assert!(within_viewing_distance(Point::new(dx.into(), dy.into()), Point::ORIGIN));
+        }
+    }
+
+    /// A public computer is office equipment, whether somebody works at it
+    /// yet or not. It never appears among gaming targets.
+    #[test]
+    fn an_office_computer_is_a_workstation_and_never_entertainment() {
         let mut map = Map::new(Size::new(10, 10), FLOOR);
         let computer = Point::new(4, 8);
         map.add_object(ObjectLayer::Props, prop("computer", computer));
 
         let features = features_of(&map);
         assert!(features.has(FeatureKind::Workstation, computer));
-        assert!(features.has(FeatureKind::Entertainment, computer));
+        assert!(!features.has(FeatureKind::Entertainment, computer));
+        assert_eq!(features.nearest(FeatureKind::Entertainment, computer), None);
         assert_eq!(FeatureKind::Workstation.access(), Access::Beside);
         assert_eq!(kinds_of("computer").collect::<Vec<_>>(), [FeatureKind::Entertainment, FeatureKind::Workstation]);
         assert_eq!(features.count(FeatureKind::Workstation), 1);

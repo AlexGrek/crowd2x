@@ -65,16 +65,29 @@ mod tests {
     use super::super::super::task::Task;
     use super::super::rig::Rig;
     use super::*;
-    use crate::map::{Map, Size, FLOOR};
+    use crate::map::Size;
 
     /// A unit in `cell` of a room with a computer at (6, 6), where every
     /// test here aims — a working one: the rig's world serves everything.
     fn rig_at(cell: Point, fun: f32) -> Rig {
-        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        let mut map = crate::sim::testing::home_map(Size::new(9, 9));
         crate::sim::testing::prop_at(&mut map, "computer", Point::new(6, 6));
         let mut rig = Rig::new(map, cell);
         rig.biology.edit(|stats| stats.with_fun(fun));
         rig
+    }
+
+    #[test]
+    fn an_office_computer_cannot_start_a_gaming_session() {
+        let mut map = crate::map::Map::new(Size::new(9, 9), crate::map::FLOOR);
+        crate::sim::testing::prop_at(&mut map, "computer", Point::new(6, 6));
+        let mut rig = Rig::new(map, Point::new(5, 6));
+        rig.biology.edit(|stats| stats.with_fun(20.0));
+        let mut task = Task::use_computer(Point::new(6, 6), 0.5);
+
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert!(rig.action.is_none());
+        assert_eq!(rig.biology.stats().fun(), 20.0);
     }
 
     /// A box switched off mid-go turns the screen off: the go ends there,

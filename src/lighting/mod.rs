@@ -30,6 +30,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 use crate::game::actors::Sim;
 use crate::map::{Point, PIXELS_PER_CELL};
 use crate::render::CanvasLight;
+use crate::sim::feature::{kinds_of, Access, VIEWING_OFFSETS};
 use crate::state::AppState;
 
 pub use scene::LightScene;
@@ -115,9 +116,10 @@ pub struct Lighting {
     /// Which [`LightScene::generation`] the GPU has finished baking. Written
     /// by the render world after a dispatch.
     pub baked: Arc<AtomicU64>,
-    /// The switchable lights (a computer's screen), with the cell of the
-    /// prop each came from: what is asked about every frame.
-    switchable: Vec<(usize, Point)>,
+    /// The switchable lights (a computer's screen, a TV's), with the cell of
+    /// the prop each came from and whether it is watched from across the
+    /// room rather than used from beside it: what is asked about every frame.
+    switchable: Vec<(usize, Point, bool)>,
     /// Lights currently switched on because somebody is using their prop.
     in_use: Vec<usize>,
     /// The [`GameState::supply_generation`](crate::sim::GameState::supply_generation)
@@ -176,7 +178,7 @@ fn build_lighting(
         .iter()
         .enumerate()
         .filter(|(_, light)| light.switchable)
-        .map(|(id, light)| (id, light.cell))
+        .map(|(id, light)| (id, light.cell, is_watched(light.name)))
         .collect();
 
     upload.scene = Some(gpu::StaticUpload {
@@ -210,18 +212,26 @@ fn build_lighting(
 /// its own, so one in use just off the canvas lights part of it, and the
 /// lightmap must not depend on where the camera is. Whoever is using a prop
 /// stands in its cell or one beside it, so that is five occupancy lookups a
-/// prop — cheap, and independent of the size of the crowd.
+/// prop — or, for a TV, the 28 cells it can be watched from
+/// ([`VIEWING_OFFSETS`]) — cheap, and independent of the size of the crowd.
 fn switch_lights_in_use(sim: Res<Sim>, lighting: Option<ResMut<Lighting>>, mut wanted: Local<Vec<usize>>) {
     let Some(mut lighting) = lighting else { return };
     let lighting = &mut *lighting;
     let world = &sim.0;
     wanted.clear();
-    for &(id, cell) in &lighting.switchable {
-        let used = std::iter::once(cell)
-            .chain(cell.cardinal_neighbours())
-            .filter_map(|at| world.occupancy().occupant(at))
-            .filter_map(|uid| world.entities().get(uid))
-            .any(|entity| entity.interacting_with() == Some(cell));
+    for &(id, cell, watched) in &lighting.switchable {
+        let using = |at: Point| {
+            world
+                .occupancy()
+                .occupant(at)
+                .and_then(|uid| world.entities().get(uid))
+                .is_some_and(|entity| entity.interacting_with() == Some(cell))
+        };
+        let used = if watched {
+            VIEWING_OFFSETS.iter().any(|&(dx, dy)| using(cell.offset(dx.into(), dy.into())))
+        } else {
+            std::iter::once(cell).chain(cell.cardinal_neighbours()).any(using)
+        };
         if used {
             wanted.push(id);
         }
@@ -238,6 +248,12 @@ fn switch_lights_in_use(sim: Res<Sim>, lighting: Option<ResMut<Lighting>>, mut w
         lighting.scene.set_enabled(id, true);
     }
     lighting.in_use.clone_from(&wanted);
+}
+
+/// Whether the prop called `name` is watched from across the room, a TV,
+/// rather than used from its own cell or beside it.
+fn is_watched(name: &str) -> bool {
+    kinds_of(name).any(|kind| kind.access() == Access::Watched)
 }
 
 /// A distribution box switched: lamps on it go dark or light up again.

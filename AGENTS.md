@@ -676,6 +676,12 @@ blocks its own. Adding a use for a prop is an entry there, a palette entry in
 `editor/props.rs` and a `map::PROPS` entry (tests fail without them), and a goal that
 queues the tasks.
 
+Computers outside a home (a property behind a house door) are office equipment:
+they provide `Workstation` only. Home computers also provide `Entertainment`,
+available to that home's owners through the usual property permissions. This is
+derived when features are indexed, so an unstaffed office or an off-duty desk
+cannot become a gaming target, and `UseComputer` rejects it as well.
+
 Every `FeatureKind` also has an `Access`: `Beside` (the fridge, touched from next to it) or
 `Entered` (beds and toilets, used by walking *into* them). The feature index admits an
 entered cell only on passable terrain with exactly one blocking prop: the feature itself.

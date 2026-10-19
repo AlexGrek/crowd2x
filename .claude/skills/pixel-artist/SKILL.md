@@ -78,6 +78,10 @@ Which combinations exist is data too: `NATURAL` colours get every hairstyle, `DY
 names the few styles each fantasy colour comes in (that is the weighting — `Look::random`
 picks uniformly from the list), `DRESSES` and `SEPARATES` pick the outfit colourways.
 
+The **TV** (`assets/tv_idle.png`, 2 frames, standby light blinking; `assets/tv.png`, 4 frames of
+picture, shown while somebody watches) is drawn by `tools/tv_art.py` (`preview` for both strips
+on a floor, enlarged): a wooden-cased set on legs, the picture a mask per frame.
+
 The **crematorium** prop (`assets/crematorium.png`, 16x16, `upscaled` in the editor palette) is
 drawn by `tools/crematorium_art.py` like `tools/guard_post_art.py`: a stone furnace, a chimney,
 a gold cross over an iron door with the fire showing through (`preview` shows it on a floor).

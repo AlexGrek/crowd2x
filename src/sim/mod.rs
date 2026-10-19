@@ -610,6 +610,7 @@ impl GameState {
         // loaded as the crowd gets there (`follow_the_crowd_out`).
         map.load_chunks(map.navigation_area());
         let _ = map.navigation();
+        let properties = Properties::from_map(&map);
         let controlled = crate::map::utilities::controlled_boxes(&map);
         let street_lights_on = Clock::after_watching(0.0).sun().is_dark();
         // Every box and every light switch on: only the controllers' boxes
@@ -617,16 +618,15 @@ impl GameState {
         let supply = flood_supply(&map, &[], &controlled, street_lights_on, std::iter::empty());
         let other_light = (!controlled.is_empty()).then(|| {
             let other = flood_supply(&map, &[], &controlled, !street_lights_on, std::iter::empty());
-            let features = Features::from_map(&map, &other);
+            let features = Features::with_properties(&map, &other, &properties);
             (other, features)
         });
-        let properties = Properties::from_map(&map);
         GameState {
             occupancy: Occupancy::new(map.size()),
             census: Census::new(),
             reclaim: Reclaim::default(),
             crowded: Vec::new(),
-            features: Features::from_map(&map, &supply),
+            features: Features::with_properties(&map, &supply, &properties),
             fridges: Fridges::from_map(&map, &supply),
             bins: Bins::from_map(&map),
             doors: Doors::from_map(&map, &properties),
@@ -898,10 +898,10 @@ impl GameState {
             flood_supply(&self.map, &self.boxes_off, &self.controlled, lights_on, self.light_switches.dark_cells())
         };
         self.supply = flood(self.street_lights_on);
-        self.features = Features::from_map(&self.map, &self.supply);
+        self.features = Features::with_properties(&self.map, &self.supply, &self.properties);
         if !self.controlled.is_empty() {
             let other = flood(!self.street_lights_on);
-            let features = Features::from_map(&self.map, &other);
+            let features = Features::with_properties(&self.map, &other, &self.properties);
             self.other_light = Some((other, features));
         }
         self.fridges.set_power(&self.supply);
@@ -2869,7 +2869,7 @@ mod tests {
     /// A map with fridges, toilets and computers in it, so a crowd has every
     /// goal to take turns between rather than one.
     fn kitchen(size: i32, seed: u64) -> GameState {
-        let mut map = Map::new(Size::new(size, size), FLOOR);
+        let mut map = crate::sim::testing::home_map(Size::new(size, size));
         let props = [
             (Point::new(2, 2), "fridge"),
             (Point::new(size - 3, size - 3), "fridge"),
@@ -2898,7 +2898,11 @@ mod tests {
         let build = || {
             let mut state = kitchen(24, 17);
             for i in 0..(PARALLEL_AT as i32 + 20) {
-                state.spawn(EntityType::Human, Point::new(i % 24, 4 + (i / 24) % 16));
+                let uid = state.spawn(EntityType::Human, Point::new(1 + i % 22, 4 + (i / 22) % 16));
+                // A shared home: its computers can be used for gaming as
+                // well as work, so both behaviours run in this test.
+                state.entities.get_mut(uid).unwrap().body_mut().set_home(PropertyId::new(1));
+                state.hire(uid);
             }
             state
         };
