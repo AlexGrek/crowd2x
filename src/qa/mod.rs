@@ -1022,17 +1022,18 @@ fn perform(
             }
         }
 
-        Step::ExpectStored { min } => {
+        Step::ExpectStored { min, store } => {
             let bins = intents
                 .sim
                 .as_deref()
                 .ok_or("there is no simulation — expected the game screen".to_string())?
                 .0
                 .bins();
-            let stored = bins.total();
+            let kind = crate::sim::bins::Store::from_name(store).ok_or(format!("no store called {store:?}"))?;
+            let stored = bins.total_in(kind);
             (stored >= *min).then_some(Next::Now).ok_or(format!(
-                "expected at least {min} pieces of scrap stored, found {stored} in {} bins",
-                bins.len()
+                "expected at least {min} pieces stored in the {store}s, found {stored} in {}",
+                bins.count(kind)
             ))
         }
 

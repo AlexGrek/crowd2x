@@ -61,6 +61,7 @@ pub mod props;
 pub mod saving;
 pub mod selection;
 pub mod speed;
+pub mod statistics;
 pub mod unitpanel;
 pub mod boxpanel;
 
@@ -111,6 +112,7 @@ impl Plugin for GamePlugin {
             unitpanel::UnitPanelPlugin,
             boxpanel::BoxPanelPlugin,
             saving::SavingPlugin,
+            statistics::StatisticsPlugin,
         ))
             .configure_sets(
                 Update,
@@ -313,6 +315,7 @@ fn leave(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     mut menu: ResMut<hud::SpawnMenu>,
+    mut statistics: ResMut<statistics::StatisticsMenu>,
     mut scope: ResMut<Scope>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -325,6 +328,8 @@ fn leave(
     }
     if menu.0.is_some() {
         hud::close_spawn_menu(&mut commands, &mut menu, &mut scope);
+    } else if statistics.0.is_some() {
+        statistics::close_statistics(&mut commands, &mut statistics, &mut scope);
     } else {
         next.set(AppState::Maps);
     }

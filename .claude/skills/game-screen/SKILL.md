@@ -1,6 +1,6 @@
 ---
 name: game-screen
-description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the HUD corners and the spawn menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
+description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the HUD corners, the spawn menu and the statistics menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
 ---
 
 # The game screen
@@ -188,11 +188,24 @@ deciding whether `esc` closes it or leaves the game.
 shows the frame of its strip for `GameState::doors()` openness, written only when it changes.
 A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.
 
-**Scrap bins fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed
-`"scrap bin"`, `editor::props`) shows frame `bin_frame(GameState::bins().stored(cell))` of its
-four — 0 empty, 1-5 a few pieces, 6-20 half full, more heaped — written only on a change. The
-HUD's map stats (`hud::stats`) end in `scrap  N stored` on a map with any bin (the `jobs`
-skill).
+**Stores fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed store —
+`"scrap bin"`, `"steel rack"`, `"scrap hopper"`, `"steel pallet"`, `sim::bins::Store`,
+`editor::props`) shows frame `bin_frame(GameState::bins().stored(cell))` of its four — 0 empty,
+1-5 a few pieces, 6-20 half full, more heaped — written only on a change. The HUD's map stats
+(`hud::stats`) end in `scrap  N stored` on a map with a scrap bin (only what the scrap bins
+hold) and `steel  N stored` on one with a steel rack (the `jobs` skill).
+
+### The statistics menu (`game/statistics.rs`)
+
+`statistics`, in the row with `save` and `quick save`, opens a full-screen modal like the spawn
+menu (its own `Scope`, `StatisticsMenu` resource so `leave` closes it on `esc` before leaving
+the game, `close` button) showing `GameState::statistics()` (`sim::statistics`): the living by
+kind, what the warehouse (scrap bins, steel rack) and the steel factory (hoppers, pallets) hold,
+workers per `JobKind` against its posts (workplaces x shifts) and the jobless, and the dead
+(`died` — `Tally`, counted as they die and saved —, lying, carried, cremated). **The world runs
+on behind it** and the text is rebuilt every frame the menu is open and written only when it
+changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text
+(unit-tested); `qa/statistics.json` opens, reads and closes it.
 
 ### Saving, and opening a loaded game (`game/saving.rs`)
 

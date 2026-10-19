@@ -1,6 +1,6 @@
 ---
 name: map-generator
-description: Knowledge base for crowd2x's procedural district generator - the seeded 131x100 district of 6x5 blocks, lots and streets (pavement, road, grass parks), the 92 houses with beds, fridges, toilets and resident spawners, the bank, the shops, the mandatory lot buildings (the warehouse and its four scrap bins, on the edge lot nearest the scrap; four public restaurants with fridges and toilets, one to each quarter; the crematorium and its two crematoria, on the edge), the perimeter wall with its 8 gates and their guard posts, roofs, lamps, windows, street lamps and their controllers, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
+description: Knowledge base for crowd2x's procedural district generator - the seeded 131x100 district of 6x5 blocks, lots and streets (pavement, road, grass parks), the 92 houses with beds, fridges, toilets and resident spawners, the bank, the shops, the mandatory lot buildings (the warehouse and its four scrap bins, on the edge lot nearest the scrap; four public restaurants with fridges and toilets, one to each quarter; the crematorium and its two crematoria, on the edge; the steel factory with its furnaces, scrap hoppers and steel pallets, on the lot nearest the warehouse, and the warehouse's steel rack), the perimeter wall with its 8 gates and their guard posts, roofs, lamps, windows, street lamps and their controllers, and the power and sewer networks it lays - its build order, invariants, where each step lives, how it is reached (browser, env var, QA fixture) and how it is tested. Maps every concept to the file and function that owns it (no code). Use when changing or extending the generator, adding a building type or furniture to it, debugging a generated map (sealed rooms, jammed crowds, dead fridges, residents without beds), or changing determinism.
 ---
 
 # Map generator: `map::district`
@@ -14,7 +14,7 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 
 | Who | Where | What |
 | --- | --- | --- |
-| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, warehouse: Rect, restaurants: Vec<Rect>, crematorium: Rect, parks, gates: Vec<Gate> }` (`Gate { leaves: [Point; 2], post, outward }`), `District::residents()`, `District::buildings()` (every building's walls: houses, shops, warehouse, restaurants, crematorium, bank) |
+| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, warehouse: Rect, restaurants: Vec<Rect>, crematorium: Rect, steel_factory: Rect, parks, gates: Vec<Gate> }` (`Gate { leaves: [Point; 2], post, outward }`), `District::residents()`, `District::buildings()` (every building's walls: houses, shops, warehouse, restaurants, crematorium, steel factory, bank) |
 | Browser button `district` | `src/browser.rs` (`Action::District`) | fresh seed, name from the name field or `district <seed>`, saved, opened in the game |
 | By hand | `src/debug.rs` | `CROWD2X_DISTRICT=<seed>` (with `CROWD2X_STATE=game`) |
 | QA fixture | `src/qa/mod.rs` | `given.maps: [{"name": ..., "district": seed}]` |
@@ -26,10 +26,11 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 `STREET` = 5 cells between and around blocks: a `PAVEMENT` each side of three cells of `ROAD`,
 the main under the middle one, lamps in the road's outer lanes (`CURB` = 1 in from each edge).
 `WIDTH` x `HEIGHT` = 131 x 100. **Lots**: 30 blocks less the bank's two and the shops' one
-leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (6: the warehouse, `RESTAURANTS` = 4, the crematorium) take theirs first, `HOUSES`
-= 92 of the rest (about 86%), and `EMPTY_LOTS` = `RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES`
-(10) are parks — all derived, so a geometry change only needs `HOUSES` chosen. Seed 7 has 137 residents (0 has 134, 42 has 133;
-they moved with the restaurants and the crematorium). Helpers:
+leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (7: the warehouse, `RESTAURANTS` = 4, the
+crematorium, the steel factory) take theirs first, `HOUSES` = 92 of the rest (about 86%), and
+`EMPTY_LOTS` = `RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES` (9) are parks — all derived, so a
+geometry change only needs `HOUSES` chosen. Seed 7 has 137 residents (re-read after the steel
+factory, and pinned by `the_tvs_draw_nothing_from_the_district_...`). Helpers:
 `block_origin`, `lots_of` (each `Lot` knows its two street-facing `outer` sides, and
 `edge_sides()` — those facing the street round the edge, with the wasteland beyond), `Rect`
 (`interior`, `on_edge`, `cells`, `contains`), `Side::outward`, `place_in`, `door`, `build`
@@ -84,11 +85,30 @@ re-read, never assumed.)
    (`"crematorium"`) in each far corner (`CREMATORIA` = 2, so 6 undertakers, `jobs`).
    **Adding the restaurants and the crematorium changed every seed's houses** (the lots and
    the RNG draws after the warehouse); the bank, shops and warehouse are as they were.
+   Last the **`steel_factory`**: the lot whose middle is nearest the warehouse's (the
+   couriers' trips), **the whole lot** (8x7), `FACTORY_WALL` (`block`) and `FACTORY_FLOOR`
+   (`floor`), a plain `DOOR` in the middle of the lot's first street side, laid out from the
+   door with `Room`: a `SCRAP_HOPPER` against each side wall in the row inside the door (the
+   couriers' workplaces, `HOPPERS` = 2), a `STEEL_PALLET` against each side wall two rows short
+   of the far wall (`PALLETS` = 2) and a `FURNACE` in each far corner (the steelworkers',
+   `FURNACES` = 2; powered, so `connect` wires the building). **It draws no RNG**, so the bank,
+   shops, warehouse, restaurants and crematorium are as they were; taking a lot still moved
+   which lots are houses and parks, so other seeds' houses changed (seed 7's count did not).
+   The warehouse got a `STEEL_RACK` with it, in the middle of its long interior wall away from
+   the door (the interior is 5x4, so the rack has a free cell either side before the corner
+   bins); `District::steel_factory` and `buildings()` include the factory.
 5. **Lots -> houses**: the rest, `EMPTY_LOTS` split off (leaving `HOUSES` = 92), re-sorted
    into street order (so spawner/arrival order reads bottom-left
    first), then **`house`** for each: 1-2 `RESIDENTS`, 7-8 x 6-7 walls (`HOUSE_WALL`,
    `HOUSE_FLOORS`), a 2-wide door on an outer side, and **`furnish`** -> `arrange` /
    `exhaustively`: beds, `FRIDGE`, `TOILET` against the inner walls, spawners beside beds.
+   Then, in `HOUSES_WITH_A_TV` (half) of them, a **`TV`** (`place_tv`): a wall cell off the
+   door, the furniture and the spawners where the house is still `livable` (the reachability
+   and `ROOM_AROUND` check `arrange` makes, factored out). Which houses and which cell are
+   drawn from a **second stream**, `SmallRng::seed_from_u64(seed ^ TV_STREAM)`, so the TVs
+   take nothing from the district's RNG and no seed's houses or people changed. `House::tv`
+   says where. A house is one open room, so the TV is watched from anywhere in it within
+   three cells (`brain-engineer`); `connect` wires it like the fridge.
    Then the **parks**: the split-off lots and the shops' fourth, each a whole lot of `GRASS`
    (`District::parks`), no RNG.
 5b. **`gates`** (no RNG, so no seed changed): `GATES_PER_SIDE` (2) a side, `GATES` = 8, each
@@ -150,8 +170,9 @@ re-read, never assumed.)
 | No line indoors; outdoor wiring only on circuits with a controlled box and nothing indoors | voltages meet only in a box; street lights never share a house's circuit | `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` |
 | Street lamps powered at night only (controlled boxes off = day), everything else all day; >= 30 lamps; 1..=10 controllers | street lights, and not a cabinet per stretch | `the_street_lamps_have_power_at_night_only_and_everything_else_all_day` |
 | >= 90% of main cells within a street lamp's radius | the streets are lit | `the_streets_are_lit` |
-| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; one warehouse holding its 4 bins and nothing else, no bin elsewhere, nobody's property, on the edge, on the edge lot to be had nearest the scrap; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's | the brief | `a_district_has_what_it_was_asked_for` |
+| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; one warehouse holding its 4 bins and nothing else, no bin elsewhere, nobody's property, on the edge, on the edge lot to be had nearest the scrap; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's; the warehouse's one steel rack, none elsewhere; one steel factory holding its 2 furnaces, 2 hoppers and 2 pallets and nothing else, none elsewhere, nobody's, on no lot farther from the warehouse than a house or park lot is (2 cells' slack for lot-vs-building middles) | the brief | `a_district_has_what_it_was_asked_for` |
 | The warehouse's door opens onto the edge street (or the yard cell before it), facing out | collectors step out towards the wasteland | `the_warehouse_door_opens_onto_the_street_round_the_edge` |
+| 40-60% of houses have one `TV`, against an inside wall with `ROOM_AROUND` free cells beside it; none anywhere else; seed 7 still has 137 residents | TVs to watch at home, seeds unchanged | `about_half_the_houses_have_a_tv_...`, `the_tvs_draw_nothing_from_the_district_...`; sim `in_a_district_the_bored_watch_the_tvs_in_their_own_houses` |
 | Every edge cell is the perimeter wall but the gates' leaves (`DOOR` on `ROAD`, opening off the map, reachable inside); `GATES_PER_SIDE` a side | a walled district, ways out | `the_district_is_walled_in_but_for_its_gates` |
 | One guard post per gate and none elsewhere, on the wall, two from its gate, its only on-map side a free cell inside, not in the gateway | guards stand inside, out of the way | `every_gate_has_a_guard_post_in_the_wall_with_room_inside_to_stand_at_it` |
 | Every street off the crossroads reads pavement, road x3, pavement (the edge streets: wall for the outer pavement) | people keep to the pavement | `every_street_is_a_pavement_each_side_of_three_cells_of_road` |
@@ -178,6 +199,8 @@ desk in the bank, then the four bins in the warehouse) and
 - **New furniture in houses**: add it to `arrange` / `Furnishing` (it must keep `ROOM_AROUND`
   and reachability), add its name constant to the `every_tile_and_prop...` list. If it needs
   power or water, `connect` already wires every consumer inside a building - nothing else to do.
+  Adding a piece to `arrange` changes every seed's houses; furniture only *some* houses get
+  can follow the TV instead (a stream of its own and `livable`), which changes no seed.
 - **New building type**: a builder like `shops` drawing from the RNG at a fixed point (this
   **changes every seed after it** - say so in the commit), return its `Rect`, include it in
   the `rooms` list `generate` builds (roof, lamp, `glaze`, `connect`, `light_streets` follow)

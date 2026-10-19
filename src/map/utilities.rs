@@ -87,6 +87,7 @@ pub const CONSUMERS: &[(&str, Utility)] = &[
     ("fridge", Utility::Power),
     ("computer", Utility::Power),
     ("tv", Utility::Power),
+    ("furnace", Utility::Power),
     ("ceiling lamp", Utility::Power),
     ("tube lamp", Utility::Power),
     ("street lamp", Utility::Power),

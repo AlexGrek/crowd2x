@@ -1,0 +1,65 @@
+{
+  "name": "the statistics menu counts the living, the warehouse, the jobs and the dead",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "yard",
+        "map": {
+          "version": 1,
+          "size": { "width": 10, "height": 6 },
+          "terrain": {
+            "palette": ["void", "floor"],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 24 }, "kind": "scrap bin" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "note": "the first arrival is hired to the one scrap bin; the second finds no post left" },
+    { "spawn": { "kind": "human", "x": 3, "y": 3 } },
+    { "spawn": { "kind": "human", "x": 6, "y": 3 } },
+    { "tick": 1 },
+
+    { "press": "statistics" },
+    { "expect_text": "humans 2" },
+    { "expect_text": "warehouse     0   scrap metal     0   steel" },
+    { "expect_text": "factory           none" },
+    { "expect_text": "scrap collectors of 1 posts" },
+    { "expect_text": "   1   without a job" },
+    { "expect_text": "lying 0  carried 0  cremated 0" },
+    { "shot": "the statistics menu" },
+
+    { "note": "esc closes the menu and stays in the game; a second esc leaves it" },
+    { "key": "esc" },
+    { "wait": 0.2 },
+    { "expect_state": "game" },
+    { "press": "statistics" },
+    { "expect_text": "humans 2" },
+    { "press": "close" },
+    { "wait": 0.2 },
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

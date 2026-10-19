@@ -89,7 +89,10 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{BuryGoal, CollectGoal, DrinkGoal, EatGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, WanderGoal, WorkGoal};
+use goals::{
+    BuryGoal, CollectGoal, DrinkGoal, EatGoal, HaulGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, SmeltGoal, WanderGoal,
+    WorkGoal,
+};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -193,6 +196,8 @@ impl Brain {
                 Box::new(WorkGoal::new()),
                 Box::new(CollectGoal::new()),
                 Box::new(BuryGoal::new()),
+                Box::new(SmeltGoal::new()),
+                Box::new(HaulGoal::new()),
             ],
         )
     }

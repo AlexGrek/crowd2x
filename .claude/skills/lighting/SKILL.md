@@ -1,6 +1,6 @@
 ---
 name: lighting
-description: The crowd2x lightmap - day/night ambient (the sun model in sim::sun - intensity and colour by hour) and indoor light, the RGB lightmap at five subtiles a cell baked by compute shaders, emitters (ceiling, tube and street lamps, fire, computers and TVs in use), occlusion, the sky field propagated through doorways, dirty chunks, the GPU/CPU reference check and its measured cost. Use when touching src/lighting/, assets/shaders/lighting.wgsl, sky.wgsl or lit_canvas.wgsl, adding a light source, or when something is lit wrong, too dark or a light does not switch.
+description: The crowd2x lightmap - day/night ambient (the sun model in sim::sun - intensity and colour by hour) and indoor light, the RGB lightmap at five subtiles a cell baked by compute shaders, emitters (ceiling, tube and street lamps, fire, computers, TVs and furnaces in use), occlusion, the sky field propagated through doorways, dirty chunks, the GPU/CPU reference check and its measured cost. Use when touching src/lighting/, assets/shaders/lighting.wgsl, sky.wgsl or lit_canvas.wgsl, adding a light source, or when something is lit wrong, too dark or a light does not switch.
 ---
 
 # Lighting
@@ -19,7 +19,7 @@ parts, each a step further from the simulation:
   occlusion bit per subtile (from `Map::sight`, so walls block light and furniture does
   not), one ceiling bit per **cell** (`Map::has_ceiling`), the lights (`EMITTERS`, a
   catalogue keyed by object name like `PROPS`, read from the `Props` *and* `Lamps` layers —
-  `"ceiling lamp"`, `"tube lamp"`, `"street lamp"` and `"fire"` always on, `"computer"` and `"tv"`
+  `"ceiling lamp"`, `"tube lamp"`, `"street lamp"` and `"fire"` always on, `"computer"`, `"furnace"` (an orange glow while a steelworker works it) and `"tv"`
   only while somebody is using it — and a lamp or a computer with no power is in the scene
   but disabled: `LightScene::from_map` takes the map's `Supply`, `apply_supply` follows it
   changing), and a CSR index from each

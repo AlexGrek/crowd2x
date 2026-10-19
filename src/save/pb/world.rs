@@ -42,6 +42,18 @@ pub struct World {
     /// save from before there were bins, which is a map with none.
     #[prost(message, repeated, tag = "12")]
     pub bins: Vec<Bin>,
+    /// The dead counted as they went (`crate::sim::statistics::Tally`).
+    /// Missing in a save from before it, which is nobody counted.
+    #[prost(message, optional, tag = "13")]
+    pub tally: Option<Deaths>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Deaths {
+    #[prost(uint32, tag = "1")]
+    pub died: u32,
+    #[prost(uint32, tag = "2")]
+    pub cremated: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

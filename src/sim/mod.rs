@@ -154,6 +154,7 @@ pub mod path;
 pub mod property;
 pub(crate) mod rng;
 mod saving;
+pub mod statistics;
 pub mod sun;
 pub mod talents;
 #[cfg(test)]
@@ -195,6 +196,7 @@ pub use property::{Properties, PropertyId};
 pub use talents::{Talent, Talents};
 pub use uid::{EntityType, Uid};
 pub use saving::RestoredEntity;
+pub use statistics::{Statistics, Tally};
 pub use walker::Walker;
 
 /// What an entity decided to do this tick.
@@ -283,10 +285,16 @@ pub enum Effect {
     /// so two finishing on the last piece in one tick get one between them,
     /// the lower slot's — see [`world_step`].
     Salvage { at: Point },
-    /// Put `pieces` of scrap metal in the bin at `at`: a collector has
+    /// Put `pieces` of what the store at `at` holds in it: a unit has
     /// finished emptying its pack into it ([`brain::tasks::Deposit`], which
     /// has already taken them out of the pack). See [`bins`].
     Deposit { at: Point, pieces: u8 },
+    /// Take as much of what the store at `at` holds as the unit has room
+    /// for, and stow it: the unit has finished filling its pack there
+    /// ([`brain::tasks::Withdraw`]). Granted piece by piece while the store
+    /// has any and the pack has room, so two at the last pieces share them
+    /// out in slot order — see [`world_step`].
+    Withdraw { at: Point },
     /// The unit died this tick, of `cause` ([`biology::health`]): it has
     /// already marked its own body dead, and the world gives back what it
     /// held — its cell, its bed, its workplace (with the job, so a worker is
@@ -576,6 +584,9 @@ pub struct GameState {
     /// pass is over ([`process_game_state`]) — the one pass that may not
     /// remove anybody. Empty between ticks, so never saved.
     burials: Vec<Uid>,
+    /// The dead, counted as they die and as they are cremated: what the
+    /// world no longer shows once a body has gone. See [`statistics`].
+    tally: Tally,
     /// Mints ids and seeds new entities. Seeded, so a run replays; and a
     /// named generator, so a save can keep its state ([`rng::WorldRng`]).
     rng: rng::WorldRng,
@@ -643,6 +654,7 @@ impl GameState {
             workplaces: Workplaces::new(),
             corpses: Corpses::new(),
             burials: Vec::new(),
+            tally: Tally::default(),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -920,6 +932,17 @@ impl GameState {
     /// What every scrap bin holds. See [`bins`].
     pub fn bins(&self) -> &Bins {
         &self.bins
+    }
+
+    /// The dead counted so far. See [`statistics`].
+    pub fn tally(&self) -> Tally {
+        self.tally
+    }
+
+    /// The world in numbers, worked out now: one walk of the arena, for a
+    /// screen to show, never for a tick to read. See [`statistics`].
+    pub fn statistics(&self) -> Statistics {
+        Statistics::of(&self.entities, &self.features, &self.bins, &self.corpses, self.tally)
     }
 
     /// Every door's leaf and lock. See [`door`].
@@ -1544,6 +1567,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         workplaces,
         corpses,
         burials,
+        tally,
         tick,
         intents,
         moves,
@@ -1577,6 +1601,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             doors,
             properties,
             corpses,
+            bins,
             dt,
             tick: *tick,
             clock,
@@ -1599,6 +1624,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             doors,
             properties,
             corpses,
+            bins,
             dt,
             tick: *tick,
             clock,
@@ -1613,7 +1639,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    let mut people = People { occupancy, homes, workplaces, corpses, burials };
+    let mut people = People { occupancy, homes, workplaces, corpses, burials, tally };
     world_step(&mut table, map, log, fridges, bins, doors, &mut people, effects, dt);
 }
 
@@ -1943,8 +1969,10 @@ fn react_for(
 /// settles races between units is the one place both are in reach. In slot
 /// order, so the last piece goes to the same unit on every run.
 ///
-/// Every [`Effect::Deposit`] puts its pieces in its bin, which the task that
-/// asked has already taken them out of the pack for.
+/// Every [`Effect::Deposit`] puts its pieces in its store, which the task
+/// that asked has already taken them out of the pack for; every
+/// [`Effect::Withdraw`] takes pieces out of one and stows them, a write into
+/// the store and the pack together, like a salvage ([`withdraw`]).
 ///
 /// Every [`Effect::Died`] gives back what the dead held — see [`died`] —
 /// and every [`Effect::TakeBody`] puts a body in an undertaker's hand
@@ -1982,6 +2010,12 @@ fn world_step(
                     deposit(entity.uid(), bins, log, at, pieces);
                 }
             }
+            Effect::Withdraw { at } => {
+                if let Some(entity) = table.slot_mut(slot as Slot) {
+                    let uid = entity.uid();
+                    withdraw(uid, entity.inventory_mut(), bins, log, at);
+                }
+            }
             Effect::Died { cause } => {
                 if let Some(entity) = table.slot_mut(slot as Slot) {
                     died(entity, people, log, cause);
@@ -1994,6 +2028,7 @@ fn world_step(
             }
             Effect::Cremate { at } => {
                 if let Some(entity) = table.slot(slot as Slot) {
+                    people.tally.cremated += 1;
                     log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
                 }
             }
@@ -2014,6 +2049,7 @@ pub(crate) struct People<'a> {
     pub workplaces: &'a mut Workplaces,
     pub corpses: &'a mut Corpses,
     pub burials: &'a mut Vec<Uid>,
+    pub tally: &'a mut Tally,
 }
 
 /// [`Effect::TakeBody`], for the unit in one slot: the body at `at` into its
@@ -2075,20 +2111,57 @@ pub(crate) fn died(entity: &mut dyn GameEntity, people: &mut People<'_>, log: &L
     people.homes.release(uid);
     people.workplaces.release(uid);
     people.corpses.add(uid, cell);
+    people.tally.died += 1;
     let _ = entity.dismiss();
     log.push(format!("{uid} died of {cause}"));
 }
 
-/// [`Effect::Deposit`], for the unit `uid`: its pieces into the bin at
+/// What a store is called in the log: a scrap bin is "the bin", as it
+/// always has been; the others by their own names.
+fn store_word(store: Option<bins::Store>) -> &'static str {
+    match store {
+        Some(bins::Store::ScrapBin) | None => "bin",
+        Some(store) => store.name(),
+    }
+}
+
+/// [`Effect::Deposit`], for the unit `uid`: its pieces into the store at
 /// `at`, and a line in the log — once a packful, so never a flood.
 pub(crate) fn deposit(uid: Uid, bins: &mut Bins, log: &Log, at: Point, pieces: u8) {
+    let store = bins.store(at);
+    let (item, word) = (store.map_or("scrap metal", |store| store.item().name()), store_word(store));
     match bins.add(at, pieces as u32) {
         Some(stored) => log.push(format!(
-            "{uid} stored {pieces} scrap metal in the bin at {}, {}: {stored} stored",
+            "{uid} stored {pieces} {item} in the {word} at {}, {}: {stored} stored",
             at.x, at.y
         )),
-        None => log.push(format!("{uid} found no scrap bin at {}, {}", at.x, at.y)),
+        None => log.push(format!("{uid} found no store at {}, {}", at.x, at.y)),
     }
+}
+
+/// [`Effect::Withdraw`], for the unit in one slot: pieces out of the store
+/// at `at` and into its pack, one at a time while the store has any and the
+/// pack has room. Logged once a packful, either way.
+pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut Bins, log: &Log, at: Point) {
+    let Some(inventory) = inventory else {
+        return;
+    };
+    let Some(store) = bins.store(at) else {
+        log.push(format!("{uid} found no store at {}, {}", at.x, at.y));
+        return;
+    };
+    let (item, word) = (store.item(), store_word(Some(store)));
+    let mut pieces = 0;
+    while inventory.room_for(item) && bins.take(at) {
+        let _ = inventory.stow(item);
+        pieces += 1;
+    }
+    let left = bins.stored(at);
+    log.push(if pieces == 0 {
+        format!("{uid} took no {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)
+    } else {
+        format!("{uid} took {pieces} {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)
+    });
 }
 
 #[cfg(test)]
@@ -3160,6 +3233,45 @@ mod tests {
         GameState::new(map, seed)
     }
 
+    /// The whole chain on a Monday: the courier takes the warehouse's scrap
+    /// to the factory's hopper, the steelworker takes it from there, smelts
+    /// it at its furnace and puts the steel on the pallet, and the courier
+    /// takes the steel back to the warehouse's rack. Two pieces of scrap to
+    /// an ingot, and nothing made or lost on the way.
+    #[test]
+    fn a_courier_and_a_steelworker_turn_the_warehouse_s_scrap_into_steel_on_its_rack() {
+        let (mut state, smelter, courier) = crate::sim::testing::steel_works(12, 3);
+        let (bin, rack, hopper, pallet) = (Point::new(2, 2), Point::new(2, 8), Point::new(16, 2), Point::new(16, 8));
+        let mut lines = Vec::new();
+        let mut smelting = false;
+        // 1800 ticks a world hour: by five o'clock at the latest.
+        for _ in 0..9 * 1800 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            smelting |= state.entities().get(smelter).unwrap().interacting_with() == Some(Point::new(21, 5));
+            if state.bins().stored(rack) >= 2 {
+                break;
+            }
+        }
+        let tail = &lines[lines.len().saturating_sub(30)..];
+        assert!(state.bins().stored(rack) >= 2, "{} steel on the rack by {}; {tail:?}", state.bins().stored(rack), state.clock());
+        assert!(smelting, "the steelworker was at its furnace");
+        assert!(lines.iter().any(|line| line.contains(&format!("{courier} took 3 scrap metal from the bin at 2, 2"))), "{tail:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{courier} stored 3 scrap metal in the scrap hopper at 16, 2"))), "{tail:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{smelter} took")) && line.contains("from the scrap hopper")), "{tail:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{smelter} stored 1 steel in the steel pallet at 16, 8"))), "{tail:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{courier} took")) && line.contains("steel from the steel pallet")), "{tail:?}");
+
+        // Every piece of scrap is somewhere: in a store, in a pack, or two
+        // of them in every ingot.
+        let carried = |uid: Uid, item: ItemKind| state.entities().get(uid).unwrap().inventory().unwrap().count(item) as u32;
+        let scrap = state.bins().stored(bin) + state.bins().stored(hopper) + carried(smelter, ItemKind::Scrap) + carried(courier, ItemKind::Scrap);
+        let steel = state.bins().stored(pallet) + state.bins().stored(rack) + carried(smelter, ItemKind::Steel) + carried(courier, ItemKind::Steel);
+        assert_eq!(scrap + 2 * steel, 12, "{scrap} scrap and {steel} steel");
+        let stats = state.statistics();
+        assert_eq!((stats.steel_in_warehouse, stats.steel_in_factory), (state.bins().stored(rack), state.bins().stored(pallet)));
+    }
+
     /// The desks are offered first, however near the bins are; then one
     /// collector to a bin; then nobody. `Command::Hire` offers them in the
     /// same order.
@@ -3184,6 +3296,10 @@ mod tests {
         assert_eq!(job(&state, arrivals[3]).unwrap().workplace, bins[1], "the bin nobody had");
         assert_eq!(job(&state, arrivals[4]), None, "every workplace taken: unemployed");
         assert_eq!(state.workplaces().len(), 4);
+        let stats = state.statistics();
+        let counts: Vec<(JobKind, u32, u32)> = stats.jobs.iter().map(|job| (job.kind, job.workers, job.posts)).collect();
+        assert_eq!(counts[..2], [(JobKind::OfficeWorker, 2, 2), (JobKind::ScrapCollector, 2, 2)]);
+        assert_eq!((stats.living(), stats.jobless, stats.scrap_in_warehouse, stats.warehouse, stats.factory), (5, 1, 0, true, false));
         let lines = state.log.drain();
         assert!(
             lines.iter().any(|line| line.contains("was hired as a scrap collector at the scrap bin at 2, 2")),
@@ -3259,6 +3375,14 @@ mod tests {
         assert!(state.entities().get(victim).is_none(), "the body left the world");
         assert!(state.corpses().is_empty());
         assert_eq!(state.entities().get(undertaker).unwrap().inventory().unwrap().hand(), None);
+
+        // Gone from the world, and still counted.
+        let stats = state.statistics();
+        assert_eq!(stats.alive, vec![(EntityType::Human, 1), (EntityType::Dog, 0)]);
+        assert_eq!((stats.died, stats.lying, stats.carried, stats.cremated), (1, 0, 0, 1));
+        let undertakers = stats.jobs.iter().find(|job| job.kind == JobKind::Undertaker).unwrap();
+        assert_eq!((undertakers.workers, undertakers.posts), (1, 3), "one crematorium, three watches");
+        assert_eq!(stats.jobless, 0);
     }
 
     #[test]
@@ -3905,6 +4029,7 @@ mod tests {
                 workplaces: &mut state.workplaces,
                 corpses: &mut state.corpses,
                 burials: &mut state.burials,
+                tally: &mut state.tally,
             },
             &mut state.effects,
             0.0,
@@ -3949,9 +4074,12 @@ mod tests {
             let watches = crate::map::district::GATES * job::WATCHES.len();
             assert_eq!(watches, 24);
             let undertakers = crate::map::district::CREMATORIA * job::WATCHES.len();
-            assert!(district.residents() >= desks + bins + watches + undertakers, "seed {seed}: more jobs than people");
-            assert_eq!(state.workplaces().len(), desks + bins + watches + undertakers, "seed {seed}");
+            let (smelters, couriers) = (crate::map::district::FURNACES, crate::map::district::HOPPERS);
+            let jobs = desks + bins + watches + undertakers + smelters + couriers;
+            assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
+            assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
+            let (mut smelting, mut hauling) = (0, 0);
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
@@ -3977,10 +4105,19 @@ mod tests {
                         cremating += 1;
                         assert!(district.crematorium.contains(job.workplace), "seed {seed}: a crematorium outside the crematorium");
                     }
+                    JobKind::Steelworker | JobKind::Courier => {
+                        if job.kind == JobKind::Steelworker {
+                            smelting += 1;
+                        } else {
+                            hauling += 1;
+                        }
+                        assert!(district.steel_factory.contains(job.workplace), "seed {seed}: a {} outside the factory", job.kind.name());
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
+            assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -4076,9 +4213,73 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("salvaged scrap metal")));
         let stored = lines.iter().find(|line| line.contains("in the bin at")).expect("a line about it");
         assert!(stored.contains("scrap metal in the bin at"), "{stored}");
-        for (bin, _) in state.bins().iter() {
-            assert!(district.warehouse.contains(bin));
+        for (bin, store, _) in state.bins().iter_stores() {
+            let building = if store.in_factory() { district.steel_factory } else { district.warehouse };
+            assert!(building.contains(bin), "{store:?} at {bin:?}");
         }
+    }
+
+    #[test]
+    fn in_a_district_the_bored_watch_the_tvs_in_their_own_houses() {
+        let district = crate::map::district::generate(7);
+        let tvs: Vec<String> = district
+            .houses
+            .iter()
+            .filter_map(|house| house.tv)
+            .map(|tv| format!("watched the TV at {}, {}", tv.x, tv.y))
+            .collect();
+        assert!(!tvs.is_empty());
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut watched = Vec::new();
+        // 1800 ticks a world hour: a day at most.
+        for _ in 0..24 * 1800 {
+            run(&mut state, 1);
+            watched.extend(state.log.drain().into_iter().filter(|line| line.contains("watched the TV")));
+            if watched.len() >= 3 {
+                break;
+            }
+        }
+        assert!(watched.len() >= 3, "{} TVs watched by {}", watched.len(), state.clock());
+        for line in &watched {
+            assert!(tvs.iter().any(|tv| line.ends_with(tv.as_str())), "{line}: not a house's TV");
+        }
+    }
+
+    /// The district's own steel works: its collectors bring scrap in to the
+    /// warehouse, its couriers take it to the steel factory, its steelworkers
+    /// smelt it and the couriers bring the steel back to the warehouse's
+    /// rack. The three trades' needs off, as the scrap test has the
+    /// collectors' (the crowd's limits are not this test's).
+    #[test]
+    fn a_district_s_steel_works_bring_steel_into_its_warehouse() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        let trades = [JobKind::ScrapCollector, JobKind::Courier, JobKind::Steelworker];
+        for worker in state.entities().iter().filter(|e| e.job().is_some_and(|job| trades.contains(&job.kind))) {
+            for process in ProcessId::ALL {
+                input.set_process(worker.uid(), process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let rack = state
+            .bins()
+            .iter_stores()
+            .find(|&(_, store, _)| store == crate::sim::bins::Store::SteelRack)
+            .map(|(cell, _, _)| cell)
+            .expect("the warehouse has a rack");
+        assert!(district.warehouse.contains(rack));
+        // Monday and Tuesday, office hours and the night between.
+        let mut ticks = 0;
+        while state.bins().stored(rack) == 0 {
+            run(&mut state, 60);
+            ticks += 60;
+            assert!(ticks < 34 * 1800, "no steel in the warehouse by {}; {:?}", state.clock(), state.statistics());
+        }
+        let stats = state.statistics();
+        assert!(stats.steel_in_warehouse > 0);
     }
 
     #[test]

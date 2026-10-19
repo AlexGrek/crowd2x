@@ -68,6 +68,7 @@ impl GameState {
             homes: self.homes.save(),
             arena: Some(self.entities.save_arena()),
             workplaces: self.workplaces.save(),
+            tally: Some(self.tally.save()),
         }
     }
 
@@ -145,6 +146,7 @@ impl GameState {
         state.refresh_supply();
         state.fridges.restore(&world.fridges)?;
         state.bins.restore(&world.bins)?;
+        state.tally = crate::sim::statistics::Tally::restore(world.tally.as_ref());
         state.doors.restore(&world.doors)?;
         state.homes = Homes::restore(&world.homes)?;
         state.workplaces = Workplaces::restore(&world.workplaces)?;

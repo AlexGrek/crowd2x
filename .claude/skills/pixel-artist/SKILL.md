@@ -87,11 +87,20 @@ drawn by `tools/crematorium_art.py` like `tools/guard_post_art.py`: a stone furn
 a gold cross over an iron door with the fire showing through (`preview` shows it on a floor).
 A carried body is the emoji ⚰ (`characters/item.rs`), and so is the undertaker's goal label.
 
+The **steel factory** and the warehouse's steel are drawn by `tools/steel_factory_art.py`
+(`preview` puts every strip on a factory floor, enlarged): `scrap_hopper.png`, a yellow hopper on
+legs, `steel_pallet.png`, ingots stacked on a wooden pallet, and `steel_rack.png`, a steel
+shelving unit, each four frames (empty, a few, half, heaped) the game picks from what the store
+holds (`fill_bins`, like the scrap bin); `furnace_idle.png` (2 frames, embers) and `furnace.png`
+(3 frames, flames, shown while a steelworker works it). The scrap is `tools/scrap_art.py`'s
+colours. Carried steel is the emoji ⛓ (`characters/item.rs`).
+
 ### Adding a layer kind that is not hair or clothes
 
 **Work uniforms** are in `tools/human_art.py` too: `UNIFORMS`, a mask and its own colours per
 job (`t` a tie, `s` a reflective band, `k` brass; the undertaker's black cassock to the ankles
-with a white collar `w` and a gold cross `y`), written by `generate` as
+with a white collar `w` and a gold cross `y`; the steelworker's brown leather apron over a
+charcoal shirt; the courier's green jacket with a satchel on a strap), written by `generate` as
 `assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
 the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
 everybody's seeded look); each is a `Clothing::Uniform*` variant, in `Clothing::UNIFORMS`, with a

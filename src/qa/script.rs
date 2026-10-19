@@ -596,11 +596,16 @@ pub enum Step {
     /// drawn and an emptied one is not, and off it nothing is drawn at all.
     /// Give the scrap window a frame after a `tick` (`wait`) before asking.
     ExpectScrap { x: i32, y: i32, pieces: u8 },
-    /// At least `min` pieces of scrap metal stored in the map's scrap bins,
-    /// all of them together, as the simulation says (`sim::bins`): what the
-    /// scrap collectors have brought in. An outcome, not a moment — give the
-    /// world ticks enough first.
-    ExpectStored { min: u32 },
+    /// At least `min` pieces stored in the map's stores of one kind, all of
+    /// them together, as the simulation says (`sim::bins`): `in` names the
+    /// store's prop — `scrap bin` (the default: what the scrap collectors
+    /// have brought in), `steel rack`, `scrap hopper`, `steel pallet`. An
+    /// outcome, not a moment — give the world ticks enough first.
+    ExpectStored {
+        min: u32,
+        #[serde(rename = "in", default = "default_store")]
+        store: String,
+    },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.
     ///
@@ -692,6 +697,10 @@ pub enum Step {
 
 fn default_tap() -> f32 {
     DEFAULT_TAP
+}
+
+fn default_store() -> String {
+    crate::sim::bins::SCRAP_BIN.to_string()
 }
 
 fn default_count() -> u32 {

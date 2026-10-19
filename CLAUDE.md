@@ -26,8 +26,12 @@ the heaps in the wasteland and stores it in its own bin in the district's wareho
 district is walled in, with eight gates, and each gate's guard post is kept round the clock by
 three guards on eight-hour watches, every day, each sleeping by its watch; undertakers on the
 same watches carry the dead to the crematoria in the district's crematorium. Four public
-restaurants, one to each quarter of a district, have fridges and toilets anybody may use.
-Every worker wears its job's uniform while its shift is due.
+restaurants, one to each quarter of a district, have fridges and toilets anybody may use. A
+steel factory beside the warehouse smelts the scrap into steel: its steelworkers smelt scrap
+from its hoppers at their furnaces, and its couriers carry scrap from the warehouse to the
+factory and the steel back to the warehouse's rack. Every worker wears its job's uniform while
+its shift is due. The game screen's `statistics` menu counts the living, the warehouse's and
+the factory's stock, the workers per job and the dead.
 
 ## Commands
 
@@ -62,7 +66,7 @@ to `screenshots/`.
 | `src/lighting/`, shaders, lamps, day/night, the sun (`src/sim/sun.rs`), something lit wrong | `lighting` |
 | Screens, menus, buttons, focus/navigation, text entry, the map browser | `interface` |
 | The map editor, palettes, map windows, placing terrain/props/lamps | `editor` (+ `map-layers`) |
-| The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD | `game-screen` |
+| The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD, the statistics menu | `game-screen` |
 | The map data model, passability, catalogues, spawners, the file format | `map` |
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
 | Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
@@ -73,7 +77,7 @@ to `screenshots/`.
 | `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, watches, weekdays, commutes, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
 | Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
@@ -132,8 +136,9 @@ src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]
 src/sim/job.rs          jobs, shifts, watches, who works which workplace    [jobs]
-src/sim/bins.rs         what each scrap bin holds                           [jobs]
+src/sim/bins.rs         the stores: scrap bins, steel racks, hoppers, pallets [jobs]
 src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
+src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]
@@ -151,6 +156,7 @@ tools/scrap_bin_art.py  draws the warehouse's scrap bin, empty to heaped     [pi
 tools/guard_post_art.py draws the guard post in the district's wall         [pixel-artist]
 tools/crematorium_art.py draws the crematorium the undertakers bring the dead to [pixel-artist]
 tools/tv_art.py         draws the TV, dark and showing a picture               [pixel-artist]
+tools/steel_factory_art.py draws the furnace, scrap hopper, steel pallet and rack [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

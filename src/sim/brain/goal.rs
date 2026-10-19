@@ -57,10 +57,16 @@ pub enum GoalId {
     /// ([`BuryGoal`](super::goals::BuryGoal)): an undertaker's watch. Last,
     /// for the same reason.
     Bury = 10,
+    /// Smelt scrap into steel at one's own furnace
+    /// ([`SmeltGoal`](super::goals::SmeltGoal)): a steelworker's shift.
+    Smelt = 11,
+    /// Carry scrap to the steel factory and steel to the warehouse
+    /// ([`HaulGoal`](super::goals::HaulGoal)): a courier's shift.
+    Haul = 12,
 }
 
 impl GoalId {
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 13;
     pub const ALL: [GoalId; GoalId::COUNT] = [
         GoalId::Idle,
         GoalId::Wander,
@@ -73,6 +79,8 @@ impl GoalId {
         GoalId::Work,
         GoalId::Collect,
         GoalId::Bury,
+        GoalId::Smelt,
+        GoalId::Haul,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -88,6 +96,8 @@ impl GoalId {
             GoalId::Work => "work",
             GoalId::Collect => "collect",
             GoalId::Bury => "bury",
+            GoalId::Smelt => "smelt",
+            GoalId::Haul => "haul",
         }
     }
 
@@ -109,6 +119,8 @@ impl GoalId {
             GoalId::Work => "💼",
             GoalId::Collect => "🧲",
             GoalId::Bury => "⚰",
+            GoalId::Smelt => "🔥",
+            GoalId::Haul => "📦",
         }
     }
 
@@ -446,6 +458,8 @@ impl From<GoalId> for pb::GoalId {
             GoalId::Work => pb::GoalId::Work,
             GoalId::Collect => pb::GoalId::Collect,
             GoalId::Bury => pb::GoalId::Bury,
+            GoalId::Smelt => pb::GoalId::Smelt,
+            GoalId::Haul => pb::GoalId::Haul,
         }
     }
 }
@@ -464,6 +478,8 @@ impl From<pb::GoalId> for GoalId {
             pb::GoalId::Work => GoalId::Work,
             pb::GoalId::Collect => GoalId::Collect,
             pb::GoalId::Bury => GoalId::Bury,
+            pb::GoalId::Smelt => GoalId::Smelt,
+            pb::GoalId::Haul => GoalId::Haul,
         }
     }
 }
@@ -597,7 +613,9 @@ mod tests {
                 (GoalId::Salvage, 0.0),
                 (GoalId::Work, 0.0),
                 (GoalId::Collect, 0.0),
-                (GoalId::Bury, 0.0)
+                (GoalId::Bury, 0.0),
+                (GoalId::Smelt, 0.0),
+                (GoalId::Haul, 0.0)
             ]
         );
     }

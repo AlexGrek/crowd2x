@@ -383,8 +383,36 @@ fn a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly() {
         assert!(ticks < 3 * 3600, "nobody taken up by {}", state.clock());
     }
     assert_eq!(state.corpses().len(), 1, "one carried, one lying");
+    let stats = state.statistics();
+    assert_eq!((stats.died, stats.lying, stats.carried), (2, 1, 1));
     let copy = side_by_side(&mut state, 600, |_, _| Input::new());
     assert_eq!(copy.corpses(), state.corpses());
+    assert_eq!(copy.tally(), state.tally(), "the dead counted are counted still");
+    assert_eq!(copy.statistics(), state.statistics());
+}
+
+/// The steel works mid-shift: scrap in the warehouse's bin and the
+/// factory's hopper, a steelworker at its furnace or on the way to it, a
+/// courier with a load. What every store holds, what every pack holds, and
+/// where each is in its work all come back, and the world goes on as it would
+/// have.
+#[test]
+fn the_steel_works_saved_mid_shift_carries_on_exactly() {
+    let (mut state, smelter, courier) = crate::sim::testing::steel_works(12, 9);
+    let hopper = Point::new(16, 2);
+    let mut ticks = 0;
+    // Until the courier has filled the hopper once and the steelworker is
+    // at the furnace with what it took from it.
+    while state.bins().stored(hopper) == 0 || state.entities().get(smelter).unwrap().interacting_with() != Some(Point::new(21, 5)) {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 9 * 1800, "nothing smelted by {}", state.clock());
+    }
+    let copy = side_by_side(&mut state, 1800, |_, _| Input::new());
+    assert_eq!(copy.bins(), state.bins());
+    let pack = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().inventory().unwrap().describe_load();
+    assert_eq!(pack(&copy, courier), pack(&state, courier));
+    assert!(state.bins().iter().map(|(_, stored)| stored).sum::<u32>() < 12, "some of it carried or smelted");
 }
 
 #[test]

@@ -280,6 +280,36 @@ UNIFORMS = {
         ],
         {"d": CLOTH["black"][0], "m": CLOTH["black"][1], "w": CLOTH["white"][2], "y": BUCKLE},
     ),
+    # A brown leather apron from the chest to the knees over a charcoal
+    # shirt, and heavy boots: the steelworker's, at the furnace.
+    "steelworker": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....gaaaag.....",
+            "....ggallagg....",
+            ".....gaaaag.....",
+            ".....aaaaaa.....",
+            "......aqqa......",
+            "......qqqq......",
+        ],
+        {"g": TROUSERS["charcoal"][0], "a": (110, 70, 38), "l": (146, 98, 58), "q": (40, 32, 28)},
+    ),
+    # A green work jacket with a satchel on a strap across it, khaki
+    # trousers: the courier's, who carries scrap and steel between the
+    # warehouse and the steel factory.
+    "courier": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....dmsmmd.....",
+            "....dmmmsmmd....",
+            ".....dmmmsd.....",
+            ".....ppppcc.....",
+            "......pqqp......",
+            "......pqqp......",
+        ],
+        {"d": CLOTH["green"][0], "m": CLOTH["green"][1], "s": (92, 60, 34), "c": (130, 88, 50),
+         "p": TROUSERS["khaki"][0], "q": TROUSERS["khaki"][1]},
+    ),
 }
 
 

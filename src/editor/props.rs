@@ -108,6 +108,15 @@ pub const PALETTE: &[PaletteItem] = &[
     // A furnace for the dead: an undertaker's workplace (`sim::job`). Drawn
     // by `tools/crematorium_art.py`.
     PaletteItem::upscaled("crematorium", "crematorium.png"),
+    // The steel factory and the warehouse's steel, drawn by
+    // `tools/steel_factory_art.py`: the furnace, embers glowing while idle and
+    // flames while a steelworker works it; and three stores (`sim::bins`)
+    // that fill up on screen like the scrap bin ([`BinFill`]) — the factory's
+    // hopper of scrap and pallet of steel, and the warehouse's steel rack.
+    PaletteItem::animated("furnace", "furnace_idle.png", 2).used("furnace.png", 3),
+    PaletteItem::posed("scrap hopper", "scrap_hopper.png", 4),
+    PaletteItem::posed("steel pallet", "steel_pallet.png", 4),
+    PaletteItem::posed("steel rack", "steel_rack.png", 4),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in
@@ -248,10 +257,11 @@ pub struct SwitchPlate {
     pub showing_on: bool,
 }
 
-/// A scrap bin: a [`PaletteItem::posed`] strip of four frames — empty, a few
-/// pieces, half full, heaped — of which the game screen shows the one for
-/// how much the simulation says it holds (`game::props`). The editor shows it
-/// empty.
+/// A store — a scrap bin, a steel rack, a scrap hopper, a steel pallet
+/// (`sim::bins::Store`): a [`PaletteItem::posed`] strip of four frames —
+/// empty, a few pieces, half full, heaped — of which the game screen shows
+/// the one for how much the simulation says it holds (`game::props`). The
+/// editor shows it empty.
 #[derive(Component)]
 pub struct BinFill {
     /// The frame showing, so a bin nobody filled costs no write.
@@ -547,8 +557,8 @@ fn spawn_prop(
             frames: item.art.frames,
             showing: 0,
         });
-    } else if item.posed && item.name == crate::sim::bins::SCRAP_BIN {
-        // A bin, showing empty until the game says otherwise.
+    } else if item.posed && crate::sim::bins::Store::from_name(item.name).is_some() {
+        // A store, showing empty until the game says otherwise.
         commands.entity(prop).insert(BinFill { showing: 0 });
     } else if item.posed {
         // Posed and not a door or a bin: a switch's plate, showing on.

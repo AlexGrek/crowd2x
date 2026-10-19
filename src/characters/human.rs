@@ -51,6 +51,8 @@ pub const fn clothing_path(clothing: Clothing) -> Option<&'static str> {
         Clothing::UniformScrapCollector => Some("human/clothes_uniform_scrap_collector.png"),
         Clothing::UniformGuard => Some("human/clothes_uniform_guard.png"),
         Clothing::UniformUndertaker => Some("human/clothes_uniform_undertaker.png"),
+        Clothing::UniformSteelworker => Some("human/clothes_uniform_steelworker.png"),
+        Clothing::UniformCourier => Some("human/clothes_uniform_courier.png"),
     }
 }
 // The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.

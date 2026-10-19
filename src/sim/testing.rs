@@ -52,6 +52,8 @@ pub struct World {
     pub corpses: Corpses,
     /// The bodies taken up, which a real tick would take out of the world.
     pub burials: Vec<Uid>,
+    /// The dead counted, as [`super::GameState`] counts them.
+    pub tally: super::Tally,
     homes: Homes,
     workplaces: Workplaces,
     pub tick: u64,
@@ -90,6 +92,7 @@ impl World {
             properties,
             corpses: Corpses::new(),
             burials: Vec::new(),
+            tally: super::Tally::default(),
             homes: Homes::new(),
             workplaces: Workplaces::new(),
             map,
@@ -111,6 +114,7 @@ impl World {
             doors: &self.doors,
             properties: &self.properties,
             corpses: &self.corpses,
+            bins: &self.bins,
             dt: self.dt,
             tick: self.tick,
             clock: self.clock,
@@ -159,6 +163,10 @@ impl World {
             }
             Effect::Salvage { at } => super::salvage(entity, &mut self.map, &self.log, at),
             Effect::Deposit { at, pieces } => super::deposit(entity.uid(), &mut self.bins, &self.log, at, pieces),
+            Effect::Withdraw { at } => {
+                let uid = entity.uid();
+                super::withdraw(uid, entity.inventory_mut(), &mut self.bins, &self.log, at);
+            }
             Effect::Died { cause } => {
                 let log = Log::new();
                 super::died(entity, &mut self.people(), &log, cause);
@@ -170,6 +178,7 @@ impl World {
                 self.lines.extend(log.drain());
             }
             Effect::Cremate { at } => {
+                self.tally.cremated += 1;
                 self.log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
             }
             Effect::None => {}
@@ -186,6 +195,7 @@ impl World {
             workplaces: &mut self.workplaces,
             corpses: &mut self.corpses,
             burials: &mut self.burials,
+            tally: &mut self.tally,
         }
     }
 
@@ -296,4 +306,41 @@ pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human
     human.set_fun(100.0);
     human.set_stamina(100.0);
     human
+}
+
+/// A warehouse at one end of a 24x17 floor — a scrap bin with `scrap`
+/// pieces in it and a steel rack — and a steel factory at the other: a
+/// hopper, a pallet and a powered furnace. A steelworker and a courier
+/// hired to them, every need off; the collector the bin was offered to
+/// first gone again, so nobody else is working. Monday, 08:00.
+pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
+    let mut map = Map::new(crate::map::Size::new(24, 17), crate::map::FLOOR);
+    for (name, cell) in [
+        ("scrap bin", Point::new(2, 2)),
+        ("steel rack", Point::new(2, 8)),
+        ("scrap hopper", Point::new(16, 2)),
+        ("steel pallet", Point::new(16, 8)),
+        ("furnace", Point::new(21, 5)),
+    ] {
+        prop_at(&mut map, name, cell);
+    }
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
+    let mut state = super::GameState::new(map, seed);
+    let collector = state.spawn(EntityType::Human, Point::new(8, 12));
+    let smelter = state.spawn(EntityType::Human, Point::new(10, 12));
+    let courier = state.spawn(EntityType::Human, Point::new(12, 12));
+    let kind = |state: &super::GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| job.kind);
+    assert_eq!(kind(&state, collector), Some(super::JobKind::ScrapCollector), "the bin is offered first");
+    assert_eq!(kind(&state, smelter), Some(super::JobKind::Steelworker));
+    assert_eq!(kind(&state, courier), Some(super::JobKind::Courier));
+    let mut input = super::Input::new();
+    input.despawn(collector);
+    for uid in [smelter, courier] {
+        for process in super::ProcessId::ALL {
+            input.set_process(uid, process, false);
+        }
+    }
+    super::process_game_state(&mut state, 1.0 / 60.0, &input);
+    let _ = state.bins.add(Point::new(2, 2), scrap);
+    (state, smelter, courier)
 }

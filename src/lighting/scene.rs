@@ -132,6 +132,12 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "tv",
         Emission { color: [0.45, 0.6, 0.85], radius: 3.5, always_on: false },
     ),
+    // A furnace's fire: a hot orange glow round it while a steelworker
+    // works it, out while nobody does.
+    (
+        "furnace",
+        Emission { color: [1.1, 0.55, 0.22], radius: 3.5, always_on: false },
+    ),
     // A sodium lamp on a post: an orange pool on the street. Always on as
     // far as the lightmap knows — what puts it out by day is the street
     // light controller on its box taking the power away

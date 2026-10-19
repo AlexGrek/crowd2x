@@ -262,7 +262,14 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
             ]),
             // Keeping the world, under the controls that run it: a row of
             // its own, since the row above is as wide as the canvas allows.
-            row(super::saving::buttons()),
+            // The world in numbers beside it ([`super::statistics`]).
+            row(children![
+                (
+                    Node { column_gap: px(3), ..default() },
+                    super::saving::buttons(),
+                ),
+                super::statistics::open_button(),
+            ]),
             logview::panel(),
         ],
     ));
@@ -759,9 +766,16 @@ fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: O
         current.map.loaded_chunks(),
     );
     // What the scrap collectors have brought in, on a map with somewhere to
-    // keep it.
-    if let Some(bins) = world.map(GameState::bins).filter(|bins| !bins.is_empty()) {
-        stats.push_str(&format!("\nscrap  {} stored", bins.total()));
+    // keep it, and the steel the couriers have brought back, on one with a
+    // rack for it.
+    if let Some(bins) = world.map(GameState::bins) {
+        use crate::sim::bins::Store;
+        if bins.count(Store::ScrapBin) > 0 {
+            stats.push_str(&format!("\nscrap  {} stored", bins.total_in(Store::ScrapBin)));
+        }
+        if bins.count(Store::SteelRack) > 0 {
+            stats.push_str(&format!("\nsteel  {} stored", bins.total_in(Store::SteelRack)));
+        }
     }
     stats
 }

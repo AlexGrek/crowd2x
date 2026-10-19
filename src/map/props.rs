@@ -98,6 +98,12 @@ pub const PROPS: &[Prop] = &[
     Prop::blocking("guard post"),
     // Where an undertaker puts the dead (`sim::job`). Used from beside it.
     Prop::blocking("crematorium"),
+    // The steel factory: its furnaces, its store of scrap to smelt and of
+    // steel made, and the warehouse's rack the steel is taken to.
+    Prop::blocking("furnace"),
+    Prop::blocking("scrap hopper"),
+    Prop::blocking("steel pallet"),
+    Prop::blocking("steel rack"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

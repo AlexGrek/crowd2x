@@ -1,7 +1,10 @@
-//! [`Deposit`]: empty the pack's scrap metal into a scrap bin.
+//! [`Deposit`]: empty the pack into a store — whatever of the one thing the
+//! store holds ([`Store::item`](crate::sim::bins::Store::item)).
 //!
 //! The end of a scrap collector's trip (`CollectGoal`): from beside its bin,
-//! a few minutes' work, and every piece it carries goes in. The pack is the
+//! a few minutes' work, and every piece it carries goes in. The same for a
+//! courier's scrap into a hopper and steel onto the warehouse's rack
+//! (`HaulGoal`), and a steelworker's steel onto a pallet (`SmeltGoal`). The pack is the
 //! unit's own and is emptied here, when the work finishes; the bin is the
 //! world's, so the pieces are *asked* in ([`Effect::Deposit`]) and the world
 //! step puts them there (`sim::world_step`), as a heap's piece is asked out
@@ -13,8 +16,6 @@
 use crate::map::Point;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
-use crate::sim::feature::FeatureKind;
-use crate::sim::item::ItemKind;
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
@@ -33,12 +34,15 @@ pub struct Deposit {
 }
 
 impl Deposit {
-    /// Whether it can go on: one step from the bin, the bin still there, and
-    /// scrap in the pack to put in it.
+    /// Whether it can go on: one step from the store, the store still there,
+    /// and some of what it holds in the pack to put in it.
     fn can_deposit(&self, ctx: &TaskCtx<'_>) -> bool {
+        let Some(store) = ctx.think.bins.store(self.bin) else {
+            return false;
+        };
         ctx.here().manhattan_distance(self.bin) <= 1
-            && ctx.think.features.has(FeatureKind::ScrapBin, self.bin)
-            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.count(ItemKind::Scrap) > 0)
+            && ctx.think.features.has(store.feature(), self.bin)
+            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.count(store.item()) > 0)
     }
 }
 
@@ -57,11 +61,11 @@ impl TaskExecutor for Deposit {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
-                let Some(inventory) = ctx.inventory.as_deref_mut() else {
+                let (Some(inventory), Some(item)) = (ctx.inventory.as_deref_mut(), ctx.think.bins.item(self.bin)) else {
                     return TaskResult::Failed;
                 };
                 let mut pieces: u8 = 0;
-                while inventory.take_out(ItemKind::Scrap) {
+                while inventory.take_out(item) {
                     pieces += 1;
                 }
                 *ctx.effect = Effect::Deposit { at: self.bin, pieces };
@@ -89,7 +93,7 @@ impl TaskExecutor for Deposit {
     }
 
     fn describe(&self) -> String {
-        format!("store scrap in the bin at {}, {}", self.bin.x, self.bin.y)
+        format!("store what it carries at {}, {}", self.bin.x, self.bin.y)
     }
 }
 
@@ -99,6 +103,7 @@ mod tests {
     use super::super::rig::Rig;
     use super::*;
     use crate::map::{Map, Size, FLOOR};
+    use crate::sim::item::ItemKind;
 
     const BIN: Point = Point::new(6, 6);
 

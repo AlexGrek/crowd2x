@@ -75,6 +75,8 @@ pub enum JobKind {
     ScrapCollector = 1,
     Guard = 2,
     Undertaker = 3,
+    Steelworker = 4,
+    Courier = 5,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -198,6 +200,8 @@ pub enum GoalId {
     Work = 8,
     Collect = 9,
     Bury = 10,
+    Smelt = 11,
+    Haul = 12,
 }
 
 /// One goal executor's state.
@@ -273,7 +277,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19")]
     pub kind: Option<TaskKind>,
 }
 
@@ -321,6 +325,12 @@ pub enum TaskKind {
     /// Watching a TV from within sight of it.
     #[prost(message, tag = "17")]
     WatchTv(Timed),
+    /// Filling the pack from a store.
+    #[prost(message, tag = "18")]
+    Withdraw(Timed),
+    /// Smelting scrap into steel at a furnace.
+    #[prost(message, tag = "19")]
+    Smelt(Timed),
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

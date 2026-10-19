@@ -112,7 +112,17 @@ lists the processes off), `pb::Body.dead` (tag 6, absent = alive), `pb::JobKind:
 `GameState::restore` rebuilds it from the dead entities (`Corpses::of`), and a dead unit's
 `holds_cell` is false, its cell freed when it died. `GameState::burials` is empty between ticks.
 Test: `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with
-`dead` not restored). **A new oneof variant must also go in the
+`dead` not restored). With the steel factory: `pb::JobKind::Steelworker` = 4 and `Courier` = 5,
+`pb::GoalId::Smelt` = 11 and `Haul` = 12 (both a `pb::Executor::Seek`),
+`pb::TaskKind::Withdraw(Timed)` = 18 and `Smelt(Timed)` = 19, the item `"steel"` by name; the
+stores (`sim::bins::Bins`, now scrap bins, steel racks, scrap hoppers and steel pallets) are the
+same `pb::World.bins` list, a store's kind being the map's prop, so nothing new there. Test:
+`the_steel_works_saved_mid_shift_carries_on_exactly` (seen failing with a saved `Withdraw`
+loaded as a `Deposit`). The dead counted, `sim::statistics::Tally` (`died`, `cremated`), is
+`pb::World.tally` (tag 13, `pb::Deaths`; absent = none counted): a body cremated has left the
+world, so only the count remembers it; checked by
+`a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with the
+tally not restored). **A new oneof variant must also go in the
 field's `tags = "..."` list** (`pb::Task.kind`) or it decodes as "a task of no kind".
 
 ## Fast

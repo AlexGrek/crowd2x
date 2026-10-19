@@ -30,7 +30,13 @@
 //! * the **undertaker**: a crematorium, and the dead wherever they fell —
 //!   to the nearest body, take it up, carry it back and cremate it
 //!   (`BuryGoal`). Round the clock like a guard, the three [`WATCHES`] of a
-//!   crematorium an undertaker each.
+//!   crematorium an undertaker each;
+//! * the **steelworker**: a furnace in the steel factory — scrap metal out of
+//!   the factory's hoppers, smelted into steel at the furnace, the steel
+//!   onto the factory's pallets (`SmeltGoal`). Office hours;
+//! * the **courier**: a scrap hopper in the steel factory — scrap metal from
+//!   the warehouse's bins to the hopper, and steel from the factory's
+//!   pallets to the warehouse's rack (`HaulGoal`). Office hours.
 //!
 //! **A worker sleeps by its shift** ([`Shift::is_bedtime`]): the eight hours
 //! that end [`UP_BEFORE_SHIFT`] before it starts. For office hours that is
@@ -74,13 +80,28 @@ pub enum JobKind {
     /// Takes up the dead and carries them to its own crematorium, on one of
     /// the three [`WATCHES`]: the dead do not wait for office hours.
     Undertaker,
+    /// Smelts scrap metal into steel at its own furnace in the steel
+    /// factory, fetching the scrap from the factory's hoppers and putting the
+    /// steel on its pallets.
+    Steelworker,
+    /// Carries scrap metal from the warehouse to its own hopper in the steel
+    /// factory, and steel from the factory back to the warehouse.
+    Courier,
 }
 
 impl JobKind {
     /// Every kind, **in the order a job is offered to an arrival**
     /// (`GameState::give_a_job`): the bank's desks first, then the bins,
-    /// then the gates, then the crematoria.
-    pub const ALL: [JobKind; 4] = [JobKind::OfficeWorker, JobKind::ScrapCollector, JobKind::Guard, JobKind::Undertaker];
+    /// then the gates, then the crematoria, then the steel factory's furnaces
+    /// and hoppers.
+    pub const ALL: [JobKind; 6] = [
+        JobKind::OfficeWorker,
+        JobKind::ScrapCollector,
+        JobKind::Guard,
+        JobKind::Undertaker,
+        JobKind::Steelworker,
+        JobKind::Courier,
+    ];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -88,6 +109,8 @@ impl JobKind {
             JobKind::ScrapCollector => "scrap collector",
             JobKind::Guard => "guard",
             JobKind::Undertaker => "undertaker",
+            JobKind::Steelworker => "steelworker",
+            JobKind::Courier => "courier",
         }
     }
 
@@ -98,6 +121,8 @@ impl JobKind {
             JobKind::ScrapCollector => "a scrap collector",
             JobKind::Guard => "a guard",
             JobKind::Undertaker => "an undertaker",
+            JobKind::Steelworker => "a steelworker",
+            JobKind::Courier => "a courier",
         }
     }
 
@@ -109,6 +134,8 @@ impl JobKind {
             JobKind::ScrapCollector => FeatureKind::ScrapBin,
             JobKind::Guard => FeatureKind::GuardPost,
             JobKind::Undertaker => FeatureKind::Crematorium,
+            JobKind::Steelworker => FeatureKind::Furnace,
+            JobKind::Courier => FeatureKind::ScrapHopper,
         }
     }
 
@@ -119,6 +146,8 @@ impl JobKind {
             JobKind::ScrapCollector => "scrap bin",
             JobKind::Guard => "guard post",
             JobKind::Undertaker => "crematorium",
+            JobKind::Steelworker => "furnace",
+            JobKind::Courier => "scrap hopper",
         }
     }
 
@@ -129,6 +158,8 @@ impl JobKind {
             JobKind::OfficeWorker | JobKind::Guard => GoalId::Work,
             JobKind::ScrapCollector => GoalId::Collect,
             JobKind::Undertaker => GoalId::Bury,
+            JobKind::Steelworker => GoalId::Smelt,
+            JobKind::Courier => GoalId::Haul,
         }
     }
 
@@ -139,6 +170,8 @@ impl JobKind {
             JobKind::ScrapCollector => Clothing::UniformScrapCollector,
             JobKind::Guard => Clothing::UniformGuard,
             JobKind::Undertaker => Clothing::UniformUndertaker,
+            JobKind::Steelworker => Clothing::UniformSteelworker,
+            JobKind::Courier => Clothing::UniformCourier,
         }
     }
 
@@ -146,7 +179,11 @@ impl JobKind {
     /// seconds: [`COMMUTE`], or [`GUARD_COMMUTE`] to a gate.
     pub const fn commute(self) -> f32 {
         match self {
-            JobKind::OfficeWorker | JobKind::ScrapCollector | JobKind::Undertaker => COMMUTE,
+            JobKind::OfficeWorker
+            | JobKind::ScrapCollector
+            | JobKind::Undertaker
+            | JobKind::Steelworker
+            | JobKind::Courier => COMMUTE,
             JobKind::Guard => GUARD_COMMUTE,
         }
     }
@@ -156,7 +193,7 @@ impl JobKind {
     /// the three watches for a guard post.
     pub const fn shifts(self) -> &'static [Shift] {
         match self {
-            JobKind::OfficeWorker | JobKind::ScrapCollector => &[OFFICE_HOURS],
+            JobKind::OfficeWorker | JobKind::ScrapCollector | JobKind::Steelworker | JobKind::Courier => &[OFFICE_HOURS],
             JobKind::Guard | JobKind::Undertaker => &WATCHES,
         }
     }
@@ -169,6 +206,8 @@ impl From<JobKind> for pb::JobKind {
             JobKind::ScrapCollector => pb::JobKind::ScrapCollector,
             JobKind::Guard => pb::JobKind::Guard,
             JobKind::Undertaker => pb::JobKind::Undertaker,
+            JobKind::Steelworker => pb::JobKind::Steelworker,
+            JobKind::Courier => pb::JobKind::Courier,
         }
     }
 }
@@ -180,6 +219,8 @@ impl From<pb::JobKind> for JobKind {
             pb::JobKind::ScrapCollector => JobKind::ScrapCollector,
             pb::JobKind::Guard => JobKind::Guard,
             pb::JobKind::Undertaker => JobKind::Undertaker,
+            pb::JobKind::Steelworker => JobKind::Steelworker,
+            pb::JobKind::Courier => JobKind::Courier,
         }
     }
 }
@@ -558,8 +599,15 @@ mod tests {
         assert_eq!(JobKind::OfficeWorker.with_article(), "an office worker");
         assert_eq!(
             JobKind::ALL,
-            [JobKind::OfficeWorker, JobKind::ScrapCollector, JobKind::Guard, JobKind::Undertaker],
-            "the office first, the crematoria last"
+            [
+                JobKind::OfficeWorker,
+                JobKind::ScrapCollector,
+                JobKind::Guard,
+                JobKind::Undertaker,
+                JobKind::Steelworker,
+                JobKind::Courier
+            ],
+            "the office first, the steel factory last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));

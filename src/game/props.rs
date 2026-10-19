@@ -152,7 +152,8 @@ pub fn bin_frame(stored: u32) -> u32 {
     }
 }
 
-/// Show every scrap bin on screen as full as the simulation says it is
+/// Show every store on screen — a scrap bin, a steel rack, a scrap hopper, a
+/// steel pallet — as full as the simulation says it is
 /// ([`bin_frame`]). A binary search per bin on the canvas, and a write only
 /// on a frame somebody filled it past a step.
 fn fill_bins(sim: Res<Sim>, mut bins: Query<(&Prop, &mut BinFill, &mut Sprite)>) {

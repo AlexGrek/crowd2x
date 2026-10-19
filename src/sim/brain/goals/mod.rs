@@ -11,10 +11,12 @@ pub mod bury;
 pub mod collect;
 pub mod drink;
 pub mod eat;
+pub mod haul;
 pub mod play;
 pub mod relieve;
 pub mod salvage;
 pub mod sleep;
+pub mod smelt;
 pub mod wander;
 pub mod work;
 
@@ -22,10 +24,12 @@ pub use bury::BuryGoal;
 pub use collect::CollectGoal;
 pub use drink::DrinkGoal;
 pub use eat::EatGoal;
+pub use haul::HaulGoal;
 pub use play::PlayGoal;
 pub use relieve::RelieveGoal;
 pub use salvage::SalvageGoal;
 pub use sleep::SleepGoal;
+pub use smelt::SmeltGoal;
 pub use wander::WanderGoal;
 pub use work::WorkGoal;
 
@@ -77,6 +81,20 @@ pub(super) fn nearest_in_reach(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<P
     ctx.think
         .features
         .nearest_where(kind, here, |cell| ctx.think.may_use(cell, key) && !places.contains(cell, now))
+}
+
+/// The store of `kind` — a bin, a rack, a hopper, a pallet — nearest this
+/// unit that it may use and does not remember as out of reach, and, if
+/// `stocked`, with something in it ([`Think::bins`](crate::sim::Think)). A
+/// walk of the stores of that kind, a handful.
+pub(super) fn nearest_store(ctx: &GoalCtx<'_>, kind: FeatureKind, stocked: bool) -> Option<Point> {
+    let here = ctx.body.center_position();
+    let now = ctx.think.clock.elapsed();
+    let places = ctx.memory.out_of_reach();
+    let key = ctx.body.home();
+    ctx.think.features.nearest_where(kind, here, |cell| {
+        ctx.think.may_use(cell, key) && !places.contains(cell, now) && (!stocked || ctx.think.bins.stored(cell) > 0)
+    })
 }
 
 /// Where a visit *starts*: [`nearest_in_reach`], or — when it has given up on

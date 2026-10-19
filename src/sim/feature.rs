@@ -64,6 +64,21 @@ pub enum FeatureKind {
     /// Somewhere to put the dead: a crematorium, loaded from beside it. An
     /// undertaker's workplace; needs no power.
     Crematorium,
+    /// Somewhere to keep steel: the warehouse's rack, which a courier fills
+    /// with what the steel factory makes. What it holds is the
+    /// [`Bins`](crate::sim::bins::Bins)'. Needs no power.
+    SteelRack,
+    /// The steel factory's store of scrap metal to be smelted: filled by a
+    /// courier from the warehouse's bins, emptied by a steelworker. A
+    /// courier's workplace. Needs no power.
+    ScrapHopper,
+    /// The steel factory's store of steel it has made: filled by a
+    /// steelworker, emptied by a courier taking it to the warehouse. Needs
+    /// no power.
+    SteelPallet,
+    /// Where scrap metal is smelted into steel: a steelworker's workplace,
+    /// worked from beside it. **Needs power.**
+    Furnace,
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -149,7 +164,11 @@ impl FeatureKind {
             | FeatureKind::Workstation
             | FeatureKind::ScrapBin
             | FeatureKind::GuardPost
-            | FeatureKind::Crematorium => Access::Beside,
+            | FeatureKind::Crematorium
+            | FeatureKind::SteelRack
+            | FeatureKind::ScrapHopper
+            | FeatureKind::SteelPallet
+            | FeatureKind::Furnace => Access::Beside,
             FeatureKind::Television => Access::Watched,
             // A bed is lain in, not stood next to, and one sleeper to a bed:
             // the toilet's arrangement, and for the same reason.
@@ -218,6 +237,23 @@ pub const FEATURES: &[Feature] = &[
         name: "crematorium",
         kind: FeatureKind::Crematorium,
     },
+    // The steel factory and the steel it sends to the warehouse.
+    Feature {
+        name: "steel rack",
+        kind: FeatureKind::SteelRack,
+    },
+    Feature {
+        name: "scrap hopper",
+        kind: FeatureKind::ScrapHopper,
+    },
+    Feature {
+        name: "steel pallet",
+        kind: FeatureKind::SteelPallet,
+    },
+    Feature {
+        name: "furnace",
+        kind: FeatureKind::Furnace,
+    },
     // The six beds the editor can place. Their art is 48x48 and has no
     // "somebody is in it" strip yet, so a bed does not show that it is being
     // slept in (see `game::props`); the sleeper is what shows it.
@@ -272,6 +308,10 @@ pub struct Features {
     scrap_bin: Vec<Point>,
     guard_post: Vec<Point>,
     crematorium: Vec<Point>,
+    steel_rack: Vec<Point>,
+    scrap_hopper: Vec<Point>,
+    steel_pallet: Vec<Point>,
+    furnace: Vec<Point>,
     /// Cells with passable terrain and exactly one blocking prop, a working
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
@@ -335,6 +375,10 @@ impl Features {
                     FeatureKind::ScrapBin => features.scrap_bin.push(cell),
                     FeatureKind::GuardPost => features.guard_post.push(cell),
                     FeatureKind::Crematorium => features.crematorium.push(cell),
+                    FeatureKind::SteelRack => features.steel_rack.push(cell),
+                    FeatureKind::ScrapHopper => features.scrap_hopper.push(cell),
+                    FeatureKind::SteelPallet => features.steel_pallet.push(cell),
+                    FeatureKind::Furnace => features.furnace.push(cell),
                 }
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
@@ -354,6 +398,10 @@ impl Features {
             &mut features.scrap_bin,
             &mut features.guard_post,
             &mut features.crematorium,
+            &mut features.steel_rack,
+            &mut features.scrap_hopper,
+            &mut features.steel_pallet,
+            &mut features.furnace,
         ] {
             cells.sort_unstable();
         }
@@ -382,6 +430,10 @@ impl Features {
             FeatureKind::ScrapBin => &self.scrap_bin,
             FeatureKind::GuardPost => &self.guard_post,
             FeatureKind::Crematorium => &self.crematorium,
+            FeatureKind::SteelRack => &self.steel_rack,
+            FeatureKind::ScrapHopper => &self.scrap_hopper,
+            FeatureKind::SteelPallet => &self.steel_pallet,
+            FeatureKind::Furnace => &self.furnace,
         }
     }
 

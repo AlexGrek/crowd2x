@@ -1,11 +1,11 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal, salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal, salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
 
-A job is **what a unit does for a living, where, and when**. Four so far, all tiring and no
+A job is **what a unit does for a living, where, and when**. Six so far, all tiring and no
 fun:
 
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
@@ -19,7 +19,13 @@ fun:
 - the **undertaker**: their own watch (the guards' `WATCHES`, every day) at a `"crematorium"`
   in the district's crematorium building — to the nearest of the dead, take the body up, carry
   it back and cremate it. The building's `CREMATORIA` (2) take 6 undertakers, hired **after**
-  the guards (`JobKind::ALL`). See "The undertaker" below.
+  the guards (`JobKind::ALL`). See "The undertaker" below;
+- the **steelworker**: their own furnace in the district's steel factory, office hours — scrap
+  metal out of the factory's hoppers, smelted into steel at the furnace, the steel onto the
+  factory's pallets;
+- the **courier**: their own scrap hopper in the steel factory, office hours — scrap metal from
+  the warehouse's bins to the hopper, and steel from the factory's pallets to the warehouse's
+  steel rack. See "The steel works" below.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -157,6 +163,44 @@ master key would need keys that are not one `PropertyId` per body.
 Tests: `corpses.rs`; `take_body.rs` and `cremate.rs` (`Rig`); `bury.rs` (takes up and cremates,
 held off with nobody dead, a body in hand cremated after the watch, nobody goes out off watch,
 a hungry undertaker does not eat the body); `sim::tests::the_dead_are_carried_to_the_crematorium_and_leave_the_world`.
+
+## The steel works
+
+The scrap the collectors bring in is made into steel. **Stores** (`sim/bins.rs`): `Bins` is every
+store on the map — a `Store` each, by prop: `ScrapBin` (`"scrap bin"`, the warehouse's) and
+`SteelRack` (`"steel rack"`, the warehouse's), `ScrapHopper` (`"scrap hopper"`) and
+`SteelPallet` (`"steel pallet"`, the factory's); each holds **one item** (`Store::item`: scrap or
+`ItemKind::Steel`), is a feature of its own kind (`Store::feature`), never fills, and gives
+pieces back one at a time (`Bins::take`). `total_in(store)`, `count(store)`, `iter_stores()`.
+`Think::bins` hands it to every brain, read-only.
+
+| Layer | What | File |
+| --- | --- | --- |
+| item | `ItemKind::Steel` (`"steel"`, 5 kg, 1 l: two to a pack), `SCRAP_PER_STEEL` = 2, carried as ⛓ | `item.rs` |
+| kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), both `OFFICE_HOURS` and `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `UniformSteelworker` (leather apron) and `UniformCourier` (green jacket, satchel) | `job.rs`, `feature.rs`, `clothing.rs` |
+| the world | `Effect::Deposit { at, pieces }` puts the pieces in whatever store is at `at` (`sim::deposit`, the log line names the item and the store: `"stored 3 scrap metal in the bin at"`, `"stored 1 steel in the steel pallet at"`); `Effect::Withdraw { at }` takes pieces out one at a time while the store has any and the pack has room (`sim::withdraw`, `"took 2 steel from the steel pallet at x, y: N left"`), in slot order | `sim/mod.rs` |
+| tasks | `Deposit` now empties the pack of **the store's item** into any store (checks `Think::bins`); `Withdraw { store, seconds }` (`WITHDRAW_SECONDS` = 5 world min) beside a store with stock and room in the pack → `Effect::Withdraw`; `Smelt { furnace, seconds }` (`SMELT_SECONDS` = 30 world min) beside a powered furnace with 2 scrap in the pack → 2 scrap out, 1 steel in, all in the pack, the furnace lit (`Action::interact`). All `Event::Worked`, and for the part done when cut short | `brain/tasks/withdraw.rs`, `smelt.rs`, `deposit.rs` |
+| steelworker | `SmeltGoal` (a `Seek`): 2+ scrap in the pack → its own furnace, `Smelt`; steel in the pack → the nearest pallet, `Deposit` (`Achieved`); else the nearest hopper with scrap (`goals::nearest_store`), `Withdraw`; none → `"found no scrap to smelt"`, `Blocked` | `brain/goals/smelt.rs` |
+| courier | `HaulGoal` (a `Seek`): steel in the pack → the nearest steel rack; scrap → its own hopper (`Deposit`, `Achieved` either way); empty → the nearer of the nearest stocked pallet and the nearest stocked scrap bin, `Withdraw`; neither → `"found nothing to carry"`, `Blocked`. **The trips alternate of themselves**: unloading scrap at the factory leaves it beside the pallets, unloading steel at the warehouse beside the bins | `brain/goals/haul.rs` |
+| menu | `now`: `smelting steel` at the furnace, `fetching scrap, storing steel`; `carrying steel to the warehouse`, `carrying scrap to the factory`, `fetching a load` | `game/unitpanel.rs` |
+| on screen | the hopper, pallet and rack fill like the scrap bin (`BinFill`, `fill_bins`); the furnace burns while worked (`used` strip, `"furnace"` emitter); the HUD's `steel  N stored` (the racks) | `game-screen`, `lighting` |
+
+**In a district** (`map-generator`): the steel factory is a mandatory building on the lot
+nearest the warehouse, 2 furnaces, 2 hoppers, 2 pallets (so 2 steelworkers and 2 couriers),
+and the warehouse has one steel rack. Seed 7 with the three trades' needs off has its first
+steel on the warehouse's rack by Tuesday 12:30 (the collectors spend Monday bringing the scrap
+in). With needs on, the crowd limit in `map-generator`'s traps applies to them as to everybody.
+
+Tests: `bins.rs` (every store holds its own item, gives it back until empty); `withdraw.rs`,
+`smelt.rs` (`Rig`, with `Rig::apply_effect` doing the world's half: two ingots fit a pack);
+`sim::tests::a_courier_and_a_steelworker_turn_the_warehouse_s_scrap_into_steel_on_its_rack`
+(`testing::steel_works`, a 24x17 floor: the log lines of the whole chain, and every piece of
+scrap accounted for — in a store, a pack, or two to an ingot; seen failing with the courier
+never fetching from a pallet) and `a_district_s_steel_works_bring_steel_into_its_warehouse`
+(seed 7, by Tuesday); `save::tests::the_steel_works_saved_mid_shift_carries_on_exactly`. QA
+`qa/steel_factory.json`: a small powered room, the courier `give`n 3 scrap, the job menu at
+10:00 (`carrying steel to the warehouse`), `expect_stored {"min": 1, "in": "steel rack"}` and
+the HUD's `steel  1 stored` by the afternoon, the statistics menu (seen failing asking for 50).
 
 ## Saving (`savegame` skill)
 

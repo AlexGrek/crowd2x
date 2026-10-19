@@ -530,6 +530,11 @@ pub struct Think<'a> {
     /// nearest body. As of the start of this tick, changed only by
     /// [`super::world_step`].
     pub corpses: &'a super::corpses::Corpses,
+    /// What every store holds — the warehouse's bins and rack, the steel
+    /// factory's hoppers and pallets — as of the start of this tick, changed
+    /// only by [`super::world_step`]. What a courier or a steelworker looks
+    /// through for somewhere with something to take.
+    pub bins: &'a super::bins::Bins,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —

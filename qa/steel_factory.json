@@ -1,0 +1,103 @@
+{
+  "name": "a courier and a steelworker turn scrap metal into steel on the warehouse's rack",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "steel works",
+        "map": {
+          "version": 1,
+          "size": { "width": 14, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor", "block"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B------------.",
+            "............-.",
+            "............-.",
+            "............-.",
+            "..............",
+            "..............",
+            ".............."
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 24 }, "kind": "transformer" },
+              { "at": { "x": 600, "y": 168 }, "kind": "furnace" },
+              { "at": { "x": 456, "y": 72 }, "kind": "scrap hopper" },
+              { "at": { "x": 456, "y": 264 }, "kind": "steel pallet" },
+              { "at": { "x": 120, "y": 168 }, "kind": "steel rack" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "steel works",
+  "steps": [
+    { "note": "a furnace at (12, 3) wired to the transformer, a hopper at (9, 1), a pallet at (9, 5), a steel rack at (2, 3); no scrap bin, so nobody is a collector" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "spawn": { "kind": "human", "x": 11, "y": 3 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a steelworker at the furnace at 12, 3, 09:00-17:00" },
+    { "spawn": { "kind": "human", "x": 4, "y": 3 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a courier at the scrap hopper at 9, 1, 09:00-17:00" },
+
+    { "note": "every need off, so this is a test about the work" },
+    { "select": 0 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "select": 1 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "note": "the courier comes to work with a packful of scrap metal from the warehouse" },
+    { "give": { "item": "scrap metal", "count": 3 } },
+    { "tick": 1 },
+    { "expect_carrying": { "item": "scrap metal", "count": 3 } },
+
+    { "note": "by ten the scrap is in the hopper and the steelworker has some of it" },
+    { "tick": 3600 },
+    { "expect_carrying": { "item": "scrap metal", "count": 0 } },
+    { "press": "job" },
+    { "shot": "the courier's job, an hour into the shift" },
+
+    { "note": "by the afternoon an ingot of steel is on the warehouse's rack" },
+    { "tick": 7200 },
+    { "expect_stored": { "min": 1, "in": "steel rack" } },
+    { "expect_text": "steel  1 stored" },
+    { "press": "statistics" },
+    { "expect_text": "steelworkers of 1 posts" },
+    { "expect_text": "couriers of 1 posts" },
+    { "shot": "the statistics with steel in the warehouse" },
+    { "press": "close" },
+    { "wait": 0.2 },
+    { "shot": "the steel works in the afternoon" }
+  ]
+}

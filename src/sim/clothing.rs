@@ -47,6 +47,10 @@ pub enum Clothing {
     /// A black cassock with a white collar and a gold cross: the
     /// undertaker's.
     UniformUndertaker,
+    /// A brown leather apron over a charcoal shirt: the steelworker's.
+    UniformSteelworker,
+    /// A green work jacket and a satchel: the courier's.
+    UniformCourier,
 }
 
 impl Clothing {
@@ -80,8 +84,14 @@ impl Clothing {
 
     /// The work uniforms: not in [`Clothing::ALL`], so never handed out at
     /// random and not on the clothing menu — a job puts one on.
-    pub const UNIFORMS: [Self; 4] =
-        [Self::UniformOfficeWorker, Self::UniformScrapCollector, Self::UniformGuard, Self::UniformUndertaker];
+    pub const UNIFORMS: [Self; 6] = [
+        Self::UniformOfficeWorker,
+        Self::UniformScrapCollector,
+        Self::UniformGuard,
+        Self::UniformUndertaker,
+        Self::UniformSteelworker,
+        Self::UniformCourier,
+    ];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -114,6 +124,8 @@ impl Clothing {
             Self::UniformScrapCollector => "uniform scrap collector",
             Self::UniformGuard => "uniform guard",
             Self::UniformUndertaker => "uniform undertaker",
+            Self::UniformSteelworker => "uniform steelworker",
+            Self::UniformCourier => "uniform courier",
         }
     }
 
@@ -125,7 +137,12 @@ impl Clothing {
     pub const fn is_uniform(self) -> bool {
         matches!(
             self,
-            Self::UniformOfficeWorker | Self::UniformScrapCollector | Self::UniformGuard | Self::UniformUndertaker
+            Self::UniformOfficeWorker
+                | Self::UniformScrapCollector
+                | Self::UniformGuard
+                | Self::UniformUndertaker
+                | Self::UniformSteelworker
+                | Self::UniformCourier
         )
     }
 

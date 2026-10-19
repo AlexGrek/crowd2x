@@ -27,7 +27,7 @@ use crate::sim::{Effect, MoveOutcome};
 
 use super::action::{Action, ActionState};
 use super::tasks::{
-    CloseFridge, ConsumeItem, Cremate, Deposit, MoveTo, TakeBody, OpenFridge, Salvage, Sleep, TakeItem, UseComputer, UseToilet, Wait, WatchTv,
+    CloseFridge, ConsumeItem, Cremate, Deposit, MoveTo, TakeBody, OpenFridge, Salvage, Sleep, Smelt, TakeItem, UseComputer, UseToilet, Wait, WatchTv, Withdraw,
     Work,
 };
 
@@ -132,6 +132,8 @@ pub enum Task {
     Deposit(Deposit),
     TakeBody(TakeBody),
     Cremate(Cremate),
+    Withdraw(Withdraw),
+    Smelt(Smelt),
 }
 
 impl Task {
@@ -162,6 +164,8 @@ impl Task {
             Task::Work(Work { desk, seconds, watch: false }) => pb::TaskKind::Work(timed(desk, seconds)),
             Task::Work(Work { desk, seconds, watch: true }) => pb::TaskKind::KeepWatch(timed(desk, seconds)),
             Task::Deposit(Deposit { bin, seconds }) => pb::TaskKind::Deposit(timed(bin, seconds)),
+            Task::Withdraw(Withdraw { store, seconds }) => pb::TaskKind::Withdraw(timed(store, seconds)),
+            Task::Smelt(Smelt { furnace, seconds }) => pb::TaskKind::Smelt(timed(furnace, seconds)),
             Task::TakeBody(TakeBody { body, seconds }) => pb::TaskKind::TakeBody(timed(body, seconds)),
             Task::Cremate(Cremate { crematorium, seconds }) => pb::TaskKind::Cremate(timed(crematorium, seconds)),
         };
@@ -210,6 +214,8 @@ impl Task {
                 Task::Work(Work { desk: at(task)?, seconds: seconds(task.seconds)?, watch: true })
             }
             pb::TaskKind::Deposit(task) => Task::Deposit(Deposit { bin: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Withdraw(task) => Task::Withdraw(Withdraw { store: at(task)?, seconds: seconds(task.seconds)? }),
+            pb::TaskKind::Smelt(task) => Task::Smelt(Smelt { furnace: at(task)?, seconds: seconds(task.seconds)? }),
             pb::TaskKind::TakeBody(task) => Task::TakeBody(TakeBody { body: at(task)?, seconds: seconds(task.seconds)? }),
             pb::TaskKind::Cremate(task) => {
                 Task::Cremate(Cremate { crematorium: at(task)?, seconds: seconds(task.seconds)? })
@@ -292,10 +298,22 @@ impl Task {
         Task::Salvage(Salvage { heap, seconds, for_work: true })
     }
 
-    /// Empty every piece of scrap metal in the pack into the bin in `bin`,
-    /// from a cell beside it.
+    /// Empty every piece of what the store in `bin` holds out of the pack
+    /// and into it, from a cell beside it.
     pub const fn deposit(bin: Point, seconds: f32) -> Task {
         Task::Deposit(Deposit { bin, seconds })
+    }
+
+    /// Fill the pack with what the store in `store` holds, from a cell
+    /// beside it.
+    pub const fn withdraw(store: Point, seconds: f32) -> Task {
+        Task::Withdraw(Withdraw { store, seconds })
+    }
+
+    /// Smelt scrap in the pack into an ingot of steel at the furnace in
+    /// `furnace`, from a cell beside it.
+    pub const fn smelt(furnace: Point, seconds: f32) -> Task {
+        Task::Smelt(Smelt { furnace, seconds })
     }
 
     /// Take up the body lying in `body`, from beside it or over it.
@@ -336,6 +354,8 @@ impl Task {
             Task::Salvage(task) => task.execute(ctx),
             Task::Work(task) => task.execute(ctx),
             Task::Deposit(task) => task.execute(ctx),
+            Task::Withdraw(task) => task.execute(ctx),
+            Task::Smelt(task) => task.execute(ctx),
             Task::TakeBody(task) => task.execute(ctx),
             Task::Cremate(task) => task.execute(ctx),
         }
@@ -358,6 +378,8 @@ impl Task {
             Task::Salvage(task) => task.interrupted(action, biology),
             Task::Work(task) => task.interrupted(action, biology),
             Task::Deposit(task) => task.interrupted(action, biology),
+            Task::Withdraw(task) => task.interrupted(action, biology),
+            Task::Smelt(task) => task.interrupted(action, biology),
             Task::TakeBody(task) => task.interrupted(action, biology),
             Task::Cremate(task) => task.interrupted(action, biology),
         }
@@ -378,6 +400,8 @@ impl Task {
             Task::Salvage(task) => task.describe(),
             Task::Work(task) => task.describe(),
             Task::Deposit(task) => task.describe(),
+            Task::Withdraw(task) => task.describe(),
+            Task::Smelt(task) => task.describe(),
             Task::TakeBody(task) => task.describe(),
             Task::Cremate(task) => task.describe(),
         }

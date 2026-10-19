@@ -9,6 +9,7 @@ pub mod close_fridge;
 pub mod consume_item;
 pub mod cremate;
 pub mod deposit;
+pub mod smelt;
 pub mod move_to;
 pub mod open_fridge;
 pub mod salvage;
@@ -19,12 +20,14 @@ pub mod use_computer;
 pub mod use_toilet;
 pub mod wait;
 pub mod watch_tv;
+pub mod withdraw;
 pub mod work;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
 pub use cremate::{Cremate, CREMATE_SECONDS};
 pub use deposit::{Deposit, DEPOSIT_SECONDS};
+pub use smelt::{Smelt, SMELT_SECONDS};
 pub use move_to::MoveTo;
 pub use open_fridge::{OpenFridge, OPEN_SECONDS};
 pub use salvage::Salvage;
@@ -35,6 +38,7 @@ pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;
 pub use wait::Wait;
 pub use watch_tv::WatchTv;
+pub use withdraw::{Withdraw, WITHDRAW_SECONDS};
 pub use work::Work;
 
 use crate::sim::biology::Experience;
@@ -137,6 +141,21 @@ pub(crate) mod rig {
                 inventory: Some(inventory),
                 effect,
             })
+        }
+
+        /// Do to the world and the pack what the world step would with the
+        /// last tick's [`Rig::effect`] — a store filled or emptied — and say
+        /// what the log said.
+        pub fn apply_effect(&mut self) -> Vec<String> {
+            let uid = self.walk.body().uid();
+            match self.effect {
+                Effect::Deposit { at, pieces } => crate::sim::deposit(uid, &mut self.world.bins, &self.world.log, at, pieces),
+                Effect::Withdraw { at } => {
+                    crate::sim::withdraw(uid, Some(&mut self.inventory), &mut self.world.bins, &self.world.log, at)
+                }
+                _ => {}
+            }
+            self.world.log.drain()
         }
 
         /// Tick until the task ends, or give up after `ticks`.

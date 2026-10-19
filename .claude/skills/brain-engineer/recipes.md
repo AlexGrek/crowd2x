@@ -569,4 +569,11 @@ first, built at compile time.
    mid-programme, power lost), `goals/play.rs` (a seat in view rather than beside, round a
    wall, nowhere in sight held off with `ROUTES_ASKED`, the nearer of computer and TV).
 
-Not done yet: the district generator places no TVs. They are placed in the editor.
+`Think::bins` is what every store holds (`sim::bins`), beside `Think::corpses`: a goal may
+read a store's stock the way it reads a heap's (`goals::nearest_store`), never write it — a
+task asks with `Effect::Deposit` / `Effect::Withdraw`.
+
+The district generator puts a TV in about half its houses (`map-generator`, `place_tv`),
+where it is the nearest amusement for whoever lives there: the sim test
+`in_a_district_the_bored_watch_the_tvs_in_their_own_houses` sees three watched before the
+first day is out. A house's TV is behind its locked door, so only its residents watch it.

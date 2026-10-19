@@ -104,11 +104,15 @@ talking only to the one below:
   `CollectGoal` is a scrap collector's shift, a trip at a time: the nearest heap it can get to
   (`nearest_heap`, a walk of the loaded heap lists of the navigation area, no route) while the
   pack has room, its own bin once it is full, `Achieved` when the packful is stored — the
-  `jobs` skill.
+  `jobs` skill. `SmeltGoal` (a steelworker) and `HaulGoal` (a courier) are the steel
+  factory's, the same shape: what to do next from what the pack holds, the stores' stock read
+  from `Think::bins` (`goals::nearest_store`, a walk of the stores of one kind), `Achieved` per
+  load stored — the `jobs` skill.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `Sleep`, `Wait`,
   `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
-  `Deposit`), `match`-dispatched so
+  `Deposit` and `Withdraw` — into and out of any store, the item being the store's —,
+  `Smelt`, `TakeBody`, `Cremate`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a
