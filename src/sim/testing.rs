@@ -14,14 +14,7 @@ use crate::map::{Map, Object, ObjectKind, ObjectLayer, Point, PIXELS_PER_CELL};
 
 use super::clock::Clock;
 use super::entity::{cell_of, GameEntity, Think};
-use super::feature::Features;
-use super::bins::Bins;
-use super::corpses::Corpses;
-use super::homes::Homes;
-use super::job::Workplaces;
-use super::fridge::Fridges;
-use super::door::Doors;
-use super::property::Properties;
+use super::facilities::Facilities;
 use super::kinds::Human;
 use super::log::Log;
 use super::occupancy::Occupancy;
@@ -32,30 +25,13 @@ pub struct World {
     pub map: Map,
     pub occupancy: Occupancy,
     pub log: Log,
-    pub features: Features,
-    /// Every fridge's door and temperature. Built from `map` once, like
-    /// `features`; [`World::step`] is what applies a react'd
-    /// [`Effect::Fridge`] and advances it, the same as
-    /// [`super::world_step`] does in a real tick.
-    pub fridges: Fridges,
-    /// What every scrap bin holds. Built from `map` once; [`World::step`]
-    /// applies an [`Effect::Deposit`] to it, as [`super::world_step`] does.
-    pub bins: Bins,
-    /// Every door, and the properties the house doors lock. Built from `map`
-    /// once; [`World::step`] applies an [`Effect::Door`] and moves the
-    /// leaves on, as [`super::world_step`] does.
-    pub doors: Doors,
-    pub properties: Properties,
-    /// Who lies dead where, filed and taken off by [`World::step`] as
-    /// [`super::world_step`] does; put a body in it to give an undertaker
-    /// one to find.
-    pub corpses: Corpses,
-    /// The bodies taken up, which a real tick would take out of the world.
-    pub burials: Vec<Uid>,
-    /// The dead counted, as [`super::GameState`] counts them.
-    pub tally: super::Tally,
-    homes: Homes,
-    workplaces: Workplaces,
+    /// Everything a [`super::GameState`] keeps beside its map and its crowd,
+    /// the same struct — the features, the fridges, the stores, the doors,
+    /// the properties, the dead — built from `map` once; [`World::step`]
+    /// grants a react'd [`Effect`] to it as [`super::world_step`] does
+    /// ([`super::effect::apply`]). A `World` derefs to it, so a test reads
+    /// `world.bins` and sets `world.features`.
+    pub facilities: Facilities,
     pub tick: u64,
     pub dt: f32,
     /// What time it is. Opening time, until a test sets it: a test about
@@ -63,6 +39,20 @@ pub struct World {
     pub clock: Clock,
     /// Everything the log has said, kept: the log itself is drained.
     lines: Vec<String>,
+}
+
+impl std::ops::Deref for World {
+    type Target = Facilities;
+
+    fn deref(&self) -> &Facilities {
+        &self.facilities
+    }
+}
+
+impl std::ops::DerefMut for World {
+    fn deref_mut(&mut self) -> &mut Facilities {
+        &mut self.facilities
+    }
 }
 
 impl World {
@@ -82,19 +72,9 @@ impl World {
     }
 
     fn with_supply(map: Map, supply: Supply) -> World {
-        let properties = Properties::from_map(&map);
         World {
             occupancy: Occupancy::new(map.size()),
-            features: Features::with_properties(&map, &supply, &properties),
-            fridges: Fridges::from_map(&map, &supply),
-            bins: Bins::from_map(&map),
-            doors: Doors::from_map(&map, &properties),
-            properties,
-            corpses: Corpses::new(),
-            burials: Vec::new(),
-            tally: super::Tally::default(),
-            homes: Homes::new(),
-            workplaces: Workplaces::new(),
+            facilities: Facilities::new(&map, &supply),
             map,
             log: Log::new(),
             tick: 0,
@@ -105,20 +85,7 @@ impl World {
     }
 
     pub fn ctx(&self) -> Think<'_> {
-        Think {
-            map: &self.map,
-            occupancy: &self.occupancy,
-            log: &self.log,
-            features: &self.features,
-            fridges: &self.fridges,
-            doors: &self.doors,
-            properties: &self.properties,
-            corpses: &self.corpses,
-            bins: &self.bins,
-            dt: self.dt,
-            tick: self.tick,
-            clock: self.clock,
-        }
+        Think::new(&self.map, &self.occupancy, &self.log, &self.facilities, self.dt, self.tick, self.clock)
     }
 
     /// One tick for `entity`: think, the move step's rules, react.
@@ -154,49 +121,10 @@ impl World {
             }
         };
         let effect = entity.react(&self.ctx(), outcome);
-        match effect {
-            Effect::Fridge { at, open } => {
-                let _ = self.fridges.set_open(at, open);
-            }
-            Effect::Door { at, key } => {
-                let _ = self.doors.want(at, key);
-            }
-            Effect::Salvage { at } => super::salvage(entity, &mut self.map, &self.log, at),
-            Effect::Deposit { at, pieces } => super::deposit(entity.uid(), &mut self.bins, &self.log, at, pieces),
-            Effect::Withdraw { at } => {
-                let uid = entity.uid();
-                super::withdraw(uid, entity.inventory_mut(), &mut self.bins, &self.log, at);
-            }
-            Effect::Died { cause } => {
-                let log = Log::new();
-                super::died(entity, &mut self.people(), &log, cause);
-                self.lines.extend(log.drain());
-            }
-            Effect::TakeBody { at } => {
-                let log = Log::new();
-                super::take_body(entity, &mut self.people(), &log, at);
-                self.lines.extend(log.drain());
-            }
-            Effect::Cremate { at } => {
-                self.tally.cremated += 1;
-                self.log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
-            }
-            Effect::None => {}
-        }
-        self.doors.advance(self.dt, &self.occupancy);
-        self.fridges.advance(self.dt * super::clock::TIME_SCALE);
+        super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
+        self.facilities.doors.advance(self.dt, &self.occupancy);
+        self.facilities.fridges.advance(self.dt * super::clock::TIME_SCALE);
         self.lines.extend(self.log.drain());
-    }
-
-    fn people(&mut self) -> super::People<'_> {
-        super::People {
-            occupancy: &mut self.occupancy,
-            homes: &mut self.homes,
-            workplaces: &mut self.workplaces,
-            corpses: &mut self.corpses,
-            burials: &mut self.burials,
-            tally: &mut self.tally,
-        }
     }
 
     /// [`World::step`], with the clock moving on by the tick, as a
@@ -341,6 +269,6 @@ pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
         }
     }
     super::process_game_state(&mut state, 1.0 / 60.0, &input);
-    let _ = state.bins.add(Point::new(2, 2), scrap);
+    let _ = state.facilities.bins.add(Point::new(2, 2), scrap);
     (state, smelter, courier)
 }

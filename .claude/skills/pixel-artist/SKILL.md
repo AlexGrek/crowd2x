@@ -103,8 +103,9 @@ with a white collar `w` and a gold cross `y`; the steelworker's brown leather ap
 charcoal shirt; the courier's green jacket with a satchel on a strap), written by `generate` as
 `assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
 the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
-everybody's seeded look); each is a `Clothing::Uniform*` variant, in `Clothing::UNIFORMS`, with a
-`clothing_path` arm, and `JobKind::uniform` says whose it is (`jobs`). A new job needs one.
+everybody's seeded look); each is `Clothing::Uniform(job)`, named by the job's row
+(`JobDef::uniform`, `"uniform steelworker"`), and `clothing_path` finds every outfit's PNG by its
+name, spaces to underscores (`jobs`). A new job needs one, and nothing in the code.
 
 A new slot (a hat, glasses) means a new array in `human.rs`, a new entry in
 `slot_paths`, `SLOT_DEPTHS` and `SLOTS`, and the tests in that file — it changes the

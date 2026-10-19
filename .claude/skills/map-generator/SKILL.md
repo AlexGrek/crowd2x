@@ -5,8 +5,11 @@ description: Knowledge base for crowd2x's procedural district generator - the se
 
 # Map generator: `map::district`
 
-Everything is in **`src/map/district.rs`** (plain Rust, no Bevy). Output is an ordinary `Map`
-plus a `District` record of where things went; nothing downstream knows it was generated.
+Everything is in **`src/map/district/`** (plain Rust, no Bevy): `mod.rs` has the geometry, the
+streets, the bank, the shops, the houses, the gates and the services, and **each lot building is
+a module of its own** — `warehouse.rs`, `restaurant.rs`, `crematorium.rs`, `steel_factory.rs` —
+listed in `LOT_BUILDINGS`. Output is an ordinary `Map` plus a `District` record of where things
+went; nothing downstream knows it was generated.
 For the layers it writes see `map-layers`; for the networks it lays, `electrician` and
 `plumber`.
 
@@ -14,7 +17,7 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 
 | Who | Where | What |
 | --- | --- | --- |
-| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, warehouse: Rect, restaurants: Vec<Rect>, crematorium: Rect, steel_factory: Rect, parks, gates: Vec<Gate> }` (`Gate { leaves: [Point; 2], post, outward }`), `District::residents()`, `District::buildings()` (every building's walls: houses, shops, warehouse, restaurants, crematorium, steel factory, bank) |
+| The API | `district::generate(seed) -> District` | `District { seed, map, houses: Vec<House>, bank: Rect, shops: Vec<Rect>, lot_buildings: Vec<(&str, Rect)>, parks, gates: Vec<Gate> }` (`Gate { leaves: [Point; 2], post, outward }`), `District::residents()`, `District::the(name)` (the one lot building of that name: `district.the(warehouse::NAME)`), `District::all(name)` (every one: the restaurants), `District::buildings()` (every building's walls: houses, shops, the lot buildings in order, bank) |
 | Browser button `district` | `src/browser.rs` (`Action::District`) | fresh seed, name from the name field or `district <seed>`, saved, opened in the game |
 | By hand | `src/debug.rs` | `CROWD2X_DISTRICT=<seed>` (with `CROWD2X_STATE=game`) |
 | QA fixture | `src/qa/mod.rs` | `given.maps: [{"name": ..., "district": seed}]` |
@@ -26,9 +29,10 @@ For the layers it writes see `map-layers`; for the networks it lays, `electricia
 `STREET` = 5 cells between and around blocks: a `PAVEMENT` each side of three cells of `ROAD`,
 the main under the middle one, lamps in the road's outer lanes (`CURB` = 1 in from each edge).
 `WIDTH` x `HEIGHT` = 131 x 100. **Lots**: 30 blocks less the bank's two and the shops' one
-leave `RESIDENTIAL_LOTS` = 108; `LOT_BUILDINGS` (7: the warehouse, `RESTAURANTS` = 4, the
-crematorium, the steel factory) take theirs first, `HOUSES` = 92 of the rest (about 86%), and
-`EMPTY_LOTS` = `RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES` (9) are parks — all derived, so a
+leave `RESIDENTIAL_LOTS` = 108; the lot buildings (`LOT_BUILDINGS`, 7 lots: the warehouse,
+`RESTAURANTS` = 4, the crematorium, the steel factory) take theirs first, `HOUSES` = 92 of the
+rest (about 86%), and `EMPTY_LOTS` = `RESIDENTIAL_LOTS - lots_built() - HOUSES` (9) are parks —
+all derived, so a
 geometry change only needs `HOUSES` chosen. Seed 7 has 137 residents (re-read after the steel
 factory, and pinned by `the_tvs_draw_nothing_from_the_district_...`). Helpers:
 `block_origin`, `lots_of` (each `Lot` knows its two street-facing `outer` sides, and
@@ -59,44 +63,45 @@ re-read, never assumed.)
    `TOILET`s), fridges along the front wall, desk rows of 1-2 `COMPUTER`s with two-cell aisles.
 3. **`shops`**: three lots of the shop block, 7x6 each, `SHOP_WALL`, a random
    `SHOP_FLOORS`, a 2-wide door; empty inside; returns the fourth lot, which becomes a park.
-4. **Mandatory lot buildings**, between shuffling the residential lots and splitting off the
-   empty ones: one lot each (`take_lot(lots, wanted, rank)`), so the next building is one more
-   entry and one builder. So far the **`warehouse`**: on the lot facing the edge street
-   (`Lot::edge_sides`) **nearest a heap of scrap** — `heaps_round(seed)`, the seed's own
-   wasteland over the navigation area (site + `NAV_MARGIN`), worked out from
-   `map::Wasteland` cell by cell before the map has one; ties to the first in shuffled order;
-   no RNG drawn. 7x6 `place_in` the lot, `WAREHOUSE_WALL` (`wall brown`) and
-   `WAREHOUSE_FLOOR` (`floor diagonal`), a 2-wide plain `DOOR` (public, nobody's property) on
-   an edge-facing side — a coin flip when there are two — kept two cells off the corners
-   (`door_clear_of_corners`), and a `SCRAP_BIN` in each of the 4 interior corners
-   (`WAREHOUSE_BINS`, which is what caps a district at four scrap collectors, `jobs`). Picking
-   the lot nearest the scrap rather than the first edge lot took the walk from the warehouse to
-   the nearest heap from a median of 55 cells (max 137) to 21-33 for 63 of 64 seeds.
-   Then the **`restaurant`s**, `RESTAURANTS` = 4, one per quarter: the lot whose middle is
-   nearest `(WIDTH * q / 4, HEIGHT * q / 4)` for q in 1, 3 — so nobody is far from public food.
-   `public_room` (7x6, a plain `DOOR` on a random outer side kept two off the corners, a
-   `Room` that lays out cells `across` the door's wall and `deep` in from it, whichever side
-   the door is on): `RESTAURANT_WALL` (`wall red`), `RESTAURANT_FLOOR` (`tiles yellow`),
-   `FRIDGE`s along the far wall (both corners, and the middle when the width is odd) and a
-   `TOILET` against each side wall one row in from the door — public food, drink and
-   toilets, powered and plumbed by `connect` like any building. Then the **`crematorium`**:
-   the first edge lot left (rank 0), `public_room` with the door on an edge side,
-   `CREMATORIUM_WALL` (`wall purple`), `CREMATORIUM_FLOOR` (`floor white`), a `CREMATORIUM`
-   (`"crematorium"`) in each far corner (`CREMATORIA` = 2, so 6 undertakers, `jobs`).
-   **Adding the restaurants and the crematorium changed every seed's houses** (the lots and
-   the RNG draws after the warehouse); the bank, shops and warehouse are as they were.
-   Last the **`steel_factory`**: the lot whose middle is nearest the warehouse's (the
-   couriers' trips), **the whole lot** (8x7), `FACTORY_WALL` (`block`) and `FACTORY_FLOOR`
-   (`floor`), a plain `DOOR` in the middle of the lot's first street side, laid out from the
-   door with `Room`: a `SCRAP_HOPPER` against each side wall in the row inside the door (the
-   couriers' workplaces, `HOPPERS` = 2), a `STEEL_PALLET` against each side wall two rows short
-   of the far wall (`PALLETS` = 2) and a `FURNACE` in each far corner (the steelworkers',
-   `FURNACES` = 2; powered, so `connect` wires the building). **It draws no RNG**, so the bank,
-   shops, warehouse, restaurants and crematorium are as they were; taking a lot still moved
-   which lots are houses and parks, so other seeds' houses changed (seed 7's count did not).
-   The warehouse got a `STEEL_RACK` with it, in the middle of its long interior wall away from
-   the door (the interior is 5x4, so the rack has a free cell either side before the corner
-   bins); `District::steel_factory` and `buildings()` include the factory.
+4. **The lot buildings** (`LOT_BUILDINGS`), between shuffling the residential lots and
+   splitting off the empty ones. Each is a `LotBuilding` in its own module (`SPEC`): a name,
+   how many, which lots it `wanted`, how it `rank`s a lot for its `index`th — given a `Siting`:
+   the heaps of scrap round the district (`heaps_round(seed)`, the seed's own wasteland over the
+   navigation area, worked out before the map has one) and the lot buildings `built` so far
+   (`Siting::the(name)`) — and a `build`er, `fn(&mut SmallRng, &mut Map, &mut Vec<Object>, Lot)
+   -> Rect`. `generate` walks the list: for each, `count` times, `take_lot` (the lowest rank,
+   ties to the first in the shuffled order) and build. **The list's order is the RNG's order.**
+   - **`warehouse`**: the edge lot (`Lot::edge_sides`) **nearest a heap of scrap**; no RNG
+     drawn for the lot. 7x6 `place_in` it, `wall brown` and `floor diagonal`, a 2-wide plain
+     `DOOR` (public, nobody's property) on an edge-facing side — a coin flip when there are two
+     — kept two cells off the corners (`door_clear_of_corners`), a `SCRAP_BIN` in each of the 4
+     interior corners (`WAREHOUSE_BINS`, which caps a district at four scrap collectors, `jobs`)
+     and a `STEEL_RACK` in the middle of its long interior wall away from the door (the
+     interior is 5x4, so the rack has a free cell either side before the corner bins). Picking
+     the lot nearest the scrap took the walk to the nearest heap from a median of 55 cells (max
+     137) to 21-33 for 63 of 64 seeds.
+   - **`restaurant`**, `RESTAURANTS` = 4, one per quarter: the lot whose middle is nearest
+     `(WIDTH * q / 4, HEIGHT * q / 4)` for q in 1, 3. `public_room` (7x6, a plain `DOOR` on a
+     random outer side kept two off the corners, a `Room` that lays out cells `across` the
+     door's wall and `deep` in from it, whichever side the door is on): `wall red`,
+     `tiles yellow`, `FRIDGE`s along the far wall (both corners, and the middle when the width
+     is odd) and a `TOILET` against each side wall one row in from the door.
+   - **`crematorium`**: the first edge lot left (rank 0), `public_room` with the door on an edge
+     side, `wall purple`, `floor white`, a `CREMATORIUM` in each far corner (`CREMATORIA` = 2,
+     so 6 undertakers, `jobs`).
+   - **`steel_factory`**: the lot whose middle is nearest the warehouse's (the couriers'
+     trips), **the whole lot** (8x7), `block` and `floor`, a plain `DOOR` in the middle of the
+     lot's first street side, laid out from the door with `Room`: a `SCRAP_HOPPER` against each
+     side wall in the row inside the door (the couriers' workplaces, `HOPPERS` = 2), a
+     `STEEL_PALLET` against each side wall two rows short of the far wall (`PALLETS` = 2) and a
+     `FURNACE` in each far corner (the steelworkers', `FURNACES` = 2; powered, so `connect`
+     wires the building). It draws no RNG.
+
+   History: adding the restaurants and the crematorium changed every seed's houses (the lots
+   and the draws after the warehouse); the steel factory, drawing nothing, moved only which
+   lots are houses and parks (seed 7's count did not change). Splitting the buildings into
+   modules (2026-10-19) changed no seed: every district of seeds 0..64 was compared byte for
+   byte before and after.
 5. **Lots -> houses**: the rest, `EMPTY_LOTS` split off (leaving `HOUSES` = 92), re-sorted
    into street order (so spawner/arrival order reads bottom-left
    first), then **`house`** for each: 1-2 `RESIDENTS`, 7-8 x 6-7 walls (`HOUSE_WALL`,
@@ -170,8 +175,8 @@ re-read, never assumed.)
 | No line indoors; outdoor wiring only on circuits with a controlled box and nothing indoors | voltages meet only in a box; street lights never share a house's circuit | `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` |
 | Street lamps powered at night only (controlled boxes off = day), everything else all day; >= 30 lamps; 1..=10 controllers | street lights, and not a cabinet per stretch | `the_street_lamps_have_power_at_night_only_and_everything_else_all_day` |
 | >= 90% of main cells within a street lamp's radius | the streets are lit | `the_streets_are_lit` |
-| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; one warehouse holding its 4 bins and nothing else, no bin elsewhere, nobody's property, on the edge, on the edge lot to be had nearest the scrap; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's; the warehouse's one steel rack, none elsewhere; one steel factory holding its 2 furnaces, 2 hoppers and 2 pallets and nothing else, none elsewhere, nobody's, on no lot farther from the warehouse than a house or park lot is (2 cells' slack for lot-vs-building middles) | the brief | `a_district_has_what_it_was_asked_for` |
-| The warehouse's door opens onto the edge street (or the yard cell before it), facing out | collectors step out towards the wasteland | `the_warehouse_door_opens_onto_the_street_round_the_edge` |
+| Counts: 92 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; every lot building as many times as its `count` | the brief | `a_district_has_what_it_was_asked_for` |
+| Each lot building where and what it should be — in its own module's tests: one warehouse holding its 4 bins and its steel rack and nothing else, none elsewhere, nobody's, on the edge lot to be had nearest the scrap, its door onto the edge street facing out; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's; one steel factory holding its 2 furnaces, 2 hoppers and 2 pallets and nothing else, none elsewhere, nobody's, on no lot farther from the warehouse than a house or park lot is | the brief; collectors step out towards the wasteland | `warehouse.rs`, `restaurant.rs`, `crematorium.rs`, `steel_factory.rs` tests |
 | 40-60% of houses have one `TV`, against an inside wall with `ROOM_AROUND` free cells beside it; none anywhere else; seed 7 still has 137 residents | TVs to watch at home, seeds unchanged | `about_half_the_houses_have_a_tv_...`, `the_tvs_draw_nothing_from_the_district_...`; sim `in_a_district_the_bored_watch_the_tvs_in_their_own_houses` |
 | Every edge cell is the perimeter wall but the gates' leaves (`DOOR` on `ROAD`, opening off the map, reachable inside); `GATES_PER_SIDE` a side | a walled district, ways out | `the_district_is_walled_in_but_for_its_gates` |
 | One guard post per gate and none elsewhere, on the wall, two from its gate, its only on-map side a free cell inside, not in the gateway | guards stand inside, out of the way | `every_gate_has_a_guard_post_in_the_wall_with_room_inside_to_stand_at_it` |
@@ -205,10 +210,15 @@ desk in the bank, then the four bins in the warehouse) and
   **changes every seed after it** - say so in the commit), return its `Rect`, include it in
   the `rooms` list `generate` builds (roof, lamp, `glaze`, `connect`, `light_streets` follow)
   and in `District::buildings()`.
-- **New mandatory building** (one every district must have, on a lot of its own): `LOT_BUILDINGS`
-  + 1, and in the mandatory step a `take_lot` (which lots qualify, how they rank) and a builder
-  like `warehouse`; a `District` field; `rooms` and `buildings()`; and `HOUSES` re-chosen if
-  `EMPTY_LOTS` would go negative.
+- **New lot building** (one every district must have, on a lot of its own): a module
+  `src/map/district/<building>.rs` — copy `crematorium.rs` (a `public_room`) or
+  `steel_factory.rs` (the whole lot, drawing nothing) — with its constants, builder, `SPEC` and
+  its own tests over `SEEDS`; `pub mod` and the `SPEC` **on the end** of `LOT_BUILDINGS` in
+  `mod.rs`; `HOUSES` re-chosen if `EMPTY_LOTS` would go negative. Nothing else: the lot, the
+  `District` record (`the`/`all`), `buildings()`, roof, lamp, windows, power and the catalogue
+  test follow from the list. On the end of the list it keeps every seed's bank, shops and lot
+  buildings, and moves only houses and parks; re-read seed 7's resident count. The `add-content`
+  skill has the whole touch list (its props, its jobs).
 - **A seed-stable addition** (decoration, signage, street furniture): do it after step 5 from
   the built rects without touching the RNG - the `roof_and_light` / `glaze` / `connect` pattern.
 - **New ground** (gravel, a plaza): a `Terrain::ground(name, cost)` in `map::terrain`, art in

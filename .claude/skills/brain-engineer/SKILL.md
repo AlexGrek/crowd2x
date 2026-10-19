@@ -85,7 +85,8 @@ Never add a Bevy system that decides something, a `Component` holding agent stat
 
 **Whatever you add with state is saved** (`savegame` skill). A goal executor implements
 `GoalExecutor::save`/`restore` (no default; reuse `pb::Executor::Seek`/`Fetch`/`Wander` or add
-a variant), a task variant needs a `pb::TaskKind` arm in `Task::save`/`restore`, an action
+a variant), a task saves itself — `TimedTask` (a name, saved as `pb::TaskKind::Named`, no
+schema change) or `SavedTask` — in its own file, an action
 variant one in `Action::save`/`restore`, a routine with memory one in `Routine::save`/`restore`,
 a process with state a field in `Biology::save`, a memory key nothing (memory is saved whole).
 Every `save` destructures its struct exhaustively, so the build points at what was missed; the
@@ -167,7 +168,8 @@ still between); the sim test `the_dead_are_carried_to_the_crematorium_and_leave_
 10. **Determinism.**
     - Randomness comes only from `crate::sim::rng::tick_rng(ctx.body.uid(), ctx.think.tick)`.
     - No `HashMap` iteration (memory is a `BTreeMap`).
-    - Routine and executor order is fixed in `Brain::human()`/`dog()`.
+    - Routine order is fixed in `Brain::human()`/`dog()`; executors come from `GoalId`'s
+      catalogue, in the order listed.
     - Compare priorities with plain `>` (NaN never wins).
 
 11. **Nothing scans the crowd.** A goal may read `ctx.think.occupancy` for a handful of named
@@ -231,7 +233,9 @@ halfway there.
 1. **Decide the layer(s)** with the table above. A new behaviour is usually a stat plus a
    routine plus a goal, reusing existing tasks. A new task or action is rarer.
 2. **Write it from [recipes.md](recipes.md)**, in dependency order: stat/process/item/feature →
-   action → task → goal → routine (`Need`) → registration in `Brain::human()`/`dog()`.
+   action → task → goal → routine (`Need`) → registration (a routine in `Brain::human()`/`dog()`;
+   a goal is registered by its `GoalId` row). The touch list for each kind of addition — a job, a
+   lot building, an item, a feature, a goal, a task, an effect — is the `add-content` skill.
 3. **Write unit tests alongside each piece** (below). Names are full sentences in snake_case;
    tests are inline `#[cfg(test)] mod tests`.
 4. **Run `cargo test`.** The two determinism tests in `src/sim/mod.rs` are the gate on any brain

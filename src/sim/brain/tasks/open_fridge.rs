@@ -1,11 +1,12 @@
 //! [`OpenFridge`]: open a fridge's door, from beside it.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::clock::watched;
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Five world seconds to open the door — a duration a body is *watched*
 /// standing through, so written and converted like every other one (see
@@ -60,6 +61,38 @@ impl TaskExecutor for OpenFridge {
 
     fn describe(&self) -> String {
         format!("open the fridge at {}, {}", self.fridge.x, self.fridge.y)
+    }
+}
+
+impl Task {
+    /// Open the fridge in `fridge`, from a cell beside it, unless it is open
+    /// already.
+    pub const fn open_fridge(fridge: Point, seconds: f32) -> Task {
+        Task::OpenFridge(OpenFridge { fridge, seconds })
+    }
+}
+
+/// Saved as `open fridge`: the fridge's cell and the seconds.
+impl TimedTask for OpenFridge {
+    const NAME: &'static str = "open fridge";
+
+    fn new(cell: Point, seconds: f32) -> OpenFridge {
+        OpenFridge { fridge: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.fridge
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::OpenFridge(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

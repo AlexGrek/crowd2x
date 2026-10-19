@@ -1,5 +1,5 @@
 //! [`Deposit`]: empty the pack into a store — whatever of the one thing the
-//! store holds ([`Store::item`](crate::sim::bins::Store::item)).
+//! store holds ([`Bins::item`](crate::sim::bins::Bins::item)).
 //!
 //! The end of a scrap collector's trip (`CollectGoal`): from beside its bin,
 //! a few minutes' work, and every piece it carries goes in. The same for a
@@ -14,12 +14,13 @@
 //! or for as much as was done of it if it is cut short.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Five minutes of world to empty a pack into a bin.
 pub const DEPOSIT_SECONDS: f32 = watched(5.0 * MINUTE);
@@ -37,12 +38,12 @@ impl Deposit {
     /// Whether it can go on: one step from the store, the store still there,
     /// and some of what it holds in the pack to put in it.
     fn can_deposit(&self, ctx: &TaskCtx<'_>) -> bool {
-        let Some(store) = ctx.think.bins.store(self.bin) else {
+        let (Some(store), Some(item)) = (ctx.think.bins.store(self.bin), ctx.think.bins.item(self.bin)) else {
             return false;
         };
         ctx.here().manhattan_distance(self.bin) <= 1
-            && ctx.think.features.has(store.feature(), self.bin)
-            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.count(store.item()) > 0)
+            && ctx.think.features.has(store, self.bin)
+            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.count(item) > 0)
     }
 }
 
@@ -94,6 +95,38 @@ impl TaskExecutor for Deposit {
 
     fn describe(&self) -> String {
         format!("store what it carries at {}, {}", self.bin.x, self.bin.y)
+    }
+}
+
+impl Task {
+    /// Empty every piece of what the store in `bin` holds out of the pack
+    /// and into it, from a cell beside it.
+    pub const fn deposit(bin: Point, seconds: f32) -> Task {
+        Task::Deposit(Deposit { bin, seconds })
+    }
+}
+
+/// Saved as `deposit`: the bin's cell and the seconds.
+impl TimedTask for Deposit {
+    const NAME: &'static str = "deposit";
+
+    fn new(cell: Point, seconds: f32) -> Deposit {
+        Deposit { bin: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.bin
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::Deposit(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

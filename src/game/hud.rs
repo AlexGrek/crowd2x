@@ -765,16 +765,16 @@ fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: O
         at.y,
         current.map.loaded_chunks(),
     );
-    // What the scrap collectors have brought in, on a map with somewhere to
-    // keep it, and the steel the couriers have brought back, on one with a
-    // rack for it.
+    // What the warehouse holds — the scrap the collectors have brought in,
+    // the steel the couriers have brought back — on a map with somewhere to
+    // keep it: every kind of store whose row gives the HUD a word for it.
     if let Some(bins) = world.map(GameState::bins) {
-        use crate::sim::bins::Store;
-        if bins.count(Store::ScrapBin) > 0 {
-            stats.push_str(&format!("\nscrap  {} stored", bins.total_in(Store::ScrapBin)));
-        }
-        if bins.count(Store::SteelRack) > 0 {
-            stats.push_str(&format!("\nsteel  {} stored", bins.total_in(Store::SteelRack)));
+        for kind in crate::sim::FeatureKind::ALL {
+            if let Some(word) = kind.store().and_then(|store| store.hud)
+                && bins.count(kind) > 0
+            {
+                stats.push_str(&format!("\n{word}  {} stored", bins.total_in(kind)));
+            }
         }
     }
     stats

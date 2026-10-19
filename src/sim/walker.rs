@@ -597,8 +597,7 @@ mod tests {
     use super::*;
     use crate::map::{FLOOR, Map, Size, WALL};
     use crate::sim::entity::cell_of;
-    use crate::sim::feature::Features;
-    use crate::sim::fridge::Fridges;
+    use crate::sim::facilities::Facilities;
     use crate::sim::log::Log;
     use crate::sim::occupancy::Occupancy;
     use crate::sim::uid::EntityType;
@@ -607,10 +606,7 @@ mod tests {
         map: Map,
         occupancy: Occupancy,
         log: Log,
-        features: Features,
-        fridges: Fridges,
-        doors: crate::sim::door::Doors,
-        properties: crate::sim::property::Properties,
+        facilities: Facilities,
     }
 
     impl World {
@@ -619,28 +615,12 @@ mod tests {
                 occupancy: Occupancy::new(map.size()),
                 map,
                 log: Log::new(),
-                features: Features::default(),
-                fridges: Fridges::default(),
-                doors: Default::default(),
-                properties: Default::default(),
+                facilities: Facilities::default(),
             }
         }
 
         fn ctx(&self, tick: u64) -> Think<'_> {
-            Think {
-                map: &self.map,
-                occupancy: &self.occupancy,
-                log: &self.log,
-                features: &self.features,
-                fridges: &self.fridges,
-                doors: &self.doors,
-                properties: &self.properties,
-                corpses: &crate::sim::corpses::NONE,
-                bins: &crate::sim::bins::NONE,
-                dt: 1.0 / 60.0,
-                tick,
-                clock: crate::sim::clock::Clock::after_watching(0.0),
-            }
+            Think::new(&self.map, &self.occupancy, &self.log, &self.facilities, 1.0 / 60.0, tick, crate::sim::clock::Clock::after_watching(0.0))
         }
     }
 
@@ -826,14 +806,14 @@ mod tests {
         map.set_terrain(toilet, FLOOR);
         crate::sim::testing::prop_at(&mut map, "toilet", toilet);
         let features =
-            Features::from_map(&map, &crate::map::utilities::Supply::everywhere(map.size()));
+            crate::sim::Features::from_map(&map, &crate::map::utilities::Supply::everywhere(map.size()));
         assert!(
             features.is_enterable(toilet),
             "the fixture should have made a real toilet"
         );
 
         let mut world = World::new(map);
-        world.features = features;
+        world.facilities.features = features;
         let mut walker = walker(Point::new(1, 1));
 
         assert!(

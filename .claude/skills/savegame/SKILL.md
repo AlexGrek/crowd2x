@@ -55,9 +55,13 @@ no build script, no `protoc`. The rules (also in `save/pb/mod.rs`):
   `Talents::restore` defaults a missing talent to 50; `Goals::restore` leaves a new goal fresh.
 - **A new file is optional**; missing means defaults. Unknown files and unknown fields are
   skipped (`files_and_fields_from_a_later_build_are_skipped`).
-- **Content by name** (terrain, props, items, entity kinds via the oneof); the game's own state
-  machines (heading, goal, task result, stage...) by prost enumerations mapped with exhaustive
-  `match` both ways (`impl From<GoalId> for pb::GoalId` and back) — never `as`.
+- **Content by name** (terrain, props, items, entity kinds via the oneof, **tasks** —
+  `pb::TaskKind::Named`, under `TimedTask::NAME`); **the catalogued kinds by number** — a
+  `GoalId` or `JobKind` is a plain `int32`, its catalogue number (`number()` / `from_number()`,
+  `sim::catalogue`), an unknown one refused; the game's own state machines (heading, task
+  result, stage...) by prost enumerations mapped with exhaustive `match` both ways — never
+  `as`. The goal and job fields were prost enumerations until 2026-10-19: the same varint on the
+  wire, so every save before reads the same.
 - **Refuse, never repair**: unknown name or enum value, out-of-range index, duplicate uid, a
   kind its uid disagrees with → `SaveError` naming the file and what (`error.rs`: `Invalid`
   inside a part, `.in_file(..)` at the top).
@@ -92,8 +96,10 @@ Where the code is:
 | id RNG | `sim/rng.rs` — `WorldRng` (= xoshiro256++, the stream `SmallRng` always was), `state_of`/`from_state` |
 | map | `map/save.rs` (`save_site`/`restore_site`, `save_chunks`/`restore_chunks`), `Chunk::from_parts` |
 
-A new **kind** needs a `pb::Kind` variant; a new **task** a `pb::TaskKind` variant; a new
-**executor** a `pb::Executor` variant if none fits. Brains are rebuilt by kind (`Brain::human()`)
+A new **kind** needs a `pb::Kind` variant; a new **task** nothing (a `TimedTask` saves as
+`pb::TaskKind::Named` under its name; one that is more than a place and a time implements
+`SavedTask` with a message of its own); a new **goal** or **job** nothing (its catalogue number);
+a new **executor** a `pb::Executor` variant if none fits. Brains are rebuilt by kind (`Brain::human()`)
 and filled in, so a routine list that changes order or names refuses old saves — **add
 routines at the end**: `Brain::restore` takes a saved list that is a prefix of the brain's
 (the routines added since start fresh; `WorkRoutine` came in that way). A unit's job is
@@ -118,12 +124,19 @@ Test: `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen f
 stores (`sim::bins::Bins`, now scrap bins, steel racks, scrap hoppers and steel pallets) are the
 same `pb::World.bins` list, a store's kind being the map's prop, so nothing new there. Test:
 `the_steel_works_saved_mid_shift_carries_on_exactly` (seen failing with a saved `Withdraw`
-loaded as a `Deposit`). The dead counted, `sim::statistics::Tally` (`died`, `cremated`), is
+loaded as a `Deposit`). **With the catalogues** (2026-10-19): tasks save by name
+(`pb::TaskKind::Named` = 20, `pb::NamedTask { name, cell, seconds }`); tags 3-19 are only read,
+each by its task's `TimedTask::legacy` (and `Salvage`/`Work`/`Wait` by hand), and never
+extended; `pb::JobKind` and `pb::GoalId` are gone, their fields plain `int32`.
+`src/save/testdata/steel_works.savegame` was written by the build before, mid-shift (old tags,
+old enums): `a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly` runs it beside
+the same world built fresh. `task.rs`'s `every_task_comes_back_from_a_save_as_itself` and
+`a_task_saved_under_its_old_tag_still_loads` cover every task both ways. The dead counted, `sim::statistics::Tally` (`died`, `cremated`), is
 `pb::World.tally` (tag 13, `pb::Deaths`; absent = none counted): a body cremated has left the
 world, so only the count remembers it; checked by
 `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with the
 tally not restored). **A new oneof variant must also go in the
-field's `tags = "..."` list** (`pb::Task.kind`) or it decodes as "a task of no kind".
+field's `tags = "..."` list** or it decodes as nothing (`pb::Task.kind`: "a task of no kind").
 
 ## Fast
 

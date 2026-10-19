@@ -48,9 +48,12 @@ use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 
 use super::brain::GoalId;
+use super::catalogue::catalogue;
 use super::clothing::Clothing;
 use super::clock::{Clock, Weekday, BEDTIME, GETTING_UP, HOUR};
 use super::feature::FeatureKind;
+use super::inventory::Inventory;
+use super::item::ItemKind;
 use super::uid::Uid;
 
 /// How long before a shift starts a worker sets off for it, in **world**
@@ -65,163 +68,176 @@ pub const COMMUTE: f32 = 0.5 * HOUR;
 /// last one leaves. One who lives nearby is early, and waits by the post.
 pub const GUARD_COMMUTE: f32 = 2.0 * HOUR;
 
-/// Every kind of job there is.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum JobKind {
-    /// Sits at a computer and works it. Tiring, and no fun.
-    OfficeWorker,
-    /// Brings scrap metal in from the heaps in the wasteland and stores it
-    /// in its own bin in the warehouse. As tiring as office work, and as
-    /// little fun.
-    ScrapCollector,
-    /// Stands at a guard post by a gate in the district's wall for one of
-    /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring.
-    Guard,
-    /// Takes up the dead and carries them to its own crematorium, on one of
-    /// the three [`WATCHES`]: the dead do not wait for office hours.
-    Undertaker,
-    /// Smelts scrap metal into steel at its own furnace in the steel
-    /// factory, fetching the scrap from the factory's hoppers and putting the
-    /// steel on its pallets.
-    Steelworker,
-    /// Carries scrap metal from the warehouse to its own hopper in the steel
-    /// factory, and steel from the factory back to the warehouse.
-    Courier,
+/// Everything about one kind of job: its row in [`JobKind`]'s catalogue.
+pub struct JobDef {
+    pub name: &'static str,
+    /// "an office worker", "a scrap collector": for a log line.
+    pub article: &'static str,
+    /// The feature the job is done at, and so what a workplace is handed out
+    /// from. The prop it is ([`FeatureKind::prop`]) is what the workplace is
+    /// called on the job menu and in the log.
+    pub workplace: FeatureKind,
+    /// The goal the job is done by: what `WorkRoutine` raises while the
+    /// shift is due. It needs an executor ([`GoalDef`](super::brain::goal::GoalDef)).
+    pub goal: GoalId,
+    /// How long before its shift somebody sets off, in **world** seconds.
+    pub commute: f32,
+    /// The shifts a workplace of the kind is worked in, **one worker to
+    /// each**, in the order they are handed out.
+    pub shifts: &'static [Shift],
+    /// The name of the uniform worn to it ([`Clothing::Uniform`]), which is
+    /// also how its art is found: `assets/human/clothes_uniform_<job>.png`,
+    /// drawn by `tools/human_art.py`.
+    pub uniform: &'static str,
+    /// The job menu's `now` line while the shift is due and the job's goal is
+    /// in charge: what it is doing about it, given whether it is at its own
+    /// workplace and what it carries.
+    pub now: fn(at_work: bool, pack: Option<&Inventory>) -> &'static str,
+}
+
+catalogue! {
+    /// Every kind of job there is, **in the order a job is offered to an
+    /// arrival** (`GameState::give_a_job`): the bank's desks first, then the
+    /// bins, then the gates, then the crematoria, then the steel factory's
+    /// furnaces and hoppers. A new job goes on the end, and so is hired last.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum JobKind: JobDef {
+        /// Sits at a computer and works it. Tiring, and no fun.
+        OfficeWorker = 0 => JobDef {
+            name: "office worker",
+            article: "an office worker",
+            workplace: FeatureKind::Workstation,
+            goal: GoalId::Work,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform office worker",
+            now: |at_work, _| if at_work { "working" } else { "on the way to work" },
+        },
+        /// Brings scrap metal in from the heaps in the wasteland and stores it
+        /// in its own bin in the warehouse. As tiring as office work, and as
+        /// little fun.
+        ScrapCollector = 1 => JobDef {
+            name: "scrap collector",
+            article: "a scrap collector",
+            workplace: FeatureKind::ScrapBin,
+            goal: GoalId::Collect,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform scrap collector",
+            now: |at_work, _| if at_work { "storing scrap" } else { "collecting scrap" },
+        },
+        /// Stands at a guard post by a gate in the district's wall for one of
+        /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
+        /// a gate is at the edge of the district, so it sets off
+        /// [`GUARD_COMMUTE`] before.
+        Guard = 2 => JobDef {
+            name: "guard",
+            article: "a guard",
+            workplace: FeatureKind::GuardPost,
+            goal: GoalId::Work,
+            commute: GUARD_COMMUTE,
+            shifts: &WATCHES,
+            uniform: "uniform guard",
+            now: |at_work, _| if at_work { "on watch" } else { "on the way to the gate" },
+        },
+        /// Takes up the dead and carries them to its own crematorium, on one of
+        /// the three [`WATCHES`]: the dead do not wait for office hours.
+        Undertaker = 3 => JobDef {
+            name: "undertaker",
+            article: "an undertaker",
+            workplace: FeatureKind::Crematorium,
+            goal: GoalId::Bury,
+            commute: COMMUTE,
+            shifts: &WATCHES,
+            uniform: "uniform undertaker",
+            now: |at_work, _| if at_work { "cremating" } else { "seeing to the dead" },
+        },
+        /// Smelts scrap metal into steel at its own furnace in the steel
+        /// factory, fetching the scrap from the factory's hoppers and putting the
+        /// steel on its pallets.
+        Steelworker = 4 => JobDef {
+            name: "steelworker",
+            article: "a steelworker",
+            workplace: FeatureKind::Furnace,
+            goal: GoalId::Smelt,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform steelworker",
+            now: |at_work, _| if at_work { "smelting steel" } else { "fetching scrap, storing steel" },
+        },
+        /// Carries scrap metal from the warehouse to its own hopper in the steel
+        /// factory, and steel from the factory back to the warehouse.
+        Courier = 5 => JobDef {
+            name: "courier",
+            article: "a courier",
+            workplace: FeatureKind::ScrapHopper,
+            goal: GoalId::Haul,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform courier",
+            now: |_, pack| {
+                let carries = |item| pack.is_some_and(|pack| pack.count(item) > 0);
+                if carries(ItemKind::Steel) {
+                    "carrying steel to the warehouse"
+                } else if carries(ItemKind::Scrap) {
+                    "carrying scrap to the factory"
+                } else {
+                    "fetching a load"
+                }
+            },
+        },
+    }
 }
 
 impl JobKind {
-    /// Every kind, **in the order a job is offered to an arrival**
-    /// (`GameState::give_a_job`): the bank's desks first, then the bins,
-    /// then the gates, then the crematoria, then the steel factory's furnaces
-    /// and hoppers.
-    pub const ALL: [JobKind; 6] = [
-        JobKind::OfficeWorker,
-        JobKind::ScrapCollector,
-        JobKind::Guard,
-        JobKind::Undertaker,
-        JobKind::Steelworker,
-        JobKind::Courier,
-    ];
-
     pub const fn name(self) -> &'static str {
-        match self {
-            JobKind::OfficeWorker => "office worker",
-            JobKind::ScrapCollector => "scrap collector",
-            JobKind::Guard => "guard",
-            JobKind::Undertaker => "undertaker",
-            JobKind::Steelworker => "steelworker",
-            JobKind::Courier => "courier",
-        }
+        self.def().name
     }
 
     /// "an office worker", "a scrap collector": for a log line.
     pub const fn with_article(self) -> &'static str {
-        match self {
-            JobKind::OfficeWorker => "an office worker",
-            JobKind::ScrapCollector => "a scrap collector",
-            JobKind::Guard => "a guard",
-            JobKind::Undertaker => "an undertaker",
-            JobKind::Steelworker => "a steelworker",
-            JobKind::Courier => "a courier",
-        }
+        self.def().article
     }
 
     /// The feature the job is done at, and so what a workplace is handed out
     /// from.
     pub const fn workplace(self) -> FeatureKind {
-        match self {
-            JobKind::OfficeWorker => FeatureKind::Workstation,
-            JobKind::ScrapCollector => FeatureKind::ScrapBin,
-            JobKind::Guard => FeatureKind::GuardPost,
-            JobKind::Undertaker => FeatureKind::Crematorium,
-            JobKind::Steelworker => FeatureKind::Furnace,
-            JobKind::Courier => FeatureKind::ScrapHopper,
-        }
+        self.def().workplace
     }
 
-    /// What its workplace is called, for a log line and the job menu.
+    /// What its workplace is called, for a log line and the job menu: the
+    /// prop it is.
     pub const fn workplace_name(self) -> &'static str {
-        match self {
-            JobKind::OfficeWorker => "computer",
-            JobKind::ScrapCollector => "scrap bin",
-            JobKind::Guard => "guard post",
-            JobKind::Undertaker => "crematorium",
-            JobKind::Steelworker => "furnace",
-            JobKind::Courier => "scrap hopper",
-        }
+        self.workplace().prop()
     }
 
     /// The goal the job is done by: what `WorkRoutine` raises while the
     /// shift is due. A guard post is stood at the way a desk is sat at.
     pub const fn goal(self) -> GoalId {
-        match self {
-            JobKind::OfficeWorker | JobKind::Guard => GoalId::Work,
-            JobKind::ScrapCollector => GoalId::Collect,
-            JobKind::Undertaker => GoalId::Bury,
-            JobKind::Steelworker => GoalId::Smelt,
-            JobKind::Courier => GoalId::Haul,
-        }
+        self.def().goal
     }
 
     /// What somebody in this job wears to work (`GameEntity::worn`).
     pub const fn uniform(self) -> Clothing {
-        match self {
-            JobKind::OfficeWorker => Clothing::UniformOfficeWorker,
-            JobKind::ScrapCollector => Clothing::UniformScrapCollector,
-            JobKind::Guard => Clothing::UniformGuard,
-            JobKind::Undertaker => Clothing::UniformUndertaker,
-            JobKind::Steelworker => Clothing::UniformSteelworker,
-            JobKind::Courier => Clothing::UniformCourier,
-        }
+        Clothing::Uniform(self)
     }
 
     /// How long before its shift somebody in this job sets off, in **world**
     /// seconds: [`COMMUTE`], or [`GUARD_COMMUTE`] to a gate.
     pub const fn commute(self) -> f32 {
-        match self {
-            JobKind::OfficeWorker
-            | JobKind::ScrapCollector
-            | JobKind::Undertaker
-            | JobKind::Steelworker
-            | JobKind::Courier => COMMUTE,
-            JobKind::Guard => GUARD_COMMUTE,
-        }
+        self.def().commute
     }
 
     /// The shifts a workplace of this kind is worked in, **one worker to
     /// each**, in the order they are handed out: one for a desk or a bin,
     /// the three watches for a guard post.
     pub const fn shifts(self) -> &'static [Shift] {
-        match self {
-            JobKind::OfficeWorker | JobKind::ScrapCollector | JobKind::Steelworker | JobKind::Courier => &[OFFICE_HOURS],
-            JobKind::Guard | JobKind::Undertaker => &WATCHES,
-        }
+        self.def().shifts
     }
-}
 
-impl From<JobKind> for pb::JobKind {
-    fn from(kind: JobKind) -> pb::JobKind {
-        match kind {
-            JobKind::OfficeWorker => pb::JobKind::OfficeWorker,
-            JobKind::ScrapCollector => pb::JobKind::ScrapCollector,
-            JobKind::Guard => pb::JobKind::Guard,
-            JobKind::Undertaker => pb::JobKind::Undertaker,
-            JobKind::Steelworker => pb::JobKind::Steelworker,
-            JobKind::Courier => pb::JobKind::Courier,
-        }
-    }
-}
-
-impl From<pb::JobKind> for JobKind {
-    fn from(kind: pb::JobKind) -> JobKind {
-        match kind {
-            pb::JobKind::OfficeWorker => JobKind::OfficeWorker,
-            pb::JobKind::ScrapCollector => JobKind::ScrapCollector,
-            pb::JobKind::Guard => JobKind::Guard,
-            pb::JobKind::Undertaker => JobKind::Undertaker,
-            pb::JobKind::Steelworker => JobKind::Steelworker,
-            pb::JobKind::Courier => JobKind::Courier,
-        }
+    /// The job menu's `now` line for somebody at it ([`JobDef::now`]).
+    pub fn now(self, at_work: bool, pack: Option<&Inventory>) -> &'static str {
+        (self.def().now)(at_work, pack)
     }
 }
 
@@ -406,7 +422,7 @@ impl Job {
     pub(crate) fn save(&self) -> pb::Job {
         let Job { kind, workplace, shift: Shift { start, end, days } } = *self;
         pb::Job {
-            kind: pb::JobKind::from(kind) as i32,
+            kind: kind.number(),
             workplace: Some(workplace.into()),
             start: start as u32,
             end: end as u32,
@@ -415,7 +431,9 @@ impl Job {
     }
 
     pub(crate) fn restore(saved: &pb::Job) -> Result<Job, Invalid> {
-        let kind = JobKind::from(pb::known::<pb::JobKind>(saved.kind, "job")?);
+        let Some(kind) = JobKind::from_number(saved.kind) else {
+            return invalid(format!("no job numbered {}", saved.kind));
+        };
         let workplace = pb::cell(saved.workplace, "workplace")?;
         let shift = match (u8::try_from(saved.start), u8::try_from(saved.end), u8::try_from(saved.days)) {
             (Ok(start), Ok(end), Ok(days)) => Shift::new(start, end, days),

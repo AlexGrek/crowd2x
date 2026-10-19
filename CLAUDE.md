@@ -75,6 +75,7 @@ to `screenshots/`.
 | The seeded district generator, its perimeter wall, gates and guard posts | `map-generator` |
 | The endless world past a map's edge: the wasteland generator, chunks, streaming and reclaiming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
 | `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
+| **Adding a kind of thing**: a job, a building every district has, an item, a feature or store, a goal, a task, an effect, a new part of the world's state — the touch list | `add-content` (+ the owning skill) |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
 | Jobs: who works where and when, shifts, watches, weekdays, commutes, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
@@ -129,9 +130,11 @@ src/game/               the game screen: actors, pool, speed, hud, panels   [gam
 src/map/                map model, format, grid layers, Supply              [map, map-layers]
 src/map/utilities.rs    power and water networks                            [electrician, plumber]
 src/map/mount.rs, src/sim/light_switch.rs  wall-mounted props; light switches and their rooms  [electrician]
-src/map/district.rs     the district generator                              [map-generator]
+src/map/district/       the district generator; a module per lot building  [map-generator]
 src/map/wasteland.rs, chunk.rs  the endless ground round every map; chunks    [wasteland]
 src/sim/                GameState, passes, entities, clock, items           [simulation]
+src/sim/catalogue.rs    catalogue!: a kind enum and a row per kind          [add-content]
+src/sim/facilities.rs, effect.rs  the world's parts; Effect and its apply   [simulation]
 src/sim/census.rs, occupancy.rs  who is in which chunk; who stands in which cell  [simulation, wasteland]
 src/sim/brain/, biology/  the mind and the body                             [brain-engineer]
 src/sim/door.rs, property.rs  doors, locks, who owns which room              [doors]

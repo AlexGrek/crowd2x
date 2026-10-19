@@ -67,8 +67,8 @@ For a plain `Need`: only `routines.rs` (constant + tests) and `brain/mod.rs` (re
 
 | Situation | Files |
 | --- | --- |
-| Raises a **new** goal | `src/sim/brain/goal.rs` (`GoalId` variant, `COUNT`, `ALL`, `name`, `emoji`, and the `the_ranked_list_...` test), `goals/<goal>.rs`, `goals/mod.rs`, executor list in `Brain::human()`; then `cargo build` — exhaustive `match`es on `GoalId`/`Task` name any others |
-| Needs data no routine sees today | the value on `Think` (`src/sim/entity.rs`) **or** on `RoutineCtx` (`routine.rs`). Every construction site must be updated: `Think {` in `src/sim/mod.rs` (two, in `process_pass`), `src/sim/testing.rs` (`World::ctx`), `src/sim/walker.rs` (test rig), `src/sim/brain/routines.rs` (two test helpers); `RoutineCtx {` in `src/sim/brain/mod.rs` (`Brain::react`) and the two test helpers in `routines.rs` |
+| Raises a **new** goal | a row of `GoalId`'s catalogue in `src/sim/brain/goal.rs` (the next number, name, emoji, executor constructor — which is what puts it in `Brain::human()`), `goals/<goal>.rs`, `goals/mod.rs`, and the `the_ranked_list_...` test (`add-content` skill) |
+| Needs data no routine sees today | the value on `Think` (`src/sim/entity.rs`), filled in `Think::new` — the one place a `Think` is built — from a field of `Facilities` (`src/sim/facilities.rs`); **or** on `RoutineCtx` (`routine.rs`): `RoutineCtx {` in `src/sim/brain/mod.rs` (`Brain::react`) and the two test helpers in `routines.rs` |
 | Needs a helper on time | `src/sim/clock.rs` (a `Clock` method + its tests) |
 | Needs something the unit remembers | `src/sim/brain/memory.rs` (a key constant), a setter on `Brain`, and the spawn pass hook in `src/sim/mod.rs` if it is handed out at spawn |
 | Watches a new stat | `src/sim/biology/stats.rs` (getter, derived inverse if it drains, `Stats::random` — every need is born 70-100% satisfied), plus `brain-engineer` for the process |
@@ -103,7 +103,7 @@ existing `qa/*.json` that watches one need in isolation — it must switch the n
 
 `src/editor/`, `src/ui/`, `src/game/`, `src/map/` (except the `Point` type), `src/render.rs`,
 `src/browser.rs`, `src/menu.rs`, `src/debug.rs`, `src/animation.rs`, `src/characters/`,
-`src/qa/mod.rs`, `src/sim/path.rs`, `src/sim/walker.rs` (except its `Think {` site),
+`src/qa/mod.rs`, `src/sim/path.rs`, `src/sim/walker.rs`,
 `src/sim/entities.rs`, `src/sim/occupancy.rs`, `tools/`, `assets/`, and the other skills
 except `brain-engineer` and `qa`. None of them change when a routine is added.
 

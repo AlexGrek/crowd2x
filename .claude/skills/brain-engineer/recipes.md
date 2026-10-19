@@ -112,29 +112,27 @@ see it up to a period late. A test drives one with `Schedule::new(seed).tick(dt)
 ## An item
 
 `item.rs`. An item says **what it is made of**, not what it does to a body or to whoever
-carries it. Add a variant, bump `ItemKind::COUNT` and `ALL` (they size the inventory's count
-array), and add an arm in each of `name`, `consume_seconds`, `nutrition`, `hydration`, `mass`
-and `volume`:
+carries it. It is one row of `ItemKind`'s catalogue (`sim::catalogue!`): the variant with the
+next number, and its `ItemDef` — name (what a save keeps), how long it takes to use up,
+nutrition, hydration, taste, mass, volume, and the emoji it is drawn as in a hand. Start from
+`..CARRIED` for a thing nobody eats or drinks:
 
 ```rust
-pub enum ItemKind { Food, Water, Coffee }
-
-pub const ALL: [ItemKind; ItemKind::COUNT] = [ItemKind::Food, ItemKind::Water, ItemKind::Coffee];
-pub const COUNT: usize = 3;
-
-pub const fn hydration(self) -> f32 {
-    match self {
-        ItemKind::Food => 0.0,
-        ItemKind::Water => DRINK,
-        ItemKind::Coffee => 30.0,
+catalogue! {
+    pub enum ItemKind: ItemDef {
+        // ...
+        /// A cup of coffee.
+        Coffee = 5 => ItemDef {
+            name: "coffee",
+            consume_seconds: SIP_SECONDS,
+            hydration: 30.0,
+            mass: 0.3,
+            volume: 0.3,
+            emoji: "☕",
+            ..CARRIED
+        },
     }
 }
-
-/// Kilograms, counted wherever it is — a hand or stowed.
-pub const fn mass(self) -> f32 { /* ... */ }
-
-/// Litres, counted only when stowed.
-pub const fn volume(self) -> f32 { /* ... */ }
 ```
 
 `TakeItem` and `ConsumeItem` already work for any `ItemKind`, and `ConsumeItem` reports
@@ -170,26 +168,19 @@ task touches and which limit counts it:
 ## A feature (what a prop is for)
 
 `feature.rs`. A prop's **name** is what a map file stores and what the editor paints. A feature
-binds that name to a use, and one name may have several uses (the fridge is `Food` and `Water`).
+binds names to a use, and one name may have several uses (the fridge is `Food` and `Water`). It
+is one row of `FeatureKind`'s catalogue: the prop names, the `Access`, and a `StoreDef` if
+things are kept in it (`sim::bins`). `Features` indexes every kind at its number, so nothing
+else in the file changes:
 
 ```rust
-pub enum FeatureKind { Food, Water, Toilet, Bed }
-
-pub const FEATURES: &[Feature] = &[
-    // ...
-    Feature { name: "bed 1", kind: FeatureKind::Bed },
-];
-
-pub struct Features {
-    // ...
-    bed: Vec<Point>,   // one Vec per kind: `nearest` scans only that kind
+catalogue! {
+    pub enum FeatureKind: FeatureDef {
+        // ...
+        /// Somewhere to sit and read.
+        Bookshelf = 14 => FeatureDef { props: &["bookshelf"], ..BESIDE },
+    }
 }
-
-// in Features::from_map
-FeatureKind::Bed => features.bed.push(object.cell()),
-
-// in Features::cells
-FeatureKind::Bed => &self.bed,
 ```
 
 Goals then call `ctx.think.features.nearest(FeatureKind::Bed, here)`.
@@ -292,15 +283,32 @@ impl TaskExecutor for UseToilet {
 }
 ```
 
-Register it in three places:
+Then, in the same file, its constructor and how it is saved — a task that is a place and a
+time is a `TimedTask`, saved under its name with no schema change:
 
-- **`brain/tasks/mod.rs`:** `pub mod use_toilet;` and `pub use use_toilet::UseToilet;`
-- **`brain/task.rs`:** add it to `use super::tasks::{..}`, then add
-  - a variant `UseToilet(UseToilet)`;
-  - a `pub const fn use_toilet(toilet: Point, seconds: f32) -> Task` constructor;
-  - an arm in `Task::execute` and in `Task::describe`.
-- **Goals** match it as `Some(Task::UseToilet(_))` in `ctx.finished`. Goals with an
-  exhaustive `Stage::of` (`EatGoal`, `DrinkGoal`) need an arm for it too.
+```rust
+impl Task {
+    /// Use the toilet in `toilet`, from a cell beside it.
+    pub const fn use_toilet(toilet: Point, seconds: f32) -> Task {
+        Task::UseToilet(UseToilet { toilet, seconds })
+    }
+}
+
+impl TimedTask for UseToilet {
+    const NAME: &'static str = "use toilet";  // never changed once a save could hold it
+    fn new(cell: Point, seconds: f32) -> UseToilet { UseToilet { toilet: cell, seconds } }
+    fn cell(&self) -> Point { self.toilet }
+    fn seconds(&self) -> f32 { self.seconds }
+}
+```
+
+(`legacy` is only for the tasks saved under a tag of their own before names; a new one has
+none.) A task that is more than that implements `SavedTask` by hand (`move_to.rs`,
+`take_item.rs`). Register it in `brain/tasks/mod.rs`: `pub mod use_toilet;`,
+`pub use use_toilet::UseToilet;`, and **its name in the `tasks!` list**, which writes the `Task`
+variant and every `match` over it. Add one to `one_of_each` in `task.rs`'s tests. Goals match it
+as `Some(Task::UseToilet(_))` in `ctx.finished`; a goal's `Stage::of` ignores tasks it does not
+know (a wildcard arm).
 
 `TaskCtx` gives you: `think`, `outcome` (this tick's move), `walk`, `action`,
 `biology: Option<&mut Biology>`, `inventory: Option<&mut Inventory>`, `here()`,
@@ -320,10 +328,11 @@ advance it), so the effect of a task is exact. Set stats with
 Four parts. **One goal per need, in its own file.** Do not parameterise an existing executor for
 a second need, even when the plans match.
 
-**1. `GoalId` in `brain/goal.rs`.** Add a variant with the next discriminant, then update
-`COUNT` (a literal), `ALL`, `name()` and `emoji()` (one codepoint).
+**1. `GoalId` in `brain/goal.rs`.** A row of its catalogue: the variant with the next number,
+its `GoalDef` — name, emoji (one codepoint) and `executor: Some(|| Box::new(goals::XGoal::new()))`,
+which is what gives every `Brain::human()` one.
 `the_ranked_list_is_highest_first_with_ties_in_goal_order` lists every goal and needs the new
-one. Ties go to the lower discriminant, so declaration order is a tie-break policy.
+one. Ties go to the lower number, so the order listed is a tie-break policy.
 
 **2. The executor, `brain/goals/<name>.rs`.** Copy `relieve.rs` for a walk-there-and-use goal,
 or `eat.rs`/`drink.rs` for one that takes an item. The shape:
@@ -490,7 +499,7 @@ Built, so read the real files. As a checklist for the next need:
      processes off to isolate the effect;
    - `a_bursting_thirsty_human_sees_to_the_worse_first_and_loses_neither` (handover).
 5. **Routine.** The `BLADDER` need, with a threshold test.
-6. **Register** on `Brain::human()`.
+6. **Register**: the goal by its `GoalId` row; the routine on `Brain::human()`.
 7. **Determinism.** `kitchen()` in `sim/mod.rs` tests has toilets, and
    `determinism_survives_brains_and_biology_in_the_parallel_rounds` asserts reliefs > 0.
 8. **QA.** `qa/toilet.json`: an inline map with a fridge and a toilet, and `expect_log` on
@@ -521,7 +530,7 @@ the toilet's checklist with a `Beside` feature; what is new is everything after 
    `Beside` feature needs no entering.
 4. **Goal.** `GoalId::Play` (🎮) and `goals/play.rs`.
 5. **Routine.** The `BOREDOM` need, commit 60, release 20.
-6. **Register** on `Brain::human()`, and add the prop to `kitchen()` in `sim/mod.rs` tests
+6. **Register** (the `GoalId` row), and add the prop to `kitchen()` in `sim/mod.rs` tests
    so `determinism_survives_brains_and_biology_in_the_parallel_rounds` runs the new goal.
 7. **Art.** A 16x16 strip per state — `computer_idle.png` (screen dark) and `computer.png`
    (screen on) — declared as one palette entry:
@@ -548,8 +557,8 @@ first, built at compile time.
    Powered (`map::utilities::CONSUMERS`). Unlike a computer, a TV outside a home is anybody's.
 2. **Task.** `tasks/watch_tv.rs`: `WatchTv { tv, seconds }`. It never walks. It checks
    `can_watch` from where the unit stands, and `features.has(Television, tv)` for power, every
-   tick. It gives `Event::Entertained` on finishing, as `UseComputer` does. Saved as
-   `pb::TaskKind::WatchTv` (tag 17).
+   tick. It gives `Event::Entertained` on finishing, as `UseComputer` does. Saved by name,
+   `"watch tv"` (`TimedTask`); the builds before saved it as `pb::TaskKind::WatchTv` (tag 17).
 3. **Goal.** No new goal: `PlayGoal` answers boredom with whichever of a home computer
    (`Entertainment`) or a TV is nearer (`choose_amusement`, `amusement_in_reach`). Which one
    the `Seek` target is comes from the feature index, so nothing new is saved. For a TV,

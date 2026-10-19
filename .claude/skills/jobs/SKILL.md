@@ -33,20 +33,20 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 
 | Concept | Where | What |
 | --- | --- | --- |
-| `JobKind` | `job.rs` | `OfficeWorker`, `ScrapCollector`, `Guard`: `name()`, `with_article()` (for log lines), `workplace()` (the `FeatureKind` its workplace is), `workplace_name()` (`computer`, `scrap bin`, `guard post`), `goal()` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect` — what `WorkRoutine` raises), `commute()` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts()` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`) |
-| `JobKind::ALL` | `job.rs` | every kind **in hiring order**: office, collectors, guards. `give_a_job` and `Command::Hire` walk it |
+| `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name) and `now` (the job menu's line). The methods read the row. Saved as its number (`JobKind::number`) |
+| `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers. `give_a_job` and `Command::Hire` walk it |
 | `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY` |
 | `Job::is_due(clock)` | `job.rs` | its hours on its days **plus the kind's commute before** (`Shift::is_due_after`): the office sets off at 08:30, a guard two hours before its watch. A shift from midnight is due from the evening before if the next day is worked. (`Shift::is_due` keeps the plain `COMMUTE`.) What `WorkRoutine` and the job menu read |
 | `Shift::is_bedtime(clock)` | `job.rs` | **a worker sleeps by its shift**: the 8 hours (`BEDTIME`-`GETTING_UP`'s length) ending `UP_BEFORE_SHIFT` = 3 before the shift starts, every day. Office hours: 22-06, the clock's own night, so nothing changed for them; day watch 21-05; evening watch 05-13; night watch 13-21. `job::is_bedtime(job, clock)` falls back to `Clock::is_night` with no job. `SleepRoutine` and the boredom routine's no-play-at-night cap read it |
 | `Shift::is_working_hours`, `hours()`, `days()` | `job.rs` | the hours alone; `09:00-17:00`; `Mon-Fri`, `Mon-Sun` (or `Mon, Wed, Sat`) |
-| uniform | `job.rs`, `clothing.rs`, `entity.rs` | `JobKind::uniform()`: `Clothing::UniformOfficeWorker` (white shirt, navy tie), `UniformScrapCollector` (orange hi-vis, silver band), `UniformGuard` (navy tunic, brass). **`GameEntity::worn(clock)`** = the uniform while `Job::is_due` (setting off to the end of the shift), else the unit's own `clothing()`. Derived from the job and the clock, never stored, so **nothing new is saved** and a loaded world dresses the same. Uniforms are `Clothing::UNIFORMS`, outside the wardrobe `Clothing::ALL`: never rolled at spawn, not on the clothing menu, but `Clothing::from_name` knows them. Art in `tools/human_art.py` (`pixel-artist`) |
+| uniform | `job.rs`, `clothing.rs`, `entity.rs` | `JobKind::uniform()` = **`Clothing::Uniform(kind)`**, named by the row's `uniform` (`"uniform office worker"`: white shirt, navy tie; `"uniform scrap collector"`: orange hi-vis; `"uniform guard"`: navy tunic, brass...). **`GameEntity::worn(clock)`** = the uniform while `Job::is_due` (setting off to the end of the shift), else the unit's own `clothing()`. Derived from the job and the clock, never stored, so **nothing new is saved** and a loaded world dresses the same. Uniforms are `Clothing::uniforms()`, outside the wardrobe `Clothing::ALL`: never rolled at spawn, not on the clothing menu, but `Clothing::from_name` knows them. Art: `assets/human/clothes_uniform_<job>.png`, found by the name (`characters::human::clothing_path`), drawn by `tools/human_art.py` (`pixel-artist`) |
 | `Job { kind, workplace, shift }` | `job.rs` | `Copy`. The workplace is **the unit's own** desk, bin or post; the shift is chosen at hire time (the first free one of `kind.shifts()` there). `Job::new(kind, at, shift)`, `Job::office(desk)`, `Job::collector(bin)`, `Job::guard(post, watch)` |
 | `Workplaces` | `job.rs` | **(cell, shift start) → worker**, a `BTreeMap` twin of `Homes`: a desk or bin is one workplace, a post three. `claim(at, shift, uid)` (only while free), `free_shift(at, shifts)`, `release(uid)`, `worker(at, shift)`, `is_taken(at, shift)`, `len()` counts cell-and-shift pairs. Bookkeeping only — nothing in a tick reads it |
 | weekday | `clock.rs` | `Weekday` (`short()`, `is_weekend()`), `Clock::weekday()` = `(day - 1) % 7`. **Day 1 is a Monday.** The HUD's `Display` is `day 1 Mon  08:00:00` |
 | desk feature | `feature.rs` | `FeatureKind::Workstation` ↔ `"computer"` (beside `Entertainment`, as a fridge is Food and Water), `Access::Beside`. A computer with no power is neither |
 | bin feature | `feature.rs` | `FeatureKind::ScrapBin` ↔ `"scrap bin"`, `Access::Beside`, **needs no power** |
 | post feature | `feature.rs` | `FeatureKind::GuardPost` ↔ `"guard post"`, `Access::Beside`, needs no power; a feature even set into a wall, which is where a district has them |
-| what bins hold | `bins.rs` | `Bins { cells, stored }`, built from the map's `"scrap bin"` props like `Fridges` (sorted, binary search): `stored(cell)`, `total()`, `add(cell, n)`, `iter()`, `len()`. A `GameState` field, `GameState::bins()`. A bin never fills, and nothing takes scrap out yet |
+| what stores hold | `bins.rs` | `Bins { cells, kinds, stored }`, built from the map's props that are a **store** — a `FeatureKind` whose row has a `StoreDef` (`feature::store_of`) — like `Fridges` (sorted, binary search): `store(cell)` (its `FeatureKind`), `item(cell)`, `stored(cell)`, `total()`, `total_in(kind)`, `count(kind)`, `add(cell, n)`, `take(cell)`, `iter_stores()`. A `Facilities` field, `GameState::bins()`, `Think::bins`. A store never fills |
 
 ## Handing jobs out (`src/sim/mod.rs`)
 
@@ -88,7 +88,7 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | nearest heap | `collect::nearest_heap`: `Map::heaps(map.navigation_area(), …)` — the site and `NAV_MARGIN` (64) round it, which a `GameState` always has loaded — keeping heaps with a side the unit may stand on that `navigation().may_reach` says it can get to and its memory does not hold out of reach; min by (manhattan, cell). No route, no allocation, once per trip decision | `brain/goals/collect.rs` |
 | salvage for work | `Salvage { heap, seconds, for_work }`: `Task::salvage` (an order, `SalvageGoal`) or `Task::salvage_for_work` (the job). `for_work` reports `Event::Worked` for the piece on finishing **and for the part done when interrupted**; an order does neither | `brain/tasks/salvage.rs` |
 | storing | `Deposit { bin, seconds }`, `DEPOSIT_SECONDS` = 5 world minutes: every tick checks within one step, the bin in `features`, scrap stowed. Finished → takes every piece out of the pack (`Inventory::take_out`), writes `Effect::Deposit { at, pieces }`, reports `Event::Worked`; interrupted → `Worked` for the part done, nothing stored | `brain/tasks/deposit.rs` |
-| the world | `Effect::Deposit` is applied in `world_step` beside `Effect::Salvage` (`sim::deposit`): `Bins::add`, and the line `"{uid} stored N scrap metal in the bin at x, y: M stored"`. `testing::World` has `bins` and applies it too (`World::deposits()` counts the lines) | `sim/mod.rs`, `sim/testing.rs` |
+| the world | `Effect::Deposit` is granted by `effect::apply` (`effect::deposit`): `Bins::add`, and the line `"{uid} stored N scrap metal in the bin at x, y: M stored"` (the word is the store's `StoreDef::called`). `testing::World` calls the same `apply` (`World::deposits()` counts the lines) | `sim/effect.rs` |
 | body | `Energy` takes `WORK_FATIGUE_PER_SECOND` on top of the waking drain: a working hour tires like `WORK_TIRES_LIKE` = **1.1** hours awake. `Fun` has no arm: work is no fun. `Satisfaction`, `Bladder` ignore it; `Experience::of` → `None` (not a treat). Walking out and back is not work; salvaging and storing are | `biology/energy.rs`, `mod.rs` |
 
 **Sleeping by the shift**: `SleepRoutine`'s night is `job::is_bedtime` — 8 hours ending 3
@@ -148,7 +148,7 @@ rebuilds it from the dead entities on load.
 
 | Layer | What | File |
 | --- | --- | --- |
-| kind | `JobKind::Undertaker`: workplace `FeatureKind::Crematorium` (`"crematorium"`, beside, no power), goal `GoalId::Bury` (⚰, the last `GoalId`), `COMMUTE`, `WATCHES`, `Clothing::UniformUndertaker` (black cassock, white collar, gold cross) | `job.rs`, `feature.rs`, `clothing.rs` |
+| kind | `JobKind::Undertaker`: workplace `FeatureKind::Crematorium` (`"crematorium"`, beside, no power), goal `GoalId::Bury` (⚰, the last `GoalId`), `COMMUTE`, `WATCHES`, uniform `"uniform undertaker"` (black cassock, white collar, gold cross) | `job.rs`, `feature.rs` |
 | routine | `WorkRoutine` raises `Bury` at `WORKING` while the watch is due **and whenever an undertaker has a body in hand** (`RoutineCtx::carrying`), so a body is never taken home | `brain/routines.rs` |
 | goal | `BuryGoal` (a `Seek`, `pb::Executor::Seek`): body in hand → beside its own crematorium + `Task::cremate`; other item in hand → consume it first; free hand → `nearest_body` (manhattan over `Think::corpses`, a reachable side by `may_reach`, not remembered out of reach) + `Task::take_body`; none → `Blocked`. `Achieved` per body cremated | `brain/goals/bury.rs` |
 | tasks | `TakeBody { body, seconds }` (`TAKE_BODY_SECONDS` = 5 world min, within a step, body still in `corpses`, hand free) → `Effect::TakeBody`; `Cremate { crematorium, seconds }` (`CREMATE_SECONDS` = 15 world min, beside, a body in hand) → empties the hand, `Effect::Cremate`. Both `Event::Worked` (and for the part done when cut short) | `brain/tasks/take_body.rs`, `cremate.rs` |
@@ -167,26 +167,25 @@ a hungry undertaker does not eat the body); `sim::tests::the_dead_are_carried_to
 ## The steel works
 
 The scrap the collectors bring in is made into steel. **Stores** (`sim/bins.rs`): `Bins` is every
-store on the map — a `Store` each, by prop: `ScrapBin` (`"scrap bin"`, the warehouse's) and
-`SteelRack` (`"steel rack"`, the warehouse's), `ScrapHopper` (`"scrap hopper"`) and
-`SteelPallet` (`"steel pallet"`, the factory's); each holds **one item** (`Store::item`: scrap or
-`ItemKind::Steel`), is a feature of its own kind (`Store::feature`), never fills, and gives
-pieces back one at a time (`Bins::take`). `total_in(store)`, `count(store)`, `iter_stores()`.
-`Think::bins` hands it to every brain, read-only.
+store on the map, each a `FeatureKind` with a `StoreDef` in its row: `ScrapBin` (`"scrap bin"`) and
+`SteelRack` (`"steel rack"`), the warehouse's (`site: "warehouse"`), `ScrapHopper`
+(`"scrap hopper"`) and `SteelPallet` (`"steel pallet"`), the factory's (`site: "factory"`); each
+holds **one item** (`StoreDef::holds`: scrap or `ItemKind::Steel`), never fills, and gives pieces
+back one at a time (`Bins::take`). `Think::bins` hands it to every brain, read-only.
 
 | Layer | What | File |
 | --- | --- | --- |
 | item | `ItemKind::Steel` (`"steel"`, 5 kg, 1 l: two to a pack), `SCRAP_PER_STEEL` = 2, carried as ⛓ | `item.rs` |
-| kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), both `OFFICE_HOURS` and `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `UniformSteelworker` (leather apron) and `UniformCourier` (green jacket, satchel) | `job.rs`, `feature.rs`, `clothing.rs` |
-| the world | `Effect::Deposit { at, pieces }` puts the pieces in whatever store is at `at` (`sim::deposit`, the log line names the item and the store: `"stored 3 scrap metal in the bin at"`, `"stored 1 steel in the steel pallet at"`); `Effect::Withdraw { at }` takes pieces out one at a time while the store has any and the pack has room (`sim::withdraw`, `"took 2 steel from the steel pallet at x, y: N left"`), in slot order | `sim/mod.rs` |
+| kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), both `OFFICE_HOURS` and `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `"uniform steelworker"` (leather apron) and `"uniform courier"` (green jacket, satchel) | `job.rs`, `feature.rs` |
+| the world | `Effect::Deposit { at, pieces }` puts the pieces in whatever store is at `at` (`effect::deposit`, the log line names the item and the store: `"stored 3 scrap metal in the bin at"`, `"stored 1 steel in the steel pallet at"`); `Effect::Withdraw { at }` takes pieces out one at a time while the store has any and the pack has room (`effect::withdraw`, `"took 2 steel from the steel pallet at x, y: N left"`), in slot order | `sim/mod.rs` |
 | tasks | `Deposit` now empties the pack of **the store's item** into any store (checks `Think::bins`); `Withdraw { store, seconds }` (`WITHDRAW_SECONDS` = 5 world min) beside a store with stock and room in the pack → `Effect::Withdraw`; `Smelt { furnace, seconds }` (`SMELT_SECONDS` = 30 world min) beside a powered furnace with 2 scrap in the pack → 2 scrap out, 1 steel in, all in the pack, the furnace lit (`Action::interact`). All `Event::Worked`, and for the part done when cut short | `brain/tasks/withdraw.rs`, `smelt.rs`, `deposit.rs` |
 | steelworker | `SmeltGoal` (a `Seek`): 2+ scrap in the pack → its own furnace, `Smelt`; steel in the pack → the nearest pallet, `Deposit` (`Achieved`); else the nearest hopper with scrap (`goals::nearest_store`), `Withdraw`; none → `"found no scrap to smelt"`, `Blocked` | `brain/goals/smelt.rs` |
 | courier | `HaulGoal` (a `Seek`): steel in the pack → the nearest steel rack; scrap → its own hopper (`Deposit`, `Achieved` either way); empty → the nearer of the nearest stocked pallet and the nearest stocked scrap bin, `Withdraw`; neither → `"found nothing to carry"`, `Blocked`. **The trips alternate of themselves**: unloading scrap at the factory leaves it beside the pallets, unloading steel at the warehouse beside the bins | `brain/goals/haul.rs` |
-| menu | `now`: `smelting steel` at the furnace, `fetching scrap, storing steel`; `carrying steel to the warehouse`, `carrying scrap to the factory`, `fetching a load` | `game/unitpanel.rs` |
+| menu | `now` (the rows' `JobDef::now`): `smelting steel` at the furnace, `fetching scrap, storing steel`; `carrying steel to the warehouse`, `carrying scrap to the factory`, `fetching a load` (from the pack) | `job.rs` |
 | on screen | the hopper, pallet and rack fill like the scrap bin (`BinFill`, `fill_bins`); the furnace burns while worked (`used` strip, `"furnace"` emitter); the HUD's `steel  N stored` (the racks) | `game-screen`, `lighting` |
 
-**In a district** (`map-generator`): the steel factory is a mandatory building on the lot
-nearest the warehouse, 2 furnaces, 2 hoppers, 2 pallets (so 2 steelworkers and 2 couriers),
+**In a district** (`map-generator`): the steel factory is a lot building
+(`map/district/steel_factory.rs`) on the lot nearest the warehouse, 2 furnaces, 2 hoppers, 2 pallets (so 2 steelworkers and 2 couriers),
 and the warehouse has one steel rack. Seed 7 with the three trades' needs off has its first
 steel on the warehouse's rack by Tuesday 12:30 (the collectors spend Monday bringing the scrap
 in). With needs on, the crowd limit in `map-generator`'s traps applies to them as to everybody.
@@ -213,13 +212,13 @@ the HUD's `steel  1 stored` by the afternoon, the statistics menu (seen failing 
   workplace; a start past 23 refused), restored after `homes` in `sim/saving.rs`, then
   **cross-checked** against the entities both ways (cell and start).
 - `pb::World.bins` (tag 12, `pb::Bin { cell, stored }`), `Bins::save`/`restore`, restored after
-  the fridges; refuses a cell with no bin or a different number of bins. Empty in an older
-  save, which is a map with none.
-- `WorkRoutine::on_shift` is saved as the routine's `committed`; `WorkGoal` and `CollectGoal`
-  are a `pb::Executor::Seek`; the tasks are `pb::TaskKind::Work(Timed)` (tag 11), a guard's
-  `KeepWatch(Timed)` (tag 14, `Work { watch: true }`),
-  `Deposit(Timed)` (tag 12) and `SalvageForWork(Timed)` (tag 13) — an order's salvage stays
-  `Salvage(Timed)` (tag 10). `GoalId::Collect` = 9.
+  the fridges; refuses a cell with no store or a different number of stores. Which kind each
+  is, is the map's. Empty in an older save, which is a map with none.
+- `WorkRoutine::on_shift` is saved as the routine's `committed`; `WorkGoal`, `CollectGoal`,
+  `BuryGoal`, `SmeltGoal` and `HaulGoal` are a `pb::Executor::Seek`; the tasks save by name
+  (`TimedTask`: `"work"`, `"keep watch"`, `"deposit"`, `"salvage for work"`, `"withdraw"`,
+  `"smelt"`...), and still read the tags the builds before wrote them under. Goals and jobs are
+  saved as their catalogue numbers (`GoalId::Collect` = 9, `JobKind::Guard` = 2...).
 - The routine was appended, so `Brain::restore` accepts a saved routine list that is a
   **prefix** of the brain's (old saves, `format1.savegame`); an executor a save does not
   mention (`CollectGoal` in an older one) starts fresh.
@@ -228,10 +227,11 @@ the HUD's `steel  1 stored` by the afternoon, the statistics menu (seen failing 
 
 `job` on the unit bar opens `Menu::Job`: a live `Readout::Job` block from
 `job_block(entity, clock)` — `job`, `at` (`computer at 12, 4`, `scrap bin at 30, 2`), `hours`,
-`days`, `now` (`working`, `on the way to work`, `collecting scrap`, `storing scrap` while at
-the bin, `on watch`, `on the way to the gate`, `on a break: <goal>`, `off until 09:00`, `off
-until 00:00` for the night watch once its watch is over, `done for the day`, `weekend`, `day
-off`) —
+`days`, `now` — while the job's goal is in charge, what the job's row says
+(`JobDef::now(at_work, pack)`: `working`, `on the way to work`, `collecting scrap`, `storing
+scrap` while at the bin, `on watch`, `on the way to the gate`...), and otherwise `on a break:
+<goal>`, `off until 09:00`, `off until 00:00` for the night watch once its watch is over, `done
+for the day`, `weekend`, `day off` —
 or `unemployed` (a human) / `no job` (anything else). Humans get a button
 (`Action::ToggleJob`, label `Readout::Employ`: `dismiss` / `hire`) that sends `Input::dismiss`
 / `Input::hire`. The HUD's map stats gain `scrap  N stored` on a map with bins, and a bin on
@@ -244,7 +244,8 @@ screen shows how full it is (`game-screen`).
   every day, three watches to a post and one free again when its guard goes; the night watch
   due from the evening before (two hours for a guard, half an hour for the office); bedtimes
   per watch (office = the clock's night); workplaces with and without a saved start.
-- `bins.rs`: every bin starts empty, sorted; add and total; save round trip and refusals.
+- `bins.rs`: every bin starts empty, sorted; add and total; every store holds its own item; save
+  round trip and refusals.
 - `feature.rs`: a bin is a `ScrapBin`, beside, with no power.
 - `clock.rs`: day 1 Monday, the weekend, the HUD string.
 - `biology/energy.rs`, `fun.rs`: an hour at work vs awake; the shift tuning; no fun.
@@ -321,13 +322,16 @@ tiring, bins not restored).
 
 ## Adding a job kind
 
-1. A `JobKind` variant (+ `pb::JobKind`, both `From`s), its `name`, `with_article`,
-   `workplace()` feature, `workplace_name`, `goal()`, `commute()`, `uniform()` (a new
-   `Clothing::Uniform*` and its art) and `shifts()` (several for a
-   workplace kept round the clock), and its place in `JobKind::ALL` (hiring order). A new workplace is a new `FeatureKind` + `FEATURES` entry
-   (`brain-engineer`); in the district, a building with that many of them (`map-generator`,
-   mandatory lot buildings).
-2. If the work is not "stand beside a prop for an hour", a goal of its own (a `GoalId`
-   appended, its executor registered last in `Brain::human()`) and tasks; what it does to the
-   body is an `Event` the processes decide on.
-3. The job menu's `now` line (`job_block`) has an arm per kind.
+**The `add-content` skill has the whole touch list.** In short:
+
+1. **A `JobKind` row** in `job.rs` — on the end, which is also the end of the hiring order — with
+   its workplace feature, goal, commute, shifts (several for a workplace kept round the clock),
+   uniform name and `now` line.
+2. **A workplace** that is a new prop: a `FeatureKind` row (`sim/feature.rs`) and the prop's map
+   rows (passability, power, art); in the district, a lot building with that many of them
+   (`map-generator`).
+3. If the work is not "stand beside a prop for an hour", **a goal of its own** (a `GoalId` row,
+   its file) and tasks (`tasks!`); what it does to the body is an `Event` the processes decide on.
+4. **The uniform's PNG** (`tools/human_art.py`).
+
+Hiring, `WorkRoutine`, the save, the uniform, the job menu and the statistics menu need nothing.

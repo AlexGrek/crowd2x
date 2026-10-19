@@ -2,10 +2,11 @@
 //! entering rather than touching (see [`crate::sim::feature::Access`]).
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::Event;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct UseToilet {
@@ -72,6 +73,37 @@ impl TaskExecutor for UseToilet {
 
     fn describe(&self) -> String {
         format!("use the toilet at {}, {}", self.toilet.x, self.toilet.y)
+    }
+}
+
+impl Task {
+    /// Use the toilet in `toilet`, from a cell beside it.
+    pub const fn use_toilet(toilet: Point, seconds: f32) -> Task {
+        Task::UseToilet(UseToilet { toilet, seconds })
+    }
+}
+
+/// Saved as `use toilet`: the toilet's cell and the seconds.
+impl TimedTask for UseToilet {
+    const NAME: &'static str = "use toilet";
+
+    fn new(cell: Point, seconds: f32) -> UseToilet {
+        UseToilet { toilet: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.toilet
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::UseToilet(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

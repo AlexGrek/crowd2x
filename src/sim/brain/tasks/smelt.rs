@@ -12,13 +12,14 @@
 //! of it, the scrap staying in the pack.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
 use crate::sim::feature::FeatureKind;
 use crate::sim::item::{ItemKind, SCRAP_PER_STEEL};
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Half an hour of world at the furnace for an ingot.
 pub const SMELT_SECONDS: f32 = watched(30.0 * MINUTE);
@@ -90,6 +91,38 @@ impl TaskExecutor for Smelt {
 
     fn describe(&self) -> String {
         format!("smelt steel at the furnace at {}, {}", self.furnace.x, self.furnace.y)
+    }
+}
+
+impl Task {
+    /// Smelt scrap in the pack into an ingot of steel at the furnace in
+    /// `furnace`, from a cell beside it.
+    pub const fn smelt(furnace: Point, seconds: f32) -> Task {
+        Task::Smelt(Smelt { furnace, seconds })
+    }
+}
+
+/// Saved as `smelt`: the furnace's cell and the seconds.
+impl TimedTask for Smelt {
+    const NAME: &'static str = "smelt";
+
+    fn new(cell: Point, seconds: f32) -> Smelt {
+        Smelt { furnace: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.furnace
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::Smelt(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

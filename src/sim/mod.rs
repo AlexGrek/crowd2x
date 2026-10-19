@@ -132,13 +132,16 @@ pub mod background;
 pub mod bins;
 pub mod biology;
 pub mod brain;
+pub(crate) mod catalogue;
 pub mod census;
 pub mod clock;
 pub mod clothing;
 pub mod corpses;
 pub mod door;
+pub mod effect;
 pub mod entities;
 pub mod entity;
+pub(crate) mod facilities;
 pub mod feature;
 pub mod fridge;
 pub mod homes;
@@ -177,6 +180,7 @@ pub use clock::Clock;
 pub use corpses::Corpses;
 pub use sun::Sun;
 pub use door::Doors;
+pub use effect::Effect;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
@@ -198,6 +202,8 @@ pub use uid::{EntityType, Uid};
 pub use saving::RestoredEntity;
 pub use statistics::{Statistics, Tally};
 pub use walker::Walker;
+
+use facilities::Facilities;
 
 /// What an entity decided to do this tick.
 ///
@@ -256,59 +262,6 @@ impl MoveOutcome {
             _ => None,
         }
     }
-}
-
-/// A change asked for *outside* the entity that asked for it.
-///
-/// [`Intent`]'s counterpart for the one kind of change react is not allowed to
-/// make directly: **react may write only to itself** ([`GameEntity::react`]),
-/// so a fridge's door — a fact about the world, read by every entity beside
-/// it — cannot be flipped from inside the parallel round that produces this.
-/// An `Effect` is the request; [`world_step`] is the sequential step,
-/// afterwards, that is allowed to grant it. Small and `Copy` for the same
-/// reason `Intent` is: one per entity per tick, in a buffer that is reused
-/// rather than reallocated.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum Effect {
-    /// Nothing. What every entity that never touches a fridge returns.
-    #[default]
-    None,
-    /// Open or close the fridge at `at`.
-    Fridge { at: Point, open: bool },
-    /// Open the door at `at`, or keep it open: somebody holding `key` is
-    /// about to go through it. Refused for a door locked to another key —
-    /// see [`door`].
-    Door { at: Point, key: Option<PropertyId> },
-    /// Take a piece of scrap metal off the heap at `at` and stow it: the
-    /// unit has finished salvaging it ([`brain::tasks::Salvage`]). Granted
-    /// only while the heap has a piece left and the unit has room for one,
-    /// so two finishing on the last piece in one tick get one between them,
-    /// the lower slot's — see [`world_step`].
-    Salvage { at: Point },
-    /// Put `pieces` of what the store at `at` holds in it: a unit has
-    /// finished emptying its pack into it ([`brain::tasks::Deposit`], which
-    /// has already taken them out of the pack). See [`bins`].
-    Deposit { at: Point, pieces: u8 },
-    /// Take as much of what the store at `at` holds as the unit has room
-    /// for, and stow it: the unit has finished filling its pack there
-    /// ([`brain::tasks::Withdraw`]). Granted piece by piece while the store
-    /// has any and the pack has room, so two at the last pieces share them
-    /// out in slot order — see [`world_step`].
-    Withdraw { at: Point },
-    /// The unit died this tick, of `cause` ([`biology::health`]): it has
-    /// already marked its own body dead, and the world gives back what it
-    /// held — its cell, its bed, its workplace (with the job, so a worker is
-    /// not left on the books) — and says so in the log.
-    Died { cause: &'static str },
-    /// Take up the body lying at `at`: the unit, an undertaker, has finished
-    /// lifting it ([`brain::tasks::TakeBody`]). Granted to a free hand while
-    /// the body is still there, so two undertakers at one body get one
-    /// between them, the lower slot's; the body is then carried as an item
-    /// and leaves the world at the end of the tick — see [`world_step`].
-    TakeBody { at: Point },
-    /// A body was put in the crematorium at `at` ([`brain::tasks::Cremate`],
-    /// which has already taken it out of the hand). Logged.
-    Cremate { at: Point },
 }
 
 /// Something done *to* the world, from outside it.
@@ -523,24 +476,10 @@ pub struct GameState {
     crowded: Vec<crate::map::ChunkPos>,
     /// Written from any thread, drained by the renderer. See [`Log`].
     pub log: Log,
-    /// Where the props a brain can use are. Derived from `map` once, here,
-    /// and never again: the simulation's map does not change.
-    features: Features,
-    /// Every fridge's door and temperature. Derived from `map` once, like
-    /// `features` — but unlike it, what is stored here changes every tick a
-    /// door is open, through [`Effect::Fridge`] and [`world_step`].
-    fridges: Fridges,
-    /// What every scrap bin holds. Derived from `map` once, like `fridges`,
-    /// and filled through [`Effect::Deposit`] and [`world_step`]. See
-    /// [`bins`].
-    bins: Bins,
-    /// Which cells are whose property: the rooms behind the house doors.
-    /// Derived from `map` once, like `features`. See [`property`].
-    properties: Properties,
-    /// Every door's leaf and lock. Derived from `map` once, like `fridges`,
-    /// and like it changed every tick a door moves, through [`Effect::Door`]
-    /// and [`world_step`]. See [`door`].
-    doors: Doors,
+    /// The world's parts beside the map and the crowd: the features and
+    /// what is in them, the doors, whose rooms, beds and workplaces are
+    /// whose, the dead. See [`facilities`].
+    facilities: Facilities,
     /// What the map's wiring and pipes reach ([`crate::map::utilities`]),
     /// with [`GameState::boxes_off`] switched off. Derived from `map` like
     /// `features`, which is built from it — and derived again, with the
@@ -569,24 +508,6 @@ pub struct GameState {
     /// Bumped every time `supply` changes, so a reader — the lighting, the
     /// x-ray — knows to look again without comparing the whole thing.
     supply_generation: u64,
-    /// Which beds have been given to whom. Written by the spawn pass and read
-    /// by nothing in a tick — a unit remembers its own bed, see [`homes`].
-    homes: Homes,
-    /// Which desks have been given to whom, the same way: written by the
-    /// spawn pass, read by nothing in a tick — a worker knows its own desk,
-    /// see [`job`].
-    workplaces: Workplaces,
-    /// Who lies dead where: filed by [`Effect::Died`], taken off by
-    /// [`Effect::TakeBody`]. Worked out again from the entities on load. See
-    /// [`corpses`].
-    corpses: Corpses,
-    /// The bodies taken up this tick, to leave the world when the processing
-    /// pass is over ([`process_game_state`]) — the one pass that may not
-    /// remove anybody. Empty between ticks, so never saved.
-    burials: Vec<Uid>,
-    /// The dead, counted as they die and as they are cremated: what the
-    /// world no longer shows once a body has gone. See [`statistics`].
-    tally: Tally,
     /// Mints ids and seeds new entities. Seeded, so a run replays; and a
     /// named generator, so a save can keep its state ([`rng::WorldRng`]).
     rng: rng::WorldRng,
@@ -621,15 +542,15 @@ impl GameState {
         // loaded as the crowd gets there (`follow_the_crowd_out`).
         map.load_chunks(map.navigation_area());
         let _ = map.navigation();
-        let properties = Properties::from_map(&map);
         let controlled = crate::map::utilities::controlled_boxes(&map);
         let street_lights_on = Clock::after_watching(0.0).sun().is_dark();
         // Every box and every light switch on: only the controllers' boxes
         // can be off yet.
         let supply = flood_supply(&map, &[], &controlled, street_lights_on, std::iter::empty());
+        let facilities = Facilities::new(&map, &supply);
         let other_light = (!controlled.is_empty()).then(|| {
             let other = flood_supply(&map, &[], &controlled, !street_lights_on, std::iter::empty());
-            let features = Features::with_properties(&map, &other, &properties);
+            let features = Features::with_properties(&map, &other, &facilities.properties);
             (other, features)
         });
         GameState {
@@ -637,11 +558,7 @@ impl GameState {
             census: Census::new(),
             reclaim: Reclaim::default(),
             crowded: Vec::new(),
-            features: Features::with_properties(&map, &supply, &properties),
-            fridges: Fridges::from_map(&map, &supply),
-            bins: Bins::from_map(&map),
-            doors: Doors::from_map(&map, &properties),
-            properties,
+            facilities,
             supply,
             boxes_off: Vec::new(),
             controlled,
@@ -650,11 +567,6 @@ impl GameState {
             // All on, so the supply above is already the one they want.
             light_switches: LightSwitches::from_map(&map),
             supply_generation: 0,
-            homes: Homes::new(),
-            workplaces: Workplaces::new(),
-            corpses: Corpses::new(),
-            burials: Vec::new(),
-            tally: Tally::default(),
             map,
             entities: Entities::new(),
             log: Log::new(),
@@ -760,7 +672,7 @@ impl GameState {
 
     /// What the map's props are for, and where. See [`feature`].
     pub fn features(&self) -> &Features {
-        &self.features
+        &self.facilities.features
     }
 
     /// Every fridge's door and temperature. See [`fridge`].
@@ -846,9 +758,9 @@ impl GameState {
         }
         let Some((supply, features)) = self.other_light.as_mut() else { return };
         std::mem::swap(&mut self.supply, supply);
-        std::mem::swap(&mut self.features, features);
+        std::mem::swap(&mut self.facilities.features, features);
         self.street_lights_on = dark;
-        self.fridges.set_power(&self.supply);
+        self.facilities.fridges.set_power(&self.supply);
         self.supply_generation += 1;
         self.log.push(format!(
             "the street lights were switched {} at {}",
@@ -910,60 +822,60 @@ impl GameState {
             flood_supply(&self.map, &self.boxes_off, &self.controlled, lights_on, self.light_switches.dark_cells())
         };
         self.supply = flood(self.street_lights_on);
-        self.features = Features::with_properties(&self.map, &self.supply, &self.properties);
+        self.facilities.features = Features::with_properties(&self.map, &self.supply, &self.facilities.properties);
         if !self.controlled.is_empty() {
             let other = flood(!self.street_lights_on);
-            let features = Features::with_properties(&self.map, &other, &self.properties);
+            let features = Features::with_properties(&self.map, &other, &self.facilities.properties);
             self.other_light = Some((other, features));
         }
-        self.fridges.set_power(&self.supply);
+        self.facilities.fridges.set_power(&self.supply);
         self.supply_generation += 1;
     }
 
     pub fn fridges(&self) -> &Fridges {
-        &self.fridges
+        &self.facilities.fridges
     }
 
     /// Who lies dead where. See [`corpses`].
     pub fn corpses(&self) -> &Corpses {
-        &self.corpses
+        &self.facilities.corpses
     }
 
     /// What every scrap bin holds. See [`bins`].
     pub fn bins(&self) -> &Bins {
-        &self.bins
+        &self.facilities.bins
     }
 
     /// The dead counted so far. See [`statistics`].
     pub fn tally(&self) -> Tally {
-        self.tally
+        self.facilities.tally
     }
 
     /// The world in numbers, worked out now: one walk of the arena, for a
     /// screen to show, never for a tick to read. See [`statistics`].
     pub fn statistics(&self) -> Statistics {
-        Statistics::of(&self.entities, &self.features, &self.bins, &self.corpses, self.tally)
+        Statistics::of(&self.entities, &self.facilities.features, &self.facilities.bins, &self.facilities.corpses, self.facilities.tally)
     }
 
     /// Every door's leaf and lock. See [`door`].
     pub fn doors(&self) -> &Doors {
-        &self.doors
+        &self.facilities.doors
     }
 
     /// Which cells are whose property. See [`property`].
     pub fn properties(&self) -> &Properties {
-        &self.properties
+        &self.facilities.properties
     }
 
     /// Which beds belong to whom. See [`homes`].
     pub fn homes(&self) -> &Homes {
-        &self.homes
+        &self.facilities.homes
     }
 
     /// Which workplaces — desks and scrap bins — belong to whom. See
     /// [`job`].
     pub fn workplaces(&self) -> &Workplaces {
-        &self.workplaces
+        &self.facilities.workplaces
     }
 
     /// Who is standing where. Read-only from outside the tick: the two places
@@ -1118,9 +1030,9 @@ impl GameState {
     /// One scan of the beds per arrival — a once-per-spawn cost, and the spawn
     /// pass is the one place that is allowed to have those.
     fn give_a_bed(&mut self, uid: Uid, near: Point) {
-        let homes = &self.homes;
+        let homes = &self.facilities.homes;
         let Some(bed) = self
-            .features
+            .facilities.features
             .nearest_where(FeatureKind::Bed, near, |cell| !homes.is_owned(cell))
         else {
             return;
@@ -1128,9 +1040,9 @@ impl GameState {
         let Some(entity) = self.entities.get_mut(uid) else {
             return;
         };
-        let property = self.properties.of(bed);
+        let property = self.facilities.properties.of(bed);
         if entity.set_home(bed, property) {
-            self.homes.claim(bed, uid);
+            self.facilities.homes.claim(bed, uid);
             self.log.push(match property {
                 Some(property) => format!("{uid} was given the bed at {}, {} and the key to {property}", bed.x, bed.y),
                 None => format!("{uid} was given the bed at {}, {}", bed.x, bed.y),
@@ -1155,12 +1067,12 @@ impl GameState {
             return false;
         };
         let key = entity.body().home();
-        let (workplaces, properties) = (&self.workplaces, &self.properties);
+        let (workplaces, properties) = (&self.facilities.workplaces, &self.facilities.properties);
         let Some(job) = JobKind::ALL.into_iter().find_map(|kind| {
             let free = |cell: Point| {
                 workplaces.free_shift(cell, kind.shifts()).is_some() && properties.may_use(cell, key)
             };
-            let at = self.features.nearest_where(kind.workplace(), near, free)?;
+            let at = self.facilities.features.nearest_where(kind.workplace(), near, free)?;
             Some(Job::new(kind, at, workplaces.free_shift(at, kind.shifts())?))
         }) else {
             return false;
@@ -1169,7 +1081,7 @@ impl GameState {
             return false;
         }
         let at = job.workplace;
-        self.workplaces.claim(at, job.shift, uid);
+        self.facilities.workplaces.claim(at, job.shift, uid);
         self.log.push(format!(
             "{uid} was hired as {} at the {} at {}, {}, {}",
             job.kind.with_article(),
@@ -1218,7 +1130,7 @@ impl GameState {
             self.log.push(format!("dismiss: {uid} has no job"));
             return false;
         };
-        self.workplaces.release(uid);
+        self.facilities.workplaces.release(uid);
         self.log.push(format!(
             "{uid} was let go from the {} at {}, {}",
             job.kind.workplace_name(),
@@ -1241,8 +1153,8 @@ impl GameState {
                 self.occupancy.release(gone.center_position(), uid);
                 // Its bed goes back to be given to the next arrival, and its
                 // desk.
-                self.homes.release(uid);
-                self.workplaces.release(uid);
+                self.facilities.homes.release(uid);
+                self.facilities.workplaces.release(uid);
                 self.log.push(format!("despawned {uid}"));
                 true
             }
@@ -1440,11 +1352,11 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 /// which may remove nobody, and before the tick is over, so nothing is left
 /// waiting between ticks.
 fn bury(state: &mut GameState) {
-    let mut burials = std::mem::take(&mut state.burials);
+    let mut burials = std::mem::take(&mut state.facilities.burials);
     for uid in burials.drain(..) {
         state.despawn(uid);
     }
-    state.burials = burials;
+    state.facilities.burials = burials;
 }
 
 /// **The spawn pass: the only thing that changes which entities exist.**
@@ -1558,16 +1470,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         occupancy,
         census,
         log,
-        features,
-        fridges,
-        bins,
-        doors,
-        properties,
-        homes,
-        workplaces,
-        corpses,
-        burials,
-        tally,
+        facilities,
         tick,
         intents,
         moves,
@@ -1592,43 +1495,17 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // The crowd as it ended the previous tick.
     think_step(
         &table,
-        &Think {
-            map,
-            occupancy,
-            log,
-            features,
-            fridges,
-            doors,
-            properties,
-            corpses,
-            bins,
-            dt,
-            tick: *tick,
-            clock,
-        },
+        &Think::new(map, occupancy, log, facilities, dt, *tick, clock),
         intents,
     );
 
-    move_step(&mut table, map, occupancy, census, features, doors, intents, moves);
+    move_step(&mut table, map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
 
     // ...and as it ends this one, which is the layer a detour is worth
     // planning against. Same struct, deliberately different moment.
     *route_work = react_step(
         &mut table,
-        &Think {
-            map,
-            occupancy,
-            log,
-            features,
-            fridges,
-            doors,
-            properties,
-            corpses,
-            bins,
-            dt,
-            tick: *tick,
-            clock,
-        },
+        &Think::new(map, occupancy, log, facilities, dt, *tick, clock),
         moves,
         effects,
     );
@@ -1639,8 +1516,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    let mut people = People { occupancy, homes, workplaces, corpses, burials, tally };
-    world_step(&mut table, map, log, fridges, bins, doors, &mut people, effects, dt);
+    world_step(&mut table, map, log, facilities, occupancy, effects, dt);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1947,8 +1823,8 @@ fn react_for(
 ///
 /// Sequential, in slot order — the same reason [`move_step`] is: two units
 /// opening and closing the same fridge on the same tick is a race, and this
-/// is what settles it the same way on every run. Every [`Effect::Fridge`] is
-/// applied and the slot reset to [`Effect::None`] — react always overwrites
+/// is what settles it the same way on every run. Every effect is applied
+/// ([`effect::apply`]) and the slot reset to [`Effect::None`] — react always overwrites
 /// its own slot, but a slot whose entity despawned keeps whatever it was
 /// last set to, so resetting here rather than relying on the next write is
 /// what keeps a stale effect from being replayed.
@@ -1957,211 +1833,33 @@ fn react_for(
 /// how many doors just changed — a fridge that was opened and closed in the
 /// same tick still ages by the tick's worth of world time.
 ///
-/// Every [`Effect::Door`] holds its door open, or starts it opening, unless
-/// it is locked to somebody else; then every leaf moves by the **watched**
-/// `dt` — a door is seen to open, like a walk — and none shuts on a body
-/// standing in it, which is why the crowd as it ends the tick is handed in.
+/// Every leaf of every door then moves by the **watched** `dt` — a door is
+/// seen to open, like a walk — and none shuts on a body standing in it, which
+/// is why the crowd as it ends the tick is handed in.
 ///
-/// Every [`Effect::Salvage`] takes a piece off its heap and stows it in the
-/// unit that asked — the one write here into an entity, and into the map:
-/// the piece has to leave the heap and arrive in the pack together, and the
-/// heap is the world's while the pack is the unit's, so the step that
-/// settles races between units is the one place both are in reach. In slot
-/// order, so the last piece goes to the same unit on every run.
-///
-/// Every [`Effect::Deposit`] puts its pieces in its store, which the task
-/// that asked has already taken them out of the pack for; every
-/// [`Effect::Withdraw`] takes pieces out of one and stows them, a write into
-/// the store and the pack together, like a salvage ([`withdraw`]).
-///
-/// Every [`Effect::Died`] gives back what the dead held — see [`died`] —
-/// and every [`Effect::TakeBody`] puts a body in an undertaker's hand
-/// ([`take_body`]), in slot order, so two at one body settle it the same way
-/// every run.
-#[allow(clippy::too_many_arguments)]
+/// What each effect does is [`effect::apply`]'s: a piece off a heap and into
+/// a pack, a packful into a store, a body into a hand, all of them writes into
+/// the world and the unit together, which is why this step — the one that
+/// settles races between units, in slot order — is where they happen.
 fn world_step(
     table: &mut FrozenEntities<'_>,
     map: &mut Map,
     log: &Log,
-    fridges: &mut Fridges,
-    bins: &mut Bins,
-    doors: &mut Doors,
-    people: &mut People<'_>,
+    facilities: &mut Facilities,
+    occupancy: &mut Occupancy,
     effects: &mut [Effect],
     dt: f32,
 ) {
     for (slot, effect) in effects.iter_mut().enumerate() {
-        match *effect {
-            Effect::Fridge { at, open } => {
-                let _ = fridges.set_open(at, open);
-            }
-            Effect::Door { at, key } => {
-                // Not logged: a crowd opens doors all day, and a line each
-                // would push everything else out of the log.
-                let _ = doors.want(at, key);
-            }
-            Effect::Salvage { at } => {
-                if let Some(entity) = table.slot_mut(slot as Slot) {
-                    salvage(entity, map, log, at);
-                }
-            }
-            Effect::Deposit { at, pieces } => {
-                if let Some(entity) = table.slot(slot as Slot) {
-                    deposit(entity.uid(), bins, log, at, pieces);
-                }
-            }
-            Effect::Withdraw { at } => {
-                if let Some(entity) = table.slot_mut(slot as Slot) {
-                    let uid = entity.uid();
-                    withdraw(uid, entity.inventory_mut(), bins, log, at);
-                }
-            }
-            Effect::Died { cause } => {
-                if let Some(entity) = table.slot_mut(slot as Slot) {
-                    died(entity, people, log, cause);
-                }
-            }
-            Effect::TakeBody { at } => {
-                if let Some(entity) = table.slot_mut(slot as Slot) {
-                    take_body(entity, people, log, at);
-                }
-            }
-            Effect::Cremate { at } => {
-                if let Some(entity) = table.slot(slot as Slot) {
-                    people.tally.cremated += 1;
-                    log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
-                }
-            }
-            Effect::None => {}
+        let asked = std::mem::take(effect);
+        if asked != Effect::None
+            && let Some(entity) = table.slot_mut(slot as Slot)
+        {
+            effect::apply(asked, entity, map, facilities, occupancy, log);
         }
-        *effect = Effect::None;
     }
-    fridges.advance(dt * clock::TIME_SCALE);
-    doors.advance(dt, people.occupancy);
-}
-
-/// The parts of the world that say where people are and what is theirs,
-/// borrowed apart for [`world_step`]: who stands where, whose beds and
-/// workplaces are whose, who lies dead where, and who is to leave.
-pub(crate) struct People<'a> {
-    pub occupancy: &'a mut Occupancy,
-    pub homes: &'a mut Homes,
-    pub workplaces: &'a mut Workplaces,
-    pub corpses: &'a mut Corpses,
-    pub burials: &'a mut Vec<Uid>,
-    pub tally: &'a mut Tally,
-}
-
-/// [`Effect::TakeBody`], for the unit in one slot: the body at `at` into its
-/// hand, while there is one there and the hand is free — and off the list of
-/// the dead and on its way out of the world. Logged either way, once a body.
-pub(crate) fn take_body(entity: &mut dyn GameEntity, people: &mut People<'_>, log: &Log, at: Point) {
-    let uid = entity.uid();
-    let Some(inventory) = entity.inventory_mut() else {
-        return;
-    };
-    let Some(dead) = people.corpses.at(at) else {
-        log.push(format!("{uid} found no body at {}, {}", at.x, at.y));
-        return;
-    };
-    if inventory.hand().is_some() {
-        log.push(format!("{uid} has no hand free for the body at {}, {}", at.x, at.y));
-        return;
-    }
-    let _ = inventory.set_hand(Some(ItemKind::Body));
-    people.corpses.remove(dead);
-    people.burials.push(dead);
-    log.push(format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
-}
-
-/// [`Effect::Salvage`], for the unit in one slot: a piece off the heap and
-/// into its pack, if there is a piece and room for it. Logged either way —
-/// once a piece, a few seconds of work apart, so never a flood.
-pub(crate) fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
-    let uid = entity.uid();
-    let Some(inventory) = entity.inventory_mut() else {
-        return;
-    };
-    if !inventory.room_for(ItemKind::Scrap) {
-        log.push(format!("{uid} has no room for scrap metal: {}", inventory.describe_load()));
-        return;
-    }
-    match map.take_scrap(at) {
-        Some(left) => {
-            let _ = inventory.stow(ItemKind::Scrap);
-            log.push(if left == 0 {
-                format!("{uid} salvaged scrap metal at {}, {}: the heap is gone", at.x, at.y)
-            } else {
-                format!("{uid} salvaged scrap metal at {}, {}: {left} left", at.x, at.y)
-            });
-        }
-        None => log.push(format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
-    }
-}
-
-/// [`Effect::Died`], for the unit in one slot: its cell is let go, so the
-/// crowd walks over the body rather than round it and nobody sees it there;
-/// its bed goes back to be given to the next arrival, and its workplace and
-/// job with it, as a despawn's do. The body stays where it fell, filed with
-/// the [`Corpses`] for an undertaker to find.
-pub(crate) fn died(entity: &mut dyn GameEntity, people: &mut People<'_>, log: &Log, cause: &'static str) {
-    let uid = entity.uid();
-    let cell = entity.center_position();
-    people.occupancy.release(cell, uid);
-    people.homes.release(uid);
-    people.workplaces.release(uid);
-    people.corpses.add(uid, cell);
-    people.tally.died += 1;
-    let _ = entity.dismiss();
-    log.push(format!("{uid} died of {cause}"));
-}
-
-/// What a store is called in the log: a scrap bin is "the bin", as it
-/// always has been; the others by their own names.
-fn store_word(store: Option<bins::Store>) -> &'static str {
-    match store {
-        Some(bins::Store::ScrapBin) | None => "bin",
-        Some(store) => store.name(),
-    }
-}
-
-/// [`Effect::Deposit`], for the unit `uid`: its pieces into the store at
-/// `at`, and a line in the log — once a packful, so never a flood.
-pub(crate) fn deposit(uid: Uid, bins: &mut Bins, log: &Log, at: Point, pieces: u8) {
-    let store = bins.store(at);
-    let (item, word) = (store.map_or("scrap metal", |store| store.item().name()), store_word(store));
-    match bins.add(at, pieces as u32) {
-        Some(stored) => log.push(format!(
-            "{uid} stored {pieces} {item} in the {word} at {}, {}: {stored} stored",
-            at.x, at.y
-        )),
-        None => log.push(format!("{uid} found no store at {}, {}", at.x, at.y)),
-    }
-}
-
-/// [`Effect::Withdraw`], for the unit in one slot: pieces out of the store
-/// at `at` and into its pack, one at a time while the store has any and the
-/// pack has room. Logged once a packful, either way.
-pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut Bins, log: &Log, at: Point) {
-    let Some(inventory) = inventory else {
-        return;
-    };
-    let Some(store) = bins.store(at) else {
-        log.push(format!("{uid} found no store at {}, {}", at.x, at.y));
-        return;
-    };
-    let (item, word) = (store.item(), store_word(Some(store)));
-    let mut pieces = 0;
-    while inventory.room_for(item) && bins.take(at) {
-        let _ = inventory.stow(item);
-        pieces += 1;
-    }
-    let left = bins.stored(at);
-    log.push(if pieces == 0 {
-        format!("{uid} took no {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)
-    } else {
-        format!("{uid} took {pieces} {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)
-    });
+    facilities.fridges.advance(dt * clock::TIME_SCALE);
+    facilities.doors.advance(dt, occupancy);
 }
 
 #[cfg(test)]
@@ -3269,7 +2967,7 @@ mod tests {
         let steel = state.bins().stored(pallet) + state.bins().stored(rack) + carried(smelter, ItemKind::Steel) + carried(courier, ItemKind::Steel);
         assert_eq!(scrap + 2 * steel, 12, "{scrap} scrap and {steel} steel");
         let stats = state.statistics();
-        assert_eq!((stats.steel_in_warehouse, stats.steel_in_factory), (state.bins().stored(rack), state.bins().stored(pallet)));
+        assert_eq!((stats.stock("warehouse", ItemKind::Steel), stats.stock("factory", ItemKind::Steel)), (state.bins().stored(rack), state.bins().stored(pallet)));
     }
 
     /// The desks are offered first, however near the bins are; then one
@@ -3299,7 +2997,7 @@ mod tests {
         let stats = state.statistics();
         let counts: Vec<(JobKind, u32, u32)> = stats.jobs.iter().map(|job| (job.kind, job.workers, job.posts)).collect();
         assert_eq!(counts[..2], [(JobKind::OfficeWorker, 2, 2), (JobKind::ScrapCollector, 2, 2)]);
-        assert_eq!((stats.living(), stats.jobless, stats.scrap_in_warehouse, stats.warehouse, stats.factory), (5, 1, 0, true, false));
+        assert_eq!((stats.living(), stats.jobless, stats.stock("warehouse", ItemKind::Scrap), stats.has("warehouse"), stats.has("factory")), (5, 1, 0, true, false));
         let lines = state.log.drain();
         assert!(
             lines.iter().any(|line| line.contains("was hired as a scrap collector at the scrap bin at 2, 2")),
@@ -3786,13 +3484,12 @@ mod tests {
             entities,
             occupancy,
             census,
-            features,
-            doors,
+            facilities,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -3833,13 +3530,12 @@ mod tests {
             entities,
             occupancy,
             census,
-            features,
-            doors,
+            facilities,
             intents,
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
 
         assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
         assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
@@ -3861,8 +3557,8 @@ mod tests {
             let uid = state.spawn(EntityType::Human, Point::new(2, 0));
             let slot = state.entities.slot_of(uid).unwrap() as usize;
             state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
-            let GameState { map, entities, occupancy, census, features, doors, intents, moves, .. } = &mut state;
-            move_step(&mut entities.freeze(), map, occupancy, census, features, doors, intents, moves);
+            let GameState { map, entities, occupancy, census, facilities, intents, moves, .. } = &mut state;
+            move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
             assert_eq!(state.last_move(uid), Some(MoveOutcome::Blocked { by: None }));
             assert_eq!(state.entities().get(uid).unwrap().center_position(), Point::new(2, 0));
             assert_eq!(state.occupancy().occupant(bed), None);
@@ -4020,17 +3716,8 @@ mod tests {
             &mut state.entities.freeze(),
             &mut state.map,
             &state.log,
-            &mut state.fridges,
-            &mut state.bins,
-            &mut state.doors,
-            &mut People {
-                occupancy: &mut state.occupancy,
-                homes: &mut state.homes,
-                workplaces: &mut state.workplaces,
-                corpses: &mut state.corpses,
-                burials: &mut state.burials,
-                tally: &mut state.tally,
-            },
+            &mut state.facilities,
+            &mut state.occupancy,
             &mut state.effects,
             0.0,
         );
@@ -4044,7 +3731,7 @@ mod tests {
     fn an_open_fridge_in_a_game_state_warms_tick_over_tick() {
         let fridge = Point::new(5, 5);
         let mut state = with_a_fridge(fridge);
-        assert!(state.fridges.set_open(fridge, true));
+        assert!(state.facilities.fridges.set_open(fridge, true));
 
         let mut last = state.fridges().temperature(fridge);
         for _ in 0..300 {
@@ -4070,11 +3757,11 @@ mod tests {
             // gates' posts, three watches to a post.
             let desks = state.features().count(FeatureKind::Workstation);
             assert!(desks >= 12, "seed {seed}: {desks} desks");
-            let bins = crate::map::district::WAREHOUSE_BINS;
+            let bins = crate::map::district::warehouse::WAREHOUSE_BINS;
             let watches = crate::map::district::GATES * job::WATCHES.len();
             assert_eq!(watches, 24);
-            let undertakers = crate::map::district::CREMATORIA * job::WATCHES.len();
-            let (smelters, couriers) = (crate::map::district::FURNACES, crate::map::district::HOPPERS);
+            let undertakers = crate::map::district::crematorium::CREMATORIA * job::WATCHES.len();
+            let (smelters, couriers) = (crate::map::district::steel_factory::FURNACES, crate::map::district::steel_factory::HOPPERS);
             let jobs = desks + bins + watches + undertakers + smelters + couriers;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
@@ -4091,7 +3778,7 @@ mod tests {
                     }
                     JobKind::ScrapCollector => {
                         collectors += 1;
-                        assert!(district.warehouse.contains(job.workplace), "seed {seed}: a bin outside the warehouse");
+                        assert!(district.the(crate::map::district::warehouse::NAME).contains(job.workplace), "seed {seed}: a bin outside the warehouse");
                     }
                     JobKind::Guard => {
                         assert!(
@@ -4103,7 +3790,7 @@ mod tests {
                     }
                     JobKind::Undertaker => {
                         cremating += 1;
-                        assert!(district.crematorium.contains(job.workplace), "seed {seed}: a crematorium outside the crematorium");
+                        assert!(district.the(crate::map::district::crematorium::NAME).contains(job.workplace), "seed {seed}: a crematorium outside the crematorium");
                     }
                     JobKind::Steelworker | JobKind::Courier => {
                         if job.kind == JobKind::Steelworker {
@@ -4111,7 +3798,7 @@ mod tests {
                         } else {
                             hauling += 1;
                         }
-                        assert!(district.steel_factory.contains(job.workplace), "seed {seed}: a {} outside the factory", job.kind.name());
+                        assert!(district.the(crate::map::district::steel_factory::NAME).contains(job.workplace), "seed {seed}: a {} outside the factory", job.kind.name());
                     }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
@@ -4197,7 +3884,7 @@ mod tests {
                 input.set_process(collector.uid(), process, false);
             }
         }
-        assert_eq!(input.commands.len(), 4 * crate::map::district::WAREHOUSE_BINS);
+        assert_eq!(input.commands.len(), 4 * crate::map::district::warehouse::WAREHOUSE_BINS);
         process_game_state(&mut state, 1.0 / 60.0, &input);
         let mut lines = Vec::new();
         // 1800 ticks a world hour at `run`'s 60Hz: until five o'clock at the
@@ -4214,7 +3901,7 @@ mod tests {
         let stored = lines.iter().find(|line| line.contains("in the bin at")).expect("a line about it");
         assert!(stored.contains("scrap metal in the bin at"), "{stored}");
         for (bin, store, _) in state.bins().iter_stores() {
-            let building = if store.in_factory() { district.steel_factory } else { district.warehouse };
+            let building = if store.store().unwrap().site == "factory" { district.the(crate::map::district::steel_factory::NAME) } else { district.the(crate::map::district::warehouse::NAME) };
             assert!(building.contains(bin), "{store:?} at {bin:?}");
         }
     }
@@ -4267,10 +3954,10 @@ mod tests {
         let rack = state
             .bins()
             .iter_stores()
-            .find(|&(_, store, _)| store == crate::sim::bins::Store::SteelRack)
+            .find(|&(_, store, _)| store == FeatureKind::SteelRack)
             .map(|(cell, _, _)| cell)
             .expect("the warehouse has a rack");
-        assert!(district.warehouse.contains(rack));
+        assert!(district.the(crate::map::district::warehouse::NAME).contains(rack));
         // Monday and Tuesday, office hours and the night between.
         let mut ticks = 0;
         while state.bins().stored(rack) == 0 {
@@ -4279,7 +3966,7 @@ mod tests {
             assert!(ticks < 34 * 1800, "no steel in the warehouse by {}; {:?}", state.clock(), state.statistics());
         }
         let stats = state.statistics();
-        assert!(stats.steel_in_warehouse > 0);
+        assert!(stats.stock("warehouse", ItemKind::Steel) > 0);
     }
 
     #[test]

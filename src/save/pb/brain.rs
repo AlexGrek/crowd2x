@@ -52,7 +52,10 @@ pub struct Brain {
 /// A job: what it is, where, and when (`crate::sim::job::Job`).
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct Job {
-    #[prost(enumeration = "JobKind", tag = "1")]
+    /// `JobKind::number` — the kind's number in its catalogue
+    /// (`sim::catalogue`). Written as an enum by the builds before there
+    /// was one, which is the same varint on the wire.
+    #[prost(int32, tag = "1")]
     pub kind: i32,
     /// The desk, or whatever the job is done at.
     #[prost(message, optional, tag = "2")]
@@ -66,17 +69,6 @@ pub struct Job {
     /// Which days it is worked: bit 0 Monday to bit 6 Sunday.
     #[prost(uint32, tag = "5")]
     pub days: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum JobKind {
-    OfficeWorker = 0,
-    ScrapCollector = 1,
-    Guard = 2,
-    Undertaker = 3,
-    Steelworker = 4,
-    Courier = 5,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -168,7 +160,9 @@ pub struct RoutineState {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Goals {
-    #[prost(enumeration = "GoalId", tag = "1")]
+    /// `GoalId::number`, as every goal here is (`sim::catalogue`): a plain
+    /// number where the builds before wrote an enum, the same on the wire.
+    #[prost(int32, tag = "1")]
     pub top: i32,
     #[prost(message, repeated, tag = "2")]
     pub slots: Vec<GoalSlot>,
@@ -176,7 +170,7 @@ pub struct Goals {
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct GoalSlot {
-    #[prost(enumeration = "GoalId", tag = "1")]
+    #[prost(int32, tag = "1")]
     pub goal: i32,
     #[prost(float, tag = "2")]
     pub priority: f32,
@@ -186,28 +180,11 @@ pub struct GoalSlot {
     pub strikes: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum GoalId {
-    Idle = 0,
-    Wander = 1,
-    Eat = 2,
-    Drink = 3,
-    Relieve = 4,
-    Play = 5,
-    Sleep = 6,
-    Salvage = 7,
-    Work = 8,
-    Collect = 9,
-    Bury = 10,
-    Smelt = 11,
-    Haul = 12,
-}
-
 /// One goal executor's state.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExecutorState {
-    #[prost(enumeration = "GoalId", tag = "1")]
+    /// `GoalId::number`.
+    #[prost(int32, tag = "1")]
     pub goal: i32,
     #[prost(oneof = "Executor", tags = "2, 3, 4")]
     pub state: Option<Executor>,
@@ -277,10 +254,14 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20")]
     pub kind: Option<TaskKind>,
 }
 
+/// What a task is. **A new task needs nothing here**: every task that is a
+/// place and a time saves as [`TaskKind::Named`], under its own name
+/// (`sim::brain::task::TimedTask::NAME`). Tags 3-19 are what the builds before
+/// wrote, one per task, and are only ever read now — never extend them.
 #[derive(Clone, PartialEq, ::prost::Oneof)]
 pub enum TaskKind {
     #[prost(message, tag = "1")]
@@ -331,6 +312,22 @@ pub enum TaskKind {
     /// Smelting scrap into steel at a furnace.
     #[prost(message, tag = "19")]
     Smelt(Timed),
+    /// Any task that is a place and a time, by name: what every one of them
+    /// is saved as now.
+    #[prost(message, tag = "20")]
+    Named(NamedTask),
+}
+
+/// A task that is a place (or none, for a wait) and a time, under the name
+/// it is registered with (`sim::brain::task`).
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NamedTask {
+    #[prost(string, tag = "1")]
+    pub name: String,
+    #[prost(message, optional, tag = "2")]
+    pub cell: Option<Cell>,
+    #[prost(float, tag = "3")]
+    pub seconds: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

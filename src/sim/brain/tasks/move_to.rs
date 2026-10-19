@@ -1,9 +1,10 @@
 //! [`MoveTo`]: walk until standing in the middle of a cell.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 
 use super::super::action::Action;
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MoveTo {
@@ -46,6 +47,32 @@ impl TaskExecutor for MoveTo {
             self.cell.x,
             self.cell.y
         )
+    }
+}
+
+impl Task {
+    /// Walk until standing in the middle of `cell`.
+    pub const fn move_to(cell: Point) -> Task {
+        Task::MoveTo(MoveTo { cell, beside: false })
+    }
+
+    /// Walk to any of a feature's valid approach cells.
+    pub const fn move_beside(cell: Point) -> Task {
+        Task::MoveTo(MoveTo { cell, beside: true })
+    }
+}
+
+/// Saved as a walk of its own (`pb::MoveTo`): where, and whether beside it.
+impl SavedTask for MoveTo {
+    fn save(&self) -> pb::TaskKind {
+        pb::TaskKind::MoveTo(pb::MoveTo { cell: Some(self.cell.into()), beside: self.beside })
+    }
+
+    fn restore(saved: &pb::TaskKind) -> Option<Result<MoveTo, Invalid>> {
+        let pb::TaskKind::MoveTo(task) = saved else {
+            return None;
+        };
+        Some(pb::cell(task.cell, "walk").map(|cell| MoveTo { cell, beside: task.beside }))
     }
 }
 

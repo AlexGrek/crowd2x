@@ -1,13 +1,15 @@
 //! What the stores hold: [`Bins`].
 //!
-//! A store is a prop things are kept in, each holding one [`ItemKind`]
-//! ([`Store`]): the warehouse's **scrap bins**, where a scrap collector stores
-//! what it brings in from the wasteland (`brain::goals::CollectGoal`), and its
-//! **steel rack**; the steel factory's **scrap hopper** and **steel pallet**,
-//! the scrap waiting to be smelted and the steel that came of it. Couriers
-//! carry scrap from the bins to the hoppers and steel from the pallets to the
-//! rack (`brain::goals::HaulGoal`); steelworkers take scrap out of a hopper
-//! and put steel on a pallet (`brain::goals::SmeltGoal`).
+//! A store is a feature things are kept in, each kind holding one
+//! [`ItemKind`] — a row of [`FeatureKind`]'s catalogue with a
+//! [`StoreDef`](super::feature::StoreDef): the warehouse's **scrap bins**,
+//! where a scrap collector stores what it brings in from the wasteland
+//! (`brain::goals::CollectGoal`), and its **steel rack**; the steel factory's
+//! **scrap hopper** and **steel pallet**, the scrap waiting to be smelted and
+//! the steel that came of it. Couriers carry scrap from the bins to the
+//! hoppers and steel from the pallets to the rack (`brain::goals::HaulGoal`);
+//! steelworkers take scrap out of a hopper and put steel on a pallet
+//! (`brain::goals::SmeltGoal`).
 //!
 //! Like a fridge's door, how much a store holds is state the world owns and
 //! no one unit does, so a unit's task *asks* for its pieces to be put in
@@ -21,68 +23,8 @@
 use crate::map::{Map, ObjectLayer, Point};
 use crate::save::{invalid, pb, Invalid};
 
-use super::feature::FeatureKind;
+use super::feature::{self, FeatureKind};
 use super::item::ItemKind;
-
-/// The prop name a scrap bin is painted with.
-pub const SCRAP_BIN: &str = "scrap bin";
-/// ...a steel rack, the warehouse's store of steel.
-pub const STEEL_RACK: &str = "steel rack";
-/// ...a scrap hopper, the steel factory's store of scrap to smelt.
-pub const SCRAP_HOPPER: &str = "scrap hopper";
-/// ...a steel pallet, the steel factory's store of steel made.
-pub const STEEL_PALLET: &str = "steel pallet";
-
-/// A kind of store: which prop, and what it holds.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Store {
-    ScrapBin,
-    SteelRack,
-    ScrapHopper,
-    SteelPallet,
-}
-
-impl Store {
-    pub const ALL: [Store; 4] = [Store::ScrapBin, Store::SteelRack, Store::ScrapHopper, Store::SteelPallet];
-
-    /// The prop name it is painted with.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Store::ScrapBin => SCRAP_BIN,
-            Store::SteelRack => STEEL_RACK,
-            Store::ScrapHopper => SCRAP_HOPPER,
-            Store::SteelPallet => STEEL_PALLET,
-        }
-    }
-
-    /// The one kind of thing it holds.
-    pub const fn item(self) -> ItemKind {
-        match self {
-            Store::ScrapBin | Store::ScrapHopper => ItemKind::Scrap,
-            Store::SteelRack | Store::SteelPallet => ItemKind::Steel,
-        }
-    }
-
-    /// The feature it is to a brain ([`FeatureKind`]): what a goal looks
-    /// for, and what says it is still there.
-    pub const fn feature(self) -> FeatureKind {
-        match self {
-            Store::ScrapBin => FeatureKind::ScrapBin,
-            Store::SteelRack => FeatureKind::SteelRack,
-            Store::ScrapHopper => FeatureKind::ScrapHopper,
-            Store::SteelPallet => FeatureKind::SteelPallet,
-        }
-    }
-
-    /// Whether it stands in the steel factory, rather than the warehouse.
-    pub const fn in_factory(self) -> bool {
-        matches!(self, Store::ScrapHopper | Store::SteelPallet)
-    }
-
-    pub fn from_name(name: &str) -> Option<Store> {
-        Store::ALL.into_iter().find(|store| store.name() == name)
-    }
-}
 
 /// Where the stores are, what kind each is, and how many pieces each holds.
 ///
@@ -94,7 +36,7 @@ impl Store {
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Bins {
     cells: Vec<Point>,
-    stores: Vec<Store>,
+    kinds: Vec<FeatureKind>,
     stored: Vec<u32>,
 }
 
@@ -104,21 +46,21 @@ pub static NONE: Bins = Bins::new();
 
 impl Bins {
     pub const fn new() -> Bins {
-        Bins { cells: Vec::new(), stores: Vec::new(), stored: Vec::new() }
+        Bins { cells: Vec::new(), kinds: Vec::new(), stored: Vec::new() }
     }
 
     /// Every store on `map`, each empty.
     pub fn from_map(map: &Map) -> Bins {
-        let mut found: Vec<(Point, Store)> = map
+        let mut found: Vec<(Point, FeatureKind)> = map
             .objects(ObjectLayer::Props)
             .iter()
-            .filter_map(|object| Some((object.cell(), Store::from_name(object.kind.as_str())?)))
+            .filter_map(|object| Some((object.cell(), feature::store_of(object.kind.as_str())?)))
             .collect();
         found.sort_unstable_by_key(|&(cell, _)| cell);
         found.dedup_by_key(|&mut (cell, _)| cell);
         let stored = vec![0; found.len()];
-        let (cells, stores) = found.into_iter().unzip();
-        Bins { cells, stores, stored }
+        let (cells, kinds) = found.into_iter().unzip();
+        Bins { cells, kinds, stored }
     }
 
     fn index(&self, cell: Point) -> Option<usize> {
@@ -131,13 +73,13 @@ impl Bins {
     }
 
     /// The kind of store in `cell`, if any.
-    pub fn store(&self, cell: Point) -> Option<Store> {
-        self.index(cell).map(|i| self.stores[i])
+    pub fn store(&self, cell: Point) -> Option<FeatureKind> {
+        self.index(cell).map(|i| self.kinds[i])
     }
 
     /// What the store in `cell` holds, if there is one.
     pub fn item(&self, cell: Point) -> Option<ItemKind> {
-        self.store(cell).map(Store::item)
+        Some(self.store(cell)?.store()?.holds)
     }
 
     /// How many pieces the store in `cell` holds; `0` where there is none.
@@ -151,13 +93,13 @@ impl Bins {
     }
 
     /// How many pieces every store of `kind` holds, together.
-    pub fn total_in(&self, kind: Store) -> u32 {
+    pub fn total_in(&self, kind: FeatureKind) -> u32 {
         self.iter_stores().filter(|&(_, store, _)| store == kind).map(|(_, _, stored)| stored).sum()
     }
 
     /// How many stores of `kind` there are.
-    pub fn count(&self, kind: Store) -> usize {
-        self.stores.iter().filter(|&&store| store == kind).count()
+    pub fn count(&self, kind: FeatureKind) -> usize {
+        self.kinds.iter().filter(|&&store| store == kind).count()
     }
 
     /// How many stores there are.
@@ -175,8 +117,8 @@ impl Bins {
     }
 
     /// Every store, cell, kind and what it holds, sorted by cell.
-    pub fn iter_stores(&self) -> impl Iterator<Item = (Point, Store, u32)> + '_ {
-        self.cells.iter().zip(&self.stores).zip(&self.stored).map(|((&cell, &store), &stored)| (cell, store, stored))
+    pub fn iter_stores(&self) -> impl Iterator<Item = (Point, FeatureKind, u32)> + '_ {
+        self.cells.iter().zip(&self.kinds).zip(&self.stored).map(|((&cell, &store), &stored)| (cell, store, stored))
     }
 
     /// Put `pieces` in the store in `cell`, and say how many it holds now.
@@ -205,7 +147,7 @@ impl Bins {
 
     /// What every store holds. Which kind each is, is the map's.
     pub(crate) fn save(&self) -> Vec<pb::Bin> {
-        let Bins { cells, stores: _, stored } = self;
+        let Bins { cells, kinds: _, stored } = self;
         cells
             .iter()
             .zip(stored)
@@ -239,8 +181,8 @@ mod tests {
     fn two_bins() -> (Bins, Point, Point) {
         let mut map = Map::new(Size::new(8, 8), FLOOR);
         let (a, b) = (Point::new(5, 1), Point::new(1, 6));
-        prop_at(&mut map, SCRAP_BIN, a);
-        prop_at(&mut map, SCRAP_BIN, b);
+        prop_at(&mut map, "scrap bin", a);
+        prop_at(&mut map, "scrap bin", b);
         prop_at(&mut map, "fridge", Point::new(3, 3));
         (Bins::from_map(&map), a, b)
     }
@@ -273,13 +215,14 @@ mod tests {
     #[test]
     fn every_store_holds_its_own_item_and_gives_it_back_until_it_is_empty() {
         let mut map = Map::new(Size::new(8, 8), FLOOR);
+        let stores = [FeatureKind::ScrapBin, FeatureKind::SteelRack, FeatureKind::ScrapHopper, FeatureKind::SteelPallet];
         let cells = [Point::new(1, 1), Point::new(3, 1), Point::new(5, 1), Point::new(1, 5)];
-        for (store, cell) in Store::ALL.into_iter().zip(cells) {
-            prop_at(&mut map, store.name(), cell);
+        for (store, cell) in stores.into_iter().zip(cells) {
+            prop_at(&mut map, store.prop(), cell);
         }
         let mut bins = Bins::from_map(&map);
         assert_eq!(bins.len(), 4);
-        for (store, cell) in Store::ALL.into_iter().zip(cells) {
+        for (store, cell) in stores.into_iter().zip(cells) {
             assert_eq!(bins.store(cell), Some(store));
             assert_eq!(bins.count(store), 1);
         }
@@ -287,10 +230,11 @@ mod tests {
         assert_eq!(bins.item(cells[1]), Some(ItemKind::Steel), "a rack steel");
         assert_eq!(bins.item(cells[2]), Some(ItemKind::Scrap), "a hopper scrap");
         assert_eq!(bins.item(cells[3]), Some(ItemKind::Steel), "a pallet steel");
-        assert!(Store::ScrapHopper.in_factory() && Store::SteelPallet.in_factory() && !Store::SteelRack.in_factory());
+        let site = |kind: FeatureKind| kind.store().unwrap().site;
+        assert_eq!(stores.map(site), ["warehouse", "warehouse", "factory", "factory"]);
 
         let _ = bins.add(cells[3], 2);
-        assert_eq!(bins.total_in(Store::SteelPallet), 2);
+        assert_eq!(bins.total_in(FeatureKind::SteelPallet), 2);
         assert!(bins.take(cells[3]) && bins.take(cells[3]));
         assert!(!bins.take(cells[3]), "empty");
         assert!(!bins.take(Point::new(7, 7)), "no store there");

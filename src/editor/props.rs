@@ -257,8 +257,9 @@ pub struct SwitchPlate {
     pub showing_on: bool,
 }
 
-/// A store — a scrap bin, a steel rack, a scrap hopper, a steel pallet
-/// (`sim::bins::Store`): a [`PaletteItem::posed`] strip of four frames —
+/// A store — a scrap bin, a steel rack, a scrap hopper, a steel pallet: any
+/// prop whose feature row keeps something (`sim::feature::store_of`): a
+/// [`PaletteItem::posed`] strip of four frames —
 /// empty, a few pieces, half full, heaped — of which the game screen shows
 /// the one for how much the simulation says it holds (`game::props`). The
 /// editor shows it empty.
@@ -557,7 +558,7 @@ fn spawn_prop(
             frames: item.art.frames,
             showing: 0,
         });
-    } else if item.posed && crate::sim::bins::Store::from_name(item.name).is_some() {
+    } else if item.posed && crate::sim::feature::store_of(item.name).is_some() {
         // A store, showing empty until the game says otherwise.
         commands.entity(prop).insert(BinFill { showing: 0 });
     } else if item.posed {
@@ -629,12 +630,10 @@ mod tests {
     /// or the use is unreachable from any map a person can make.
     #[test]
     fn every_feature_the_simulation_knows_is_a_prop_the_editor_can_place() {
-        for feature in crate::sim::feature::FEATURES {
-            assert!(
-                item_of(ObjectLayer::Props, &ObjectKind::new(feature.name)).is_some(),
-                "no palette entry for {:?}",
-                feature.name
-            );
+        for kind in crate::sim::FeatureKind::ALL {
+            for &name in kind.def().props {
+                assert!(item_of(ObjectLayer::Props, &ObjectKind::new(name)).is_some(), "no palette entry for {name:?}");
+            }
         }
     }
 

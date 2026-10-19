@@ -9,11 +9,12 @@
 //! it is the same [`Event::Entertained`], once the programme is over.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::Event;
 use crate::sim::feature::{can_watch, FeatureKind};
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct WatchTv {
@@ -54,6 +55,38 @@ impl TaskExecutor for WatchTv {
 
     fn describe(&self) -> String {
         format!("watch the TV at {}, {}", self.tv.x, self.tv.y)
+    }
+}
+
+impl Task {
+    /// Watch the TV in `tv` for `seconds`, from wherever this unit stands
+    /// within sight of it ([`crate::sim::feature::can_watch`]).
+    pub const fn watch_tv(tv: Point, seconds: f32) -> Task {
+        Task::WatchTv(WatchTv { tv, seconds })
+    }
+}
+
+/// Saved as `watch tv`: the tv's cell and the seconds.
+impl TimedTask for WatchTv {
+    const NAME: &'static str = "watch tv";
+
+    fn new(cell: Point, seconds: f32) -> WatchTv {
+        WatchTv { tv: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.tv
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::WatchTv(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

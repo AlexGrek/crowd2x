@@ -588,7 +588,7 @@ mod tests {
     fn a_worker_wears_its_jobs_uniform_while_its_shift_is_due_and_its_own_clothes_otherwise() {
         use crate::sim::clock::{Clock, DAY, HOUR, TIME_SCALE};
         use crate::sim::clothing::Clothing;
-        use crate::sim::job::{Job, WATCHES};
+        use crate::sim::job::{Job, JobKind, WATCHES};
         let at = |day: u32, hours: f32| {
             let world = (day - 1) as f64 * DAY as f64 + (hours as f64 - 8.0) * HOUR as f64;
             Clock::after_watching(world / TIME_SCALE as f64)
@@ -599,24 +599,24 @@ mod tests {
 
         assert!(human.hire(Job::office(Point::new(3, 3))));
         assert_eq!(human.worn(at(1, 8.4)), Some(Clothing::SundressRed), "not yet");
-        assert_eq!(human.worn(at(1, 8.6)), Some(Clothing::UniformOfficeWorker), "dressed for the walk in");
-        assert_eq!(human.worn(at(1, 16.9)), Some(Clothing::UniformOfficeWorker));
+        assert_eq!(human.worn(at(1, 8.6)), Some(Clothing::Uniform(JobKind::OfficeWorker)), "dressed for the walk in");
+        assert_eq!(human.worn(at(1, 16.9)), Some(Clothing::Uniform(JobKind::OfficeWorker)));
         assert_eq!(human.worn(at(1, 17.1)), Some(Clothing::SundressRed), "home time");
         assert_eq!(human.worn(at(6, 10.0)), Some(Clothing::SundressRed), "Saturday");
         *human.clothing_mut().unwrap() = Clothing::GownBlack;
-        assert_eq!(human.worn(at(2, 10.0)), Some(Clothing::UniformOfficeWorker), "changing changes what it goes home in");
+        assert_eq!(human.worn(at(2, 10.0)), Some(Clothing::Uniform(JobKind::OfficeWorker)), "changing changes what it goes home in");
         assert_eq!(human.worn(at(2, 18.0)), Some(Clothing::GownBlack));
         assert_eq!(human.clothing(), Some(Clothing::GownBlack), "the uniform is never its own");
 
         human.dismiss();
         assert!(human.hire(Job::guard(Point::new(0, 3), WATCHES[2])));
         assert_eq!(human.worn(at(2, 21.0)), Some(Clothing::GownBlack));
-        assert_eq!(human.worn(at(2, 22.5)), Some(Clothing::UniformGuard), "the night watch dresses before midnight");
-        assert_eq!(human.worn(at(3, 3.0)), Some(Clothing::UniformGuard));
+        assert_eq!(human.worn(at(2, 22.5)), Some(Clothing::Uniform(JobKind::Guard)), "the night watch dresses before midnight");
+        assert_eq!(human.worn(at(3, 3.0)), Some(Clothing::Uniform(JobKind::Guard)));
         assert_eq!(human.worn(at(3, 8.5)), Some(Clothing::GownBlack));
         human.dismiss();
         assert!(human.hire(Job::collector(Point::new(3, 3))));
-        assert_eq!(human.worn(at(3, 11.0)), Some(Clothing::UniformScrapCollector));
+        assert_eq!(human.worn(at(3, 11.0)), Some(Clothing::Uniform(JobKind::ScrapCollector)));
         human.dismiss();
         assert_eq!(human.worn(at(3, 11.0)), Some(Clothing::GownBlack), "let go");
 

@@ -62,13 +62,13 @@ impl GameState {
             boxes_off: pb::pack(self.boxes_off.iter().copied()),
             street_lights_on: self.street_lights_on,
             switches_off: pb::pack(self.light_switches.cells().filter(|&cell| !self.light_switches.is_on(cell))),
-            fridges: self.fridges.save(),
-            bins: self.bins.save(),
-            doors: self.doors.save(),
-            homes: self.homes.save(),
+            fridges: self.facilities.fridges.save(),
+            bins: self.facilities.bins.save(),
+            doors: self.facilities.doors.save(),
+            homes: self.facilities.homes.save(),
             arena: Some(self.entities.save_arena()),
-            workplaces: self.workplaces.save(),
-            tally: Some(self.tally.save()),
+            workplaces: self.facilities.workplaces.save(),
+            tally: Some(self.facilities.tally.save()),
         }
     }
 
@@ -144,12 +144,12 @@ impl GameState {
         // The supply both ways, the features and the fridges' power, for
         // the switches as saved.
         state.refresh_supply();
-        state.fridges.restore(&world.fridges)?;
-        state.bins.restore(&world.bins)?;
-        state.tally = crate::sim::statistics::Tally::restore(world.tally.as_ref());
-        state.doors.restore(&world.doors)?;
-        state.homes = Homes::restore(&world.homes)?;
-        state.workplaces = Workplaces::restore(&world.workplaces)?;
+        state.facilities.fridges.restore(&world.fridges)?;
+        state.facilities.bins.restore(&world.bins)?;
+        state.facilities.tally = crate::sim::statistics::Tally::restore(world.tally.as_ref());
+        state.facilities.doors.restore(&world.doors)?;
+        state.facilities.homes = Homes::restore(&world.homes)?;
+        state.facilities.workplaces = Workplaces::restore(&world.workplaces)?;
 
         let arena = pb::required(&world.arena, "arena")?;
         let mut holders: Vec<(Point, crate::sim::Uid)> = Vec::new();
@@ -170,7 +170,7 @@ impl GameState {
         for (slot, entity) in state.entities.iter_slots() {
             state.census.file(slot, entity.center_position());
         }
-        state.corpses = crate::sim::Corpses::of(&state.entities);
+        state.facilities.corpses = crate::sim::Corpses::of(&state.entities);
         for (cell, uid) in holders {
             if let Err(other) = state.occupancy.claim(cell, uid) {
                 return invalid(format!("{uid} and {other} both hold {}, {}", cell.x, cell.y));
@@ -189,7 +189,7 @@ impl GameState {
         // its desk.
         for (_, entity) in state.entities.iter_slots() {
             if let Some(job) = entity.job()
-                && state.workplaces.worker(job.workplace, job.shift) != Some(entity.uid())
+                && state.facilities.workplaces.worker(job.workplace, job.shift) != Some(entity.uid())
             {
                 let at = job.workplace;
                 return invalid(format!("{} works at {}, {}, which is not their desk", entity.uid(), at.x, at.y));

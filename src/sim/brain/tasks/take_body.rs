@@ -10,12 +10,13 @@
 //! It is work, and tires like it ([`Event::Worked`]).
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Five minutes of world to take up a body.
 pub const TAKE_BODY_SECONDS: f32 = watched(5.0 * MINUTE);
@@ -73,6 +74,37 @@ impl TaskExecutor for TakeBody {
 
     fn describe(&self) -> String {
         format!("take up the body at {}, {}", self.body.x, self.body.y)
+    }
+}
+
+impl Task {
+    /// Take up the body lying in `body`, from beside it or over it.
+    pub const fn take_body(body: Point, seconds: f32) -> Task {
+        Task::TakeBody(TakeBody { body, seconds })
+    }
+}
+
+/// Saved as `take body`: the body's cell and the seconds.
+impl TimedTask for TakeBody {
+    const NAME: &'static str = "take body";
+
+    fn new(cell: Point, seconds: f32) -> TakeBody {
+        TakeBody { body: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.body
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::TakeBody(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

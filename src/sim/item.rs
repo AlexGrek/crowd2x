@@ -16,6 +16,7 @@
 //! truth. An item that needs state of its own (a half-eaten meal, a labelled
 //! crate) is a change *here* first, and the inventory follows it.
 
+use super::catalogue::catalogue;
 use super::clock::{watched, MINUTE};
 
 /// How nourishing one meal is: the hunger it takes away.
@@ -105,45 +106,91 @@ pub const STEEL_VOLUME: f32 = 1.0;
 /// How many pieces of scrap metal a furnace smelts into one ingot of steel.
 pub const SCRAP_PER_STEEL: u8 = 2;
 
-/// What is being held.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ItemKind {
-    Food,
-    Water,
-    /// A piece of scrap metal, salvaged from a heap in the wasteland
-    /// (`brain::tasks::Salvage`). Nothing a body can use: it is carried.
-    Scrap,
-    /// The dead, taken up by an undertaker (`brain::tasks::TakeBody`) and
-    /// carried to a crematorium. Nothing a body can use.
-    Body,
-    /// An ingot of steel, smelted from scrap metal in the steel factory
-    /// (`brain::tasks::Smelt`). Nothing a body can use: it is carried.
-    Steel,
+/// Everything about one kind of item: its row in [`ItemKind`]'s catalogue.
+pub struct ItemDef {
+    /// How it reads in a debug view, and how a save names it.
+    pub name: &'static str,
+    /// How long using it up takes ([`ItemKind::consume_seconds`]).
+    pub consume_seconds: f32,
+    /// How nourishing it is, on the hunger scale.
+    pub nutrition: f32,
+    /// How much water is in it, on the thirst scale.
+    pub hydration: f32,
+    /// How much of a treat it is, on the satisfaction scale.
+    pub taste: f32,
+    /// What it weighs, in kilograms.
+    pub mass: f32,
+    /// How much room it takes up, in litres.
+    pub volume: f32,
+    /// How it is drawn in a hand (`characters::item`): one emoji, a single
+    /// codepoint, for the reason [`GoalId::emoji`](super::brain::GoalId::emoji)
+    /// is.
+    pub emoji: &'static str,
+}
+
+/// A thing nobody eats or drinks: carried, and dropped in a moment if a
+/// hand is wanted for something else.
+const CARRIED: ItemDef = ItemDef {
+    name: "",
+    consume_seconds: DROP_SECONDS,
+    nutrition: 0.0,
+    hydration: 0.0,
+    taste: 0.0,
+    mass: 0.0,
+    volume: 0.0,
+    emoji: "",
+};
+
+catalogue! {
+    /// What is being held.
+    ///
+    /// [`ItemKind::ALL`] is the order an [`Inventory`](super::inventory::Inventory)
+    /// keeps its count per kind in, and its debug view lists them in — never a
+    /// hash order. Saved by [`ItemKind::name`].
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum ItemKind: ItemDef {
+        Food = 0 => ItemDef {
+            name: "food",
+            consume_seconds: CHEW_SECONDS,
+            nutrition: MEAL,
+            taste: TASTY,
+            mass: MEAL_MASS,
+            volume: MEAL_VOLUME,
+            emoji: "🍔",
+            ..CARRIED
+        },
+        Water = 1 => ItemDef {
+            name: "water",
+            consume_seconds: SIP_SECONDS,
+            hydration: DRINK,
+            mass: DRINK_MASS,
+            volume: DRINK_VOLUME,
+            emoji: "💧",
+            ..CARRIED
+        },
+        /// A piece of scrap metal, salvaged from a heap in the wasteland
+        /// (`brain::tasks::Salvage`). Nothing a body can use: it is carried.
+        Scrap = 2 => ItemDef { name: "scrap metal", mass: SCRAP_MASS, volume: SCRAP_VOLUME, emoji: "🔩", ..CARRIED },
+        /// The dead, taken up by an undertaker (`brain::tasks::TakeBody`) and
+        /// carried to a crematorium. Nothing a body can use.
+        Body = 3 => ItemDef {
+            name: "body",
+            consume_seconds: LAY_DOWN_SECONDS,
+            mass: BODY_MASS,
+            volume: BODY_VOLUME,
+            emoji: "⚰",
+            ..CARRIED
+        },
+        /// An ingot of steel, smelted from scrap metal in the steel factory
+        /// (`brain::tasks::Smelt`). Nothing a body can use: it is carried.
+        Steel = 4 => ItemDef { name: "steel", mass: STEEL_MASS, volume: STEEL_VOLUME, emoji: "⛓", ..CARRIED },
+    }
 }
 
 impl ItemKind {
-    /// Every kind there is, in declaration order.
-    ///
-    /// An [`Inventory`](super::inventory::Inventory) is a count per kind
-    /// indexed by this, and its debug view walks it — so the order here is the
-    /// order a unit's items are listed in, and iterating it can never be a hash
-    /// order.
-    pub const ALL: [ItemKind; ItemKind::COUNT] =
-        [ItemKind::Food, ItemKind::Water, ItemKind::Scrap, ItemKind::Body, ItemKind::Steel];
-
-    /// How many kinds there are. A literal, because it sizes an array.
-    /// `every_kind_is_in_all` fails if the two stop agreeing.
-    pub const COUNT: usize = 5;
-
     /// How it reads in a debug view.
     pub const fn name(self) -> &'static str {
-        match self {
-            ItemKind::Food => "food",
-            ItemKind::Water => "water",
-            ItemKind::Scrap => "scrap metal",
-            ItemKind::Body => "body",
-            ItemKind::Steel => "steel",
-        }
+        self.def().name
     }
 
     /// The kind called `name` ([`ItemKind::name`]) — how a save names one.
@@ -158,38 +205,24 @@ impl ItemKind {
     /// first, and should not have to know what it is to know how long that
     /// takes.
     pub const fn consume_seconds(self) -> f32 {
-        match self {
-            ItemKind::Food => CHEW_SECONDS,
-            ItemKind::Water => SIP_SECONDS,
-            ItemKind::Scrap | ItemKind::Steel => DROP_SECONDS,
-            ItemKind::Body => LAY_DOWN_SECONDS,
-        }
+        self.def().consume_seconds
     }
 
     /// How nourishing it is, on the hunger scale.
     pub const fn nutrition(self) -> f32 {
-        match self {
-            ItemKind::Food => MEAL,
-            ItemKind::Water | ItemKind::Scrap | ItemKind::Body | ItemKind::Steel => 0.0,
-        }
+        self.def().nutrition
     }
 
     /// How much water is in it, on the thirst scale.
     pub const fn hydration(self) -> f32 {
-        match self {
-            ItemKind::Food | ItemKind::Scrap | ItemKind::Body | ItemKind::Steel => 0.0,
-            ItemKind::Water => DRINK,
-        }
+        self.def().hydration
     }
 
     /// How much of a treat it is, on the satisfaction scale. Zero for
     /// something with no flavour to speak of — and something with no flavour
     /// is nothing to tire of either.
     pub const fn taste(self) -> f32 {
-        match self {
-            ItemKind::Food => TASTY,
-            ItemKind::Water | ItemKind::Scrap | ItemKind::Body | ItemKind::Steel => 0.0,
-        }
+        self.def().taste
     }
 
     /// What it weighs, in kilograms.
@@ -197,13 +230,7 @@ impl ItemKind {
     /// Counted against a unit's mass limit wherever it is —  in a hand or
     /// stowed away — because weight is carried either way.
     pub const fn mass(self) -> f32 {
-        match self {
-            ItemKind::Food => MEAL_MASS,
-            ItemKind::Water => DRINK_MASS,
-            ItemKind::Scrap => SCRAP_MASS,
-            ItemKind::Body => BODY_MASS,
-            ItemKind::Steel => STEEL_MASS,
-        }
+        self.def().mass
     }
 
     /// How much room it takes up, in litres.
@@ -212,13 +239,12 @@ impl ItemKind {
     /// away, and something held in a hand is not packed. See
     /// [`Inventory`](super::inventory::Inventory).
     pub const fn volume(self) -> f32 {
-        match self {
-            ItemKind::Food => MEAL_VOLUME,
-            ItemKind::Water => DRINK_VOLUME,
-            ItemKind::Scrap => SCRAP_VOLUME,
-            ItemKind::Body => BODY_VOLUME,
-            ItemKind::Steel => STEEL_VOLUME,
-        }
+        self.def().volume
+    }
+
+    /// The emoji it is drawn as in a hand.
+    pub const fn emoji(self) -> &'static str {
+        self.def().emoji
     }
 }
 
@@ -248,6 +274,17 @@ mod tests {
         for kind in ItemKind::ALL {
             assert!(kind.mass() > 0.0, "{} weighs nothing", kind.name());
             assert!(kind.volume() > 0.0, "{} takes up no room", kind.name());
+        }
+    }
+
+    /// Every kind has a name of its own, which is what a save keeps, and
+    /// something to be drawn as.
+    #[test]
+    fn every_kind_is_named_once_and_drawn() {
+        for (index, kind) in ItemKind::ALL.into_iter().enumerate() {
+            assert!(!kind.name().is_empty() && !kind.emoji().is_empty(), "{kind:?}");
+            assert!(ItemKind::ALL[..index].iter().all(|other| other.name() != kind.name()), "{}", kind.name());
+            assert_eq!(ItemKind::from_name(kind.name()), Some(kind));
         }
     }
 }

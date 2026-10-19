@@ -320,7 +320,7 @@ fn a_district_saved_with_scrap_in_its_bins_and_its_collectors_out_carries_on_exa
         .filter(|entity| entity.job().is_some_and(|job| job.kind == JobKind::ScrapCollector))
         .map(|entity| entity.uid())
         .collect();
-    assert_eq!(collectors.len(), crate::map::district::WAREHOUSE_BINS);
+    assert_eq!(collectors.len(), crate::map::district::warehouse::WAREHOUSE_BINS);
     // Only the job wanted, so a morning is enough for a trip.
     let mut input = Input::new();
     for &uid in &collectors {
@@ -691,6 +691,45 @@ fn a_format_1_save_still_loads_and_still_runs() {
     assert_eq!(loaded.len(), 7);
     run(&mut loaded, 60);
     assert_eq!(loaded.tick(), 360);
+}
+
+/// A steel works saved mid-shift by the build before the kinds were
+/// catalogued (`sim::catalogue`): jobs and goals written as the old schema's
+/// enums, every task under its own tag, a courier and a steelworker in
+/// uniform. It must keep loading, and go on exactly as the same world built
+/// fresh does.
+const STEEL_WORKS: &[u8] = include_bytes!("testdata/steel_works.savegame");
+
+/// The world in that fixture: [`crate::sim::testing::steel_works`] run until
+/// the steelworker is at its furnace with scrap the courier brought.
+fn steel_works_fixture() -> GameState {
+    let (mut state, smelter, _) = crate::sim::testing::steel_works(12, 9);
+    while state.bins().stored(Point::new(16, 2)) == 0 || state.entities().get(smelter).unwrap().interacting_with() != Some(Point::new(21, 5)) {
+        run(&mut state, 10);
+    }
+    state
+}
+
+/// Writes it. `cargo test write_the_steel_works_fixture -- --ignored`, once.
+#[test]
+#[ignore]
+fn write_the_steel_works_fixture() {
+    let zip = snapshot(&steel_works_fixture(), &meta(), None).to_zip(None).unwrap();
+    std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/save/testdata/steel_works.savegame"), zip).unwrap();
+}
+
+#[test]
+fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
+    let mut loaded = restore(&SaveFiles::from_zip(STEEL_WORKS).unwrap()).expect("it loads").state;
+    let mut fresh = steel_works_fixture();
+    assert_same(&fresh, &loaded, "just loaded");
+    for tick in 0..1800 {
+        run(&mut fresh, 1);
+        run(&mut loaded, 1);
+        if tick % 60 == 59 {
+            assert_same(&fresh, &loaded, &format!("{} ticks after loading", tick + 1));
+        }
+    }
 }
 
 // --- how fast ---

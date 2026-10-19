@@ -5,10 +5,11 @@
 //! is [`Event::Entertained`] when the session is over.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::Event;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct UseComputer {
@@ -57,6 +58,37 @@ impl TaskExecutor for UseComputer {
 
     fn describe(&self) -> String {
         format!("use the computer at {}, {}", self.computer.x, self.computer.y)
+    }
+}
+
+impl Task {
+    /// Have a go on the computer in `computer`, from a cell beside it.
+    pub const fn use_computer(computer: Point, seconds: f32) -> Task {
+        Task::UseComputer(UseComputer { computer, seconds })
+    }
+}
+
+/// Saved as `use computer`: the computer's cell and the seconds.
+impl TimedTask for UseComputer {
+    const NAME: &'static str = "use computer";
+
+    fn new(cell: Point, seconds: f32) -> UseComputer {
+        UseComputer { computer: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.computer
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::UseComputer(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

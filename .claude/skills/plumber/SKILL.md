@@ -36,7 +36,7 @@ and a full bladder has nowhere to go (the relieve goal is held off as "blocked")
 | Sewer in the editor | `src/editor/props.rs` | props `PALETTE` entry `"sewer"`, art `assets/sewer.png` |
 | X-ray drawing | `src/editor/grids.rs` | `paint` water arm via `cable` (4 texels wide), `PIPE_LIVE`/`PIPE_DEAD`, toilet corner light `SERVED`/`UNSERVED` |
 | "water a/b" readouts | `src/editor/grids.rs`, `src/game/hud.rs` | `GridOverlay::summary` |
-| District plumbing | `src/map/district.rs` | `SEWER` at `(0, HEIGHT-1)`, `connect` lays a pipe main mid-street (skipping buildings) and, per building with a toilet, `service_entry` on `GridLayer::Water` then `lay` from the entry to each toilet |
+| District plumbing | `src/map/district/mod.rs` | `SEWER` at `(0, HEIGHT-1)`, `connect` lays a pipe main mid-street (skipping buildings) and, per building with a toilet, `service_entry` on `GridLayer::Water` then `lay` from the entry to each toilet |
 | Art | `assets/` | `sewer.png`, `sewer_pipe.png` (16x16) |
 
 ## Recipes

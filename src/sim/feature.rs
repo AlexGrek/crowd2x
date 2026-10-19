@@ -1,16 +1,16 @@
-//! What the props on a map are *for*: [`FEATURES`], and the [`Features`]
-//! index of where they are.
+//! What the props on a map are *for*: [`FeatureKind`]'s catalogue, and the
+//! [`Features`] index of where they are.
 //!
 //! The same shape as `map::TERRAIN`: a static catalogue that binds a prop's
 //! **name** — the one a map file stores and the editor's palette paints — to
-//! what a brain can do with it. The art stays in the editor; what a fridge
-//! looks like is none of this module's business, and that it holds food is
-//! none of the editor's.
+//! what a brain can do with it ([`FeatureDef::props`]). The art stays in the
+//! editor; what a fridge looks like is none of this module's business, and
+//! that it holds food is none of the editor's.
 //!
-//! A prop with no entry here is scenery, which today is every prop but the
-//! fridge, the toilet, the computer, the TV, the beds, the scrap bin, the guard post and the
-//! crematorium. A prop with two entries is
-//! two things at once: a fridge is food and water.
+//! A prop no kind names is scenery. A prop two kinds name is two things at
+//! once: a fridge is food and water. A kind with a [`StoreDef`] is a store —
+//! what it holds is [`crate::sim::bins::Bins`]' — so a new store is a row
+//! here and nothing else in the simulation.
 //!
 //! **A feature that does not work is not one.** A fridge with no power, a
 //! computer with no power and a toilet with no drain
@@ -31,54 +31,115 @@ use rand::RngExt;
 use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 
+use super::catalogue::catalogue;
+use super::item::ItemKind;
 use super::property::Properties;
 
-/// What a brain can get out of a feature.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum FeatureKind {
-    Food,
-    Water,
-    Toilet,
-    /// Something to do: a home computer, used from the chair beside it.
-    Entertainment,
-    /// Something to do from across the room: a TV, watched from anywhere
-    /// within [`VIEWING_DISTANCE`] that is in sight of it ([`can_watch`]).
-    /// The other way to be amused, so `goals::play` goes for whichever of the
-    /// two is nearer; needs power, like the computer, and is anybody's
-    /// outside a home.
-    Television,
-    /// Somewhere to sleep: a bed, slept *in* rather than beside.
-    Bed,
-    /// Somewhere to work: a computer again, worked at from the chair beside
-    /// it. Which one is somebody's own desk is a job's business
-    /// ([`crate::sim::job`]); this only says what counts as a desk.
-    Workstation,
-    /// Somewhere to store scrap metal: a warehouse's bin, filled from beside
-    /// it. A scrap collector's workplace, the way a computer is an office
-    /// worker's; what each holds is [`crate::sim::bins::Bins`]'. Needs no
-    /// power.
-    ScrapBin,
-    /// Somewhere to keep watch: a guard post by a gate in the district's
-    /// wall, stood at from beside it. A guard's workplace; needs no power.
-    GuardPost,
-    /// Somewhere to put the dead: a crematorium, loaded from beside it. An
-    /// undertaker's workplace; needs no power.
-    Crematorium,
-    /// Somewhere to keep steel: the warehouse's rack, which a courier fills
-    /// with what the steel factory makes. What it holds is the
-    /// [`Bins`](crate::sim::bins::Bins)'. Needs no power.
-    SteelRack,
-    /// The steel factory's store of scrap metal to be smelted: filled by a
-    /// courier from the warehouse's bins, emptied by a steelworker. A
-    /// courier's workplace. Needs no power.
-    ScrapHopper,
-    /// The steel factory's store of steel it has made: filled by a
-    /// steelworker, emptied by a courier taking it to the warehouse. Needs
-    /// no power.
-    SteelPallet,
-    /// Where scrap metal is smelted into steel: a steelworker's workplace,
-    /// worked from beside it. **Needs power.**
-    Furnace,
+/// Everything about one kind of feature: its row in [`FeatureKind`]'s
+/// catalogue.
+pub struct FeatureDef {
+    /// The props that are one — the names a map file stores and the editor's
+    /// palette paints. A prop may be several kinds at once (a fridge is food
+    /// and water, a computer a desk and something to play on) and a kind may
+    /// be several props (six beds).
+    pub props: &'static [&'static str],
+    /// How it is used: from beside it, by entering it, or from in sight of
+    /// it.
+    pub access: Access,
+    /// What it keeps, for a store ([`crate::sim::bins`]); `None` for
+    /// anything else.
+    pub store: Option<StoreDef>,
+}
+
+/// A feature things are kept in: one kind of item each, as many pieces as
+/// are put in it ([`crate::sim::bins::Bins`]). Filled and emptied from
+/// beside it, needing no power.
+pub struct StoreDef {
+    /// The one kind of thing it holds.
+    pub holds: ItemKind,
+    /// What a log line calls it: "the bin", "the scrap hopper".
+    pub called: &'static str,
+    /// The building whose stock it is, as the statistics menu lists it
+    /// (`warehouse`, `factory`): every store with the same site is added up
+    /// together.
+    pub site: &'static str,
+    /// The word the HUD counts what it holds under (`scrap  12 stored`),
+    /// for the stores the HUD counts; `None` for the rest.
+    pub hud: Option<&'static str>,
+}
+
+/// Used from a cell beside it, and nothing kept in it: most features.
+const BESIDE: FeatureDef = FeatureDef { props: &[], access: Access::Beside, store: None };
+
+catalogue! {
+    /// What a brain can get out of a feature.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum FeatureKind: FeatureDef {
+        Food = 0 => FeatureDef { props: &["fridge"], ..BESIDE },
+        Water = 1 => FeatureDef { props: &["fridge"], ..BESIDE },
+        /// A toilet is sat on, one at a time: entered, not stood beside.
+        Toilet = 2 => FeatureDef { props: &["toilet"], access: Access::Entered, ..BESIDE },
+        /// Something to do: a home computer, used from the chair beside it.
+        Entertainment = 3 => FeatureDef { props: &["computer"], ..BESIDE },
+        /// Something to do from across the room: a TV, watched from anywhere
+        /// within [`VIEWING_DISTANCE`] that is in sight of it ([`can_watch`]).
+        /// The other way to be amused, so `goals::play` goes for whichever of the
+        /// two is nearer; needs power, like the computer, and is anybody's
+        /// outside a home.
+        Television = 4 => FeatureDef { props: &["tv"], access: Access::Watched, ..BESIDE },
+        /// Somewhere to sleep: a bed, slept *in* rather than beside, and one
+        /// sleeper to a bed — the toilet's arrangement, and for the same
+        /// reason. Every bed the editor can place; their art is 48x48 and has
+        /// no "somebody is in it" strip yet, so the sleeper is what shows it.
+        Bed = 5 => FeatureDef {
+            props: &["bed 1", "bed 2", "bed 3", "bed 4", "bed 5", "bed 6"],
+            access: Access::Entered,
+            ..BESIDE
+        },
+        /// Somewhere to work: a computer again, worked at from the chair beside
+        /// it. Which one is somebody's own desk is a job's business
+        /// ([`crate::sim::job`]); this only says what counts as a desk.
+        Workstation = 6 => FeatureDef { props: &["computer"], ..BESIDE },
+        /// Somewhere to store scrap metal: a warehouse's bin, filled from beside
+        /// it. A scrap collector's workplace, the way a computer is an office
+        /// worker's. Needs no power.
+        ScrapBin = 7 => FeatureDef {
+            props: &["scrap bin"],
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "bin", site: "warehouse", hud: Some("scrap") }),
+            ..BESIDE
+        },
+        /// Somewhere to keep watch: a guard post by a gate in the district's
+        /// wall, stood at from beside it. A guard's workplace; needs no power.
+        GuardPost = 8 => FeatureDef { props: &["guard post"], ..BESIDE },
+        /// Somewhere to put the dead: a crematorium, loaded from beside it. An
+        /// undertaker's workplace; needs no power.
+        Crematorium = 9 => FeatureDef { props: &["crematorium"], ..BESIDE },
+        /// Somewhere to keep steel: the warehouse's rack, which a courier fills
+        /// with what the steel factory makes.
+        SteelRack = 10 => FeatureDef {
+            props: &["steel rack"],
+            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel rack", site: "warehouse", hud: Some("steel") }),
+            ..BESIDE
+        },
+        /// The steel factory's store of scrap metal to be smelted: filled by a
+        /// courier from the warehouse's bins, emptied by a steelworker. A
+        /// courier's workplace.
+        ScrapHopper = 11 => FeatureDef {
+            props: &["scrap hopper"],
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "scrap hopper", site: "factory", hud: None }),
+            ..BESIDE
+        },
+        /// The steel factory's store of steel it has made: filled by a
+        /// steelworker, emptied by a courier taking it to the warehouse.
+        SteelPallet = 12 => FeatureDef {
+            props: &["steel pallet"],
+            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel pallet", site: "factory", hud: None }),
+            ..BESIDE
+        },
+        /// Where scrap metal is smelted into steel: a steelworker's workplace,
+        /// worked from beside it. **Needs power** (`map::utilities`).
+        Furnace = 13 => FeatureDef { props: &["furnace"], ..BESIDE },
+    }
 }
 
 /// How a feature is used: from a cell beside it, or by entering its own.
@@ -157,138 +218,37 @@ const fn viewing_offsets() -> [(i8, i8); 28] {
 
 impl FeatureKind {
     pub const fn access(self) -> Access {
-        match self {
-            FeatureKind::Food
-            | FeatureKind::Water
-            | FeatureKind::Entertainment
-            | FeatureKind::Workstation
-            | FeatureKind::ScrapBin
-            | FeatureKind::GuardPost
-            | FeatureKind::Crematorium
-            | FeatureKind::SteelRack
-            | FeatureKind::ScrapHopper
-            | FeatureKind::SteelPallet
-            | FeatureKind::Furnace => Access::Beside,
-            FeatureKind::Television => Access::Watched,
-            // A bed is lain in, not stood next to, and one sleeper to a bed:
-            // the toilet's arrangement, and for the same reason.
-            FeatureKind::Toilet | FeatureKind::Bed => Access::Entered,
-        }
+        self.def().access
+    }
+
+    /// What it keeps, if it is a store.
+    pub const fn store(self) -> Option<&'static StoreDef> {
+        self.def().store.as_ref()
+    }
+
+    /// The prop that is one: the first its row names.
+    pub const fn prop(self) -> &'static str {
+        self.def().props[0]
     }
 }
 
-pub struct Feature {
-    /// The prop name, exactly as the palette and the map file spell it.
-    pub name: &'static str,
-    pub kind: FeatureKind,
-}
-
-/// Every prop a brain can use.
-///
-/// A name may appear more than once, once per use: the fridge has drinks in
-/// it as well as food, rather than there being a second prop to walk to.
+/// Everything a prop name is for — nothing, for scenery — in the order the
+/// kinds are listed.
 ///
 /// A fridge never runs out of food or drink — there is no depletion state —
-/// but it does have a door and a temperature now
-/// ([`crate::sim::fridge::Fridges`]), which is why "nothing about a fridge
-/// changes during a tick" is no longer quite true. What still holds is that
-/// *this* index does not: which prop names are food, water, a toilet, a go on
-/// a computer or a bed to sleep in is fixed at map load, which is what lets
-/// it be built once, here, and read from every thread.
-pub const FEATURES: &[Feature] = &[
-    Feature {
-        name: "fridge",
-        kind: FeatureKind::Food,
-    },
-    Feature {
-        name: "fridge",
-        kind: FeatureKind::Water,
-    },
-    Feature {
-        name: "toilet",
-        kind: FeatureKind::Toilet,
-    },
-    Feature {
-        name: "computer",
-        kind: FeatureKind::Entertainment,
-    },
-    // Something to watch, from across the room.
-    Feature {
-        name: "tv",
-        kind: FeatureKind::Television,
-    },
-    // ...and a desk somebody works at, the way a fridge is food and water.
-    Feature {
-        name: "computer",
-        kind: FeatureKind::Workstation,
-    },
-    // Where a scrap collector stores what it brings in.
-    Feature {
-        name: "scrap bin",
-        kind: FeatureKind::ScrapBin,
-    },
-    // Where a guard keeps its watch.
-    Feature {
-        name: "guard post",
-        kind: FeatureKind::GuardPost,
-    },
-    // Where an undertaker brings the dead.
-    Feature {
-        name: "crematorium",
-        kind: FeatureKind::Crematorium,
-    },
-    // The steel factory and the steel it sends to the warehouse.
-    Feature {
-        name: "steel rack",
-        kind: FeatureKind::SteelRack,
-    },
-    Feature {
-        name: "scrap hopper",
-        kind: FeatureKind::ScrapHopper,
-    },
-    Feature {
-        name: "steel pallet",
-        kind: FeatureKind::SteelPallet,
-    },
-    Feature {
-        name: "furnace",
-        kind: FeatureKind::Furnace,
-    },
-    // The six beds the editor can place. Their art is 48x48 and has no
-    // "somebody is in it" strip yet, so a bed does not show that it is being
-    // slept in (see `game::props`); the sleeper is what shows it.
-    Feature {
-        name: "bed 1",
-        kind: FeatureKind::Bed,
-    },
-    Feature {
-        name: "bed 2",
-        kind: FeatureKind::Bed,
-    },
-    Feature {
-        name: "bed 3",
-        kind: FeatureKind::Bed,
-    },
-    Feature {
-        name: "bed 4",
-        kind: FeatureKind::Bed,
-    },
-    Feature {
-        name: "bed 5",
-        kind: FeatureKind::Bed,
-    },
-    Feature {
-        name: "bed 6",
-        kind: FeatureKind::Bed,
-    },
-];
-
-/// Everything a prop name is for — nothing, for scenery.
+/// but it does have a door and a temperature
+/// ([`crate::sim::fridge::Fridges`]), and a store holds what is put in it
+/// ([`crate::sim::bins::Bins`]). What does not change is this: which prop
+/// names are food, water, a toilet, a go on a computer or a bed to sleep in is
+/// fixed, which is what lets the index be built once, at map load, and read
+/// from every thread.
 pub fn kinds_of(name: &str) -> impl Iterator<Item = FeatureKind> + '_ {
-    FEATURES
-        .iter()
-        .filter(move |feature| feature.name == name)
-        .map(|feature| feature.kind)
+    FeatureKind::ALL.into_iter().filter(move |kind| kind.def().props.contains(&name))
+}
+
+/// The kind of store a prop called `name` is, if it is one.
+pub fn store_of(name: &str) -> Option<FeatureKind> {
+    kinds_of(name).find(|kind| kind.store().is_some())
 }
 
 /// Where the things a brain can use are, by cell.
@@ -298,20 +258,8 @@ pub fn kinds_of(name: &str) -> impl Iterator<Item = FeatureKind> + '_ {
 /// never of the crowd or the map.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Features {
-    food: Vec<Point>,
-    water: Vec<Point>,
-    toilet: Vec<Point>,
-    entertainment: Vec<Point>,
-    television: Vec<Point>,
-    bed: Vec<Point>,
-    workstation: Vec<Point>,
-    scrap_bin: Vec<Point>,
-    guard_post: Vec<Point>,
-    crematorium: Vec<Point>,
-    steel_rack: Vec<Point>,
-    scrap_hopper: Vec<Point>,
-    steel_pallet: Vec<Point>,
-    furnace: Vec<Point>,
+    /// Every working feature of each kind, sorted, at the kind's number.
+    cells: [Vec<Point>; FeatureKind::COUNT],
     /// Cells with passable terrain and exactly one blocking prop, a working
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
@@ -364,22 +312,7 @@ impl Features {
                         continue;
                     }
                 }
-                match kind {
-                    FeatureKind::Food => features.food.push(cell),
-                    FeatureKind::Water => features.water.push(cell),
-                    FeatureKind::Toilet => features.toilet.push(cell),
-                    FeatureKind::Entertainment => features.entertainment.push(cell),
-                    FeatureKind::Television => features.television.push(cell),
-                    FeatureKind::Bed => features.bed.push(cell),
-                    FeatureKind::Workstation => features.workstation.push(cell),
-                    FeatureKind::ScrapBin => features.scrap_bin.push(cell),
-                    FeatureKind::GuardPost => features.guard_post.push(cell),
-                    FeatureKind::Crematorium => features.crematorium.push(cell),
-                    FeatureKind::SteelRack => features.steel_rack.push(cell),
-                    FeatureKind::ScrapHopper => features.scrap_hopper.push(cell),
-                    FeatureKind::SteelPallet => features.steel_pallet.push(cell),
-                    FeatureKind::Furnace => features.furnace.push(cell),
-                }
+                features.cells[kind as usize].push(cell);
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
                 }
@@ -387,22 +320,7 @@ impl Features {
         }
         // Sorted, so nothing that picks among them depends on the order the
         // props were painted in.
-        for cells in [
-            &mut features.food,
-            &mut features.water,
-            &mut features.toilet,
-            &mut features.entertainment,
-            &mut features.television,
-            &mut features.bed,
-            &mut features.workstation,
-            &mut features.scrap_bin,
-            &mut features.guard_post,
-            &mut features.crematorium,
-            &mut features.steel_rack,
-            &mut features.scrap_hopper,
-            &mut features.steel_pallet,
-            &mut features.furnace,
-        ] {
+        for cells in &mut features.cells {
             cells.sort_unstable();
         }
         features
@@ -419,22 +337,7 @@ impl Features {
     }
 
     fn cells(&self, kind: FeatureKind) -> &[Point] {
-        match kind {
-            FeatureKind::Food => &self.food,
-            FeatureKind::Water => &self.water,
-            FeatureKind::Toilet => &self.toilet,
-            FeatureKind::Entertainment => &self.entertainment,
-            FeatureKind::Television => &self.television,
-            FeatureKind::Bed => &self.bed,
-            FeatureKind::Workstation => &self.workstation,
-            FeatureKind::ScrapBin => &self.scrap_bin,
-            FeatureKind::GuardPost => &self.guard_post,
-            FeatureKind::Crematorium => &self.crematorium,
-            FeatureKind::SteelRack => &self.steel_rack,
-            FeatureKind::ScrapHopper => &self.scrap_hopper,
-            FeatureKind::SteelPallet => &self.steel_pallet,
-            FeatureKind::Furnace => &self.furnace,
-        }
+        &self.cells[kind as usize]
     }
 
     /// Every working feature of `kind`, sorted by cell.

@@ -1029,7 +1029,7 @@ fn perform(
                 .ok_or("there is no simulation — expected the game screen".to_string())?
                 .0
                 .bins();
-            let kind = crate::sim::bins::Store::from_name(store).ok_or(format!("no store called {store:?}"))?;
+            let kind = crate::sim::feature::store_of(store).ok_or(format!("no store called {store:?}"))?;
             let stored = bins.total_in(kind);
             (stored >= *min).then_some(Next::Now).ok_or(format!(
                 "expected at least {min} pieces stored in the {store}s, found {stored} in {}",

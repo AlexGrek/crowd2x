@@ -188,12 +188,15 @@ deciding whether `esc` closes it or leaves the game.
 shows the frame of its strip for `GameState::doors()` openness, written only when it changes.
 A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.
 
-**Stores fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed store —
-`"scrap bin"`, `"steel rack"`, `"scrap hopper"`, `"steel pallet"`, `sim::bins::Store`,
-`editor::props`) shows frame `bin_frame(GameState::bins().stored(cell))` of its four — 0 empty,
-1-5 a few pieces, 6-20 half full, more heaped — written only on a change. The HUD's map stats
-(`hud::stats`) end in `scrap  N stored` on a map with a scrap bin (only what the scrap bins
-hold) and `steel  N stored` on one with a steel rack (the `jobs` skill).
+**Stores fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed prop that is a
+store — `"scrap bin"`, `"steel rack"`, `"scrap hopper"`, `"steel pallet"`: any whose feature row
+keeps something, `sim::feature::store_of`; `editor::props`) shows frame
+`bin_frame(GameState::bins().stored(cell))` of its four — 0 empty, 1-5 a few pieces, 6-20 half
+full, more heaped — written only on a change. The HUD's map stats (`hud::stats`) end in a line
+per kind of store whose `StoreDef` has a `hud` word, on a map with one: `scrap  N stored` (the
+scrap bins) and `steel  N stored` (the steel racks). A new store needs nothing here (the `jobs`
+skill). The statistics menu's stock lines are one per store `site` (`warehouse`, `factory`),
+listing what its stores hold — `sim::Statistics::sites`, built from the same rows.
 
 ### The statistics menu (`game/statistics.rs`)
 

@@ -62,18 +62,20 @@ it are four steps:
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
    the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
-   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack), `Effect::Deposit { at, pieces }` (a packful into a scrap bin, `sim/bins.rs`; the `jobs` skill), `Effect::Died { cause }` (the unit just died: `sim::died` frees its cell, bed and workplace and files it in `Corpses`), `Effect::TakeBody { at }` (an undertaker takes up a body: into its hand, off `Corpses`, onto `burials`) or `Effect::Cremate { at }` (logged) — into a
+   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack), `Effect::Deposit { at, pieces }` / `Effect::Withdraw { at }` (a packful into or out of a store, `sim/bins.rs`; the `jobs` skill), `Effect::Died { cause }` (the unit just died: its cell, bed and workplace are freed and it is filed in `Corpses`), `Effect::TakeBody { at }` (an undertaker takes up a body: into its hand, off `Corpses`, onto `burials`) or `Effect::Cremate { at }` (logged) — into a
    third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
    door directly: that is a fact about the world, read by every entity beside it, not about
    the one entity that opened it.
 4. **world** — single-threaded, slots ascending, like move, and for the same reason: two
    units opening and closing one fridge on the same tick is a race, and this is what settles
-   it the same way on every run. Every `Effect` is applied (`fridges.set_open`, `doors.want`,
-   `salvage`, `deposit` → `Bins::add`), the slot
+   it the same way on every run. Every `Effect` is granted by **`effect::apply`**
+   (`sim/effect.rs`: the enum, `apply`, and what each does — a fridge's door, a door's leaf, a
+   piece off a heap, a packful into or out of a store, a death, a body taken up), the slot
    reset to `Effect::None`, and then `Fridges::advance` moves every fridge's temperature on
    by the tick's worth of world time — see `sim::world_step` and "Features" in `brain-engineer`'s `architecture.md`.
-   `world_step` takes the people-shaped parts as one borrow, `People { occupancy, homes,
-   workplaces, corpses, burials }`.
+   `world_step` takes the world's parts as one borrow, **`Facilities`**, and the occupancy.
+   `testing::World::step` calls the same `apply`, so a test's world grants an effect exactly
+   as a game's does.
 5. **bury** (`process_game_state`, after the processing pass, which may remove nobody): the
    bodies taken up this tick (`GameState::burials`) are despawned, so nothing waits between
    ticks and nothing new is saved.
@@ -110,6 +112,16 @@ timing; the sequential path below `PARALLEL_AT` cuts the same blocks. A budget o
 delays a route, never changes it. Details in `brain-engineer`'s `architecture.md`, "The
 route budget".
 
+**The world's parts are one struct, `Facilities`** (`sim/facilities.rs`): the features index,
+the fridges, the stores (`Bins`), the doors, the properties, the dead (`Corpses`), the beds
+(`Homes`) and workplaces given out, the `Tally` of the dead and the bodies to bury this tick.
+`GameState` holds one (its getters — `bins()`, `doors()`... — read it), and so does
+`testing::World` (which derefs to it), so a new part of the world is one field there, built in
+`Facilities::new`. **`Think::new(map, occupancy, log, &facilities, dt, tick, clock)` is the one
+way a `Think` is made** — the process pass, the test worlds, the walker's and routines' test
+rigs — so a brain reading a new part is a field on `Think` and a line in `Think::new`. The touch
+list for that and for a new `Effect` is the `add-content` skill.
+
 **Hiring and letting go** come from outside too: `Command::Hire` / `Command::Dismiss`, applied
 in the spawn pass like a freeze, with the desks (`Workplaces`) kept by `GameState` the way
 `Homes` keeps beds (`jobs` skill).
@@ -137,7 +149,7 @@ beds, desks, the arena (slots, holes, serials, free-list order), and who holds w
 not prepare or reclaim chunks: the next spawn pass does, as it would have. The id allocator
 is `rng::WorldRng` (xoshiro256++, the stream `SmallRng` always was) so its state can be saved.
 
-So **any new field on `GameState`, an entity kind or anything inside one must be saved** — a
+So **any new field on `GameState` or `Facilities`, an entity kind or anything inside one must be saved** — a
 tag in `src/save/pb/`, and `save`/`restore` beside the field — unless it is overwritten every
 tick or only says how memory is used. `GameEntity::save` has no default; every `save`
 destructures exhaustively, so the build finds what is missing.

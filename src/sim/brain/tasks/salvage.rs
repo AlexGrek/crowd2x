@@ -15,13 +15,14 @@
 //! if it is cut short. An order carried out is an errand, and does not.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::TIME_SCALE;
 use crate::sim::item::ItemKind;
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{self, SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Salvage {
@@ -93,6 +94,40 @@ impl TaskExecutor for Salvage {
 
     fn describe(&self) -> String {
         format!("salvage the scrap at {}, {}", self.heap.x, self.heap.y)
+    }
+}
+
+impl Task {
+    /// Work the heap of scrap in `heap`, from a cell beside it, for one
+    /// piece of scrap metal: to an order, so no more tiring than any other
+    /// errand.
+    pub const fn salvage(heap: Point, seconds: f32) -> Task {
+        Task::Salvage(Salvage { heap, seconds, for_work: false })
+    }
+
+    /// The same, for a living: a scrap collector's, which tires like a
+    /// stretch at a desk ([`Salvage::for_work`]).
+    pub const fn salvage_for_work(heap: Point, seconds: f32) -> Task {
+        Task::Salvage(Salvage { heap, seconds, for_work: true })
+    }
+}
+
+/// Saved as `salvage`, or `salvage for work`: the heap and the seconds.
+impl SavedTask for Salvage {
+    fn save(&self) -> pb::TaskKind {
+        task::named(if self.for_work { "salvage for work" } else { "salvage" }, Some(self.heap), self.seconds)
+    }
+
+    fn restore(saved: &pb::TaskKind) -> Option<Result<Salvage, Invalid>> {
+        let ((cell, seconds), for_work) = match saved {
+            pb::TaskKind::Salvage(task) => ((task.cell, task.seconds), false),
+            pb::TaskKind::SalvageForWork(task) => ((task.cell, task.seconds), true),
+            _ => match task::read_named(saved, "salvage") {
+                Some(found) => (found, false),
+                None => (task::read_named(saved, "salvage for work")?, true),
+            },
+        };
+        Some(task::cell_and_seconds(cell, seconds, "salvage").map(|(heap, seconds)| Salvage { heap, seconds, for_work }))
     }
 }
 

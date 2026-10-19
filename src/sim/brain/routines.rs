@@ -424,7 +424,7 @@ mod tests {
     use super::*;
     use crate::map::{Map, Point, Size, FLOOR};
     use crate::sim::entity::{Body, Think};
-    use crate::sim::feature::Features;
+    use crate::sim::facilities::Facilities;
     use crate::sim::log::Log;
     use crate::sim::occupancy::Occupancy;
     use crate::sim::biology::Biology;
@@ -438,26 +438,8 @@ mod tests {
 
     fn priority_in(routine: &mut NeedRoutine, biology: &Biology) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
-        let (occupancy, log, features, fridges) = (
-            Occupancy::new(map.size()),
-            Log::new(),
-            Features::default(),
-            crate::sim::fridge::Fridges::default(),
-        );
-        let think = Think {
-            map: &map,
-            occupancy: &occupancy,
-            log: &log,
-            features: &features,
-            fridges: &fridges,
-            doors: &Default::default(),
-            properties: &Default::default(),
-            corpses: &crate::sim::corpses::NONE,
-            bins: &crate::sim::bins::NONE,
-            dt: 1.0 / 60.0,
-            tick: 0,
-            clock: crate::sim::clock::Clock::after_watching(0.0),
-        };
+        let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+        let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, crate::sim::clock::Clock::after_watching(0.0));
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut goals = Goals::new();
         routine.arrange(
@@ -623,26 +605,8 @@ mod tests {
         job: Option<&crate::sim::job::Job>,
     ) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
-        let (occupancy, log, features, fridges) = (
-            Occupancy::new(map.size()),
-            Log::new(),
-            Features::default(),
-            crate::sim::fridge::Fridges::default(),
-        );
-        let think = Think {
-            map: &map,
-            occupancy: &occupancy,
-            log: &log,
-            features: &features,
-            fridges: &fridges,
-            doors: &Default::default(),
-            properties: &Default::default(),
-            corpses: &crate::sim::corpses::NONE,
-            bins: &crate::sim::bins::NONE,
-            dt: 1.0 / 60.0,
-            tick: 0,
-            clock,
-        };
+        let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+        let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, clock);
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut goals = Goals::new();
         routine.arrange(
@@ -751,26 +715,8 @@ mod tests {
     /// at `clock`.
     fn work_priority(routine: &mut WorkRoutine, job: Option<&crate::sim::job::Job>, clock: Clock) -> f32 {
         let map = Map::new(Size::new(2, 2), FLOOR);
-        let (occupancy, log, features, fridges) = (
-            Occupancy::new(map.size()),
-            Log::new(),
-            Features::default(),
-            crate::sim::fridge::Fridges::default(),
-        );
-        let think = Think {
-            map: &map,
-            occupancy: &occupancy,
-            log: &log,
-            features: &features,
-            fridges: &fridges,
-            doors: &Default::default(),
-            properties: &Default::default(),
-            corpses: &crate::sim::corpses::NONE,
-            bins: &crate::sim::bins::NONE,
-            dt: 1.0 / 60.0,
-            tick: 0,
-            clock,
-        };
+        let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+        let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, clock);
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
         let mut goals = Goals::new();
         routine.arrange(
@@ -816,26 +762,8 @@ mod tests {
         let job = crate::sim::job::Job::collector(Point::new(3, 3));
         let wanted = |clock: Clock| {
             let map = Map::new(Size::new(2, 2), FLOOR);
-            let (occupancy, log, features, fridges) = (
-                Occupancy::new(map.size()),
-                Log::new(),
-                Features::default(),
-                crate::sim::fridge::Fridges::default(),
-            );
-            let think = Think {
-                map: &map,
-                occupancy: &occupancy,
-                log: &log,
-                features: &features,
-                fridges: &fridges,
-                doors: &Default::default(),
-                properties: &Default::default(),
-                corpses: &crate::sim::corpses::NONE,
-                bins: &crate::sim::bins::NONE,
-                dt: 1.0 / 60.0,
-                tick: 0,
-                clock,
-            };
+            let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+            let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, clock);
             let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
             let mut goals = Goals::new();
             WorkRoutine::new().arrange(

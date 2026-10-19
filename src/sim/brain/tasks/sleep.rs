@@ -14,11 +14,12 @@
 //! hour, and a sleeper woken for the toilet every hour once rested not at all.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::TIME_SCALE;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Sleep {
@@ -99,6 +100,37 @@ impl TaskExecutor for Sleep {
 
     fn describe(&self) -> String {
         format!("sleep in the bed at {}, {}", self.bed.x, self.bed.y)
+    }
+}
+
+impl Task {
+    /// Sleep in the bed in `bed`, from a cell beside it, for `seconds`.
+    pub const fn sleep(bed: Point, seconds: f32) -> Task {
+        Task::Sleep(Sleep { bed, seconds })
+    }
+}
+
+/// Saved as `sleep`: the bed's cell and the seconds.
+impl TimedTask for Sleep {
+    const NAME: &'static str = "sleep";
+
+    fn new(cell: Point, seconds: f32) -> Sleep {
+        Sleep { bed: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.bed
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::Sleep(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

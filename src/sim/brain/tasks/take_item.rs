@@ -1,10 +1,11 @@
 //! [`TakeItem`]: take something out of whatever is in a cell, from beside it.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::item::ItemKind;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{self, SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct TakeItem {
@@ -74,6 +75,28 @@ impl TaskExecutor for TakeItem {
 
     fn describe(&self) -> String {
         format!("take {} from {}, {}", self.item.name(), self.from.x, self.from.y)
+    }
+}
+
+impl Task {
+    /// Take `item` out of whatever is in `from`, from a cell beside it.
+    pub const fn take(from: Point, item: ItemKind, seconds: f32) -> Task {
+        Task::TakeItem(TakeItem { from, item, seconds })
+    }
+}
+
+/// Saved as a take of its own (`pb::TakeItem`): from where, what — by the
+/// item's name — and how long.
+impl SavedTask for TakeItem {
+    fn save(&self) -> pb::TaskKind {
+        pb::TaskKind::TakeItem(pb::TakeItem { from: Some(self.from.into()), item: self.item.name().to_string(), seconds: self.seconds })
+    }
+
+    fn restore(saved: &pb::TaskKind) -> Option<Result<TakeItem, Invalid>> {
+        let pb::TaskKind::TakeItem(task) = saved else {
+            return None;
+        };
+        Some((|| Ok(TakeItem { from: pb::cell(task.from, "take")?, item: task::item(&task.item)?, seconds: task::seconds(task.seconds)? }))())
     }
 }
 

@@ -89,10 +89,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{
-    BuryGoal, CollectGoal, DrinkGoal, EatGoal, HaulGoal, PlayGoal, RelieveGoal, SalvageGoal, SleepGoal, SmeltGoal, WanderGoal,
-    WorkGoal,
-};
+use goals::WanderGoal;
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -166,9 +163,11 @@ impl Brain {
     }
 
     /// A person: keeps fed, hydrated, comfortable, entertained and rested,
-    /// stays busy, goes to work if it has a job; wanders, eats, drinks, uses
-    /// the toilet, has a go on a computer, sleeps in a bed, works at a desk
-    /// or collects scrap.
+    /// stays busy, goes to work if it has a job; and can pursue **every goal
+    /// there is an executor for** ([`GoalDef::executor`](goal::GoalDef)) —
+    /// wander, eat, drink, use the toilet, play, sleep, follow an order, and
+    /// whatever any job's goal is. A new goal is a row of [`GoalId`]'s
+    /// catalogue, not a line here.
     ///
     /// **A routine added here goes on the end.** A save keeps the routines'
     /// state in this order, and [`Brain::restore`] reads a shorter list from
@@ -185,20 +184,7 @@ impl Brain {
                 Routine::stay_busy(),
                 Routine::work(),
             ],
-            [
-                Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
-                Box::new(EatGoal::new()),
-                Box::new(DrinkGoal::new()),
-                Box::new(RelieveGoal::new()),
-                Box::new(PlayGoal::new()),
-                Box::new(SleepGoal::new()),
-                Box::new(SalvageGoal::new()),
-                Box::new(WorkGoal::new()),
-                Box::new(CollectGoal::new()),
-                Box::new(BuryGoal::new()),
-                Box::new(SmeltGoal::new()),
-                Box::new(HaulGoal::new()),
-            ],
+            GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
     }
 
@@ -499,7 +485,7 @@ impl Brain {
                 .iter()
                 .flatten()
                 .map(|executor| pb::ExecutorState {
-                    goal: pb::GoalId::from(executor.goal()) as i32,
+                    goal: executor.goal().number(),
                     state: Some(executor.save()),
                 })
                 .collect(),
@@ -538,7 +524,7 @@ impl Brain {
         self.job = saved.job.as_ref().map(Job::restore).transpose()?;
         self.goals = Goals::restore(pb::required(&saved.goals, "goals")?)?;
         for state in &saved.executors {
-            let goal = GoalId::from(pb::known::<pb::GoalId>(state.goal, "executor")?);
+            let goal = GoalId::restore(state.goal, "executor")?;
             let Some(executor) = self.executors[goal as usize].as_deref_mut() else {
                 return invalid(format!("a {} executor saved for a brain without one", goal.name()));
             };

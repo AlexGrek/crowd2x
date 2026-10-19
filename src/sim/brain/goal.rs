@@ -14,91 +14,77 @@
 
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
+use crate::sim::catalogue::catalogue;
 use crate::sim::entity::{Body, Think};
 use crate::sim::inventory::Inventory;
 use crate::sim::job::Job;
 use crate::sim::uid::Uid;
 
+use super::goals;
 use super::memory::Memory;
 use super::perception::Perception;
 use super::task::{Task, TaskResult, Tasks};
 
-/// Every goal a brain can hold.
-///
-/// An enum over a fixed array rather than a map of strings: a typo in a
-/// variant is a compile error where a typo in a string is a runtime one, the
-/// discriminants are the storage order (as `map::ObjectLayer`'s are), and
-/// iterating in declaration order is what the determinism tests depend on.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[repr(u8)]
-pub enum GoalId {
-    /// Nothing to do. The goal in charge when no other goal is wanted at all,
-    /// which is why it has no executor anywhere and cannot be put on a
-    /// cooldown.
-    Idle = 0,
-    Wander = 1,
-    Eat = 2,
-    Drink = 3,
-    Relieve = 4,
-    Play = 5,
-    Sleep = 6,
-    /// Carry out an order to salvage a heap of scrap
-    /// ([`SalvageGoal`](super::goals::SalvageGoal)).
-    Salvage = 7,
-    /// Go to one's own desk and work a shift at it
-    /// ([`WorkGoal`](super::goals::WorkGoal)). After every need, so every
-    /// need it ties with wins the tie.
-    Work = 8,
-    /// Bring scrap in from the wasteland and store it in one's own bin
-    /// ([`CollectGoal`](super::goals::CollectGoal)): a scrap collector's
-    /// shift. After work, for the reason work is after every need.
-    Collect = 9,
-    /// Carry the dead to one's own crematorium
-    /// ([`BuryGoal`](super::goals::BuryGoal)): an undertaker's watch. Last,
-    /// for the same reason.
-    Bury = 10,
-    /// Smelt scrap into steel at one's own furnace
-    /// ([`SmeltGoal`](super::goals::SmeltGoal)): a steelworker's shift.
-    Smelt = 11,
-    /// Carry scrap to the steel factory and steel to the warehouse
-    /// ([`HaulGoal`](super::goals::HaulGoal)): a courier's shift.
-    Haul = 12,
+/// Everything about one goal: its row in [`GoalId`]'s catalogue.
+pub struct GoalDef {
+    /// How it reads on the brains menu.
+    pub name: &'static str,
+    /// What is shown above a unit's head while it is in charge. See
+    /// [`GoalId::emoji`].
+    pub emoji: &'static str,
+    /// A fresh executor for it, for every brain a person is built with
+    /// ([`Brain::human`](super::Brain::human)); `None` for a goal nobody
+    /// pursues.
+    pub executor: Option<fn() -> Box<dyn GoalExecutor>>,
+}
+
+catalogue! {
+    /// Every goal a brain can hold.
+    ///
+    /// An enum over a fixed array rather than a map of strings: a typo in a
+    /// variant is a compile error where a typo in a string is a runtime one,
+    /// the numbers are the storage order (as `map::ObjectLayer`'s are) and what
+    /// a save keeps, and iterating in the order listed is what the determinism
+    /// tests depend on. **Ties go to the goal listed first** ([`Goals::best`]),
+    /// which is why the jobs' goals come after every need.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+    pub enum GoalId: GoalDef {
+        /// Nothing to do. The goal in charge when no other goal is wanted at
+        /// all, which is why it has no executor anywhere and cannot be put on a
+        /// cooldown.
+        Idle = 0 => GoalDef { name: "idle", emoji: "💤", executor: None },
+        Wander = 1 => GoalDef { name: "wander", emoji: "🚶", executor: Some(|| Box::new(goals::WanderGoal::new())) },
+        Eat = 2 => GoalDef { name: "eat", emoji: "🍎", executor: Some(|| Box::new(goals::EatGoal::new())) },
+        Drink = 3 => GoalDef { name: "drink", emoji: "💧", executor: Some(|| Box::new(goals::DrinkGoal::new())) },
+        Relieve = 4 => GoalDef { name: "relieve", emoji: "🚽", executor: Some(|| Box::new(goals::RelieveGoal::new())) },
+        Play = 5 => GoalDef { name: "play", emoji: "🎮", executor: Some(|| Box::new(goals::PlayGoal::new())) },
+        Sleep = 6 => GoalDef { name: "sleep", emoji: "😴", executor: Some(|| Box::new(goals::SleepGoal::new())) },
+        /// Carry out an order to salvage a heap of scrap
+        /// ([`SalvageGoal`](super::goals::SalvageGoal)).
+        Salvage = 7 => GoalDef { name: "salvage", emoji: "🔧", executor: Some(|| Box::new(goals::SalvageGoal::new())) },
+        /// Go to one's own desk and work a shift at it
+        /// ([`WorkGoal`](super::goals::WorkGoal)). After every need, so every
+        /// need it ties with wins the tie.
+        Work = 8 => GoalDef { name: "work", emoji: "💼", executor: Some(|| Box::new(goals::WorkGoal::new())) },
+        /// Bring scrap in from the wasteland and store it in one's own bin
+        /// ([`CollectGoal`](super::goals::CollectGoal)): a scrap collector's
+        /// shift. After work, for the reason work is after every need.
+        Collect = 9 => GoalDef { name: "collect", emoji: "🧲", executor: Some(|| Box::new(goals::CollectGoal::new())) },
+        /// Carry the dead to one's own crematorium
+        /// ([`BuryGoal`](super::goals::BuryGoal)): an undertaker's watch.
+        Bury = 10 => GoalDef { name: "bury", emoji: "⚰", executor: Some(|| Box::new(goals::BuryGoal::new())) },
+        /// Smelt scrap into steel at one's own furnace
+        /// ([`SmeltGoal`](super::goals::SmeltGoal)): a steelworker's shift.
+        Smelt = 11 => GoalDef { name: "smelt", emoji: "🔥", executor: Some(|| Box::new(goals::SmeltGoal::new())) },
+        /// Carry scrap to the steel factory and steel to the warehouse
+        /// ([`HaulGoal`](super::goals::HaulGoal)): a courier's shift.
+        Haul = 12 => GoalDef { name: "haul", emoji: "📦", executor: Some(|| Box::new(goals::HaulGoal::new())) },
+    }
 }
 
 impl GoalId {
-    pub const COUNT: usize = 13;
-    pub const ALL: [GoalId; GoalId::COUNT] = [
-        GoalId::Idle,
-        GoalId::Wander,
-        GoalId::Eat,
-        GoalId::Drink,
-        GoalId::Relieve,
-        GoalId::Play,
-        GoalId::Sleep,
-        GoalId::Salvage,
-        GoalId::Work,
-        GoalId::Collect,
-        GoalId::Bury,
-        GoalId::Smelt,
-        GoalId::Haul,
-    ];
-
     pub const fn name(self) -> &'static str {
-        match self {
-            GoalId::Idle => "idle",
-            GoalId::Wander => "wander",
-            GoalId::Eat => "eat",
-            GoalId::Drink => "drink",
-            GoalId::Relieve => "relieve",
-            GoalId::Play => "play",
-            GoalId::Sleep => "sleep",
-            GoalId::Salvage => "salvage",
-            GoalId::Work => "work",
-            GoalId::Collect => "collect",
-            GoalId::Bury => "bury",
-            GoalId::Smelt => "smelt",
-            GoalId::Haul => "haul",
-        }
+        self.def().name
     }
 
     /// The emoji shown above a unit's head while this goal is in charge —
@@ -107,25 +93,16 @@ impl GoalId {
     /// risks falling back to its unjoined parts on a renderer that does not
     /// merge them, which is a worse failure than a plainer emoji.
     pub const fn emoji(self) -> &'static str {
-        match self {
-            GoalId::Idle => "💤",
-            GoalId::Wander => "🚶",
-            GoalId::Eat => "🍎",
-            GoalId::Drink => "💧",
-            GoalId::Relieve => "🚽",
-            GoalId::Play => "🎮",
-            GoalId::Sleep => "😴",
-            GoalId::Salvage => "🔧",
-            GoalId::Work => "💼",
-            GoalId::Collect => "🧲",
-            GoalId::Bury => "⚰",
-            GoalId::Smelt => "🔥",
-            GoalId::Haul => "📦",
-        }
+        self.def().emoji
     }
 
     const fn index(self) -> usize {
         self as usize
+    }
+
+    /// The goal a save numbered `number`, or why not.
+    pub(crate) fn restore(number: i32, what: &str) -> Result<GoalId, Invalid> {
+        GoalId::from_number(number).ok_or_else(|| Invalid::new(format!("{what}: no goal numbered {number}")))
     }
 }
 
@@ -213,11 +190,11 @@ impl Goals {
     pub(crate) fn save(&self) -> pb::Goals {
         let Goals { priority, cooldown, strikes, top } = self;
         pb::Goals {
-            top: pb::GoalId::from(*top) as i32,
+            top: top.number(),
             slots: GoalId::ALL
                 .iter()
                 .map(|&goal| pb::GoalSlot {
-                    goal: pb::GoalId::from(goal) as i32,
+                    goal: goal.number(),
                     priority: priority[goal.index()],
                     cooldown: cooldown[goal.index()] as u32,
                     strikes: strikes[goal.index()] as u32,
@@ -230,9 +207,9 @@ impl Goals {
     /// — starts where it does in a new brain: unwanted, not held off.
     pub(crate) fn restore(saved: &pb::Goals) -> Result<Goals, Invalid> {
         let mut goals = Goals::new();
-        goals.top = GoalId::from(pb::known::<pb::GoalId>(saved.top, "top goal")?);
+        goals.top = GoalId::restore(saved.top, "top goal")?;
         for slot in &saved.slots {
-            let goal = GoalId::from(pb::known::<pb::GoalId>(slot.goal, "goal")?);
+            let goal = GoalId::restore(slot.goal, "goal")?;
             let (Ok(cooldown), Ok(strikes)) = (u16::try_from(slot.cooldown), u8::try_from(slot.strikes)) else {
                 return invalid(format!("{} held off {} ticks after {} strikes", goal.name(), slot.cooldown, slot.strikes));
             };
@@ -442,46 +419,6 @@ pub trait GoalExecutor: Send + Sync {
     /// Put back what [`GoalExecutor::save`] kept, into an executor built
     /// fresh with its brain. A state of another executor's shape is refused.
     fn restore(&mut self, saved: &pb::Executor) -> Result<(), Invalid>;
-}
-
-impl From<GoalId> for pb::GoalId {
-    fn from(goal: GoalId) -> pb::GoalId {
-        match goal {
-            GoalId::Idle => pb::GoalId::Idle,
-            GoalId::Wander => pb::GoalId::Wander,
-            GoalId::Eat => pb::GoalId::Eat,
-            GoalId::Drink => pb::GoalId::Drink,
-            GoalId::Relieve => pb::GoalId::Relieve,
-            GoalId::Play => pb::GoalId::Play,
-            GoalId::Sleep => pb::GoalId::Sleep,
-            GoalId::Salvage => pb::GoalId::Salvage,
-            GoalId::Work => pb::GoalId::Work,
-            GoalId::Collect => pb::GoalId::Collect,
-            GoalId::Bury => pb::GoalId::Bury,
-            GoalId::Smelt => pb::GoalId::Smelt,
-            GoalId::Haul => pb::GoalId::Haul,
-        }
-    }
-}
-
-impl From<pb::GoalId> for GoalId {
-    fn from(goal: pb::GoalId) -> GoalId {
-        match goal {
-            pb::GoalId::Idle => GoalId::Idle,
-            pb::GoalId::Wander => GoalId::Wander,
-            pb::GoalId::Eat => GoalId::Eat,
-            pb::GoalId::Drink => GoalId::Drink,
-            pb::GoalId::Relieve => GoalId::Relieve,
-            pb::GoalId::Play => GoalId::Play,
-            pb::GoalId::Sleep => GoalId::Sleep,
-            pb::GoalId::Salvage => GoalId::Salvage,
-            pb::GoalId::Work => GoalId::Work,
-            pb::GoalId::Collect => GoalId::Collect,
-            pb::GoalId::Bury => GoalId::Bury,
-            pb::GoalId::Smelt => GoalId::Smelt,
-            pb::GoalId::Haul => GoalId::Haul,
-        }
-    }
 }
 
 #[cfg(test)]

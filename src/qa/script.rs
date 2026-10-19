@@ -700,7 +700,7 @@ fn default_tap() -> f32 {
 }
 
 fn default_store() -> String {
-    crate::sim::bins::SCRAP_BIN.to_string()
+    crate::sim::FeatureKind::ScrapBin.prop().to_string()
 }
 
 fn default_count() -> u32 {

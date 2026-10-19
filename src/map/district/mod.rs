@@ -29,17 +29,14 @@
 //!   off at each end;
 //! * **the shops** — one block, three of its lots a shop with a wide door and
 //!   nothing inside yet, the fourth left as a small park;
-//! * **the mandatory lot buildings** — one lot each, taken before any house:
-//!   so far only the **warehouse** ([`warehouse`]), on the lot facing the
-//!   street round the edge of the district that is nearest a heap of the
-//!   district's own wasteland ([`heaps_round`]), so its collectors' trips are
-//!   short, with a [`SCRAP_BIN`] in each corner; and [`RESTAURANTS`]
-//!   **restaurants** ([`restaurant`]), one on the lot nearest the middle of
-//!   each quarter of the district so nobody is far from one: public, with
-//!   fridges anybody may eat and drink from and toilets anybody may use;
-//!   and the **crematorium** ([`crematorium`]), on a lot on the edge of the
-//!   district, with [`CREMATORIA`] furnaces the undertakers bring the dead
-//!   to (`sim::job`);
+//! * **the lot buildings** every district must have — a lot each, taken
+//!   before any house, one module each, listed in [`LOT_BUILDINGS`]: the
+//!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
+//!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
+//!   the warehouse. **A new one is a module with a [`LotBuilding`] in it and
+//!   a line in that list**; everything else — the lot it takes from the
+//!   houses, its roof, lamp, windows, power, its place in
+//!   [`District::buildings`] — follows from the list;
 //! * **the houses** — every lot of every other block, less [`EMPTY_LOTS`]
 //!   left as parks, which leaves [`HOUSES`].
 //!
@@ -110,6 +107,11 @@ use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};
 
+pub mod crematorium;
+pub mod restaurant;
+pub mod steel_factory;
+pub mod warehouse;
+
 use super::grid::{power, water};
 use super::utilities::{self, Utility};
 use super::{Bounds, GridLayer, Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, Wasteland, NAV_MARGIN, PIXELS_PER_CELL};
@@ -137,15 +139,9 @@ const BLOCKS_Y: i32 = 5;
 /// Lots in the blocks that are neither the bank's (two) nor the shops' (one):
 /// four to a block.
 const RESIDENTIAL_LOTS: usize = 4 * (BLOCKS_X * BLOCKS_Y - 3) as usize;
-/// The buildings that must be in every district and take a lot each before
-/// any house is built ([`generate`]'s mandatory step): the warehouse, the
-/// restaurants and the crematorium.
-const LOT_BUILDINGS: usize = 1 + RESTAURANTS + 1 + 1;
-/// How many restaurants: one to each quarter of the district.
-pub const RESTAURANTS: usize = 4;
-/// The residential lots left as parks: what neither a mandatory building nor
-/// a house took.
-const EMPTY_LOTS: usize = RESIDENTIAL_LOTS - LOT_BUILDINGS - HOUSES;
+/// The residential lots left as parks: what neither a lot building nor a
+/// house took.
+const EMPTY_LOTS: usize = RESIDENTIAL_LOTS - lots_built() - HOUSES;
 
 pub const WIDTH: i32 = BLOCKS_X * BLOCK_W + (BLOCKS_X + 1) * STREET;
 pub const HEIGHT: i32 = BLOCKS_Y * BLOCK_H + (BLOCKS_Y + 1) * STREET;
@@ -196,42 +192,6 @@ const HOUSES_WITH_A_TV: f64 = 0.5;
 /// where it stands, so that choosing draws nothing from the district's own
 /// and every seed's streets, houses and people are what they were without.
 const TV_STREAM: u64 = 0x7e1e_7151_0a5e_7000;
-/// Where a scrap collector stores what it brings in: one in each corner of
-/// the warehouse, and one collector to a bin (`sim::job`).
-pub const SCRAP_BIN: &str = "scrap bin";
-/// How many bins the warehouse has, and so how many collectors a district
-/// can employ.
-pub const WAREHOUSE_BINS: usize = 4;
-const WAREHOUSE_WALL: &str = "wall brown";
-const WAREHOUSE_FLOOR: &str = "floor diagonal";
-const RESTAURANT_WALL: &str = "wall red";
-const RESTAURANT_FLOOR: &str = "tiles yellow";
-/// Where the dead are brought: an undertaker's workplace, three watches to
-/// each (`sim::job`).
-pub const CREMATORIUM: &str = "crematorium";
-/// How many crematoria the crematorium has, and so how many undertakers a
-/// district takes: three to each.
-pub const CREMATORIA: usize = 2;
-/// Where the steel a courier brings from the steel factory is kept: one on
-/// the warehouse's long wall away from its door (`sim::bins`).
-pub const STEEL_RACK: &str = "steel rack";
-/// A steelworker's workplace in the steel factory, where scrap metal is
-/// smelted into steel: one in each of the far corners, so [`FURNACES`]
-/// steelworkers (`sim::job`).
-pub const FURNACE: &str = "furnace";
-pub const FURNACES: usize = 2;
-/// The steel factory's store of scrap metal to smelt, one against each side
-/// wall by the door — a courier's workplace, so [`HOPPERS`] couriers.
-pub const SCRAP_HOPPER: &str = "scrap hopper";
-pub const HOPPERS: usize = 2;
-/// The steel factory's store of the steel it made, one against each side
-/// wall between the hoppers and the furnaces.
-pub const STEEL_PALLET: &str = "steel pallet";
-pub const PALLETS: usize = 2;
-const FACTORY_WALL: &str = "block";
-const FACTORY_FLOOR: &str = "floor";
-const CREMATORIUM_WALL: &str = "wall purple";
-const CREMATORIUM_FLOOR: &str = "floor white";
 /// The door of a shop, the bank and its restrooms: anybody may open it.
 const DOOR: &str = "door";
 /// A house's door, which only the people living there may open: the
@@ -257,8 +217,9 @@ const LONGEST_SPUR: i32 = 12;
 /// What a resident's spawner spawns: an `EntityType` name.
 pub const RESIDENT: &str = "human";
 
-/// Every tile name the generator paints with, so a test can check each one
-/// is still in the catalogue rather than finding out from a panic.
+/// Every tile name the generator paints with — beside each lot building's own
+/// ([`LotBuilding::tiles`]) — so a test can check each one is still in the
+/// catalogue rather than finding out from a panic.
 const TILES: &[&str] = &[
     PAVEMENT,
     ROAD,
@@ -273,17 +234,65 @@ const TILES: &[&str] = &[
     SHOP_FLOORS[0],
     SHOP_FLOORS[1],
     SHOP_FLOORS[2],
-    WAREHOUSE_WALL,
-    WAREHOUSE_FLOOR,
-    FACTORY_WALL,
-    FACTORY_FLOOR,
-    RESTAURANT_WALL,
-    RESTAURANT_FLOOR,
-    CREMATORIUM_WALL,
-    CREMATORIUM_FLOOR,
     WINDOW,
     PERIMETER_WALL,
 ];
+
+/// A building every district must have, on a lot of its own, taken before
+/// any house is built: what [`LOT_BUILDINGS`] lists, one module each.
+pub struct LotBuilding {
+    /// What [`District::the`] and [`District::all`] call it.
+    pub name: &'static str,
+    /// How many of it a district has, a lot each.
+    pub count: usize,
+    /// Which lots it may stand on.
+    wanted: fn(&Lot) -> bool,
+    /// How good a lot is for the `index`th of it, lowest best — ties to the
+    /// first in the shuffled order — given where the scrap is and what has
+    /// been built already ([`Siting`]).
+    rank: fn(&Siting<'_>, usize, &Lot) -> i32,
+    /// Build it on the lot: walls, floor, door and props; the walls back.
+    /// May draw from the district's RNG, which is why the order of
+    /// [`LOT_BUILDINGS`] is the order of every seed's draws.
+    build: fn(&mut SmallRng, &mut Map, &mut Vec<Object>, Lot) -> Rect,
+    /// Every tile it paints with, for the catalogue test.
+    pub tiles: &'static [&'static str],
+    /// Every prop it places but its doors, for the catalogue test.
+    pub props: &'static [&'static str],
+}
+
+/// What a [`LotBuilding`] is sited by: the heaps of scrap round the district,
+/// and the lot buildings already built — in [`LOT_BUILDINGS`] order — so one
+/// can stand near another.
+pub struct Siting<'a> {
+    pub heaps: &'a [Point],
+    pub built: &'a [(&'static str, Rect)],
+}
+
+impl Siting<'_> {
+    /// The walls of the lot building called `name`, which has to have been
+    /// built already: earlier in [`LOT_BUILDINGS`].
+    pub fn the(&self, name: &str) -> Rect {
+        self.built.iter().find(|(built, _)| *built == name).map(|&(_, walls)| walls).expect("built before")
+    }
+}
+
+/// Every lot building, **in the order they are built**: each takes its lots
+/// and draws from the RNG in turn, so a new one goes on the end — which keeps
+/// every seed's bank, shops and lot buildings as they were, and moves only its
+/// houses and parks — and moving one changes every district.
+pub const LOT_BUILDINGS: &[&LotBuilding] = &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC];
+
+/// How many lots the lot buildings take.
+const fn lots_built() -> usize {
+    let mut lots = 0;
+    let mut i = 0;
+    while i < LOT_BUILDINGS.len() {
+        lots += LOT_BUILDINGS[i].count;
+        i += 1;
+    }
+    lots
+}
 
 /// A rectangle of cells: `x`, `y` is its lowest corner.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -362,18 +371,10 @@ pub struct District {
     pub houses: Vec<House>,
     pub bank: Rect,
     pub shops: Vec<Rect>,
-    /// Where the scrap collectors store their scrap: on a lot facing the
-    /// edge street, a [`SCRAP_BIN`] in each corner.
-    pub warehouse: Rect,
-    /// Where anybody may eat, drink and use a toilet: [`RESTAURANTS`] of
-    /// them, a lot each, spread over the district's quarters.
-    pub restaurants: Vec<Rect>,
-    /// Where the undertakers bring the dead: on a lot facing the edge
-    /// street, [`CREMATORIA`] furnaces in it.
-    pub crematorium: Rect,
-    /// Where scrap metal is smelted into steel: on the lot nearest the
-    /// warehouse, its furnaces, hoppers and pallets in it.
-    pub steel_factory: Rect,
+    /// Every lot building ([`LOT_BUILDINGS`]) by name, in the order they were
+    /// built: the warehouse, the restaurants, the crematorium, the steel
+    /// factory. Ask for one with [`District::the`] or [`District::all`].
+    pub lot_buildings: Vec<(&'static str, Rect)>,
     /// The lots left as grass: the residential lots without a house, and the
     /// shop block's fourth.
     pub parks: Vec<Rect>,
@@ -387,18 +388,30 @@ impl District {
         self.houses.iter().map(|house| house.residents as usize).sum()
     }
 
-    /// The outside of every building's walls: the houses, the shops, the
-    /// warehouse, the restaurants, the crematorium, the steel factory and the
-    /// bank.
+    /// The outside of every building's walls: the houses, the shops, every
+    /// lot building and the bank.
     pub fn buildings(&self) -> Vec<Rect> {
         self.houses
             .iter()
             .map(|house| house.walls)
             .chain(self.shops.iter().copied())
-            .chain([self.warehouse])
-            .chain(self.restaurants.iter().copied())
-            .chain([self.crematorium, self.steel_factory, self.bank])
+            .chain(self.lot_buildings.iter().map(|&(_, walls)| walls))
+            .chain([self.bank])
             .collect()
+    }
+
+    /// The walls of the one lot building called `name` (a module's `NAME`:
+    /// [`warehouse::NAME`]...).
+    pub fn the(&self, name: &str) -> Rect {
+        let mut found = self.all(name);
+        let walls = found.next().unwrap_or_else(|| panic!("no {name} in the district"));
+        assert!(found.next().is_none(), "more than one {name} in the district");
+        walls
+    }
+
+    /// The walls of every lot building called `name`, in the order built.
+    pub fn all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = Rect> + 'a {
+        self.lot_buildings.iter().filter(move |(each, _)| *each == name).map(|&(_, walls)| walls)
     }
 }
 
@@ -562,36 +575,18 @@ pub fn generate(seed: u64) -> District {
     let mut lots: Vec<Lot> = blocks.iter().flat_map(|&(bx, by)| lots_of(bx, by)).collect();
     lots.shuffle(&mut rng);
     // The buildings every district must have, a lot each, before a house is
-    // given one: the next one is another lot taken here and a builder. The
-    // warehouse goes on a lot facing the street round the edge, the side the
-    // scrap is on — the one nearest a heap, ties to the first in the
-    // shuffled order. The wasteland is the seed's as much as the district
-    // is, so this draws nothing and is the same every time.
+    // given one ([`LOT_BUILDINGS`]), in their order: each takes the lot it
+    // ranks best and builds on it.
     let heaps = heaps_round(seed);
-    let to_scrap = |lot: &Lot| {
-        let middle = lot.origin.offset(LOT_W / 2, LOT_H / 2);
-        heaps.iter().map(|&heap| heap.manhattan_distance(middle)).min().unwrap_or(i32::MAX)
-    };
-    let warehouse_lot = take_lot(&mut lots, |lot| lot.edge_sides().next().is_some(), to_scrap);
-    let warehouse = warehouse(&mut rng, &mut map, &mut props, warehouse_lot);
-    // The restaurants: one to each quarter, on the lot nearest its middle.
-    let restaurants: Vec<Rect> = [(1, 1), (3, 1), (1, 3), (3, 3)]
-        .into_iter()
-        .map(|(qx, qy)| {
-            let target = Point::new(WIDTH * qx / 4, HEIGHT * qy / 4);
-            let lot = take_lot(&mut lots, |_| true, |lot| lot.origin.offset(LOT_W / 2, LOT_H / 2).manhattan_distance(target));
-            restaurant(&mut rng, &mut map, &mut props, lot)
-        })
-        .collect();
-    // The crematorium: out on the edge of the district, the first edge lot
-    // left in the shuffled order.
-    let crematorium_lot = take_lot(&mut lots, |lot| lot.edge_sides().next().is_some(), |_| 0);
-    let crematorium = crematorium(&mut rng, &mut map, &mut props, crematorium_lot);
-    // The steel factory: on the lot nearest the warehouse, so the couriers'
-    // trips between the two are short. Draws nothing.
-    let to_the_warehouse = Point::new(warehouse.x + warehouse.w / 2, warehouse.y + warehouse.h / 2);
-    let factory_lot = take_lot(&mut lots, |_| true, |lot| lot.origin.offset(LOT_W / 2, LOT_H / 2).manhattan_distance(to_the_warehouse));
-    let steel_factory = steel_factory(&mut map, &mut props, factory_lot);
+    let mut lot_buildings: Vec<(&'static str, Rect)> = Vec::new();
+    for spec in LOT_BUILDINGS {
+        for index in 0..spec.count {
+            let siting = Siting { heaps: &heaps, built: &lot_buildings };
+            let lot = take_lot(&mut lots, spec.wanted, |lot| (spec.rank)(&siting, index, lot));
+            let walls = (spec.build)(&mut rng, &mut map, &mut props, lot);
+            lot_buildings.push((spec.name, walls));
+        }
+    }
     let empty = lots.split_off(lots.len() - EMPTY_LOTS);
     // Back into street order, so the spawners — and so the order people
     // arrive in — read the map from the bottom left rather than at random.
@@ -621,9 +616,7 @@ pub fn generate(seed: u64) -> District {
         .iter()
         .map(|house| house.walls)
         .chain(shops.iter().copied())
-        .chain([warehouse])
-        .chain(restaurants.iter().copied())
-        .chain([crematorium, steel_factory])
+        .chain(lot_buildings.iter().map(|&(_, walls)| walls))
         .collect();
     roof_and_light(&mut map, &rooms, bank);
     let buildings: Vec<Rect> = rooms.iter().copied().chain([bank]).collect();
@@ -643,10 +636,7 @@ pub fn generate(seed: u64) -> District {
         houses,
         bank,
         shops,
-        warehouse,
-        restaurants,
-        crematorium,
-        steel_factory,
+        lot_buildings,
         parks,
         gates,
     }
@@ -1236,113 +1226,6 @@ fn shops(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, bx: i32, by
     (shops, spare)
 }
 
-/// The warehouse, on `lot`: a room as big as a shop, a plain door — anybody
-/// may come in, it is nobody's property — in a wall facing the edge street,
-/// and a [`SCRAP_BIN`] in each of its [`WAREHOUSE_BINS`] corners. The door is
-/// kept two cells off the corners, so no bin stands in front of it, and each
-/// bin has the two cells beside it free to be used from.
-fn warehouse(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
-    let walls = place_in(rng, lot, LOT_W - 1, LOT_H - 1);
-    build(map, walls, WAREHOUSE_WALL, WAREHOUSE_FLOOR);
-    let sides: Vec<Side> = lot.edge_sides().collect();
-    let side = sides[rng.random_range(0..sides.len())];
-    for cell in door_clear_of_corners(rng, walls, side, DOOR_WIDTH, 2) {
-        map.set_terrain(cell, tile(WAREHOUSE_FLOOR));
-        props.push(object(DOOR, cell));
-    }
-    let inside = walls.interior();
-    let corners = [
-        Point::new(inside.x, inside.y),
-        Point::new(inside.right(), inside.y),
-        Point::new(inside.x, inside.top()),
-        Point::new(inside.right(), inside.top()),
-    ];
-    for corner in corners {
-        props.push(object(SCRAP_BIN, corner));
-    }
-    // The steel rack in the middle of the long wall away from the door: the
-    // interior is five cells by four, so the middle of a long wall has a
-    // cell either side of it before the corners' bins.
-    let rack_y = if side == Side::North { inside.y } else { inside.top() };
-    props.push(object(STEEL_RACK, Point::new(inside.x + inside.w / 2, rack_y)));
-    walls
-}
-
-/// The steel factory, on `lot`: the whole lot, `FACTORY_WALL` round
-/// `FACTORY_FLOOR`, a plain door — nobody's property — in the middle of the
-/// lot's first street side. Laid out from the door ([`Room`]): a
-/// [`SCRAP_HOPPER`] against each side wall in the row inside the door, a
-/// [`STEEL_PALLET`] against each side wall two rows short of the far wall,
-/// and a [`FURNACE`] in each far corner; everything has two free cells beside
-/// it, and the middle is open floor. Draws nothing from the RNG.
-fn steel_factory(map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
-    let walls = Rect::new(lot.origin.x, lot.origin.y, LOT_W, LOT_H);
-    build(map, walls, FACTORY_WALL, FACTORY_FLOOR);
-    let side = lot.outer[0];
-    let door: Vec<Point> = match side {
-        Side::South | Side::North => {
-            let y = if side == Side::South { walls.y } else { walls.top() };
-            (0..DOOR_WIDTH).map(|i| Point::new(walls.x + walls.w / 2 - 1 + i, y)).collect()
-        }
-        Side::West | Side::East => {
-            let x = if side == Side::West { walls.x } else { walls.right() };
-            (0..DOOR_WIDTH).map(|i| Point::new(x, walls.y + walls.h / 2 - 1 + i)).collect()
-        }
-    };
-    for cell in door {
-        map.set_terrain(cell, tile(FACTORY_FLOOR));
-        props.push(object(DOOR, cell));
-    }
-    let inside = walls.interior();
-    let (wide, deep) = match side {
-        Side::South | Side::North => (inside.w, inside.h),
-        Side::West | Side::East => (inside.h, inside.w),
-    };
-    let room = Room { walls, side, wide, deep };
-    for across in [0, wide - 1] {
-        props.push(object(SCRAP_HOPPER, room.at(across, 0)));
-        props.push(object(STEEL_PALLET, room.at(across, deep - 3)));
-        props.push(object(FURNACE, room.at(across, deep - 1)));
-    }
-    walls
-}
-
-/// A restaurant, on `lot`: a room as big as a shop with a plain door —
-/// nobody's property, so anybody may come in and use what is inside — on one
-/// of the lot's street sides, kept two cells off the corners. Fridges along
-/// the wall facing the door, and a toilet against each side wall a row in from
-/// the door, so the row inside the door stays clear and everything has free
-/// cells beside it to be used from. Laid out facing the door whichever side it
-/// is on.
-fn restaurant(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
-    let side = lot.outer[rng.random_range(0..2)];
-    let room = public_room(rng, map, props, lot, side, RESTAURANT_WALL, RESTAURANT_FLOOR);
-    let mut fridges = vec![0, room.wide - 1];
-    if room.wide % 2 == 1 {
-        fridges.push(room.wide / 2);
-    }
-    for across in fridges {
-        props.push(object(FRIDGE, room.at(across, room.deep - 1)));
-    }
-    for across in [0, room.wide - 1] {
-        props.push(object(TOILET, room.at(across, 1)));
-    }
-    room.walls
-}
-
-/// The crematorium, on `lot`: a room as big as a shop with a plain door —
-/// nobody's property — on a side facing the edge street, and a
-/// [`CREMATORIUM`] in each of the [`CREMATORIA`] corners facing the door.
-fn crematorium(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
-    let sides: Vec<Side> = lot.edge_sides().collect();
-    let side = sides[rng.random_range(0..sides.len())];
-    let room = public_room(rng, map, props, lot, side, CREMATORIUM_WALL, CREMATORIUM_FLOOR);
-    for across in [0, room.wide - 1] {
-        props.push(object(CREMATORIUM, room.at(across, room.deep - 1)));
-    }
-    room.walls
-}
-
 /// A building of one room laid out from its door: its walls, and the room
 /// inside measured `across` the door's wall and `deep` in from it.
 struct Room {
@@ -1571,9 +1454,9 @@ fn livable(inside: Rect, entry: &[Point], taken: &[Point]) -> bool {
 mod tests {
     use super::*;
 
-    const SEEDS: std::ops::Range<u64> = 0..64;
+    pub(super) const SEEDS: std::ops::Range<u64> = 0..64;
 
-    fn props_in(map: &Map, rect: Rect, name: &str) -> usize {
+    pub(super) fn props_in(map: &Map, rect: Rect, name: &str) -> usize {
         map.objects(ObjectLayer::Props)
             .iter()
             .filter(|prop| prop.kind.as_str() == name && rect.contains(prop.cell()))
@@ -1658,11 +1541,9 @@ mod tests {
             for &shop in &district.shops {
                 assert_eq!(in_room(shop, HOUSE_LAMP), 1, "seed {seed}, shop at {shop:?}");
             }
-            assert_eq!(in_room(district.warehouse, HOUSE_LAMP), 1, "seed {seed}: the warehouse");
-            for &restaurant in &district.restaurants {
-                assert_eq!(in_room(restaurant, HOUSE_LAMP), 1, "seed {seed}, restaurant at {restaurant:?}");
+            for &(name, walls) in &district.lot_buildings {
+                assert_eq!(in_room(walls, HOUSE_LAMP), 1, "seed {seed}: the {name} at {walls:?}");
             }
-            assert_eq!(in_room(district.crematorium, HOUSE_LAMP), 1, "seed {seed}: the crematorium");
             assert!(in_room(district.bank, OFFICE_LAMP) >= 12, "seed {seed}: {}", in_room(district.bank, OFFICE_LAMP));
             for lamp in lamps {
                 assert!(district.map.sight().is_passable(lamp.cell()), "seed {seed}: a lamp in a wall");
@@ -1673,12 +1554,13 @@ mod tests {
 
     #[test]
     fn every_tile_and_prop_the_generator_uses_exists() {
-        for name in TILES {
+        for name in TILES.iter().chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.tiles)) {
             assert!(TerrainId::from_name(name).is_some(), "{name}");
         }
         for name in BEDS
             .iter()
-            .chain(&[FRIDGE, TOILET, COMPUTER, TV, SCRAP_BIN, STEEL_RACK, FURNACE, SCRAP_HOPPER, STEEL_PALLET, GUARD_POST, CREMATORIUM, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
+            .chain(&[FRIDGE, TOILET, COMPUTER, TV, GUARD_POST, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
+            .chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.props))
         {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
         }
@@ -1831,138 +1713,10 @@ mod tests {
             assert!(props_in(map, district.bank, COMPUTER) >= 12, "seed {seed}");
             assert!(props_in(map, district.bank, TOILET) >= 2, "seed {seed}");
 
-            // The restaurants: one to each quarter, fridges and toilets and
-            // nothing else, open to anybody.
-            assert_eq!(district.restaurants.len(), RESTAURANTS, "seed {seed}");
-            let properties = crate::sim::Properties::from_map(map);
-            for (i, &restaurant) in district.restaurants.iter().enumerate() {
-                assert!(props_in(map, restaurant, FRIDGE) >= 2, "seed {seed} {restaurant:?}");
-                assert_eq!(props_in(map, restaurant, TOILET), 2, "seed {seed} {restaurant:?}");
-                let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| restaurant.interior().contains(prop.cell()));
-                assert!(inside.clone().all(|prop| [FRIDGE, TOILET].contains(&prop.kind.as_str())), "seed {seed} {restaurant:?}");
-                for cell in restaurant.cells() {
-                    assert_eq!(properties.of(cell), None, "seed {seed}: a restaurant is nobody's property");
-                }
-                let (qx, qy) = ((i % 2) as i32, (i / 2) as i32);
-                let (mx, my) = (restaurant.x + restaurant.w / 2, restaurant.y + restaurant.h / 2);
-                assert_eq!((mx * 2 / WIDTH, my * 2 / HEIGHT), (qx, qy), "seed {seed}: restaurant {i} at {restaurant:?} is out of its quarter");
-            }
-
-            // The crematorium: its furnaces and nothing else, nobody's, on
-            // the edge, and none anywhere else.
-            let crematorium = district.crematorium;
-            let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| crematorium.interior().contains(prop.cell()));
-            assert!(inside.clone().all(|prop| prop.kind.as_str() == CREMATORIUM), "seed {seed}: the crematorium holds crematoria only");
-            assert_eq!(inside.count(), CREMATORIA, "seed {seed}");
-            assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), CREMATORIUM), CREMATORIA, "seed {seed}: none elsewhere");
-            for cell in crematorium.cells() {
-                assert_eq!(properties.of(cell), None, "seed {seed}: the crematorium is nobody's property");
-            }
-            let on_the_edge = crematorium.x - STREET <= 1
-                || WIDTH - STREET - 1 - crematorium.right() <= 1
-                || crematorium.y - STREET <= 1
-                || HEIGHT - STREET - 1 - crematorium.top() <= 1;
-            assert!(on_the_edge, "seed {seed}: the crematorium at {crematorium:?} is not on the edge");
-
-            // One warehouse, its bins and its steel rack and nothing else in
-            // it, open to anybody, on a lot facing the street round the edge.
-            let warehouse = district.warehouse;
-            let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| warehouse.interior().contains(prop.cell()));
-            assert!(
-                inside.clone().all(|prop| [SCRAP_BIN, STEEL_RACK].contains(&prop.kind.as_str())),
-                "seed {seed}: the warehouse holds bins and a rack only"
-            );
-            assert_eq!(inside.count(), WAREHOUSE_BINS + 1, "seed {seed}");
-            assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), SCRAP_BIN), WAREHOUSE_BINS, "seed {seed}: bins nowhere else");
-            assert_eq!(props_in(map, warehouse, STEEL_RACK), 1, "seed {seed}: a rack for the steel");
-            assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), STEEL_RACK), 1, "seed {seed}: and none elsewhere");
-
-            // One steel factory: its furnaces, hoppers and pallets and
-            // nothing else, nobody's, on the lot nearest the warehouse, and
-            // none of them anywhere else.
-            let factory = district.steel_factory;
-            let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| factory.interior().contains(prop.cell()));
-            assert!(
-                inside.clone().all(|prop| [FURNACE, SCRAP_HOPPER, STEEL_PALLET].contains(&prop.kind.as_str())),
-                "seed {seed}: the steel factory holds its furnaces and stores only"
-            );
-            for (name, count) in [(FURNACE, FURNACES), (SCRAP_HOPPER, HOPPERS), (STEEL_PALLET, PALLETS)] {
-                assert_eq!(props_in(map, factory, name), count, "seed {seed}: {name}");
-                assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), name), count, "seed {seed}: {name} elsewhere");
-            }
-            for cell in factory.cells() {
-                assert_eq!(properties.of(cell), None, "seed {seed}: the steel factory is nobody's property");
-            }
-            let middle = |rect: Rect| Point::new(rect.x + rect.w / 2, rect.y + rect.h / 2);
-            let to_the_factory = middle(factory).manhattan_distance(middle(warehouse));
-            let lot_middles = district.houses.iter().map(|house| house.walls).chain(district.parks.iter().copied());
-            for other in lot_middles {
-                assert!(
-                    middle(other).manhattan_distance(middle(warehouse)) + 2 >= to_the_factory,
-                    "seed {seed}: the lot at {other:?} is nearer the warehouse than the factory at {factory:?}"
-                );
-            }
-            let properties = crate::sim::Properties::from_map(map);
-            for cell in warehouse.cells() {
-                assert_eq!(properties.of(cell), None, "seed {seed}: the warehouse is nobody's property");
-            }
-            let near_the_edge = warehouse.x - STREET <= 1
-                || WIDTH - STREET - 1 - warehouse.right() <= 1
-                || warehouse.y - STREET <= 1
-                || HEIGHT - STREET - 1 - warehouse.top() <= 1;
-            assert!(near_the_edge, "seed {seed}: the warehouse at {warehouse:?} is not on the edge");
-
-            // Of the lots on the edge to be had — not the bank's or the
-            // shops' blocks — the one nearest the scrap.
-            let heaps = heaps_round(seed);
-            let to_scrap = |lot: &Lot| {
-                let middle = lot.origin.offset(LOT_W / 2, LOT_H / 2);
-                heaps.iter().map(|&heap| heap.manhattan_distance(middle)).min().unwrap()
-            };
-            let taken = |bx: i32, by: i32| {
-                let origin = block_origin(bx, by);
-                let block = Rect::new(origin.x, origin.y, BLOCK_W, BLOCK_H);
-                let bank = district.bank;
-                [Point::new(bank.x, bank.y), Point::new(bank.right(), bank.top()), Point::new(district.shops[0].x, district.shops[0].y)]
-                    .into_iter()
-                    .any(|cell| block.contains(cell))
-            };
-            let edge_lots: Vec<Lot> = (0..BLOCKS_Y)
-                .flat_map(|by| (0..BLOCKS_X).map(move |bx| (bx, by)))
-                .filter(|&(bx, by)| !taken(bx, by))
-                .flat_map(|(bx, by)| lots_of(bx, by))
-                .filter(|lot| lot.edge_sides().next().is_some())
-                .collect();
-            let ours = edge_lots
-                .iter()
-                .find(|lot| Rect::new(lot.origin.x, lot.origin.y, LOT_W, LOT_H).contains(Point::new(warehouse.x, warehouse.y)))
-                .expect("the warehouse is on an edge lot");
-            let nearest = edge_lots.iter().map(to_scrap).min().unwrap();
-            assert_eq!(to_scrap(ours), nearest, "seed {seed}: the warehouse is not on the edge lot nearest the scrap");
-        }
-    }
-
-    /// The warehouse's door faces the edge street, so a collector steps out
-    /// of it towards the wasteland.
-    #[test]
-    fn the_warehouse_door_opens_onto_the_street_round_the_edge() {
-        for seed in SEEDS {
-            let district = generate(seed);
-            let map = &district.map;
-            let warehouse = district.warehouse;
-            let doors: Vec<Point> = doors_of(map).into_iter().filter(|&(cell, _)| warehouse.contains(cell)).map(|(cell, _)| cell).collect();
-            assert_eq!(doors.len(), DOOR_WIDTH as usize, "seed {seed}");
-            for door in doors {
-                let outside = door.cardinal_neighbours().into_iter().find(|&cell| !warehouse.contains(cell)).unwrap();
-                let edge_street = outside.x < STREET || outside.x >= WIDTH - STREET || outside.y < STREET || outside.y >= HEIGHT - STREET;
-                let yard = !edge_street && map.terrain(outside) == Some(tile(PAVEMENT));
-                // A building is placed somewhere in its lot, so the door may
-                // open onto the cell of yard between the lot's edge and it.
-                assert!(edge_street || yard, "seed {seed}: the warehouse door at {door:?} opens onto {outside:?}");
-                let toward_edge = |cell: Point| {
-                    cell.x.min(cell.y).min(WIDTH - 1 - cell.x).min(HEIGHT - 1 - cell.y)
-                };
-                assert!(toward_edge(outside) < toward_edge(door), "seed {seed}: the door at {door:?} faces inwards");
+            // Every lot building, as many as it says, and each in the
+            // places its own module's tests say.
+            for spec in LOT_BUILDINGS {
+                assert_eq!(district.all(spec.name).count(), spec.count, "seed {seed}: {}", spec.name);
             }
         }
     }
@@ -2056,7 +1810,7 @@ mod tests {
         }
     }
 
-    fn doors_of(map: &Map) -> Vec<(Point, &str)> {
+    pub(super) fn doors_of(map: &Map) -> Vec<(Point, &str)> {
         map.objects(ObjectLayer::Props)
             .iter()
             .filter(|prop| [DOOR, HOUSE_DOOR].contains(&prop.kind.as_str()))
@@ -2111,9 +1865,8 @@ mod tests {
                 .iter()
                 .map(|house| (house.walls, HOUSE_DOOR))
                 .chain(district.shops.iter().map(|&shop| (shop, DOOR)))
-                .chain(district.restaurants.iter().map(|&restaurant| (restaurant, DOOR)))
-                .chain([(district.crematorium, DOOR)])
-                .chain([(district.warehouse, DOOR), (district.bank, DOOR)])
+                .chain(district.lot_buildings.iter().map(|&(_, walls)| (walls, DOOR)))
+                .chain([(district.bank, DOOR)])
                 .collect();
             for &(walls, kind) in &buildings {
                 // Every way through an outer wall has a door in it, of the

@@ -1,14 +1,11 @@
 //! What an item looks like while somebody is holding it.
 //!
 //! Every [`ItemKind`] has to be drawable, and there are two ways to draw one: a
-//! pixel-art texture or an emoji. [`art`] is a `match` over every kind with no
-//! fallback arm, so a new item does not compile until somebody has said which —
-//! an item that is never drawn is not a case to remember to check for.
-//!
-//! The simulation does not know any of this. An item says what it is made of;
-//! which picture that is belongs here, next to the rest of the art, the same
-//! way `sim` hands out an appearance seed and [`super::human`] decides which
-//! PNGs it means. `game::held` is what puts the picture on the screen.
+//! pixel-art texture or an emoji. So far every item is an emoji, and the emoji
+//! is a field of the item's row in its catalogue (`sim::item`), which a new
+//! item does not compile without — an item that is never drawn is not a case
+//! to remember to check for. [`art`] turns it into a picture; `game::held` is
+//! what puts the picture on the screen.
 
 use bevy::prelude::*;
 
@@ -38,17 +35,10 @@ pub enum ItemArt {
     Emoji(&'static str),
 }
 
-/// How an item is drawn.
-///
-/// Every kind, and no wildcard arm: that is the guarantee.
+/// How an item is drawn: the emoji its row in the catalogue names
+/// ([`ItemKind::emoji`]), which every kind must have — that is the guarantee.
 pub const fn art(kind: ItemKind) -> ItemArt {
-    match kind {
-        ItemKind::Food => ItemArt::Emoji("🍔"),
-        ItemKind::Water => ItemArt::Emoji("💧"),
-        ItemKind::Scrap => ItemArt::Emoji("🔩"),
-        ItemKind::Body => ItemArt::Emoji("⚰"),
-        ItemKind::Steel => ItemArt::Emoji("⛓"),
-    }
+    ItemArt::Emoji(kind.emoji())
 }
 
 /// How far to nudge a texture of this many texels, in canvas pixels, so that

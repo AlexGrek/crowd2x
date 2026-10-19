@@ -99,7 +99,7 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
 - Art is not in here. Which PNG draws a floor belongs to the Bevy adapter; the editor is
   not wired to this format yet and still spawns its own tile entities.
 
-**The district generator** (`map/district.rs`, plain Rust like the rest of `map/`):
+**The district generator** (`map/district/`, plain Rust like the rest of `map/`):
 `district::generate(seed)` builds a 131x100 district — a 6x5 grid of 2x2-lot blocks with
 5-cell streets between and around them (pavement, three cells of road, pavement; yards
 paved, the empty lots grass parks) — holding 92

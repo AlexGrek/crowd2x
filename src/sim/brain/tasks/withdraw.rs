@@ -12,12 +12,13 @@
 //! or for as much as was done of it if it is cut short.
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Five minutes of world to fill a pack from a store.
 pub const WITHDRAW_SECONDS: f32 = watched(5.0 * MINUTE);
@@ -35,13 +36,13 @@ impl Withdraw {
     /// Whether it can go on: one step from the store, the store still there
     /// with something in it, and room in the pack for a piece of it.
     fn can_withdraw(&self, ctx: &TaskCtx<'_>) -> bool {
-        let Some(store) = ctx.think.bins.store(self.store) else {
+        let (Some(store), Some(item)) = (ctx.think.bins.store(self.store), ctx.think.bins.item(self.store)) else {
             return false;
         };
         ctx.here().manhattan_distance(self.store) <= 1
-            && ctx.think.features.has(store.feature(), self.store)
+            && ctx.think.features.has(store, self.store)
             && ctx.think.bins.stored(self.store) > 0
-            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.room_for(store.item()))
+            && ctx.inventory.as_deref().is_some_and(|inventory| inventory.room_for(item))
     }
 }
 
@@ -86,6 +87,38 @@ impl TaskExecutor for Withdraw {
 
     fn describe(&self) -> String {
         format!("take from the store at {}, {}", self.store.x, self.store.y)
+    }
+}
+
+impl Task {
+    /// Fill the pack with what the store in `store` holds, from a cell
+    /// beside it.
+    pub const fn withdraw(store: Point, seconds: f32) -> Task {
+        Task::Withdraw(Withdraw { store, seconds })
+    }
+}
+
+/// Saved as `withdraw`: the store's cell and the seconds.
+impl TimedTask for Withdraw {
+    const NAME: &'static str = "withdraw";
+
+    fn new(cell: Point, seconds: f32) -> Withdraw {
+        Withdraw { store: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.store
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::Withdraw(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

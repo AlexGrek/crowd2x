@@ -3,7 +3,9 @@
 //! Each is a `Copy` struct holding what the step is about, with an
 //! [`TaskExecutor`](super::task::TaskExecutor) impl that starts its action,
 //! checks what has to stay true while it runs, and applies what finishing it
-//! means. See [`super::task`] for why they are not boxed.
+//! means; its `Task::` constructor; and how it is saved. See [`super::task`]
+//! for why they are not boxed, and for adding one: a file here, and its name
+//! in the [`tasks!`](super::task::tasks) list below.
 
 pub mod close_fridge;
 pub mod consume_item;
@@ -43,7 +45,27 @@ pub use work::Work;
 
 use crate::sim::biology::Experience;
 
-use super::task::TaskCtx;
+use super::task::{tasks, TaskCtx};
+
+tasks! {
+    MoveTo,
+    TakeItem,
+    ConsumeItem,
+    UseToilet,
+    UseComputer,
+    WatchTv,
+    Sleep,
+    Wait,
+    OpenFridge,
+    CloseFridge,
+    Salvage,
+    Work,
+    Deposit,
+    TakeBody,
+    Cremate,
+    Withdraw,
+    Smelt,
+}
 
 /// Say that what a task just did was **in recent memory**, and so less of a
 /// treat than it would have been — what [`Biology::handle`] hands back when it
@@ -149,9 +171,11 @@ pub(crate) mod rig {
         pub fn apply_effect(&mut self) -> Vec<String> {
             let uid = self.walk.body().uid();
             match self.effect {
-                Effect::Deposit { at, pieces } => crate::sim::deposit(uid, &mut self.world.bins, &self.world.log, at, pieces),
+                Effect::Deposit { at, pieces } => {
+                    crate::sim::effect::deposit(uid, &mut self.world.facilities.bins, &self.world.log, at, pieces)
+                }
                 Effect::Withdraw { at } => {
-                    crate::sim::withdraw(uid, Some(&mut self.inventory), &mut self.world.bins, &self.world.log, at)
+                    crate::sim::effect::withdraw(uid, Some(&mut self.inventory), &mut self.world.facilities.bins, &self.world.log, at)
                 }
                 _ => {}
             }

@@ -2,11 +2,12 @@
 //! [`super::OpenFridge`].
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::clock::watched;
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// Five world seconds to close the door — the same as opening it.
 pub const CLOSE_SECONDS: f32 = watched(5.0);
@@ -52,6 +53,38 @@ impl TaskExecutor for CloseFridge {
 
     fn describe(&self) -> String {
         format!("close the fridge at {}, {}", self.fridge.x, self.fridge.y)
+    }
+}
+
+impl Task {
+    /// Close the fridge in `fridge`, from a cell beside it, unless it is
+    /// closed already.
+    pub const fn close_fridge(fridge: Point, seconds: f32) -> Task {
+        Task::CloseFridge(CloseFridge { fridge, seconds })
+    }
+}
+
+/// Saved as `close fridge`: the fridge's cell and the seconds.
+impl TimedTask for CloseFridge {
+    const NAME: &'static str = "close fridge";
+
+    fn new(cell: Point, seconds: f32) -> CloseFridge {
+        CloseFridge { fridge: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.fridge
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::CloseFridge(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

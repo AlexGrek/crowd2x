@@ -120,7 +120,7 @@ a box selects it (`SelectedBox`, exclusive with `Selected`, same frame sprite);
 `game/boxpanel.rs` - panel with `switch off`/`switch on` and `close` (pressable by name).
 `has_box`, `box_is_on` on `GameState`. Box state is **not saved** in the map.
 
-## The district generator wires itself (`src/map/district.rs`, `connect`)
+## The district generator wires itself (`src/map/district/mod.rs`, `connect`)
 
 After roofs and lamps, seed-independent: transformer at `(WIDTH-1, 0)`, sewer at
 `(0, HEIGHT-1)`, a `LINE` and a `PIPE` main down the middle of every street (skipping building

@@ -8,6 +8,7 @@
 //! It is work, and tires like it ([`Event::Worked`]).
 
 use crate::map::Point;
+use crate::save::pb;
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::{watched, MINUTE, TIME_SCALE};
 use crate::sim::feature::FeatureKind;
@@ -15,7 +16,7 @@ use crate::sim::item::ItemKind;
 use crate::sim::Effect;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 /// A quarter of an hour of world to see a body into the fire.
 pub const CREMATE_SECONDS: f32 = watched(15.0 * MINUTE);
@@ -76,6 +77,38 @@ impl TaskExecutor for Cremate {
 
     fn describe(&self) -> String {
         format!("cremate a body at the crematorium at {}, {}", self.crematorium.x, self.crematorium.y)
+    }
+}
+
+impl Task {
+    /// Put the body in hand into the crematorium in `crematorium`, from a
+    /// cell beside it.
+    pub const fn cremate(crematorium: Point, seconds: f32) -> Task {
+        Task::Cremate(Cremate { crematorium, seconds })
+    }
+}
+
+/// Saved as `cremate`: the crematorium's cell and the seconds.
+impl TimedTask for Cremate {
+    const NAME: &'static str = "cremate";
+
+    fn new(cell: Point, seconds: f32) -> Cremate {
+        Cremate { crematorium: cell, seconds }
+    }
+
+    fn cell(&self) -> Point {
+        self.crematorium
+    }
+
+    fn seconds(&self) -> f32 {
+        self.seconds
+    }
+
+    fn legacy(saved: &pb::TaskKind) -> Option<&pb::Timed> {
+        match saved {
+            pb::TaskKind::Cremate(task) => Some(task),
+            _ => None,
+        }
     }
 }
 

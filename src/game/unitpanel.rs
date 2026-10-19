@@ -50,7 +50,7 @@ use bevy::prelude::*;
 
 use crate::characters::{dog, human};
 use crate::sim::clothing::Clothing;
-use crate::sim::{Clock, EntityType, GameEntity, GoalId, ItemKind, JobKind, MoveOutcome, Talent, Uid};
+use crate::sim::{Clock, EntityType, GameEntity, ItemKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -695,18 +695,13 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
     }
 }
 
-/// What a courier has in its pack to carry: steel before scrap.
-fn carrying(entity: &dyn GameEntity) -> Option<ItemKind> {
-    let inventory = entity.inventory()?;
-    [ItemKind::Steel, ItemKind::Scrap].into_iter().find(|&item| inventory.count(item) > 0)
-}
-
 /// What it does for a living, as a block of lines: the job, where it is done
 /// (`computer at 12, 4`, `scrap bin at 30, 2`), the hours and days, and —
 /// `now` — what it is doing about them at `clock`, which is the line worth
-/// watching: on the way in, at the desk, out collecting scrap or storing it,
-/// on watch at a gate, seeing to the dead, away from it for something more
-/// pressing, or off.
+/// watching: what the job's own row says while its goal is in charge (on the
+/// way in, at the desk, out collecting scrap or storing it, on watch at a
+/// gate, seeing to the dead — [`JobKind::now`](crate::sim::JobKind::now)), away from it for something
+/// more pressing, or off.
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
@@ -714,24 +709,10 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let shift = job.shift;
     let at_work = entity.interacting_with() == Some(job.workplace);
     let now = if job.is_due(clock) {
-        match (entity.current_goal(), job.kind) {
-            (Some(GoalId::Work), JobKind::OfficeWorker) if at_work => "working".to_string(),
-            (Some(GoalId::Work), JobKind::OfficeWorker) => "on the way to work".to_string(),
-            (Some(GoalId::Collect), JobKind::ScrapCollector) if at_work => "storing scrap".to_string(),
-            (Some(GoalId::Collect), JobKind::ScrapCollector) => "collecting scrap".to_string(),
-            (Some(GoalId::Work), JobKind::Guard) if at_work => "on watch".to_string(),
-            (Some(GoalId::Work), JobKind::Guard) => "on the way to the gate".to_string(),
-            (Some(GoalId::Bury), JobKind::Undertaker) if at_work => "cremating".to_string(),
-            (Some(GoalId::Bury), JobKind::Undertaker) => "seeing to the dead".to_string(),
-            (Some(GoalId::Smelt), JobKind::Steelworker) if at_work => "smelting steel".to_string(),
-            (Some(GoalId::Smelt), JobKind::Steelworker) => "fetching scrap, storing steel".to_string(),
-            (Some(GoalId::Haul), JobKind::Courier) => match carrying(entity) {
-                Some(ItemKind::Steel) => "carrying steel to the warehouse".to_string(),
-                Some(_) => "carrying scrap to the factory".to_string(),
-                None => "fetching a load".to_string(),
-            },
-            (Some(goal), _) => format!("on a break: {}", goal.name()),
-            (None, _) => "off".to_string(),
+        match entity.current_goal() {
+            Some(goal) if goal == job.kind.goal() => job.kind.now(at_work, entity.inventory()).to_string(),
+            Some(goal) => format!("on a break: {}", goal.name()),
+            None => "off".to_string(),
         }
     } else if !shift.works_on(clock.weekday()) {
         if clock.weekday().is_weekend() { "weekend" } else { "day off" }.to_string()

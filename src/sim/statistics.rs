@@ -5,17 +5,18 @@
 //! ([`GameState::statistics`](super::GameState::statistics)) by one walk of the
 //! arena — never per tick, only while somebody is reading it. Most of it is
 //! there to be counted: the living and the dead lying in the world are
-//! entities, the warehouse is the [`Bins`](super::Bins), the posts are the
+//! entities, the warehouse and the factory are the [`Bins`](super::Bins) —
+//! grouped by the site each store kind's row names, so a new store or a new
+//! building with stores shows up here with no change — and the posts are the
 //! workplace features. What is not is a body gone to the crematorium, which
 //! leaves the world, and so the [`Tally`]: counted as it happens, and saved.
 
 use crate::save::pb;
 
 use super::entities::Entities;
-use super::feature::Features;
+use super::feature::{FeatureKind, Features};
 use super::item::ItemKind;
 use super::job::JobKind;
-use super::bins::Store;
 use super::uid::EntityType;
 use super::{Bins, Corpses};
 
@@ -49,20 +50,29 @@ pub struct JobCount {
     pub posts: u32,
 }
 
+/// What one building's stores hold, all of them together: the warehouse's
+/// bins and rack, the factory's hoppers and pallets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SiteStock {
+    /// The building, as its stores' rows name it
+    /// ([`StoreDef::site`](super::feature::StoreDef::site)).
+    pub site: &'static str,
+    /// Whether the map has any of its stores — a map without a warehouse
+    /// says so, rather than that it is empty.
+    pub present: bool,
+    /// Every kind of thing kept there and how many pieces, in the order the
+    /// store kinds are listed.
+    pub items: Vec<(ItemKind, u32)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statistics {
     /// The living, by kind, in [`EntityType::ALL`] order.
     pub alive: Vec<(EntityType, u32)>,
-    /// What the warehouse holds — scrap metal in its bins, steel on its
-    /// rack — and whether there is one (any of its stores on the map).
-    pub scrap_in_warehouse: u32,
-    pub steel_in_warehouse: u32,
-    pub warehouse: bool,
-    /// What the steel factory holds — scrap metal in its hoppers, steel on
-    /// its pallets — and whether there is one.
-    pub scrap_in_factory: u32,
-    pub steel_in_factory: u32,
-    pub factory: bool,
+    /// What every building with stores holds, one entry a site, in the order
+    /// their store kinds are listed — every site there is, on this map or
+    /// not.
+    pub sites: Vec<SiteStock>,
     /// Every [`JobKind`], in [`JobKind::ALL`] order, posts or none.
     pub jobs: Vec<JobCount>,
     /// Living humans with no job.
@@ -107,14 +117,29 @@ impl Statistics {
                 posts: (features.cells_of(kind.workplace()).len() * kind.shifts().len()) as u32,
             })
             .collect();
+        let mut sites: Vec<SiteStock> = Vec::new();
+        for kind in FeatureKind::ALL {
+            let Some(store) = kind.store() else {
+                continue;
+            };
+            let at = match sites.iter().position(|stock| stock.site == store.site) {
+                Some(at) => at,
+                None => {
+                    sites.push(SiteStock { site: store.site, present: false, items: Vec::new() });
+                    sites.len() - 1
+                }
+            };
+            let stock = &mut sites[at];
+            stock.present |= bins.count(kind) > 0;
+            let stored = bins.total_in(kind);
+            match stock.items.iter_mut().find(|(item, _)| *item == store.holds) {
+                Some((_, count)) => *count += stored,
+                None => stock.items.push((store.holds, stored)),
+            }
+        }
         Statistics {
             alive: alive.to_vec(),
-            scrap_in_warehouse: bins.total_in(Store::ScrapBin),
-            steel_in_warehouse: bins.total_in(Store::SteelRack),
-            warehouse: bins.count(Store::ScrapBin) + bins.count(Store::SteelRack) > 0,
-            scrap_in_factory: bins.total_in(Store::ScrapHopper),
-            steel_in_factory: bins.total_in(Store::SteelPallet),
-            factory: bins.count(Store::ScrapHopper) + bins.count(Store::SteelPallet) > 0,
+            sites,
             jobs,
             jobless,
             died: tally.died,
@@ -127,5 +152,21 @@ impl Statistics {
     /// Every living unit, of every kind.
     pub fn living(&self) -> u32 {
         self.alive.iter().map(|&(_, count)| count).sum()
+    }
+
+    /// How many pieces of `item` the stores of `site` hold.
+    pub fn stock(&self, site: &str, item: ItemKind) -> u32 {
+        self.sites
+            .iter()
+            .filter(|stock| stock.site == site)
+            .flat_map(|stock| &stock.items)
+            .filter(|(each, _)| *each == item)
+            .map(|(_, count)| count)
+            .sum()
+    }
+
+    /// Whether the map has any of `site`'s stores.
+    pub fn has(&self, site: &str) -> bool {
+        self.sites.iter().any(|stock| stock.site == site && stock.present)
     }
 }

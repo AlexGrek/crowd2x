@@ -167,12 +167,11 @@ pub fn describe(stats: &Statistics) -> String {
     out.push_str(&format!("alive      {:>4}   {}\n", stats.living(), kinds.join("  ")));
 
     out.push('\n');
-    for (name, there, scrap, steel) in [
-        ("warehouse", stats.warehouse, stats.scrap_in_warehouse, stats.steel_in_warehouse),
-        ("factory", stats.factory, stats.scrap_in_factory, stats.steel_in_factory),
-    ] {
-        if there {
-            out.push_str(&format!("{name:<10} {scrap:>4}   scrap metal  {steel:>4}   steel\n"));
+    for stock in &stats.sites {
+        let name = stock.site;
+        if stock.present {
+            let items: Vec<String> = stock.items.iter().map(|(item, count)| format!("{count:>4}   {}", item.name())).collect();
+            out.push_str(&format!("{name:<10} {}\n", items.join("  ")));
         } else {
             out.push_str(&format!("{name:<10}        none\n"));
         }
@@ -201,19 +200,18 @@ fn plural(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::statistics::JobCount;
-    use crate::sim::{EntityType, JobKind};
+    use crate::sim::statistics::{JobCount, SiteStock};
+    use crate::sim::{EntityType, ItemKind, JobKind};
+
+    fn site(site: &'static str, present: bool, scrap: u32, steel: u32) -> SiteStock {
+        SiteStock { site, present, items: vec![(ItemKind::Scrap, scrap), (ItemKind::Steel, steel)] }
+    }
 
     #[test]
     fn the_menu_reads_the_living_the_warehouse_the_jobs_and_the_dead() {
         let stats = Statistics {
             alive: vec![(EntityType::Human, 12), (EntityType::Dog, 1)],
-            scrap_in_warehouse: 30,
-            steel_in_warehouse: 6,
-            warehouse: true,
-            scrap_in_factory: 3,
-            steel_in_factory: 1,
-            factory: true,
+            sites: vec![site("warehouse", true, 30, 6), site("factory", true, 3, 1)],
             jobs: vec![
                 JobCount { kind: JobKind::OfficeWorker, workers: 5, posts: 12 },
                 JobCount { kind: JobKind::Guard, workers: 3, posts: 3 },
@@ -238,12 +236,7 @@ mod tests {
     fn a_map_without_a_warehouse_or_a_factory_says_so() {
         let stats = Statistics {
             alive: vec![(EntityType::Human, 1)],
-            scrap_in_warehouse: 0,
-            steel_in_warehouse: 0,
-            warehouse: false,
-            scrap_in_factory: 0,
-            steel_in_factory: 0,
-            factory: false,
+            sites: vec![site("warehouse", false, 0, 0), site("factory", false, 0, 0)],
             jobs: Vec::new(),
             jobless: 1,
             died: 0,

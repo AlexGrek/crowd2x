@@ -2,8 +2,9 @@
 //!
 //! Every layer is a full 16x16 frame drawn at the same position, so a character
 //! is just a stack of sprites in a fixed order. Adding a new hairstyle
-//! means dropping a PNG into `assets/human/` and listing it here; outfits also
-//! need a stable [`Clothing`] variant and a [`clothing_path`] mapping. For a
+//! means dropping a PNG into `assets/human/` and listing it here; an outfit
+//! also needs a stable [`Clothing`] name, which its PNG is named after
+//! ([`clothing_path`]) — a job's uniform is named in the job's row. For a
 //! new style or colour, adding a mask or palette to `tools/human_art.py`, which
 //! draws every hair and outfit layer and prints these lists.
 //!
@@ -19,41 +20,29 @@ use crate::sim::clothing::Clothing;
 
 pub const BASE: &str = "human/human_base.png";
 
-/// Art for every wearable outfit. Exhaustive so a new outfit needs a texture.
-pub const fn clothing_path(clothing: Clothing) -> Option<&'static str> {
-    match clothing {
-        Clothing::None => None,
-        Clothing::SwimsuitBlue => Some("human/clothes_swimsuit_blue.png"),
-        Clothing::SwimsuitPink => Some("human/clothes_swimsuit_pink.png"),
-        Clothing::SundressRed => Some("human/clothes_sundress_red.png"),
-        Clothing::SundressYellow => Some("human/clothes_sundress_yellow.png"),
-        Clothing::SundressGreen => Some("human/clothes_sundress_green.png"),
-        Clothing::SundressWhite => Some("human/clothes_sundress_white.png"),
-        Clothing::SundressTeal => Some("human/clothes_sundress_teal.png"),
-        Clothing::SundressOrange => Some("human/clothes_sundress_orange.png"),
-        Clothing::SundressPurple => Some("human/clothes_sundress_purple.png"),
-        Clothing::GownRed => Some("human/clothes_gown_red.png"),
-        Clothing::GownBlack => Some("human/clothes_gown_black.png"),
-        Clothing::GownNavy => Some("human/clothes_gown_navy.png"),
-        Clothing::GownPurple => Some("human/clothes_gown_purple.png"),
-        Clothing::GownWhite => Some("human/clothes_gown_white.png"),
-        Clothing::GownGreen => Some("human/clothes_gown_green.png"),
-        Clothing::ShortsWhiteJeans => Some("human/clothes_shorts_white_jeans.png"),
-        Clothing::ShortsRedKhaki => Some("human/clothes_shorts_red_khaki.png"),
-        Clothing::ShortsYellowJeans => Some("human/clothes_shorts_yellow_jeans.png"),
-        Clothing::ShortsTealCharcoal => Some("human/clothes_shorts_teal_charcoal.png"),
-        Clothing::TrousersWhiteCharcoal => Some("human/clothes_trousers_white_charcoal.png"),
-        Clothing::TrousersBlackJeans => Some("human/clothes_trousers_black_jeans.png"),
-        Clothing::TrousersGreenKhaki => Some("human/clothes_trousers_green_khaki.png"),
-        Clothing::TrousersNavyBrown => Some("human/clothes_trousers_navy_brown.png"),
-        Clothing::TrousersOrangeJeans => Some("human/clothes_trousers_orange_jeans.png"),
-        Clothing::UniformOfficeWorker => Some("human/clothes_uniform_office_worker.png"),
-        Clothing::UniformScrapCollector => Some("human/clothes_uniform_scrap_collector.png"),
-        Clothing::UniformGuard => Some("human/clothes_uniform_guard.png"),
-        Clothing::UniformUndertaker => Some("human/clothes_uniform_undertaker.png"),
-        Clothing::UniformSteelworker => Some("human/clothes_uniform_steelworker.png"),
-        Clothing::UniformCourier => Some("human/clothes_uniform_courier.png"),
+/// Art for every wearable outfit: `human/clothes_<name>.png`, the outfit's
+/// name with its spaces as underscores — the wardrobe's and every job's uniform
+/// alike, so a new outfit, or a new job's uniform, is a PNG of that name and
+/// nothing here. `None` for no outfit. Worked out once per outfit and kept;
+/// `every_outfit_has_the_existing_art...` and `every_uniform_has_art...` check
+/// the files are there.
+pub fn clothing_path(clothing: Clothing) -> Option<&'static str> {
+    static PATHS: std::sync::OnceLock<Vec<(Clothing, &'static str)>> = std::sync::OnceLock::new();
+    if clothing == Clothing::None {
+        return None;
     }
+    let paths = PATHS.get_or_init(|| {
+        Clothing::ALL
+            .into_iter()
+            .chain(Clothing::uniforms())
+            .filter(|&outfit| outfit != Clothing::None)
+            .map(|outfit| {
+                let path = format!("human/clothes_{}.png", outfit.name().replace(' ', "_"));
+                (outfit, &*Box::leak(path.into_boxed_str()))
+            })
+            .collect()
+    });
+    paths.iter().find(|(outfit, _)| *outfit == clothing).map(|&(_, path)| path)
 }
 // The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.
 #[cfg(test)]
@@ -320,8 +309,8 @@ mod tests {
     /// Every uniform has its own art, drawn by `tools/human_art.py`, on disk.
     #[test]
     fn every_uniform_has_art_of_its_own() {
-        let paths: Vec<_> = Clothing::UNIFORMS.into_iter().filter_map(clothing_path).collect();
-        assert_eq!(paths.len(), Clothing::UNIFORMS.len());
+        let paths: Vec<_> = Clothing::uniforms().filter_map(clothing_path).collect();
+        assert_eq!(paths.len(), Clothing::uniforms().count());
         for path in paths {
             assert!(!CLOTHES.contains(&path), "{path} is not in the wardrobe");
             let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(path);

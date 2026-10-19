@@ -15,12 +15,13 @@
 //! finishing of it.
 
 use crate::map::Point;
+use crate::save::{pb, Invalid};
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::TIME_SCALE;
 use crate::sim::feature::FeatureKind;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{self, SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Work {
@@ -100,6 +101,38 @@ impl TaskExecutor for Work {
         } else {
             format!("work at the computer at {}, {}", self.desk.x, self.desk.y)
         }
+    }
+}
+
+impl Task {
+    /// Work the desk in `desk`, from a cell beside it, for `seconds`.
+    pub const fn work(desk: Point, seconds: f32) -> Task {
+        Task::Work(Work { desk, seconds, watch: false })
+    }
+
+    /// Keep watch at the guard post in `post`, from a cell beside it, for
+    /// `seconds`: a guard's stretch, which is work ([`Work::watch`]).
+    pub const fn keep_watch(post: Point, seconds: f32) -> Task {
+        Task::Work(Work { desk: post, seconds, watch: true })
+    }
+}
+
+/// Saved as `work`, or `keep watch`: the desk or post and the seconds.
+impl SavedTask for Work {
+    fn save(&self) -> pb::TaskKind {
+        task::named(if self.watch { "keep watch" } else { "work" }, Some(self.desk), self.seconds)
+    }
+
+    fn restore(saved: &pb::TaskKind) -> Option<Result<Work, Invalid>> {
+        let ((cell, seconds), watch) = match saved {
+            pb::TaskKind::Work(task) => ((task.cell, task.seconds), false),
+            pb::TaskKind::KeepWatch(task) => ((task.cell, task.seconds), true),
+            _ => match task::read_named(saved, "work") {
+                Some(found) => (found, false),
+                None => (task::read_named(saved, "keep watch")?, true),
+            },
+        };
+        Some(task::cell_and_seconds(cell, seconds, "work").map(|(desk, seconds)| Work { desk, seconds, watch }))
     }
 }
 

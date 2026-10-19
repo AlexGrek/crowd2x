@@ -553,6 +553,38 @@ pub struct Think<'a> {
     pub clock: super::clock::Clock,
 }
 
+impl<'a> Think<'a> {
+    /// The world as `facilities` has it, at tick `tick` of `dt` watched
+    /// seconds, `clock` o'clock: **the one way a `Think` is made**, so a new
+    /// part of the world a brain reads is a field here and a line below, and
+    /// nothing that builds one — the process pass, the tests' worlds — has to
+    /// change.
+    pub(crate) fn new(
+        map: &'a crate::map::Map,
+        occupancy: &'a super::occupancy::Occupancy,
+        log: &'a super::log::Log,
+        facilities: &'a super::facilities::Facilities,
+        dt: f32,
+        tick: u64,
+        clock: super::clock::Clock,
+    ) -> Think<'a> {
+        Think {
+            map,
+            occupancy,
+            log,
+            features: &facilities.features,
+            fridges: &facilities.fridges,
+            doors: &facilities.doors,
+            properties: &facilities.properties,
+            corpses: &facilities.corpses,
+            bins: &facilities.bins,
+            dt,
+            tick,
+            clock,
+        }
+    }
+}
+
 impl Think<'_> {
     /// **World** seconds since the previous tick: what a body *ages* by.
     ///

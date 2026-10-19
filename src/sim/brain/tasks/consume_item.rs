@@ -1,11 +1,12 @@
 //! [`ConsumeItem`]: use up what is in hand.
 
+use crate::save::{pb, Invalid};
 use crate::sim::biology::Event;
 use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 
 use super::super::action::{Action, ActionState};
-use super::super::task::{TaskCtx, TaskExecutor, TaskResult};
+use super::super::task::{self, SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ConsumeItem {
@@ -50,6 +51,28 @@ impl TaskExecutor for ConsumeItem {
 
     fn describe(&self) -> String {
         format!("consume {}", self.item.name())
+    }
+}
+
+impl Task {
+    /// Use up the `item` in hand.
+    pub const fn consume(item: ItemKind, seconds: f32) -> Task {
+        Task::ConsumeItem(ConsumeItem { item, seconds })
+    }
+}
+
+/// Saved as a meal of its own (`pb::ConsumeItem`): what — by the item's
+/// name — and how long.
+impl SavedTask for ConsumeItem {
+    fn save(&self) -> pb::TaskKind {
+        pb::TaskKind::ConsumeItem(pb::ConsumeItem { item: self.item.name().to_string(), seconds: self.seconds })
+    }
+
+    fn restore(saved: &pb::TaskKind) -> Option<Result<ConsumeItem, Invalid>> {
+        let pb::TaskKind::ConsumeItem(task) = saved else {
+            return None;
+        };
+        Some((|| Ok(ConsumeItem { item: task::item(&task.item)?, seconds: task::seconds(task.seconds)? }))())
     }
 }
 

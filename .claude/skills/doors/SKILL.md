@@ -64,7 +64,7 @@ panel (a district QA test broke on it).
 
 ## The district
 
-`map/district.rs`: every doorway is `DOOR_WIDTH` (2) leaves — houses get `"house door"`,
+`map/district/`: every doorway is `DOOR_WIDTH` (2) leaves — houses get `"house door"`,
 the bank's front door, its four restroom doorways (widened from 1 to 2; no RNG change, so
 seeds keep their streets and people) and the shops get `"door"`.
 Test: `every_doorway_is_a_door_at_least_two_leaves_wide` (no one-cell gap between walls

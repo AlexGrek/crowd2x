@@ -181,8 +181,9 @@ it is inside the current one, so the line it walks cuts corners — except the l
 which a walk ends in the *middle* of. `path.rs` says why corner cutting can never skip a
 cell the search vetted.
 
-**Features** (`sim/feature.rs`) are what props are *for*: a static `FEATURES` catalogue binds
-a prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell — and
+**Features** (`sim/feature.rs`) are what props are *for*: `FeatureKind`'s catalogue (a
+`catalogue!` row a kind: its prop names, its `Access`, and for a store what it holds) binds a
+prop name to a `FeatureKind`, and `GameState::new` indexes the map's props by cell — and
 indexes them again whenever a distribution box is switched (`GameState::switch_box`), the one
 thing during play that changes which features work.
 A name may appear more than once — `"fridge"` is both `Food` and `Water` — `"toilet"` is
@@ -227,7 +228,8 @@ say — the fridge **stays open and keeps warming** until somebody closes it: it
 closes it first if picked back up still standing beside it, and otherwise the next unit's
 `OpenFridge` finds the door already open and that unit closes it when it is done. Since a
 task may not write outside its own unit, opening and closing are requests — an `Effect`,
-`GameState`'s fourth step, `sim::world_step` — not direct writes; see the `simulation` skill.
+`GameState`'s fourth step, `sim::world_step`, granted by `effect::apply` — not direct
+writes; see the `simulation` skill.
 
 **A prop can show that it is being used.** A computer's screen is on for as long as
 somebody is sitting at it, and dark otherwise — `game/props.rs` swaps the two strips of
