@@ -567,7 +567,8 @@ mod tests {
 
     /// The point of getting ready: a collector with every need on and none of
     /// them seen to sees to each before it leaves the site — a drink, a meal,
-    /// the TV, the toilet last — and nothing calls it back in before the
+    /// the toilet last; not the TV, bored as it is, since boredom never takes
+    /// a worker off its shift — and nothing calls it back in before the
     /// packful is in the bin. Then again before the next trip, which starts
     /// before the shift is out.
     #[test]
@@ -591,7 +592,7 @@ mod tests {
         let stats = set_out_with.expect("never set out");
         // The minutes from the toilet to the edge of the site.
         let margin = 2.0;
-        for (need, level) in [("hunger", stats.hunger()), ("thirst", stats.thirst()), ("bladder", stats.bladder()), ("boredom", stats.boredom())] {
+        for (need, level) in [("hunger", stats.hunger()), ("thirst", stats.thirst()), ("bladder", stats.bladder())] {
             assert!(level <= READY + margin, "set out with {need} at {level}: {:?}", world.lines());
         }
 
@@ -605,7 +606,8 @@ mod tests {
         let first_piece = line(0, "salvaged scrap metal");
         let stored = line(first_piece, "scrap metal in the bin");
         assert!(line(0, "is ready to go out for scrap metal") < first_piece);
-        for need in ["drank at the fridge", "ate at the fridge", "watched the TV", "used the toilet"] {
+        assert!(!world.log_contains("watched the TV"), "a go at something is not got ready for: {:?}", world.lines());
+        for need in ["drank at the fridge", "ate at the fridge", "used the toilet"] {
             assert!(line(0, need) < first_piece, "{need:?} after setting out: {lines:?}");
             assert!(line_after(&world, first_piece, need).is_none_or(|at| at > stored), "called back for {need:?}: {lines:?}");
         }

@@ -6,12 +6,14 @@
 //! work at a time, each a walk beside the place and a task there, **planned
 //! from what is true now** (rule 4), in this order:
 //!
-//! 1. **fewer crops than plots** — the free plot of good soil nearest the
+//! 1. **a ripe crop** — the nearest: [`Harvest`](crate::sim::brain::tasks::Harvest)
+//!    it, if the pack has room for what it yields; if not, to the bin first.
+//!    The harvest first, because it is what the field is for: sown first, a
+//!    farmer short of its ten never cut a ripe crop, and stored nothing;
+//! 2. **fewer crops than plots** — the free plot of good soil nearest the
 //!    field, or with none yet the farm's bin ([`nearest_plot`]):
-//!    [`Sow`](crate::sim::brain::tasks::Sow) it. So a crop harvested is sown
-//!    again before the next is cut;
-//! 2. **a ripe crop** — the nearest: [`Harvest`](crate::sim::brain::tasks::Harvest)
-//!    it, if the pack has room for what it yields; if not, to the bin first;
+//!    [`Sow`](crate::sim::brain::tasks::Sow) it. So the plots cut are sown
+//!    again before anything is tended;
 //! 3. **a crop not tended today** — the nearest:
 //!    [`Tend`](crate::sim::brain::tasks::Tend) it;
 //! 4. **wheat in the pack** — to the bin, and
@@ -19,6 +21,15 @@
 //!    `Achieved`, and the routine starts the next piece of work;
 //! 5. **nothing** — every crop tended, nothing ripe, nothing carried: the
 //!    day's work is done, `Blocked`, and the hold spaces out the next look.
+//!
+//! **A trip out starts from the bin**: with work out in the wasteland and
+//! the farmer in the district, the bin first — to store the wheat in the
+//! pack, since it is in and the bin is near; or with none, unless ready
+//! ([`GoalCtx::ready_to_go_out`]), with nothing to do there but set out,
+//! which is where `ReadyRoutine` sees to every need first (the `jobs` skill,
+//! "Getting ready"), as `CollectGoal` does for a collector. A field is past
+//! the district's wall, and the way out to it round by a gate can be an
+//! hour's walk from the nearest fridge and toilet.
 //!
 //! **How long a day it is is the routine's to say**; this goal never reads
 //! the clock but to ask a crop how it is ([`Crop::is_ripe`],
@@ -153,11 +164,6 @@ impl FarmGoal {
         let pack = ctx.inventory?;
         let now = ctx.think.clock;
         let carrying = pack.count(ItemKind::Wheat) > 0;
-        if ctx.think.fields.of(farm).count() < PLOTS
-            && let Some(plot) = nearest_plot(ctx, farm)
-        {
-            return Some(plot);
-        }
         if let Some(ripe) = nearest_crop(ctx, farm, |crop| crop.is_ripe(now)) {
             if pack.room_for_many(ItemKind::Wheat, ripe.harvest()) {
                 return Some(ripe.cell);
@@ -165,6 +171,11 @@ impl FarmGoal {
             if carrying {
                 return Some(farm);
             }
+        }
+        if ctx.think.fields.of(farm).count() < PLOTS
+            && let Some(plot) = nearest_plot(ctx, farm)
+        {
+            return Some(plot);
         }
         if let Some(crop) = nearest_crop(ctx, farm, |crop| crop.needs_tending(now)) {
             return Some(crop.cell);
@@ -189,10 +200,25 @@ impl FarmGoal {
         }
     }
 
+    /// Whether this farmer should go to its bin before setting out for
+    /// `target`, work out past the district's edge, from in the district:
+    /// with wheat in the pack, to store it — it is in, and the bin is near —
+    /// or with none, and not ready to go out, to set out from there, where a
+    /// trip out is got ready for (`ReadyRoutine`).
+    fn sets_out_from_the_bin(ctx: &GoalCtx<'_>, farm: Point, target: Point) -> bool {
+        let here = ctx.body.center_position();
+        let map = ctx.think.map;
+        if target == farm || map.contains(target) || !map.contains(here) {
+            return false;
+        }
+        let carrying = ctx.inventory.is_some_and(|pack| pack.count(ItemKind::Wheat) > 0);
+        carrying || (!ctx.ready_to_go_out && here.manhattan_distance(farm) > 1)
+    }
+
     /// Queue the walk beside the target (unless already there) and `then`,
-    /// on the back of the queue. `false` when nowhere beside it can be stood
-    /// on.
-    fn plan(&mut self, ctx: &mut GoalCtx<'_>, then: Task) -> bool {
+    /// if anything, on the back of the queue. `false` when nowhere beside it
+    /// can be stood on.
+    fn plan(&mut self, ctx: &mut GoalCtx<'_>, then: Option<Task>) -> bool {
         let Some(target) = self.seek.target else {
             return false;
         };
@@ -203,7 +229,9 @@ impl FarmGoal {
                 let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
         }
-        let _ = ctx.tasks.push_back(then);
+        if let Some(then) = then {
+            let _ = ctx.tasks.push_back(then);
+        }
         true
     }
 
@@ -264,12 +292,12 @@ impl GoalExecutor for FarmGoal {
                 } else {
                     self.seek.setback(ctx, |ctx| Self::next(ctx, farm).filter(|&next| next != farm))
                 };
-                if retry
-                    && let Some(target) = self.seek.target
-                    && let Some(then) = Self::work_at(ctx, farm, target)
-                    && self.plan(ctx, then)
-                {
-                    return GoalProgress::Working;
+                if retry && let Some(target) = self.seek.target {
+                    // Nothing to do at the bin is the start of a trip out.
+                    let then = Self::work_at(ctx, farm, target);
+                    if (then.is_some() || target == farm) && self.plan(ctx, then) {
+                        return GoalProgress::Working;
+                    }
                 }
                 self.seek.forget();
                 return GoalProgress::Blocked;
@@ -298,12 +326,20 @@ impl GoalExecutor for FarmGoal {
             self.seek.forget();
             return GoalProgress::Blocked;
         };
+        if Self::sets_out_from_the_bin(ctx, farm, target) {
+            self.head_for(farm);
+            if self.plan(ctx, Self::work_at(ctx, farm, farm)) {
+                return GoalProgress::Working;
+            }
+            self.seek.forget();
+            return GoalProgress::Blocked;
+        }
         let Some(then) = Self::work_at(ctx, farm, target) else {
             self.seek.forget();
             return GoalProgress::Blocked;
         };
         self.head_for(target);
-        if self.plan(ctx, then) {
+        if self.plan(ctx, Some(then)) {
             GoalProgress::Working
         } else {
             self.seek.forget();
@@ -414,23 +450,39 @@ mod tests {
         assert!(!world.log_contains("tended the wheat"), "nothing is tended the day it is sown");
     }
 
-    /// Every working day after, the whole field tended once; the Sunday off,
-    /// when it ripens; the next Monday harvested at its best, every sheaf in
-    /// the bin, and the field sown again.
+    /// Twice a week: Monday's crops tended on the Tuesday and the Wednesday,
+    /// at their best and ripe on the Thursday, harvested — every sheaf in the
+    /// bin — and the field sown again; those tended on the Friday and the
+    /// Saturday, ripe on the Sunday, the farmer's day off, and in on the
+    /// Monday.
     #[test]
-    fn a_week_on_the_farm_tends_the_field_every_day_but_sunday_and_brings_in_the_harvest() {
+    fn a_week_on_the_farm_brings_in_two_harvests_and_keeps_the_sunday() {
         let mut world = meadow(at(1, 8.5));
         let mut human = farmer(Point::new(12, 3));
         work_the_day(&mut world, &mut human, 1);
-        for day in 2..=6 {
+        for day in 2..=3 {
             work_the_day(&mut world, &mut human, day);
             for crop in world.fields.of(BIN) {
                 assert_eq!((crop.tended, crop.quality), (day, TEND_QUALITY * (day as u8 - 1)), "day {day}: {crop:?}");
             }
         }
         assert!(world.fields.of(BIN).all(|crop| crop.quality == BEST));
+
+        // Thursday: ripe, in with the harvest, and the field sown again.
+        work_the_day(&mut world, &mut human, 4);
+        assert_eq!(lines_with(&world, "harvested 3 wheat at"), PLOTS, "{:?}", world.lines());
+        let harvest = PLOTS as u32 * MOST_YIELDED as u32;
+        assert_eq!(world.bins.stored(BIN), harvest, "{:?}", world.lines());
+        assert!(lines_with(&world, "wheat in the grain bin at 1, 7") >= 3, "a pack holds four crops' worth");
+        let field: Vec<Crop> = world.fields.of(BIN).copied().collect();
+        assert_eq!(field.len(), PLOTS);
+        assert!(field.iter().all(|crop| crop.tended == 4 && crop.quality == 0), "sown again: {field:?}");
+
+        for day in 5..=6 {
+            work_the_day(&mut world, &mut human, day);
+        }
+        assert!(world.fields.of(BIN).all(|crop| crop.quality == BEST));
         let tended = lines_with(&world, "tended the wheat");
-        assert_eq!(tended, 5 * PLOTS);
 
         // Sunday: the day off, and the field ripens.
         world.clock = at(7, 8.5);
@@ -439,13 +491,12 @@ mod tests {
             assert_ne!(human.brain().top_goal(), GoalId::Farm, "a farmer's Sunday is its own");
         }
         assert_eq!(lines_with(&world, "tended the wheat"), tended);
-        assert!(world.fields.of(BIN).all(|crop| crop.is_ripe(world.clock)), "ripe six days after sowing");
+        assert!(world.fields.of(BIN).all(|crop| crop.is_ripe(world.clock)), "ripe three days after sowing");
 
-        // Monday: in with the harvest, and the field sown again.
+        // Monday: the second harvest in, and the field sown again.
         work_the_day(&mut world, &mut human, 8);
-        assert_eq!(lines_with(&world, "harvested 3 wheat at"), PLOTS, "{:?}", world.lines());
-        assert_eq!(world.bins.stored(BIN), PLOTS as u32 * MOST_YIELDED as u32, "{:?}", world.lines());
-        assert!(lines_with(&world, "wheat in the grain bin at 1, 7") >= 3, "a pack holds four crops' worth");
+        assert_eq!(lines_with(&world, "harvested 3 wheat at"), 2 * PLOTS, "{:?}", world.lines());
+        assert_eq!(world.bins.stored(BIN), 2 * harvest, "{:?}", world.lines());
         assert_eq!(human.inventory_mut().count(ItemKind::Wheat), 0);
         let field: Vec<Crop> = world.fields.of(BIN).copied().collect();
         assert_eq!(field.len(), PLOTS);
@@ -470,6 +521,94 @@ mod tests {
         assert!(world.fields.of(BIN).all(|crop| crop.tended == 2), "the day's work done");
         assert!(held_off > ticks(&world, 3.0), "held off only {held_off} ticks of the afternoon");
         assert!(world.lines().len() < 3 * PLOTS, "{} lines", world.lines().len());
+    }
+
+    /// The harvest comes first: a field three short of its ten, two of its
+    /// crops ripe, has those two cut and stored before a single plot is
+    /// sown. Sown first, a farmer who never had its ten never cut anything.
+    #[test]
+    fn a_farmer_harvests_what_is_ripe_before_it_sows_the_rest_of_its_field() {
+        let mut world = meadow(at(1, 10.0));
+        let sown = at(1, 10.0);
+        for cell in [Point::new(4, 6), Point::new(4, 8), Point::new(6, 6), Point::new(6, 8), Point::new(8, 6), Point::new(8, 8), Point::new(10, 6)] {
+            assert!(world.facilities.fields.sow(&mut world.map, cell, BIN, sown));
+        }
+        // Five of them sown a day later: still growing on the Thursday morning.
+        let later = at(2, 10.0);
+        for cell in [Point::new(6, 6), Point::new(6, 8), Point::new(8, 6), Point::new(8, 8), Point::new(10, 6)] {
+            let crop = world.facilities.fields.harvest(&mut world.map, cell, at(30, 0.0)).unwrap();
+            assert!(world.facilities.fields.sow(&mut world.map, crop.cell, BIN, later));
+        }
+        let mut human = farmer(Point::new(12, 3));
+        world.clock = at(4, 11.0);
+        for _ in 0..ticks(&world, 3.0) {
+            world.step_in_time(&mut human);
+            if world.log_contains("sowed wheat at") {
+                break;
+            }
+        }
+        let lines = world.lines();
+        let first = |needle: &str| lines.iter().position(|line| line.contains(needle));
+        let sowed = first("sowed wheat at").unwrap_or_else(|| panic!("never sowed: {lines:?}"));
+        assert_eq!(lines[..sowed].iter().filter(|line| line.contains("harvested")).count(), 2, "{lines:?}");
+    }
+
+    /// A small yard of floor with good soil all round it — the wasteland of
+    /// seed 14 — and the farm's grain bin in one corner, a fridge, a TV and a
+    /// toilet along the far side: the field is out past the site's edge, as a
+    /// district's is past its wall.
+    fn yard_to_get_ready_in(clock: Clock) -> (World, Point) {
+        let bin = Point::new(1, 1);
+        let mut map = Map::new(Size::new(9, 7), crate::map::FLOOR).with_wasteland(14);
+        for (name, cell) in [("grain bin", bin), ("fridge", Point::new(7, 1)), ("tv", Point::new(7, 3)), ("toilet", Point::new(7, 5))] {
+            prop_at(&mut map, name, cell);
+        }
+        map.load_chunks(map.navigation_area());
+        let mut world = World::new(map);
+        world.clock = clock;
+        (world, bin)
+    }
+
+    /// A field out in the wasteland is a trip out, and a farmer gets ready
+    /// for it as a collector does (the `jobs` skill, "Getting ready"): from
+    /// across the yard, its field just past the edge beside it, it goes back
+    /// by its bin first, sees to every need — a drink, a meal, the toilet;
+    /// not the TV — and only then goes out to sow.
+    #[test]
+    fn a_farmer_sees_to_every_need_at_the_farm_before_it_goes_out_to_its_field() {
+        use crate::sim::brain::routines::READY;
+        let (mut world, bin) = yard_to_get_ready_in(at(2, 8.5));
+        // Its field so far: one crop, on the far side of the yard from the bin.
+        assert!(world.facilities.fields.sow(&mut world.map, Point::new(10, 6), bin, at(1, 10.0)));
+        let mut human = needy_human(Point::new(7, 5), 40.0, 50.0, 40.0);
+        human.set_fun(50.0);
+        assert!(human.hire(Job::new(JobKind::Farmer, bin, FARM_HOURS)));
+
+        let (mut set_out_with, mut beside_the_bin) = (None, false);
+        for _ in 0..ticks(&world, 6.0) {
+            world.step_in_time(&mut human);
+            beside_the_bin |= human.center_position().manhattan_distance(bin) <= 1;
+            if set_out_with.is_none() && !world.map.contains(human.center_position()) {
+                set_out_with = Some(human.stats());
+            }
+            if world.log_contains("sowed wheat at") {
+                break;
+            }
+        }
+        let stats = set_out_with.unwrap_or_else(|| panic!("never set out: {:?}", world.lines()));
+        assert!(beside_the_bin, "went out without going by its bin");
+        let margin = 2.0;
+        for (need, level) in [("hunger", stats.hunger()), ("thirst", stats.thirst()), ("bladder", stats.bladder())] {
+            assert!(level <= READY + margin, "set out with {need} at {level}: {:?}", world.lines());
+        }
+        let lines = world.lines();
+        let first = |needle: &str| lines.iter().position(|line| line.contains(needle)).unwrap_or_else(|| panic!("no {needle:?}: {lines:?}"));
+        let sowed = first("sowed wheat at");
+        assert!(first("is ready to go out for wheat") < sowed);
+        assert!(!world.log_contains("watched the TV"), "a go at something is not got ready for: {:?}", world.lines());
+        for need in ["drank at the fridge", "ate at the fridge", "used the toilet"] {
+            assert!(first(need) < sowed, "{need:?} after setting out: {lines:?}");
+        }
     }
 
     /// A farmer whose grain bin is gone has no farm to sow a field for.

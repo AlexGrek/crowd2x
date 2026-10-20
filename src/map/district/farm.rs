@@ -1,11 +1,16 @@
 //! The **farm**: where the farmers store the wheat they grow out in the
 //! wasteland's good soil (`sim::fields`). On the lot facing the street round
-//! the edge of the district that is nearest a plot of it
-//! ([`soil_round`](super::soil_round)), so the walk out to the fields and
-//! back with a pack of wheat is short; [`GRAIN_BINS`] against its side
-//! walls, each a farmer's workplace, and so as many farmers.
+//! the edge of the district with the shortest **walk** out to the soil its
+//! farmers will sow ([`walk_to_the_fields`]) — round by a gate, the only way
+//! through the wall — so the walk out to the fields and back with a pack of
+//! wheat is short; [`GRAIN_BINS`] against its side walls, each a farmer's
+//! workplace, and so as many farmers.
+//!
+//! It was the edge lot nearest the soil as the crow flies, and that was
+//! often a corner of the district between two gates: fields ten cells past
+//! the wall, and seventy cells' walk round to them.
 
-use super::{build, object, tile, Lot, LotBuilding, Rect, Room, Side, DOOR, DOOR_WIDTH, LOT_H, LOT_W};
+use super::{build, object, tile, Lot, LotBuilding, Rect, Room, Side, Siting, DOOR, DOOR_WIDTH, LOT_H, LOT_W};
 use crate::map::{Map, Object, Point};
 
 /// What [`super::District::the`] calls it.
@@ -15,24 +20,44 @@ pub const GRAIN_BIN: &str = "grain bin";
 /// How many bins the farm has, four against each side wall, and so how many
 /// farmers a district employs.
 pub const GRAIN_BINS: usize = 8;
+/// How many crops a farmer's field is — `sim::fields::PLOTS`, which a test
+/// holds this to: the map knows nothing of the simulation.
+const FIELD: usize = 10;
+/// How many plots the farm's fields take, all told.
+const FIELDS: usize = GRAIN_BINS * FIELD;
 const WALL: &str = "wall brown";
 const FLOOR: &str = "wood cracked";
 
-/// One, on the edge lot nearest the good soil: ties to the first in the
-/// shuffled order. The soil is the seed's wasteland's, so this draws
-/// nothing and is the same every time.
+/// One, on the edge lot with the shortest walk out to its fields
+/// ([`walk_to_the_fields`]): ties to the first in the shuffled order. The
+/// soil is the seed's wasteland's and the gates are the geometry's, so this
+/// draws nothing and is the same every time.
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
     wanted: |lot| lot.edge_sides().next().is_some(),
-    rank: |siting, _, lot| {
-        let middle = lot.origin.offset(LOT_W / 2, LOT_H / 2);
-        siting.soil.iter().map(|&plot| plot.manhattan_distance(middle)).min().unwrap_or(i32::MAX)
-    },
+    rank: |siting, _, lot| walk_to_the_fields(siting, lot.origin.offset(LOT_W / 2, LOT_H / 2)),
     build: |_, map, props, lot| farm(map, props, lot),
     tiles: &[WALL, FLOOR],
     props: &[GRAIN_BIN],
 };
+
+/// How far the farmers of a farm at `from` walk out to their fields, all
+/// told: for each of the [`FIELDS`] plots of good soil nearest it as the crow
+/// flies — the ones they sow, nearest their bins first (`FarmGoal`'s
+/// `nearest_plot`) — the walk out to it round by the gate that makes it
+/// shortest ([`Siting::walk_out`]). `i32::MAX` with no soil at all.
+pub fn walk_to_the_fields(siting: &Siting<'_>, from: Point) -> i32 {
+    let mut nearest: Vec<(i32, Point)> = siting.soil.iter().map(|&plot| (plot.manhattan_distance(from), plot)).collect();
+    if nearest.is_empty() {
+        return i32::MAX;
+    }
+    let fields = FIELDS.min(nearest.len());
+    if fields < nearest.len() {
+        nearest.select_nth_unstable(fields);
+    }
+    nearest[..fields].iter().map(|&(_, plot)| siting.walk_out(from, plot)).sum()
+}
 
 /// The farm, on `lot`: the whole lot, `WALL` round `FLOOR`, a plain door —
 /// nobody's property — in the middle of the lot's first side facing the edge
@@ -111,38 +136,41 @@ mod tests {
     }
 
     /// The good soil round a district is enough for every farmer's field
-    /// many times over, and the farm is the edge lot nearest it: no house or
-    /// park on the edge — the lots there were to be had when the farm, built
-    /// last, took its own — is nearer.
+    /// many times over, and the farm is the edge lot with the shortest walk
+    /// out to it: no house or park on the edge — the lots there were to be
+    /// had when the farm, built last, took its own — is a shorter walk.
     #[test]
-    fn the_farm_stands_on_the_edge_lot_nearest_the_good_soil() {
-        let fields = GRAIN_BINS * crate::sim::fields::PLOTS;
-        let mut nearest = Vec::new();
+    fn the_farm_stands_on_the_edge_lot_with_the_shortest_walk_out_to_the_good_soil() {
+        assert_eq!(FIELD, crate::sim::fields::PLOTS);
+        let mut walks = Vec::new();
         for seed in SEEDS {
             let district = generate(seed);
             let soil = soil_round(seed);
             // 282 to 2243 over the seeds.
-            assert!(soil.len() >= 3 * fields, "seed {seed}: {} plots of good soil", soil.len());
-            let to_soil = |rect: Rect| {
-                let middle = Point::new(rect.x + rect.w / 2, rect.y + rect.h / 2);
-                soil.iter().map(|&plot| plot.manhattan_distance(middle)).min().unwrap()
-            };
+            assert!(soil.len() >= 3 * FIELDS, "seed {seed}: {} plots of good soil", soil.len());
+            let gates = gate_layout();
+            assert_eq!(gates, district.gates, "seed {seed}: the gates are where they were sited by");
+            let siting = Siting { heaps: &[], soil: &soil, gates: &gates, built: &[] };
+            let walk = |rect: Rect| walk_to_the_fields(&siting, Point::new(rect.x + rect.w / 2, rect.y + rect.h / 2));
             let farm = district.the(NAME);
             let on_the_edge = |rect: Rect| {
                 rect.x - STREET <= 1 || WIDTH - STREET - 1 - rect.right() <= 1 || rect.y - STREET <= 1 || HEIGHT - STREET - 1 - rect.top() <= 1
             };
             let others = district.houses.iter().map(|house| house.walls).chain(district.parks.iter().copied()).filter(|&rect| on_the_edge(rect));
             for other in others {
-                assert!(to_soil(other) + 2 >= to_soil(farm), "seed {seed}: the lot at {other:?} is nearer the soil than the farm at {farm:?}");
+                // A house is a little smaller than its lot: a cell or two
+                // either way, for each plot.
+                assert!(walk(other) + 2 * FIELDS as i32 >= walk(farm), "seed {seed}: the lot at {other:?} is a shorter walk to the soil than the farm at {farm:?}");
             }
-            nearest.push(to_soil(farm));
+            walks.push(walk(farm) / FIELDS as i32);
             for plot in &soil {
                 assert!(is_plot(*plot) && district.map.can_sow(*plot), "seed {seed}: {plot:?} is not a plot that can be sown");
             }
         }
-        // Measured: 10 to 12 cells from the middle of the farm's lot for 58
-        // of the 64 seeds, 33 at most — just past the wall.
-        nearest.sort_unstable();
-        assert!(nearest[nearest.len() / 2] <= 12 && nearest[nearest.len() - 1] <= 40, "from the farm to good soil: {nearest:?}");
+        // Measured over the 64 seeds, the walk from the middle of the farm's
+        // lot out by a gate to a plot of its fields, on average: a median of
+        // 39 cells, 80 at most. Sited as the crow flies it was 55 and 149.
+        walks.sort_unstable();
+        assert!(walks[walks.len() / 2] <= 40 && walks[walks.len() - 1] <= 80, "from the farm out to its fields: {walks:?}");
     }
 }

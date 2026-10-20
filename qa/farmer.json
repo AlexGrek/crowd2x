@@ -1,5 +1,5 @@
 {
-  "name": "a farmer is hired at the grain bin, sows a field of wheat in the good soil, tends it all week and brings the harvest in on the Monday",
+  "name": "a farmer is hired at the grain bin, sows a field of wheat in the good soil, tends it two days and brings the harvest in on the Thursday",
   "state": "game",
   "timeout": 600,
   "given": {
@@ -50,7 +50,7 @@
     { "expect_log": "was hired as a farmer at the grain bin at 4, 3" },
     { "select": 0 },
     { "expect_selected": "human" },
-    { "note": "every need switched off, tiredness too, so this is a test about the job and a week of it" },
+    { "note": "every need switched off, tiredness too, so this is a test about the job and half a week of it" },
     { "process": { "name": "hunger", "on": false } },
     { "process": { "name": "thirst", "on": false } },
     { "process": { "name": "bladder", "on": false } },
@@ -75,17 +75,17 @@
     { "shot": "Monday afternoon: the field sown round the grain bin, a crop looked at" },
     { "press": "close" },
 
-    { "note": "to Saturday at three: tended every day since, so in ear and at its best" },
-    { "tick": 232320 },
+    { "note": "to Wednesday at three: tended on the Tuesday and today, so in ear and at its best" },
+    { "tick": 94080 },
     { "select_crop": { "x": 2, "y": 2 } },
     { "expect_text": "in ear, stage 3 of 4" },
     { "expect_text": "quality 100% of 100%, tended today" },
     { "wait": 0.3 },
-    { "shot": "Saturday afternoon: the field in ear" },
+    { "shot": "Wednesday afternoon: the field in ear" },
     { "press": "close" },
 
-    { "note": "to the next Monday at five: ripe on the Sunday, harvested today, three sheaves a crop at its best, and sown again" },
-    { "tick": 96000 },
+    { "note": "to Thursday at five: ripe three days after it was sown, harvested today, three sheaves a crop at its best, and sown again" },
+    { "tick": 49920 },
     { "expect_stored": { "min": 30, "in": "grain bin" } },
     { "expect_crops": { "min": 10 } },
     { "press": "statistics" },
@@ -95,7 +95,7 @@
     { "shot": "the statistics: the farm's wheat and the fields" },
     { "press": "close" },
     { "wait": 0.3 },
-    { "shot": "Monday evening: the harvest in, the grain bin full, the field sown again" },
+    { "shot": "Thursday evening: the harvest in, the grain bin full, the field sown again" },
 
     { "key": "esc" },
     { "expect_state": "maps" }

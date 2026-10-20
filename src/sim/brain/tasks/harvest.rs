@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn a_ripe_crop_is_asked_for_once_the_work_is_over() {
-        let mut rig = rig_on(7);
+        let mut rig = rig_on(4);
         let mut task = Task::harvest(CROP, HARVEST_SECONDS);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.effect, Effect::None);
@@ -137,8 +137,8 @@ mod tests {
 
     #[test]
     fn not_before_it_is_ripe_and_not_into_a_full_pack() {
-        assert_eq!(rig_on(6).tick(&mut Task::harvest(CROP, HARVEST_SECONDS)), TaskResult::Failed, "in ear");
-        let mut full = rig_on(7);
+        assert_eq!(rig_on(3).tick(&mut Task::harvest(CROP, HARVEST_SECONDS)), TaskResult::Failed, "in ear");
+        let mut full = rig_on(4);
         while full.inventory.stow(ItemKind::Wheat) {}
         assert_eq!(full.tick(&mut Task::harvest(CROP, HARVEST_SECONDS)), TaskResult::Failed, "no room");
     }

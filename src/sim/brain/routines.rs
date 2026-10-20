@@ -185,6 +185,13 @@ impl RoutineExecutor for NeedRoutine {
                 // their own night, which a night watch keeps by day.
                 priority = priority.min(SLEEPY / NEED_PER_PRIORITY / 2.0);
             }
+            if self.need.goal == GoalId::Play && ctx.job.is_some_and(|job| job.is_due(ctx.think.clock)) {
+                // Work is no fun, and a worker does not go off for a go at
+                // something while its shift is due: the TV it may watch is
+                // its own, at home across the district as often as not. With
+                // nothing to do at work, though, it may.
+                priority = priority.min(BORED_AT_WORK);
+            }
             goals.raise_to(self.need.goal, priority);
         }
     }
@@ -193,6 +200,12 @@ impl RoutineExecutor for NeedRoutine {
         vec![(self.need.feeling, if self.committed { "yes" } else { "no" }.to_string())]
     }
 }
+
+/// The most a go at something is wanted while its worker's shift is due:
+/// boredom's commit level, under [`WORKING`] — so it never takes a worker off
+/// its work, and still comes before wandering about when the work is held
+/// off. Boredom does a body no harm.
+const BORED_AT_WORK: f32 = BORED / NEED_PER_PRIORITY;
 
 /// Tiredness at which a human decides to go to bed **in the daytime**. High:
 /// somebody has to be properly worn out to give up an afternoon.
@@ -403,7 +416,7 @@ impl RoutineExecutor for WorkRoutine {
 
 /// A need no worse than this — 85% met — is one a worker sets out on a trip
 /// into the wasteland with ([`ReadyRoutine`]): hunger, thirst and the bladder
-/// at most 15, fun at least 85.
+/// at most 15.
 pub const READY: f32 = 15.0;
 
 /// Once a worker has stopped to get ready, it sees to every need worse than
@@ -422,6 +435,18 @@ pub const GETTING_READY: f32 = 1.6;
 /// are seen to in the list's order rather than in the goals'.
 const IN_TURN: f32 = 0.01;
 
+/// A need worse than this takes a worker off its work ([`WORKING`] is the
+/// priority of a need at it): one that does, on a job worked out in the
+/// wasteland, has [`ReadyRoutine`] see to every need while it is about it.
+const CALLED_AWAY: f32 = WORKING * NEED_PER_PRIORITY;
+
+/// What [`ReadyNeed::top_up`] says of a need [`ReadyRoutine`] never sees to:
+/// boredom, which never takes a worker off its shift ([`BORED_AT_WORK`]) and
+/// so never calls one back from a trip. Seen to before every trip, it sent a
+/// worker home to its TV across the district, and by the time it was back
+/// the rest were short again: it was never ready.
+const NOT_BEFORE_A_TRIP: f32 = f32::INFINITY;
+
 /// A need [`ReadyRoutine`] sees to before a trip out, and how far up it tops
 /// it once it has stopped to get ready.
 #[derive(Clone, Copy, Debug)]
@@ -435,9 +460,10 @@ pub struct ReadyNeed {
 
 /// The needs a worker sees to before it sets out, in the order it sees to
 /// them: a drink first, since its water reaches the bladder over half an hour
-/// ([`ARRIVES_OVER`](crate::sim::biology::bladder::ARRIVES_OVER)); a meal; a
-/// go at something; the toilet last, so that it leaves empty with the drink
-/// already in it.
+/// ([`ARRIVES_OVER`](crate::sim::biology::bladder::ARRIVES_OVER)); a meal; the
+/// toilet last, so that it leaves empty with the drink already in it. **A go
+/// at something keeps its place on the list** — a save's bits are its places
+/// — but is never seen to ([`NOT_BEFORE_A_TRIP`]).
 ///
 /// **Not tiredness**: nothing but a night's sleep is any good for that, and a
 /// worker who got up rested ends its shift short of [`EXHAUSTED`] by design
@@ -445,10 +471,7 @@ pub struct ReadyNeed {
 pub const READY_NEEDS: [ReadyNeed; 4] = [
     ReadyNeed { need: &THIRST, top_up: TOPPED_UP },
     ReadyNeed { need: &HUNGER, top_up: TOPPED_UP },
-    // A go at something is half an hour, and fun drains all the while:
-    // topped up past 95% it is under it again by the end of the next thing
-    // seen to, and back for another go, worth less the second time.
-    ReadyNeed { need: &BOREDOM, top_up: READY },
+    ReadyNeed { need: &BOREDOM, top_up: NOT_BEFORE_A_TRIP },
     ReadyNeed { need: &BLADDER, top_up: TOPPED_UP },
 ];
 
@@ -463,12 +486,18 @@ pub const READY_NEEDS: [ReadyNeed; 4] = [
 ///   — and either **beside the bin**, where every trip starts
 ///   (`CollectGoal` goes there first) and not at home across the district, a
 ///   long walk from the way out; or **back in with a trip half done**,
-///   called in by a need, where the fridge it came in for is. Started, it
-///   goes on wherever the fridge and the toilet are. Out in the wasteland
-///   there is nothing to see to anything with.
+///   called in by a need, where the fridge it came in for is; or **called
+///   away by a need** anywhere in the district, ready or not — one past
+///   [`CALLED_AWAY`], which takes it off its work whatever this routine
+///   says: it is stopping for that one anyway, and without the rest seen to
+///   as well the next calls it back an hour later. A farmer living across
+///   the district from the farm turned back home for one need after
+///   another and never got there. Started, it goes on wherever the fridge
+///   and the toilet are. Out in the wasteland there is nothing to see to
+///   anything with.
 /// * **What**: when any need is worse than [`READY`], a list, taken there
 ///   and then, of every need worse than its top-up level
-///   ([`ReadyNeed::top_up`]: [`TOPPED_UP`], fun [`READY`]) whose process is
+///   ([`ReadyNeed::top_up`]: [`TOPPED_UP`]; fun never) whose process is
 ///   running and whose goal is not held off — a need nothing in reach can
 ///   meet (no fridge) is not waited for — raised over [`WORKING`] in the
 ///   list's order. A need leaves the list once it is topped up, and
@@ -556,17 +585,23 @@ impl RoutineExecutor for ReadyRoutine {
             return;
         };
         let carrying = pack.count(item) > 0;
-        if self.ready || (self.pending == 0 && !carrying && here.manhattan_distance(job.workplace) > 1) {
+        let called_away = Self::worse_than(|ready| ready.top_up.max(CALLED_AWAY), biology, goals) != 0;
+        if called_away && self.pending == 0 {
+            // Stopped by a need, ready or not: everything else while it is
+            // about it.
+            self.ready = false;
+        }
+        if self.ready || (self.pending == 0 && !carrying && !called_away && here.manhattan_distance(job.workplace) > 1) {
             // Ready, and on the way out; or not at the start of a trip yet —
-            // beside the bin, where the job's goal goes first, or back in
-            // with a trip half done, called in by a need.
+            // beside the bin, where the job's goal goes first, back in with
+            // a trip half done, or called away by a need.
             return;
         }
         // A need stays on the list until it is topped up; a fresh list is
         // taken when anything is worse than ready, and tops up everything.
         let short = Self::worse_than(|ready| ready.top_up, biology, goals);
         self.pending &= short;
-        if self.pending == 0 && Self::worse_than(|_| READY, biology, goals) != 0 {
+        if self.pending == 0 && Self::worse_than(|ready| ready.top_up.max(READY), biology, goals) != 0 {
             self.pending = short;
         }
         if self.pending == 0 {
@@ -1004,6 +1039,38 @@ mod tests {
         assert_eq!(ranked(80.0), GoalId::Eat);
     }
 
+    /// Bored at work is bored at work: while its shift is due, boredom never
+    /// beats the job, however bad — and still comes before wandering about,
+    /// for when the work is held off. Off shift, or with no job, it is the
+    /// need it always was.
+    #[test]
+    fn boredom_never_takes_a_worker_off_its_shift() {
+        let bored = |job: Option<&crate::sim::job::Job>, clock: Clock| {
+            let map = Map::new(Size::new(2, 2), FLOOR);
+            let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+            let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, clock);
+            let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+            let mut goals = Goals::new();
+            NeedRoutine::new(&BOREDOM).arrange(
+                &RoutineCtx {
+                    think: &think,
+                    body: &body,
+                    biology: Some(&Biology::new(Stats::calm().with_fun(10.0))),
+                    memory: &crate::sim::brain::memory::Memory::new(),
+                    job,
+                    inventory: None,
+                },
+                &mut goals,
+            );
+            goals.priority(GoalId::Play)
+        };
+        let job = crate::sim::job::Job::office(Point::new(3, 3));
+        let on_shift = bored(Some(&job), on(2, 11.0));
+        assert!(on_shift < WORKING && on_shift > BUSY, "{on_shift}");
+        assert_eq!(bored(Some(&job), on(2, 19.0)), 90.0 / NEED_PER_PRIORITY, "after work");
+        assert_eq!(bored(None, on(2, 11.0)), 90.0 / NEED_PER_PRIORITY, "no job");
+    }
+
     /// Exhausted is 1.5, the same as work, and the tie goes to the bed: work
     /// is the last goal, and ties go to the first.
     #[test]
@@ -1089,14 +1156,14 @@ mod tests {
     fn a_collector_about_to_set_out_first_sees_to_every_need_worse_than_85_percent() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
         Readiness::of(needs(30.0, 40.0, 4.0, 50.0)).arrange(&mut routine, &mut goals);
-        // A drink first, then a meal, then a go at something; the bladder
-        // is fine.
-        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Play]);
-        assert!(goals.priority(GoalId::Play) > WORKING, "every one of them before the trip");
+        // A drink first, then a meal; the bladder is fine, and boredom is
+        // not seen to before a trip.
+        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat]);
+        assert!(goals.priority(GoalId::Eat) > WORKING, "every one of them before the trip");
         assert!(routine.is_getting_ready());
         assert_eq!(
             routine.debug_fields(),
-            [("ready to go out", "no".to_string()), ("seeing to", "drink, eat, play".to_string())]
+            [("ready to go out", "no".to_string()), ("seeing to", "drink, eat".to_string())]
         );
 
         // 85% exactly is ready enough.
@@ -1113,8 +1180,6 @@ mod tests {
     fn once_it_stops_it_tops_every_need_up() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
         Readiness::of(needs(30.0, 12.0, 8.0, 10.0)).arrange(&mut routine, &mut goals);
-        // Fun at 90% is not: half an hour's go is not over before it is
-        // under 95% again.
         assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Relieve]);
         // Drunk: still to top up the rest, though none of them is past 15.
         Readiness::of(needs(32.0, 0.0, 9.0, 10.0)).arrange(&mut routine, &mut goals);
@@ -1129,10 +1194,26 @@ mod tests {
     /// The toilet last: the water of the drink before reaches the bladder
     /// over half an hour.
     #[test]
-    fn the_toilet_comes_after_the_drink_the_meal_and_the_go_at_something() {
+    fn the_toilet_comes_after_the_drink_and_the_meal() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
         Readiness::of(needs(50.0, 50.0, 50.0, 50.0)).arrange(&mut routine, &mut goals);
-        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Play, GoalId::Relieve]);
+        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Relieve]);
+    }
+
+    /// Boredom is not seen to before a trip, however bored: it never takes
+    /// a worker off its shift, so it never calls one back from a trip
+    /// either, and the go at something was on a TV at home, as often as not
+    /// across the district.
+    #[test]
+    fn a_worker_sets_out_bored_and_is_not_called_away_by_it() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let bored = Readiness::of(needs(0.0, 0.0, 0.0, 100.0));
+        bored.arrange(&mut routine, &mut goals);
+        assert_eq!((raised(&goals), routine.state()), (vec![], (true, 0)));
+        let across = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(0.0, 0.0, 0.0, 100.0)) };
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        across.arrange(&mut routine, &mut goals);
+        assert_eq!((raised(&goals), routine.state()), (vec![], (false, 0)), "not called away by it");
     }
 
     #[test]
@@ -1182,11 +1263,12 @@ mod tests {
     /// starts: not at home across the district, which is a long walk from
     /// the way out, and not out in the wasteland — hired out there, or loaded
     /// — with nothing to see to anything with. Started, it goes on wherever
-    /// the fridge is. Called back in from a trip half done, it gets ready
-    /// wherever it is — at the fridge it came in for — before it goes back
-    /// out, rather than out and in again for each need in turn.
+    /// the fridge is. Called back in from a trip half done, or called away
+    /// by a need anywhere in the district, it gets ready wherever it is — at
+    /// the fridge it came in for — before it goes back out, rather than out
+    /// and in again for each need in turn.
     #[test]
-    fn getting_ready_starts_beside_the_bin_or_back_in_with_a_trip_half_done() {
+    fn getting_ready_starts_beside_the_bin_back_in_with_a_trip_half_done_or_called_away() {
         for cell in [ACROSS_THE_SITE, OUT_THERE] {
             let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
             let away = Readiness { cell, ..Readiness::of(needs(40.0, 40.0, 40.0, 40.0)) };
@@ -1209,6 +1291,21 @@ mod tests {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
         let still_out = Readiness { cell: OUT_THERE, pack: pack(1), ..Readiness::of(needs(40.0, 80.0, 50.0, 0.0)) };
         still_out.arrange(&mut routine, &mut goals);
+        assert!(raised(&goals).is_empty());
+
+        // Called away by a need anywhere in the district, nothing in the
+        // pack — on the way in from home, say — and ready already or not:
+        // everything else too. Short of [`CALLED_AWAY`], not.
+        for ready in [false, true] {
+            let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+            routine.set_state(ready, 0).unwrap();
+            let on_the_way = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, 76.0, 50.0, 0.0)) };
+            on_the_way.arrange(&mut routine, &mut goals);
+            assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Relieve], "ready already: {ready}");
+        }
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let not_yet = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, 74.0, 50.0, 0.0)) };
+        not_yet.arrange(&mut routine, &mut goals);
         assert!(raised(&goals).is_empty());
     }
 

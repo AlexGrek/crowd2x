@@ -13,8 +13,10 @@
 //! (not the day it was sown, and not once it is ripe) its farmer can tend it,
 //! for [`TEND_QUALITY`] more quality, up to [`BEST`]; a ripe crop yields more
 //! wheat the better it was kept ([`Crop::harvest`]). Sown on a Monday and
-//! tended every day after but Sunday, a crop is ripe the next Sunday at its
-//! best, and harvested and sown again on the Monday.
+//! tended on the Tuesday and the Wednesday, a crop is ripe on the Thursday at
+//! its best, and harvested and sown again; tended on the Friday and the
+//! Saturday, it ripens on the Sunday, and is in on the Monday — two harvests
+//! a week.
 //!
 //! **A crop is the farm's, not the farmer's**: it is sown for the farmer's
 //! workplace, its own grain bin ([`Crop::farm`]), so a farmer let go or dead
@@ -31,17 +33,19 @@ use super::clock::{Clock, DAY};
 /// How many crops a farmer keeps sown at once: its field.
 pub const PLOTS: usize = 10;
 
-/// How many days a crop takes from being sown to being ripe.
-pub const GROWING_DAYS: u32 = 6;
+/// How many days a crop takes from being sown to being ripe: three, so a
+/// field comes in twice a week. It was six, and a new district stored no
+/// wheat for the whole of its first week.
+pub const GROWING_DAYS: u32 = 3;
 
 /// How many days each stage before ripe lasts: three of them, then ripe.
 pub const STAGE_DAYS: u32 = GROWING_DAYS / 3;
 
 /// What a day's tending adds to a crop's quality, in percent.
-pub const TEND_QUALITY: u8 = 20;
+pub const TEND_QUALITY: u8 = 50;
 
-/// The best a crop can be kept: five days' tending, a whole week's but the
-/// day it was sown and the Sunday.
+/// The best a crop can be kept: two days' tending, every day it grows but
+/// the day it was sown.
 pub const BEST: u8 = 100;
 
 /// Quality worth one more sheaf of wheat at the harvest, on top of the one
@@ -264,37 +268,37 @@ mod tests {
     }
 
     #[test]
-    fn a_crop_grows_a_stage_every_two_days_and_is_ripe_after_six() {
+    fn a_crop_grows_a_stage_a_day_and_is_ripe_after_three() {
         let (mut map, mut fields) = field();
         let plot = Point::new(4, 4);
         assert!(fields.sow(&mut map, plot, FARM, at(1, 10.0)));
         let crop = *fields.at(plot).unwrap();
-        let stages: Vec<Stage> = [(1, 10.0), (3, 9.9), (3, 10.0), (5, 10.0), (7, 9.9), (7, 10.0), (30, 0.0)]
+        let stages: Vec<Stage> = [(1, 10.0), (2, 9.9), (2, 10.0), (3, 10.0), (4, 9.9), (4, 10.0), (30, 0.0)]
             .into_iter()
             .map(|(day, hours)| crop.stage(at(day, hours)))
             .collect();
         use Stage::*;
         assert_eq!(stages, [Seedling, Seedling, Young, Heading, Heading, Ripe, Ripe]);
-        assert_eq!(crop.ripe_in(at(1, 10.0)), 6.0 * DAY as f64);
-        assert_eq!(crop.ripe_in(at(8, 0.0)), 0.0);
+        assert_eq!(crop.ripe_in(at(1, 10.0)), 3.0 * DAY as f64);
+        assert_eq!(crop.ripe_in(at(5, 0.0)), 0.0);
         assert_eq!(Ripe.number(), 4);
     }
 
-    /// Once a day, never the day it went in and never once ripe: tended
-    /// every day but the Sunday, a crop sown on a Monday is at its best when
-    /// it is ripe, and yields the most.
+    /// Once a day, never the day it went in and never once ripe: tended on
+    /// the two days between, a crop sown on a Monday is at its best when it
+    /// is ripe on the Thursday, and yields the most.
     #[test]
     fn a_crop_is_tended_once_a_day_and_yields_more_the_better_it_was_kept() {
         let (mut map, mut fields) = field();
         let plot = Point::new(2, 6);
         assert!(fields.sow(&mut map, plot, FARM, at(1, 10.0)));
         assert_eq!(fields.tend(plot, at(1, 15.0)), None, "not the day it was sown");
-        for day in 2..=6 {
+        for day in 2..=3 {
             assert_eq!(fields.tend(plot, at(day, 11.0)), Some(TEND_QUALITY * (day as u8 - 1)), "day {day}");
             assert_eq!(fields.tend(plot, at(day, 12.0)), None, "day {day}: once a day");
         }
         assert_eq!(fields.at(plot).unwrap().quality, BEST);
-        assert_eq!(fields.tend(plot, at(7, 11.0)), None, "ripe: nothing to tend");
+        assert_eq!(fields.tend(plot, at(4, 11.0)), None, "ripe: nothing to tend");
         assert_eq!(fields.at(plot).unwrap().harvest(), MOST_YIELDED);
         let neglected = Crop { quality: 0, ..*fields.at(plot).unwrap() };
         assert_eq!(neglected.harvest(), 1);
@@ -307,11 +311,11 @@ mod tests {
         let plot = Point::new(6, 6);
         assert!(fields.sow(&mut map, plot, FARM, at(1, 10.0)));
         assert!(!map.is_passable(plot), "a crop is in the way");
-        assert_eq!(fields.harvest(&mut map, plot, at(5, 10.0)), None, "still in ear");
-        let crop = fields.harvest(&mut map, plot, at(7, 10.0)).expect("ripe");
+        assert_eq!(fields.harvest(&mut map, plot, at(4, 9.0)), None, "still in ear");
+        let crop = fields.harvest(&mut map, plot, at(4, 10.0)).expect("ripe");
         assert_eq!(crop.cell, plot);
         assert!(fields.at(plot).is_none() && map.is_passable(plot));
-        assert_eq!(fields.harvest(&mut map, plot, at(7, 10.0)), None, "nothing left");
+        assert_eq!(fields.harvest(&mut map, plot, at(4, 10.0)), None, "nothing left");
     }
 
     #[test]

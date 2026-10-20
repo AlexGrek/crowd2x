@@ -216,7 +216,7 @@ catalogue! {
             shifts: &[FARM_HOURS],
             uniform: "uniform farmer",
             now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
-            goes_out_for: None,
+            goes_out_for: Some(ItemKind::Wheat),
         },
     }
 }

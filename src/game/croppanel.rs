@@ -204,13 +204,13 @@ mod tests {
     #[test]
     fn the_panel_reads_how_far_a_crop_has_grown_and_how_well_it_is_kept() {
         let crop = Crop { cell: Point::new(4, -6), farm: Point::new(1, 7), sown: 0.0, quality: 40, tended: 1 };
-        assert_eq!(growth(&crop, at_hours(0.0)), "seedling, stage 1 of 4: ripe in 6 days");
-        assert_eq!(growth(&crop, at_hours(48.0 + 20.0)), "young, stage 2 of 4: ripe in 3 days, 4 hours");
-        assert_eq!(growth(&crop, at_hours(143.5)), "in ear, stage 3 of 4: ripe in 30 minutes");
-        assert_eq!(growth(&crop, at_hours(144.0)), "ripe, stage 4 of 4: ready to harvest");
+        assert_eq!(growth(&crop, at_hours(0.0)), "seedling, stage 1 of 4: ripe in 3 days");
+        assert_eq!(growth(&crop, at_hours(24.0 + 20.0)), "young, stage 2 of 4: ripe in 1 day, 4 hours");
+        assert_eq!(growth(&crop, at_hours(71.5)), "in ear, stage 3 of 4: ripe in 30 minutes");
+        assert_eq!(growth(&crop, at_hours(72.0)), "ripe, stage 4 of 4: ready to harvest");
         assert_eq!(care(&crop, at_hours(0.0)), "quality 40% of 100%, sown today");
         assert_eq!(care(&Crop { tended: 2, ..crop }, at_hours(25.0)), "quality 40% of 100%, tended today");
         assert_eq!(care(&crop, at_hours(24.0)), "quality 40% of 100%, not tended today");
-        assert_eq!(care(&crop, at_hours(150.0)), "quality 40% of 100%, grown");
+        assert_eq!(care(&crop, at_hours(80.0)), "quality 40% of 100%, grown");
     }
 }

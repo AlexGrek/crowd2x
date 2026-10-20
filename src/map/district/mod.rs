@@ -263,16 +263,26 @@ pub struct LotBuilding {
 }
 
 /// What a [`LotBuilding`] is sited by: the heaps of scrap round the district,
-/// and the lot buildings already built — in [`LOT_BUILDINGS`] order — so one
-/// can stand near another.
+/// the good soil, the gates out to them, and the lot buildings already built
+/// — in [`LOT_BUILDINGS`] order — so one can stand near another.
 pub struct Siting<'a> {
     pub heaps: &'a [Point],
     /// Every plot of good soil round the district ([`soil_round`]).
     pub soil: &'a [Point],
+    /// The gates in the perimeter wall ([`gate_layout`]): the only ways out
+    /// to the heaps and the soil.
+    pub gates: &'a [Gate],
     pub built: &'a [(&'static str, Rect)],
 }
 
 impl Siting<'_> {
+    /// How far a walk it is from `from`, in the district, to `to`, out in
+    /// the wasteland: round by the gate that makes it shortest
+    /// ([`Gate::walk`]).
+    pub fn walk_out(&self, from: Point, to: Point) -> i32 {
+        self.gates.iter().map(|gate| gate.walk(from, to)).min().unwrap_or(i32::MAX)
+    }
+
     /// The walls of the lot building called `name`, which has to have been
     /// built already: earlier in [`LOT_BUILDINGS`].
     pub fn the(&self, name: &str) -> Rect {
@@ -363,6 +373,17 @@ pub struct Gate {
     pub post: Point,
     /// One step out through it: off the map, into the wasteland.
     pub outward: Point,
+}
+
+impl Gate {
+    /// How far a walk it is along the grid from `from`, in the district, out
+    /// through this gate to `to`, out in the wasteland: to the road inside its
+    /// first leaf, through, and on. The district's streets are a grid, so
+    /// this is near enough what a route there comes to.
+    pub fn walk(&self, from: Point, to: Point) -> i32 {
+        let (leaf, out) = (self.leaves[0], self.outward);
+        from.manhattan_distance(leaf.offset(-out.x, -out.y)) + 2 + leaf.offset(out.x, out.y).manhattan_distance(to)
+    }
 }
 
 /// A generated district: the map, and where everything in it went.
@@ -581,11 +602,11 @@ pub fn generate(seed: u64) -> District {
     // The buildings every district must have, a lot each, before a house is
     // given one ([`LOT_BUILDINGS`]), in their order: each takes the lot it
     // ranks best and builds on it.
-    let (heaps, soil) = (heaps_round(seed), soil_round(seed));
+    let (heaps, soil, ways_out) = (heaps_round(seed), soil_round(seed), gate_layout());
     let mut lot_buildings: Vec<(&'static str, Rect)> = Vec::new();
     for spec in LOT_BUILDINGS {
         for index in 0..spec.count {
-            let siting = Siting { heaps: &heaps, soil: &soil, built: &lot_buildings };
+            let siting = Siting { heaps: &heaps, soil: &soil, gates: &ways_out, built: &lot_buildings };
             let lot = take_lot(&mut lots, spec.wanted, |lot| (spec.rank)(&siting, index, lot));
             let walls = (spec.build)(&mut rng, &mut map, &mut props, lot);
             lot_buildings.push((spec.name, walls));
@@ -719,16 +740,32 @@ fn pave(map: &mut Map, blocks: &[Rect]) {
     }
 }
 
-/// The gates in the perimeter wall: [`GATES_PER_SIDE`] a side, each where
-/// one of the streets running out to that side meets the wall — the ones
-/// that split the side most evenly — opening straight off its road. Two
-/// [`DOOR`] leaves on [`ROAD`] in the first two of its three lanes, and a
-/// [`GUARD_POST`] in the wall on the far side of the street's pavement, two
-/// cells from the nearer leaf with a cell of wall between: a guard stands
-/// at it on the road inside, out of the gateway, and could only get round
-/// to the outside of it through the gate. From the geometry alone, drawing
-/// nothing from the seed.
+/// The gates in the perimeter wall ([`gate_layout`]), built: two [`DOOR`]
+/// leaves on [`ROAD`] each, and its [`GUARD_POST`].
 fn gates(map: &mut Map, props: &mut Vec<Object>) -> Vec<Gate> {
+    let gates = gate_layout();
+    let road = tile(ROAD);
+    for gate in &gates {
+        for leaf in gate.leaves {
+            map.set_terrain(leaf, road);
+            props.push(object(DOOR, leaf));
+        }
+        props.push(object(GUARD_POST, gate.post));
+    }
+    gates
+}
+
+/// Where the gates in the perimeter wall go: [`GATES_PER_SIDE`] a side,
+/// each where one of the streets running out to that side meets the wall —
+/// the ones that split the side most evenly — opening straight off its
+/// road. Two leaves in the first two of its three lanes, and a guard post in
+/// the wall on the far side of the street's pavement, two cells from the
+/// nearer leaf with a cell of wall between: a guard stands at it on the road
+/// inside, out of the gateway, and could only get round to the outside of it
+/// through the gate. From the geometry alone, drawing nothing from the seed
+/// — which is what lets the lot buildings be sited by the way out
+/// ([`Siting::walk_out`]) before the wall is built.
+fn gate_layout() -> Vec<Gate> {
     // The streets that split `blocks` blocks most evenly, by number.
     let streets = |blocks: i32| (1..=GATES_PER_SIDE).map(move |i| i * (blocks + 1) / (GATES_PER_SIDE + 1));
     let mut gates = Vec::new();
@@ -745,14 +782,6 @@ fn gates(map: &mut Map, props: &mut Vec<Object>) -> Vec<Gate> {
             let leaves = [Point::new(x, y0 + 1), Point::new(x, y0 + 2)];
             gates.push(Gate { leaves, post: Point::new(x, y0 - 1), outward });
         }
-    }
-    let road = tile(ROAD);
-    for gate in &gates {
-        for leaf in gate.leaves {
-            map.set_terrain(leaf, road);
-            props.push(object(DOOR, leaf));
-        }
-        props.push(object(GUARD_POST, gate.post));
     }
     gates
 }
