@@ -36,7 +36,11 @@
 //!   onto the factory's pallets (`SmeltGoal`). Office hours;
 //! * the **courier**: a scrap hopper in the steel factory — scrap metal from
 //!   the warehouse's bins to the hopper, and steel from the factory's
-//!   pallets to the warehouse's rack (`HaulGoal`). Office hours.
+//!   pallets to the warehouse's rack (`HaulGoal`). Office hours;
+//! * the **farmer**: a grain bin at the farm, and a field of wheat out in
+//!   the wasteland's good soil — sown, tended every day, harvested ripe and
+//!   the wheat stored in the bin (`FarmGoal`, `sim::fields`). Nine to five,
+//!   [`FARM_HOURS`]: every day but Sunday.
 //!
 //! **A worker sleeps by its shift** ([`Shift::is_bedtime`]): the eight hours
 //! that end [`UP_BEFORE_SHIFT`] before it starts. For office hours that is
@@ -186,6 +190,20 @@ catalogue! {
                 }
             },
         },
+        /// Sows wheat in good soil out in the wasteland, a field of
+        /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
+        /// it ripe and stores the wheat in its own grain bin at the farm
+        /// (`FarmGoal`). Every day but Sunday.
+        Farmer = 6 => JobDef {
+            name: "farmer",
+            article: "a farmer",
+            workplace: FeatureKind::GrainBin,
+            goal: GoalId::Farm,
+            commute: COMMUTE,
+            shifts: &[FARM_HOURS],
+            uniform: "uniform farmer",
+            now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
+        },
     }
 }
 
@@ -247,11 +265,22 @@ pub const WEEKDAYS: u8 = 0b001_1111;
 /// Every day of the week, as a [`Shift::days`] mask.
 pub const EVERY_DAY: u8 = 0b111_1111;
 
+/// Every day but Sunday, as a [`Shift::days`] mask.
+pub const MONDAY_TO_SATURDAY: u8 = 0b011_1111;
+
 /// Nine to five, Monday to Friday.
 pub const OFFICE_HOURS: Shift = Shift {
     start: 9,
     end: 17,
     days: WEEKDAYS,
+};
+
+/// Nine to five, every day but Sunday: a field is tended every day it grows,
+/// and a farmer has one day off.
+pub const FARM_HOURS: Shift = Shift {
+    start: 9,
+    end: 17,
+    days: MONDAY_TO_SATURDAY,
 };
 
 /// A guard post's three watches, every day: the day, the evening and the
@@ -623,9 +652,10 @@ mod tests {
                 JobKind::Guard,
                 JobKind::Undertaker,
                 JobKind::Steelworker,
-                JobKind::Courier
+                JobKind::Courier,
+                JobKind::Farmer
             ],
-            "the office first, the steel factory last"
+            "the office first, the farm last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));

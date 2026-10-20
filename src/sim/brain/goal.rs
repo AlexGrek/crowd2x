@@ -79,6 +79,10 @@ catalogue! {
         /// Carry scrap to the steel factory and steel to the warehouse
         /// ([`HaulGoal`](super::goals::HaulGoal)): a courier's shift.
         Haul = 12 => GoalDef { name: "haul", emoji: "📦", executor: Some(|| Box::new(goals::HaulGoal::new())) },
+        /// Sow, tend and harvest one's own field, and store the wheat at one's
+        /// own grain bin ([`FarmGoal`](super::goals::FarmGoal)): a farmer's
+        /// shift.
+        Farm = 13 => GoalDef { name: "farm", emoji: "🌱", executor: Some(|| Box::new(goals::FarmGoal::new())) },
     }
 }
 
@@ -552,7 +556,8 @@ mod tests {
                 (GoalId::Collect, 0.0),
                 (GoalId::Bury, 0.0),
                 (GoalId::Smelt, 0.0),
-                (GoalId::Haul, 0.0)
+                (GoalId::Haul, 0.0),
+                (GoalId::Farm, 0.0)
             ]
         );
     }

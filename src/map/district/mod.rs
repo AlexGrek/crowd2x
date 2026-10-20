@@ -33,7 +33,7 @@
 //!   before any house, one module each, listed in [`LOT_BUILDINGS`]: the
 //!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
 //!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
-//!   the warehouse. **A new one is a module with a [`LotBuilding`] in it and
+//!   the warehouse, the [`farm`] on the edge lot nearest the good soil. **A new one is a module with a [`LotBuilding`] in it and
 //!   a line in that list**; everything else — the lot it takes from the
 //!   houses, its roof, lamp, windows, power, its place in
 //!   [`District::buildings`] — follows from the list;
@@ -108,13 +108,14 @@ use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};
 
 pub mod crematorium;
+pub mod farm;
 pub mod restaurant;
 pub mod steel_factory;
 pub mod warehouse;
 
 use super::grid::{power, water};
 use super::utilities::{self, Utility};
-use super::{Bounds, GridLayer, Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, Wasteland, NAV_MARGIN, PIXELS_PER_CELL};
+use super::{is_plot, Bounds, GridLayer, Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, Wasteland, NAV_MARGIN, PIXELS_PER_CELL};
 
 /// How many houses a district has: about 86% of the residential lots left
 /// once the mandatory buildings have theirs.
@@ -266,6 +267,8 @@ pub struct LotBuilding {
 /// can stand near another.
 pub struct Siting<'a> {
     pub heaps: &'a [Point],
+    /// Every plot of good soil round the district ([`soil_round`]).
+    pub soil: &'a [Point],
     pub built: &'a [(&'static str, Rect)],
 }
 
@@ -281,7 +284,8 @@ impl Siting<'_> {
 /// and draws from the RNG in turn, so a new one goes on the end — which keeps
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
-pub const LOT_BUILDINGS: &[&LotBuilding] = &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC];
+pub const LOT_BUILDINGS: &[&LotBuilding] =
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -577,11 +581,11 @@ pub fn generate(seed: u64) -> District {
     // The buildings every district must have, a lot each, before a house is
     // given one ([`LOT_BUILDINGS`]), in their order: each takes the lot it
     // ranks best and builds on it.
-    let heaps = heaps_round(seed);
+    let (heaps, soil) = (heaps_round(seed), soil_round(seed));
     let mut lot_buildings: Vec<(&'static str, Rect)> = Vec::new();
     for spec in LOT_BUILDINGS {
         for index in 0..spec.count {
-            let siting = Siting { heaps: &heaps, built: &lot_buildings };
+            let siting = Siting { heaps: &heaps, soil: &soil, built: &lot_buildings };
             let lot = take_lot(&mut lots, spec.wanted, |lot| (spec.rank)(&siting, index, lot));
             let walls = (spec.build)(&mut rng, &mut map, &mut props, lot);
             lot_buildings.push((spec.name, walls));
@@ -663,6 +667,31 @@ fn heaps_round(seed: u64) -> Vec<Point> {
     site.grown(NAV_MARGIN)
         .points()
         .filter(|&cell| !site.contains(cell) && wasteland.scrap(cell, site).is_some())
+        .collect()
+}
+
+/// Every plot of good soil the wasteland of `seed` lays within the
+/// navigation area round a district's site — where its farmers sow
+/// (`sim::brain::goals::FarmGoal`): the cells [`Map::can_sow`] says yes to
+/// before anything is sown — good soil, open all round, a heap or a lake
+/// beside it ruling it out, and the site beside it too (its edge is the
+/// perimeter wall). Worked out from the generator a plot at a time, before
+/// the map has a wasteland of its own.
+fn soil_round(seed: u64) -> Vec<Point> {
+    let site = Bounds::from(Size::new(WIDTH, HEIGHT));
+    let wasteland = Wasteland::new(seed);
+    let open = |cell: Point| {
+        let tile = wasteland.tile(cell, site);
+        !site.contains(cell) && tile.is_passable() && wasteland.scrap_on(cell, site, tile).is_none()
+    };
+    site.grown(NAV_MARGIN)
+        .points()
+        .filter(|&cell| {
+            is_plot(cell)
+                && !site.contains(cell)
+                && wasteland.tile(cell, site).is_fertile()
+                && (-1..=1).all(|dy| (-1..=1).all(|dx| open(cell.offset(dx, dy))))
+        })
         .collect()
 }
 
@@ -1941,8 +1970,9 @@ mod tests {
 
     #[test]
     fn the_tvs_draw_nothing_from_the_district_so_a_seed_builds_the_same_houses() {
-        // Seed 7's resident count, read before there were any TVs.
-        assert_eq!(generate(7).residents(), 137);
+        // Seed 7's resident count, read before there were any TVs — and
+        // again once the farm took a lot of its own, which moved the houses.
+        assert_eq!(generate(7).residents(), 143);
     }
 
     // --- the ground ---

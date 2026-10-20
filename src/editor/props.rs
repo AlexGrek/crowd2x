@@ -117,6 +117,10 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::posed("scrap hopper", "scrap_hopper.png", 4),
     PaletteItem::posed("steel pallet", "steel_pallet.png", 4),
     PaletteItem::posed("steel rack", "steel_rack.png", 4),
+    // The farm's wooden grain bin, a farmer's workplace and store of wheat
+    // (`sim::bins`), filling up on screen like the scrap bin ([`BinFill`]).
+    // Drawn by `tools/farm_art.py`.
+    PaletteItem::posed("grain bin", "grain_bin.png", 4),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

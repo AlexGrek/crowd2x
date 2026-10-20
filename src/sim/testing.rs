@@ -236,6 +236,31 @@ pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human
     human
 }
 
+/// Move `state`'s clock on to `hours` o'clock on day `day` (day 1 is a
+/// Monday), as if the time between had gone by with nothing happening.
+pub fn skip_to(state: &mut super::GameState, day: u32, hours: f32) {
+    use super::clock::{DAY, HOUR, OPENING_TIME, TIME_SCALE};
+    let world = (day - 1) as f64 * DAY as f64 + hours as f64 * HOUR as f64 - OPENING_TIME;
+    assert!(world >= state.clock().elapsed(), "the clock only goes forward");
+    state.elapsed = world / TIME_SCALE as f64;
+}
+
+/// A farm on good soil: a 24x14 site of meadow with a grain bin at (1, 7),
+/// and a farmer hired to it with every need off. Monday, 08:00.
+pub fn farm(seed: u64) -> (super::GameState, Uid) {
+    let mut map = Map::new(crate::map::Size::new(24, 14), crate::map::MEADOW);
+    prop_at(&mut map, "grain bin", Point::new(1, 7));
+    let mut state = super::GameState::new(map, seed);
+    let farmer = state.spawn(EntityType::Human, Point::new(12, 3));
+    assert_eq!(state.entities().get(farmer).unwrap().job().map(|job| job.kind), Some(super::JobKind::Farmer));
+    let mut input = super::Input::new();
+    for process in super::ProcessId::ALL {
+        input.set_process(farmer, process, false);
+    }
+    super::process_game_state(&mut state, 1.0 / 60.0, &input);
+    (state, farmer)
+}
+
 /// A warehouse at one end of a 24x17 floor — a scrap bin with `scrap`
 /// pieces in it and a steel rack — and a steel factory at the other: a
 /// hopper, a pallet and a powered furnace. A steelworker and a courier

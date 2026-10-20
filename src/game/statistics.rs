@@ -15,6 +15,8 @@
 
 use bevy::prelude::*;
 
+use crate::sim::fields::Stage;
+use crate::sim::statistics::FieldStock;
 use crate::sim::{GameState, Statistics};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
@@ -176,6 +178,7 @@ pub fn describe(stats: &Statistics) -> String {
             out.push_str(&format!("{name:<10}        none\n"));
         }
     }
+    out.push_str(&fields(&stats.fields));
 
     out.push('\n');
     for (index, job) in stats.jobs.iter().enumerate() {
@@ -190,6 +193,15 @@ pub fn describe(stats: &Statistics) -> String {
         stats.died, stats.lying, stats.carried, stats.cremated
     ));
     out
+}
+
+/// `fields       80   10 seedling  20 young  30 in ear  20 ripe  quality 64%`.
+fn fields(stock: &FieldStock) -> String {
+    let Some(quality) = stock.quality else {
+        return format!("{:<10} {:>4}   nothing sown\n", "fields", 0);
+    };
+    let stages: Vec<String> = Stage::ALL.iter().zip(stock.stages).map(|(stage, count)| format!("{count} {}", stage.name())).collect();
+    format!("{:<10} {:>4}   {}  quality {quality}%\n", "fields", stock.sown(), stages.join("  "))
 }
 
 /// "human" to "humans", "office worker" to "office workers".
@@ -212,6 +224,7 @@ mod tests {
         let stats = Statistics {
             alive: vec![(EntityType::Human, 12), (EntityType::Dog, 1)],
             sites: vec![site("warehouse", true, 30, 6), site("factory", true, 3, 1)],
+            fields: FieldStock { stages: [10, 20, 30, 20], quality: Some(64) },
             jobs: vec![
                 JobCount { kind: JobKind::OfficeWorker, workers: 5, posts: 12 },
                 JobCount { kind: JobKind::Guard, workers: 3, posts: 3 },
@@ -226,6 +239,7 @@ mod tests {
         assert!(text.contains("alive        13   humans 12  dogs 1"), "{text}");
         assert!(text.contains("warehouse    30   scrap metal     6   steel"), "{text}");
         assert!(text.contains("factory       3   scrap metal     1   steel"), "{text}");
+        assert!(text.contains("fields       80   10 seedling  20 young  30 in ear  20 ripe  quality 64%"), "{text}");
         assert!(text.contains("jobs          5   office workers of 12 posts"), "{text}");
         assert!(text.contains("              3   guards of 3 posts"), "{text}");
         assert!(text.contains("              4   without a job"), "{text}");
@@ -237,6 +251,7 @@ mod tests {
         let stats = Statistics {
             alive: vec![(EntityType::Human, 1)],
             sites: vec![site("warehouse", false, 0, 0), site("factory", false, 0, 0)],
+            fields: FieldStock::default(),
             jobs: Vec::new(),
             jobless: 1,
             died: 0,
@@ -246,5 +261,6 @@ mod tests {
         };
         let text = describe(&stats);
         assert!(text.contains("warehouse         none") && text.contains("factory           none"), "{text}");
+        assert!(text.contains("fields        0   nothing sown"), "{text}");
     }
 }

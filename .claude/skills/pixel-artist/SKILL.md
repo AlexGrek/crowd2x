@@ -95,12 +95,20 @@ holds (`fill_bins`, like the scrap bin); `furnace_idle.png` (2 frames, embers) a
 (3 frames, flames, shown while a steelworker works it). The scrap is `tools/scrap_art.py`'s
 colours. Carried steel is the emoji ⛓ (`characters/item.rs`).
 
+The **farm** is drawn by `tools/farm_art.py` (`preview` puts everything on meadow, enlarged):
+`grain_bin.png`, a wooden bin, four frames (empty, a little grain, half, heaped over the rim)
+the game picks like the scrap bin's; and the wheat at its four stages, one 16x16 each,
+`wheat_1.png` (shoots in a strip of tilled earth) to `wheat_4.png` (gold ears) — `wheat_3.png`
+and `wheat_4.png` are one mask of ears on stalks (`TALL`) coloured green and gold. The game
+draws the one for the crop's stage (`game/crops.rs`). Carried wheat is the emoji 🌾.
+
 ### Adding a layer kind that is not hair or clothes
 
 **Work uniforms** are in `tools/human_art.py` too: `UNIFORMS`, a mask and its own colours per
 job (`t` a tie, `s` a reflective band, `k` brass; the undertaker's black cassock to the ankles
 with a white collar `w` and a gold cross `y`; the steelworker's brown leather apron over a
-charcoal shirt; the courier's green jacket with a satchel on a strap), written by `generate` as
+charcoal shirt; the courier's green jacket with a satchel on a strap; the farmer's denim
+dungarees, the bib buttoned at its corners, over a red shirt), written by `generate` as
 `assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
 the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
 everybody's seeded look); each is `Clothing::Uniform(job)`, named by the job's row

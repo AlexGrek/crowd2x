@@ -193,6 +193,13 @@ impl Chunk {
         }
     }
 
+    /// Something stands in `cell` now — a crop the map keeps (`Map::plant`)
+    /// — and it cannot be walked until [`Chunk::clear`]ed.
+    pub fn block(&mut self, cell: Point) {
+        let index = local_index(cell);
+        self.passable[index / 64] &= !(1 << (index % 64));
+    }
+
     /// The tile of a cell in this chunk. A cell of another chunk reads the
     /// cell in the same place in this one — the caller found the chunk.
     #[inline]

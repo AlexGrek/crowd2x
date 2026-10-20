@@ -45,6 +45,19 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
   it, and `nothing_walkable_costs_less_than_the_cheapest_step` holds the catalogue to it. A
   new ground is `Terrain::ground(name, cost)`, appended to the end of `TERRAIN` (names are
   what files store; the order is not) with art in the editor palette.
+- **Good soil** is a column of the catalogue too (`Terrain::fertile`, `TerrainId::is_fertile`;
+  `Terrain::soil(name, cost)`): `"meadow"`, and nothing else yet. A crop of wheat
+  (`sim::fields`, the `jobs` skill) goes only in a **plot** — `map::is_plot(cell)`, both
+  coordinates even, so no two crops touch — of good soil with nothing in the way and **the eight
+  cells round it open**: `Map::can_sow`. None of the eight is a plot and nothing in play closes a
+  cell, so a crop never closes a one-cell gap (a lake, a heap, a wall beside it) and no field can
+  shut a cell in; on a map with nothing round it, the plots on its edge cannot be sown. **A crop blocks its cell**, as a heap of scrap does:
+  `Map::plant(cell)` / `unplant(cell)` keep the map's `planted` set (keyed by chunk like the
+  salvage tallies, on the site or off it), clear or set the site's passability bit or a loaded
+  chunk's (`Chunk::block` / `clear`), and `load_chunk` and the unloaded fallback respect it.
+  `Map::is_open_ground` counts a planted cell as open, so **planting never touches
+  `Map::navigation`**. Not in a map file, nor in a save's chunks: the simulation's fields plant
+  the map again on load. `set_wasteland` forgets what was sown off the site.
 - **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
   `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
   through: furniture cannot — beds, the fridge, the toilet, the computer, crates, fire — and the two doors (`"door"`, `"house door"`) can, since a door's leaf is simulation state, not the map's (the `doors` skill).

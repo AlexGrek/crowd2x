@@ -9,9 +9,11 @@
 use crate::map::{Map, Point};
 
 use super::bins::Bins;
+use super::clock::Clock;
 use super::entity::GameEntity;
 use super::facilities::Facilities;
 use super::feature::FeatureKind;
+use super::fields::PLOTS;
 use super::inventory::Inventory;
 use super::item::ItemKind;
 use super::log::Log;
@@ -70,6 +72,18 @@ pub enum Effect {
     /// A body was put in the crematorium at `at` (`brain::tasks::Cremate`,
     /// which has already taken it out of the hand). Counted and logged.
     Cremate { at: Point },
+    /// Sow a crop in the plot at `at`, `when` the unit finished
+    /// (`brain::tasks::Sow`), for the farm it works for — its job's grain
+    /// bin. Refused where somebody stands in the plot, where it was sown
+    /// first, or where the farm's field is full ([`super::fields`]).
+    Sow { at: Point, when: Clock },
+    /// Count a day's tending of the crop at `at` (`brain::tasks::Tend`):
+    /// its quality goes up, once a day.
+    Tend { at: Point, when: Clock },
+    /// Harvest the ripe crop at `at` (`brain::tasks::Harvest`): out of the
+    /// fields, its plot open again, and what it yields into the unit's pack —
+    /// granted only with room for all of it.
+    Harvest { at: Point, when: Clock },
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -106,6 +120,65 @@ pub(crate) fn apply(
             facilities.tally.cremated += 1;
             log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
         }
+        Effect::Sow { at, when } => sow(entity, map, facilities, occupancy, log, at, when),
+        Effect::Tend { at, when } => match facilities.fields.tend(at, when) {
+            Some(quality) => log.push(format!("{} tended the wheat at {}, {}: kept at {quality}%", entity.uid(), at.x, at.y)),
+            None => log.push(format!("{} found nothing to tend at {}, {}", entity.uid(), at.x, at.y)),
+        },
+        Effect::Harvest { at, when } => harvest(entity, map, facilities, log, at, when),
+    }
+}
+
+/// [`Effect::Sow`]: a crop in the plot at `at`, for the farm the unit works
+/// for, unless somebody stands there or the fields will not have it. Logged
+/// either way — once a crop.
+fn sow(entity: &dyn GameEntity, map: &mut Map, facilities: &mut Facilities, occupancy: &Occupancy, log: &Log, at: Point, when: Clock) {
+    let uid = entity.uid();
+    let Some(farm) = entity.job().map(|job| job.workplace) else {
+        return;
+    };
+    if let Some(other) = occupancy.occupant(at) {
+        log.push(format!("{uid} could not sow at {}, {}: {other} is standing there", at.x, at.y));
+        return;
+    }
+    // The dead let their cell go (`died`), so the occupancy does not say so:
+    // a body is not sown over.
+    if let Some(dead) = facilities.corpses.at(at) {
+        log.push(format!("{uid} could not sow at {}, {}: the body of {dead} lies there", at.x, at.y));
+        return;
+    }
+    if facilities.fields.sow(map, at, farm, when) {
+        let sown = facilities.fields.of(farm).count();
+        log.push(format!("{uid} sowed wheat at {}, {}: {sown} of {PLOTS} sown", at.x, at.y));
+    } else {
+        log.push(format!("{uid} could not sow at {}, {}", at.x, at.y));
+    }
+}
+
+/// [`Effect::Harvest`]: the ripe crop at `at` out of the fields and what it
+/// yields into the unit's pack, while the pack has room for all of it.
+/// Logged either way — once a crop.
+fn harvest(entity: &mut dyn GameEntity, map: &mut Map, facilities: &mut Facilities, log: &Log, at: Point, when: Clock) {
+    let uid = entity.uid();
+    let Some(inventory) = entity.inventory_mut() else {
+        return;
+    };
+    let Some(crop) = facilities.fields.at(at).copied() else {
+        log.push(format!("{uid} found nothing to harvest at {}, {}", at.x, at.y));
+        return;
+    };
+    if !inventory.room_for_many(ItemKind::Wheat, crop.harvest()) {
+        log.push(format!("{uid} has no room for the wheat at {}, {}: {}", at.x, at.y, inventory.describe_load()));
+        return;
+    }
+    match facilities.fields.harvest(map, at, when) {
+        Some(crop) => {
+            for _ in 0..crop.harvest() {
+                let _ = inventory.stow(ItemKind::Wheat);
+            }
+            log.push(format!("{uid} harvested {} wheat at {}, {}, kept at {}%", crop.harvest(), at.x, at.y, crop.quality));
+        }
+        None => log.push(format!("{uid} found nothing ripe at {}, {}", at.x, at.y)),
     }
 }
 

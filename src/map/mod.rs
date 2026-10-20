@@ -63,6 +63,13 @@
 //! own copy of a map is ever salvaged. A game's save keeps it, with the
 //! loaded chunks, chunk by chunk ([`save`]).
 //!
+//! **And crops.** A farmer sows wheat in good soil (`Terrain::fertile`), one
+//! plant to a [plot](is_plot), and a plant is in the way like a heap until it
+//! is harvested ([`Map::plant`], [`Map::unplant`]). Which cells are planted
+//! is kept here because passability is; *what* grows there — whose it is,
+//! how old, how well kept — is the simulation's (`sim::fields`), which plants
+//! the map again when a game is loaded.
+//!
 //! A map built in code ([`Map::new`]) has no wasteland: off the site is
 //! nothing, impassable and opaque, which is the bounded box every unit test
 //! was written against. [`Map::with_wasteland`] gives it one.
@@ -104,7 +111,7 @@ pub use terrain::{
     TERRAIN, VOID, WALL, WATER,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -247,6 +254,7 @@ impl std::fmt::Debug for Map {
             .field("wasteland", &self.wasteland.map(Wasteland::seed))
             .field("loaded_chunks", &self.chunks.len())
             .field("salvaged", &self.salvaged.len())
+            .field("planted", &self.planted.len())
             .field("terrain_layers", &self.terrain.len())
             .field("props", &self.objects(ObjectLayer::Props).len())
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
@@ -295,11 +303,34 @@ pub struct Map {
     /// Bumped by every piece taken, so whatever draws the heaps knows to look
     /// again.
     salvage_revision: u64,
+    /// Every cell a crop stands in, on the site or off it, by chunk and cell
+    /// in it like `salvaged`. In the way until harvested ([`Map::plant`]).
+    /// Simulation state the simulation keeps the rest of (`sim::fields`): not
+    /// in a map file, nor in a save's chunks — the save's crops plant it again.
+    planted: BTreeSet<(ChunkPos, u16)>,
 }
 
-/// Where a heap's tally is kept in `Map::salvaged`.
+/// Where a heap's tally is kept in `Map::salvaged`, and a crop in
+/// `Map::planted`.
 fn salvage_key(cell: Point) -> (ChunkPos, u16) {
     (ChunkPos::of(cell), chunk::local_index(cell) as u16)
+}
+
+/// The cell a [`salvage_key`] is for.
+fn cell_of_key(pos: ChunkPos, index: u16) -> Point {
+    pos.origin().offset(index as i32 % CHUNK, index as i32 / CHUNK)
+}
+
+/// Whether `cell` is a **plot**: one of the cells a crop may be sown in —
+/// both its coordinates even. So no two crops are ever side by side or
+/// corner to corner, the eight cells round a plot are cells no crop can
+/// stand in, and on open ground every cell left between crops joins up with
+/// every other: a field, however it is sown, never shuts anybody in or walls
+/// a way off — the scrap's one heap to a two-by-two block (`wasteland`), for
+/// crops. Where the ground is not open all round, [`Map::can_sow`] asks for
+/// the ring round the plot to be.
+pub const fn is_plot(cell: Point) -> bool {
+    cell.x.rem_euclid(2) == 0 && cell.y.rem_euclid(2) == 0
 }
 
 /// Whether every cell of the chunk at `pos` is on the site, so it would
@@ -335,6 +366,7 @@ impl Map {
             chunks: ChunkGrid::new(),
             salvaged: BTreeMap::new(),
             salvage_revision: 0,
+            planted: BTreeSet::new(),
         };
         map.rebuild_passability();
         map
@@ -352,13 +384,15 @@ impl Map {
     }
 
     /// Surround the site with a wasteland, or with nothing. Forgets every
-    /// loaded chunk, which was the other wasteland's ground, and everything
-    /// salvaged from its scrap.
+    /// loaded chunk, which was the other wasteland's ground, everything
+    /// salvaged from its scrap and everything sown in its soil.
     pub fn set_wasteland(&mut self, wasteland: Option<Wasteland>) {
         if self.wasteland != wasteland {
             self.wasteland = wasteland;
             self.chunks = ChunkGrid::new();
             self.salvaged.clear();
+            let site = self.site();
+            self.planted.retain(|&(pos, index)| site.contains(cell_of_key(pos, index)));
             self.salvage_revision = self.salvage_revision.wrapping_add(1);
             self.invalidate_navigation();
         }
@@ -396,7 +430,19 @@ impl Map {
             Chunk::generate(pos, |cell| wasteland.tile(cell, site), |cell, tile| wasteland.scrap_on(cell, site, tile))
         });
         self.clear_salvaged(pos);
+        self.block_planted(pos);
         true
+    }
+
+    /// Close the cells of the loaded chunk at `pos` that have a crop in them:
+    /// a field sown before the chunk was dropped is still there.
+    fn block_planted(&mut self, pos: ChunkPos) {
+        let Some(chunk) = self.chunks.get_mut(pos) else {
+            return;
+        };
+        for &(_, index) in self.planted.range((pos, 0)..=(pos, u16::MAX)) {
+            chunk.block(cell_of_key(pos, index));
+        }
     }
 
     /// Open the cells of the loaded chunk at `pos` whose heaps have been
@@ -466,6 +512,7 @@ impl Map {
         let tile = wasteland.tile(cell, site);
         tile.is_passable()
             && wasteland.scrap_on(cell, site, tile).is_none_or(|found| self.left_of(cell, found).is_none())
+            && !self.is_planted(cell)
     }
 
     /// What is left of a heap found as `found` in `cell`: `None` once it is
@@ -563,7 +610,79 @@ impl Map {
     /// which counts a heap as something that can go, the way it counts a
     /// door as something that can open.
     pub fn is_open_ground(&self, point: Point) -> bool {
-        self.is_passable(point) || self.scrap(point).is_some()
+        self.is_passable(point) || self.scrap(point).is_some() || self.is_planted(point)
+    }
+
+    /// Whether a crop could be sown in `cell` now: a [plot](is_plot) of good
+    /// soil (`Terrain::fertile`) with nothing in the way — no crop, no heap,
+    /// no prop — **and the eight cells round it open**. Who is standing
+    /// there is not the map's to say.
+    ///
+    /// The ring is what keeps the promise [`is_plot`] makes where the ground
+    /// is not open all round: a plot in a gap one cell wide — between a lake
+    /// and a heap, against a wall — would close the gap. None of the eight is
+    /// a plot, so no crop ever stands in them, and nothing else in play ever
+    /// closes a cell (a heap only ever goes): with the ring open, whatever way
+    /// ran through the plot runs round it, for as long as the crop stands.
+    pub fn can_sow(&self, cell: Point) -> bool {
+        is_plot(cell)
+            && self.terrain(cell).is_some_and(TerrainId::is_fertile)
+            && self.is_passable(cell)
+            && (-1..=1).all(|dy| (-1..=1).all(|dx| self.is_passable(cell.offset(dx, dy))))
+    }
+
+    /// Whether a crop stands in `cell`.
+    #[inline]
+    pub fn is_planted(&self, cell: Point) -> bool {
+        !self.planted.is_empty() && self.planted.contains(&salvage_key(cell))
+    }
+
+    /// Every cell a crop stands in, by chunk and cell in it.
+    pub fn planted(&self) -> impl Iterator<Item = Point> + '_ {
+        self.planted.iter().map(|&(pos, index)| cell_of_key(pos, index))
+    }
+
+    /// Sow `cell`: from now on it is in the way, as a heap is, until
+    /// [`Map::unplant`]. Refused — `false`, nothing changed — where
+    /// [`Map::can_sow`] says no.
+    ///
+    /// Like [`Map::take_scrap`], it leaves [`Map::navigation`] alone:
+    /// reachability counts a crop's cell as open ground, the way it counts a
+    /// heap, and a crop only ever stands in a plot, so no field can cut one
+    /// cell off from another.
+    pub fn plant(&mut self, cell: Point) -> bool {
+        if !self.can_sow(cell) {
+            return false;
+        }
+        self.planted.insert(salvage_key(cell));
+        match self.size.index_of(cell) {
+            Some(_) => self.passability.set(cell, false),
+            None => {
+                if let Some(chunk) = self.chunks.get_mut(ChunkPos::of(cell)) {
+                    chunk.block(cell);
+                }
+            }
+        }
+        true
+    }
+
+    /// The crop in `cell` is gone — harvested — and the cell is open again.
+    /// `false` where there was none.
+    pub fn unplant(&mut self, cell: Point) -> bool {
+        if !self.planted.remove(&salvage_key(cell)) {
+            return false;
+        }
+        match self.size.index_of(cell) {
+            // A crop is only sown on open ground, and nothing in play puts a
+            // prop down: the cell is as open as it was.
+            Some(_) => self.passability.set(cell, true),
+            None => {
+                if let Some(chunk) = self.chunks.get_mut(ChunkPos::of(cell)) {
+                    chunk.clear(cell);
+                }
+            }
+        }
+        true
     }
 
     /// An unbuilt map: every cell [`VOID`], and so nothing walkable anywhere.
@@ -648,6 +767,12 @@ impl Map {
                 self.passability.set(prop.cell(), false);
             }
         }
+        for &(pos, index) in &self.planted {
+            let cell = cell_of_key(pos, index);
+            if self.size.contains(cell) {
+                self.passability.set(cell, false);
+            }
+        }
     }
 
     /// Recompute passability for one cell: the rule of
@@ -660,6 +785,7 @@ impl Map {
         let terrain = self.terrain(point);
         self.sight.set(point, terrain.is_some_and(TerrainId::is_see_through));
         let passable = terrain.is_some_and(TerrainId::is_passable)
+            && !self.is_planted(point)
             && !self.objects(ObjectLayer::Props).iter().any(|prop| {
                 prop.cell() == point && !prop.kind.prop_passability().is_passable()
             });
@@ -1141,5 +1267,89 @@ mod tests {
         assert!((0..8).all(|x| (0..8).all(|y| map.scrap(Point::new(x, y)).is_none())));
         let bare = Map::new(Size::new(8, 8), FLOOR);
         assert_eq!(bare.scrap(heap), None);
+    }
+
+    /// A small site in the wasteland of seed 3, and the first plot of meadow
+    /// out past it.
+    fn meadow() -> (Map, Point) {
+        let map = Map::new(Size::new(8, 8), FLOOR).with_wasteland(3);
+        let plot = Bounds::new(Point::new(40, -200), Size::new(400, 400))
+            .points()
+            .find(|&cell| map.can_sow(cell))
+            .expect("a plot of meadow in a patch that size");
+        (map, plot)
+    }
+
+    #[test]
+    fn a_crop_is_sown_only_in_a_plot_of_good_soil() {
+        let (map, plot) = meadow();
+        assert_eq!(map.terrain(plot), Some(MEADOW));
+        assert!(is_plot(plot) && !is_plot(plot.offset(1, 0)) && !is_plot(plot.offset(0, 1)) && !is_plot(plot.offset(1, 1)));
+        assert!(!map.can_sow(plot.offset(1, 0)), "not a plot");
+        let mut floor = Map::new(Size::new(8, 8), FLOOR);
+        assert!(!floor.can_sow(Point::new(2, 2)), "a floor is not soil");
+        assert!(!floor.plant(Point::new(2, 2)));
+        assert!(floor.is_passable(Point::new(2, 2)));
+        let mut on_site = Map::new(Size::new(8, 8), MEADOW);
+        assert!(on_site.plant(Point::new(4, 2)), "meadow painted on the site is soil too");
+        assert!(!on_site.is_passable(Point::new(4, 2)));
+        assert!(!on_site.plant(Point::new(4, 2)), "one crop to a plot");
+        assert!(on_site.unplant(Point::new(4, 2)));
+        assert!(on_site.is_passable(Point::new(4, 2)));
+        assert!(!on_site.unplant(Point::new(4, 2)), "nothing left to harvest");
+    }
+
+    /// A wall across a meadow with one gap in it, and the gap a plot: sown,
+    /// it would cut the meadow in two, so it cannot be — nor anything with a
+    /// blocked cell round it — while a plot out in the open can.
+    #[test]
+    fn a_plot_is_sown_only_with_the_ground_open_all_round_it() {
+        let mut map = Map::new(Size::new(10, 10), MEADOW);
+        for y in (0..10).filter(|&y| y != 4) {
+            map.set_terrain(Point::new(4, y), WALL);
+        }
+        assert!(!map.can_sow(Point::new(4, 4)), "the one way through");
+        assert!(map.can_sow(Point::new(2, 2)) && map.can_sow(Point::new(6, 6)), "open all round");
+        assert!(!map.can_sow(Point::new(0, 2)), "the map's edge, with nothing past it");
+        assert!(!map.plant(Point::new(4, 4)));
+        assert!(map.is_passable(Point::new(4, 4)));
+    }
+
+    /// Sown, a plot is in the way as a heap is, whether its chunk is loaded
+    /// or not, dropped and loaded again or loaded only after — and
+    /// reachability never hears of it.
+    #[test]
+    fn a_crop_is_in_the_way_until_it_is_harvested_whether_its_chunk_is_loaded_or_not() {
+        for loaded in [false, true] {
+            let (mut map, plot) = meadow();
+            let pos = ChunkPos::of(plot);
+            if loaded {
+                map.load_chunk(pos);
+            }
+            let navigation = map.navigation_revision();
+            assert!(map.plant(plot), "loaded {loaded}");
+            assert!(map.is_planted(plot) && !map.is_passable(plot), "loaded {loaded}");
+            assert!(map.is_open_ground(plot) && map.is_see_through(plot), "loaded {loaded}");
+            assert!(plot.cardinal_neighbours().iter().all(|&side| !map.is_planted(side)));
+            map.unload_chunks(|_| false);
+            assert!(!map.is_passable(plot), "dropped");
+            map.load_chunk(pos);
+            assert!(!map.is_passable(plot), "loaded again");
+            assert_eq!(map.planted().collect::<Vec<_>>(), [plot]);
+            assert!(map.unplant(plot));
+            assert!(map.is_passable(plot), "harvested");
+            map.unload_chunks(|_| false);
+            assert!(map.is_passable(plot), "harvested and dropped");
+            assert_eq!(map.navigation_revision(), navigation, "a field changes nothing about who can reach what");
+        }
+    }
+
+    #[test]
+    fn a_new_wasteland_forgets_what_was_sown_in_the_old_one() {
+        let (mut map, plot) = meadow();
+        assert!(map.plant(plot));
+        map.set_wasteland(None);
+        map.set_wasteland(Some(Wasteland::new(3)));
+        assert!(!map.is_planted(plot) && map.is_passable(plot));
     }
 }

@@ -576,6 +576,13 @@ pub enum Step {
     /// Select the distribution box in a cell, opening its panel — what a
     /// click on a box with nobody standing on it does.
     SelectBox { x: i32, y: i32 },
+    /// Select the crop of wheat in a cell, opening its panel — what a click
+    /// on a crop with nobody standing in it does.
+    SelectCrop { x: i32, y: i32 },
+    /// At least `min` crops in the fields, as the simulation says
+    /// (`sim::fields`). An outcome, not a moment — give the farmers ticks
+    /// enough first.
+    ExpectCrops { min: u32 },
     /// Switch the distribution box in a cell on or off, on the command queue
     /// the game uses — applied by the next tick, like `spawn`. The panel's
     /// button is the way a player does it; this is for a test about what
@@ -599,7 +606,8 @@ pub enum Step {
     /// At least `min` pieces stored in the map's stores of one kind, all of
     /// them together, as the simulation says (`sim::bins`): `in` names the
     /// store's prop — `scrap bin` (the default: what the scrap collectors
-    /// have brought in), `steel rack`, `scrap hopper`, `steel pallet`. An
+    /// have brought in), `steel rack`, `scrap hopper`, `steel pallet`,
+    /// `grain bin`. An
     /// outcome, not a moment — give the world ticks enough first.
     ExpectStored {
         min: u32,

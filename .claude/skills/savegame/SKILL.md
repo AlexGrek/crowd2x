@@ -135,7 +135,14 @@ the same world built fresh. `task.rs`'s `every_task_comes_back_from_a_save_as_it
 `pb::World.tally` (tag 13, `pb::Deaths`; absent = none counted): a body cremated has left the
 world, so only the count remembers it; checked by
 `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with the
-tally not restored). **A new oneof variant must also go in the
+tally not restored). **With the farm**: `pb::World.crops` (tag 14, `pb::Crop { cell, farm, sown,
+quality, tended }`, empty in an older save = nothing sown) — `Fields::save`/`restore`
+(`sim/fields.rs`), which **plants the map again** (a save keeps the ground as found, not what
+stands on it) and refuses a crop where nothing could be sown; `sim/saving.rs` refuses one sown
+for a farm with no grain bin. `JobKind::Farmer` = 6, `GoalId::Farm` = 13 (a
+`pb::Executor::Seek`), the tasks `"sow"`, `"tend"`, `"harvest"` by name and the item `"wheat"` by
+name: no schema change but the one field. The test fingerprint (`save/tests.rs`) includes the
+map's planted cells. Test: `a_farm_saved_mid_week_carries_on_exactly`. **A new oneof variant must also go in the
 field's `tags = "..."` list** or it decodes as nothing (`pb::Task.kind`: "a task of no kind").
 
 ## Fast

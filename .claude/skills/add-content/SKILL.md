@@ -94,6 +94,12 @@ reads the queue (`Stage::of`) ignores tasks it does not know.
 
 - **Effect** (a change a task asks of the world beyond its unit): a variant in `sim/effect.rs` and
   its arm in `effect::apply` — the one function the world step and `testing::World` both call.
+- **An effect that needs the time** carries it (`Effect::Sow { at, when: Clock }`): `apply` is
+  handed no clock, and the task asking knows `ctx.think.clock`.
+- **Something play puts in the way** (a crop): the map keeps passability, so the map keeps
+  *that* a cell is blocked (`Map::plant` / `unplant`, counted as open ground so navigation
+  never changes) and the simulation keeps the rest (`sim::fields`), planting the map again on
+  load. Keep what blocks to a pattern that cannot shut a cell in (`map::is_plot`).
 - **World state** (a new index, store, tally — anything beside the map and the crowd): a field of
   `Facilities` (`sim/facilities.rs`), built in `Facilities::new`; if a brain reads it, a field of
   `Think` filled in `Think::new` (`sim/entity.rs`) — no other place builds a `Think`; if it changes

@@ -38,6 +38,12 @@
 //! time, so selecting either clears the other, and the frame goes on
 //! whichever it is.
 //!
+//! # So can a crop
+//!
+//! A click on a crop of wheat out in the fields, nobody standing there,
+//! selects the crop ([`SelectedCrop`]), and [`super::croppanel`] says how it
+//! is growing. Asked before the box: the crop is what is seen.
+//!
 //! # A light switch is flipped, not selected
 //!
 //! A click on a cell with nobody in it and a light switch on its wall flips
@@ -141,6 +147,33 @@ impl SelectedBox {
     }
 }
 
+/// The crop of wheat being looked at, if any — by its cell: a crop is the
+/// fields' (`sim::fields`), one to a plot.
+#[derive(Resource, Default)]
+pub struct SelectedCrop(Option<Point>);
+
+impl SelectedCrop {
+    pub fn get(&self) -> Option<Point> {
+        self.0
+    }
+
+    /// What the crop panel's `close` asks for, and a harvest.
+    pub fn clear(&mut self) {
+        self.0 = None;
+    }
+
+    /// Look at a crop named directly, for the QA harness.
+    pub fn select(&mut self, at: Point) {
+        self.0 = Some(at);
+    }
+
+    fn set(this: &mut ResMut<SelectedCrop>, at: Option<Point>) {
+        if this.0 != at {
+            this.0 = at;
+        }
+    }
+}
+
 /// The sprite that frames whoever is selected.
 #[derive(Component)]
 struct SelectionFrame;
@@ -151,6 +184,7 @@ impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Selected>()
             .init_resource::<SelectedBox>()
+            .init_resource::<SelectedCrop>()
             .add_systems(OnEnter(AppState::Game), spawn_frame)
             .add_systems(OnExit(AppState::Game), clear)
             .add_systems(
@@ -170,9 +204,10 @@ impl Plugin for SelectionPlugin {
 /// the last visit would name somebody who no longer exists — and would name
 /// them convincingly, since ids are minted from a seeded RNG and the second
 /// world hands out the same ones.
-fn clear(mut selected: ResMut<Selected>, mut selected_box: ResMut<SelectedBox>) {
+fn clear(mut selected: ResMut<Selected>, mut selected_box: ResMut<SelectedBox>, mut selected_crop: ResMut<SelectedCrop>) {
     Selected::set(&mut selected, None);
     SelectedBox::set(&mut selected_box, None);
+    SelectedCrop::set(&mut selected_crop, None);
 }
 
 /// The frame exists for the life of the screen and is moved and hidden, rather
@@ -211,6 +246,7 @@ fn pick(
     mut input: ResMut<SimInput>,
     mut selected: ResMut<Selected>,
     mut selected_box: ResMut<SelectedBox>,
+    mut selected_crop: ResMut<SelectedCrop>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) {
         return;
@@ -236,7 +272,9 @@ fn pick(
     if switch {
         input.0.switch_light(cell, !sim.0.light_is_on(cell));
     }
-    let a_box = (unit.is_none() && !switch && sim.0.has_box(cell)).then_some(cell);
+    let crop = (unit.is_none() && !switch && sim.0.fields().at(cell).is_some()).then_some(cell);
+    SelectedCrop::set(&mut selected_crop, crop);
+    let a_box = (unit.is_none() && !switch && crop.is_none() && sim.0.has_box(cell)).then_some(cell);
     SelectedBox::set(&mut selected_box, a_box);
 }
 
@@ -267,6 +305,7 @@ fn forget_the_departed(sim: Option<Res<Sim>>, mut selected: ResMut<Selected>) {
 fn follow_selection(
     selected: Res<Selected>,
     selected_box: Res<SelectedBox>,
+    selected_crop: Res<SelectedCrop>,
     sim: Option<Res<Sim>>,
     mut frames: Query<(&mut Transform, &mut Visibility), With<SelectionFrame>>,
 ) {
@@ -278,6 +317,7 @@ fn follow_selection(
         .or_else(|| {
             selected_box
                 .0
+                .or(selected_crop.0)
                 .map(|cell| background::cell_centre(IVec2::new(cell.x, cell.y)))
         });
 

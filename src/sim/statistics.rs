@@ -1,5 +1,6 @@
-//! The world in numbers: who is alive, what the warehouse and the steel
-//! factory hold, who works at what, and the dead.
+//! The world in numbers: who is alive, what the warehouse, the steel
+//! factory and the farm hold, what grows in the fields, who works at what,
+//! and the dead.
 //!
 //! [`Statistics`] is a snapshot, worked out on asking
 //! ([`GameState::statistics`](super::GameState::statistics)) by one walk of the
@@ -13,12 +14,14 @@
 
 use crate::save::pb;
 
+use super::clock::Clock;
 use super::entities::Entities;
-use super::feature::{FeatureKind, Features};
+use super::facilities::Facilities;
+use super::feature::FeatureKind;
+use super::fields::Stage;
 use super::item::ItemKind;
 use super::job::JobKind;
 use super::uid::EntityType;
-use super::{Bins, Corpses};
 
 /// What happened that the world itself no longer shows.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -65,6 +68,23 @@ pub struct SiteStock {
     pub items: Vec<(ItemKind, u32)>,
 }
 
+/// The fields: how many crops are at each stage, and how well kept they are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct FieldStock {
+    /// Crops at each [`Stage`], in [`Stage::ALL`] order.
+    pub stages: [u32; Stage::ALL.len()],
+    /// Their quality on average, in percent, rounded down; `None` with
+    /// nothing sown.
+    pub quality: Option<u32>,
+}
+
+impl FieldStock {
+    /// Every crop in the fields.
+    pub fn sown(&self) -> u32 {
+        self.stages.iter().sum()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statistics {
     /// The living, by kind, in [`EntityType::ALL`] order.
@@ -73,6 +93,8 @@ pub struct Statistics {
     /// their store kinds are listed — every site there is, on this map or
     /// not.
     pub sites: Vec<SiteStock>,
+    /// What is growing in the fields.
+    pub fields: FieldStock,
     /// Every [`JobKind`], in [`JobKind::ALL`] order, posts or none.
     pub jobs: Vec<JobCount>,
     /// Living humans with no job.
@@ -87,7 +109,9 @@ pub struct Statistics {
 }
 
 impl Statistics {
-    pub fn of(entities: &Entities, features: &Features, bins: &Bins, corpses: &Corpses, tally: Tally) -> Statistics {
+    /// The world's numbers at `now`.
+    pub(crate) fn of(entities: &Entities, facilities: &Facilities, now: Clock) -> Statistics {
+        let Facilities { features, bins, corpses, tally, fields, .. } = facilities;
         let mut alive = EntityType::ALL.map(|kind| (kind, 0u32));
         let mut workers = [0u32; JobKind::ALL.len()];
         let (mut jobless, mut carried) = (0, 0);
@@ -137,9 +161,17 @@ impl Statistics {
                 None => stock.items.push((store.holds, stored)),
             }
         }
+        let mut stock = FieldStock::default();
+        let mut quality = 0u32;
+        for crop in fields.iter() {
+            stock.stages[crop.stage(now) as usize] += 1;
+            quality += crop.quality as u32;
+        }
+        stock.quality = (!fields.is_empty()).then(|| quality / fields.len() as u32);
         Statistics {
             alive: alive.to_vec(),
             sites,
+            fields: stock,
             jobs,
             jobless,
             died: tally.died,

@@ -1,0 +1,103 @@
+{
+  "name": "a farmer is hired at the grain bin, sows a field of wheat in the good soil, tends it all week and brings the harvest in on the Monday",
+  "state": "game",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "meadow",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 7 },
+          "terrain": {
+            "palette": ["meadow"],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 216, "y": 168 }, "kind": "grain bin" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "meadow",
+  "steps": [
+    { "note": "a site of good soil with a grain bin in cell (4, 3), and nothing else to be hired to. The first plot sown is the nearest the bin with the ground open all round it, (2, 2): the two beside the bin have it in their ring" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "arriving to find the bin free is being hired to it" },
+    { "spawn": { "kind": "human", "x": 1, "y": 1 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a farmer at the grain bin at 4, 3" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "note": "every need switched off, tiredness too, so this is a test about the job and a week of it" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "press": "job" },
+    { "expect_text": "farmer" },
+    { "expect_text": "grain bin at 4, 3" },
+    { "expect_text": "09:00-17:00" },
+    { "expect_text": "Mon-Sat" },
+    { "expect_text": "off until 09:00" },
+    { "press": "close" },
+
+    { "note": "Monday: ten crops sown round the bin by two in the afternoon, at 1920 ticks a world hour" },
+    { "tick": 11520 },
+    { "expect_crops": { "min": 10 } },
+    { "select_crop": { "x": 2, "y": 2 } },
+    { "expect_text": "seedling, stage 1 of 4" },
+    { "expect_text": "quality 0% of 100%, sown today" },
+    { "look_at": { "x": 4, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "Monday afternoon: the field sown round the grain bin, a crop looked at" },
+    { "press": "close" },
+
+    { "note": "to Saturday at three: tended every day since, so in ear and at its best" },
+    { "tick": 232320 },
+    { "select_crop": { "x": 2, "y": 2 } },
+    { "expect_text": "in ear, stage 3 of 4" },
+    { "expect_text": "quality 100% of 100%, tended today" },
+    { "wait": 0.3 },
+    { "shot": "Saturday afternoon: the field in ear" },
+    { "press": "close" },
+
+    { "note": "to the next Monday at five: ripe on the Sunday, harvested today, three sheaves a crop at its best, and sown again" },
+    { "tick": 96000 },
+    { "expect_stored": { "min": 30, "in": "grain bin" } },
+    { "expect_crops": { "min": 10 } },
+    { "press": "statistics" },
+    { "expect_text": "farm         30   wheat" },
+    { "expect_text": "fields       10   10 seedling" },
+    { "wait": 0.3 },
+    { "shot": "the statistics: the farm's wheat and the fields" },
+    { "press": "close" },
+    { "wait": 0.3 },
+    { "shot": "Monday evening: the harvest in, the grain bin full, the field sown again" },
+
+    { "key": "esc" },
+    { "expect_state": "maps" }
+  ]
+}

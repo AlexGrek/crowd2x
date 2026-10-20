@@ -1,6 +1,6 @@
 ---
 name: game-screen
-description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the HUD corners, the spawn menu and the statistics menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
+description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the crops of wheat drawn by stage and the crop panel, the HUD corners, the spawn menu and the statistics menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
 ---
 
 # The game screen
@@ -189,22 +189,41 @@ shows the frame of its strip for `GameState::doors()` openness, written only whe
 A fact about the door, so unlike a computer screen the crowd is not asked — the `doors` skill.
 
 **Stores fill on screen** (`game/props.rs` `fill_bins`): every `BinFill` (a posed prop that is a
-store — `"scrap bin"`, `"steel rack"`, `"scrap hopper"`, `"steel pallet"`: any whose feature row
+store — `"scrap bin"`, `"steel rack"`, `"scrap hopper"`, `"steel pallet"`, `"grain bin"`: any whose feature row
 keeps something, `sim::feature::store_of`; `editor::props`) shows frame
 `bin_frame(GameState::bins().stored(cell))` of its four — 0 empty, 1-5 a few pieces, 6-20 half
 full, more heaped — written only on a change. The HUD's map stats (`hud::stats`) end in a line
 per kind of store whose `StoreDef` has a `hud` word, on a map with one: `scrap  N stored` (the
-scrap bins) and `steel  N stored` (the steel racks). A new store needs nothing here (the `jobs`
-skill). The statistics menu's stock lines are one per store `site` (`warehouse`, `factory`),
-listing what its stores hold — `sim::Statistics::sites`, built from the same rows.
+scrap bins), `steel  N stored` (the steel racks) and `wheat  N stored` (the grain bins). A new
+store needs nothing here (the `jobs` skill). The statistics menu's stock lines are one per store
+`site` (`warehouse`, `factory`, `farm`), listing what its stores hold —
+`sim::Statistics::sites`, built from the same rows.
+
+**Crops grow on screen** (`game/crops.rs`, `CropsPlugin`): a sprite on every crop of wheat on
+the canvas (`GameState::fields`, the simulation's — nothing is sown in the editor), drawn like a
+heap of scrap (deep by its row, `upscale(ART_SCALE)`), its picture `ART[stage]` —
+`wheat_1.png` .. `wheat_4.png`, seedling to ripe. A crop grows **by the clock** without the
+fields changing, so every frame the crops on the canvas (a few dozen at most) are checked
+against `Crop::stage(clock)` and a picture swapped where the stage moved on; harvested ones go.
+The window is forgotten `OnEnter(Game)`, like the map windows.
+
+### Looking at a crop (`game/croppanel.rs`)
+
+A click on a crop with nobody in its cell selects it (`selection::SelectedCrop`, asked before
+the box; one selection at a time, the green frame on it) and opens a panel along the bottom:
+`wheat  x, y`, `young, stage 2 of 4: ripe in 3 days, 4 hours` (`growth`), `quality 40% of
+100%, tended today` / `not tended today` / `sown today` / `grown` (`care`), the grain bin it was sown for, and
+`close`. Read-only, rewritten in place every frame; a crop harvested under it clears the
+selection. QA: `select_crop`.
 
 ### The statistics menu (`game/statistics.rs`)
 
 `statistics`, in the row with `save` and `quick save`, opens a full-screen modal like the spawn
 menu (its own `Scope`, `StatisticsMenu` resource so `leave` closes it on `esc` before leaving
 the game, `close` button) showing `GameState::statistics()` (`sim::statistics`): the living by
-kind, what the warehouse (scrap bins, steel rack) and the steel factory (hoppers, pallets) hold,
-workers per `JobKind` against its posts (workplaces x shifts) and the jobless, and the dead
+kind, what the warehouse (scrap bins, steel rack), the steel factory (hoppers, pallets) and the
+farm (grain bins) hold, the fields (`fields       80   10 seedling  20 young  30 in ear  20 ripe
+quality 64%`, `sim::statistics::FieldStock`, or `nothing sown`), workers per `JobKind` against its posts (workplaces x shifts) and the jobless, and the dead
 (`died` — `Tally`, counted as they die and saved —, lying, carried, cremated). **The world runs
 on behind it** and the text is rebuilt every frame the menu is open and written only when it
 changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text

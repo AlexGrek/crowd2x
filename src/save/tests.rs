@@ -66,6 +66,7 @@ fn fingerprint(state: &GameState) -> Vec<Vec<u8>> {
         .map(|chunk| (chunk.x, chunk.y, chunk.salvaged))
         .collect();
     parts.push(format!("{salvaged:?}").into_bytes());
+    parts.push(format!("{:?}", state.map.planted().collect::<Vec<_>>()).into_bytes());
     parts
 }
 
@@ -413,6 +414,34 @@ fn the_steel_works_saved_mid_shift_carries_on_exactly() {
     let pack = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().inventory().unwrap().describe_load();
     assert_eq!(pack(&copy, courier), pack(&state, courier));
     assert!(state.bins().iter().map(|(_, stored)| stored).sum::<u32>() < 12, "some of it carried or smelted");
+}
+
+/// A farm in the middle of the week: its field sown on the Monday, the
+/// Tuesday's tending under way. Every crop — where, how old, how well kept,
+/// when last tended — comes back, planted in the map again, and the world
+/// goes on as it would have: the rest of the field tended after the load.
+#[test]
+fn a_farm_saved_mid_week_carries_on_exactly() {
+    let (mut state, farmer) = crate::sim::testing::farm(5);
+    let mut ticks = 0;
+    while state.fields().len() < crate::sim::fields::PLOTS {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 6 * 1800, "nothing sown by {}", state.clock());
+    }
+    crate::sim::testing::skip_to(&mut state, 2, 9.0);
+    while !state.fields().iter().any(|crop| crop.tended == 2)
+        || state.entities().get(farmer).unwrap().interacting_with().is_none()
+    {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 12 * 1800, "nothing tended by {}", state.clock());
+    }
+    let copy = side_by_side(&mut state, 3600, |_, _| Input::new());
+    let crops = |state: &GameState| state.fields().iter().copied().collect::<Vec<_>>();
+    assert_eq!(crops(&copy), crops(&state));
+    assert_eq!(copy.map.planted().collect::<Vec<_>>(), state.map.planted().collect::<Vec<_>>());
+    assert!(state.fields().iter().filter(|crop| crop.tended == 2).count() > 1, "more tended after the load");
 }
 
 #[test]

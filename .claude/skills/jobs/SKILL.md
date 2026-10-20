@@ -1,11 +1,11 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal, salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal, salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
 
-A job is **what a unit does for a living, where, and when**. Six so far, all tiring and no
+A job is **what a unit does for a living, where, and when**. Seven so far, all tiring and no
 fun:
 
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
@@ -25,7 +25,10 @@ fun:
   factory's pallets;
 - the **courier**: their own scrap hopper in the steel factory, office hours — scrap metal from
   the warehouse's bins to the hopper, and steel from the factory's pallets to the warehouse's
-  steel rack. See "The steel works" below.
+  steel rack. See "The steel works" below;
+- the **farmer**: their own grain bin at the district's farm, nine to five **every day but
+  Sunday** — a field of ten crops of wheat sown in the good soil out in the wasteland, tended
+  every day, harvested when ripe and the wheat stored in the bin. See "The farm" below.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -34,8 +37,8 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | Concept | Where | What |
 | --- | --- | --- |
 | `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name) and `now` (the job menu's line). The methods read the row. Saved as its number (`JobKind::number`) |
-| `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers. `give_a_job` and `Command::Hire` walk it |
-| `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY` |
+| `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers. `give_a_job` and `Command::Hire` walk it |
+| `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY` |
 | `Job::is_due(clock)` | `job.rs` | its hours on its days **plus the kind's commute before** (`Shift::is_due_after`): the office sets off at 08:30, a guard two hours before its watch. A shift from midnight is due from the evening before if the next day is worked. (`Shift::is_due` keeps the plain `COMMUTE`.) What `WorkRoutine` and the job menu read |
 | `Shift::is_bedtime(clock)` | `job.rs` | **a worker sleeps by its shift**: the 8 hours (`BEDTIME`-`GETTING_UP`'s length) ending `UP_BEFORE_SHIFT` = 3 before the shift starts, every day. Office hours: 22-06, the clock's own night, so nothing changed for them; day watch 21-05; evening watch 05-13; night watch 13-21. `job::is_bedtime(job, clock)` falls back to `Clock::is_night` with no job. `SleepRoutine` and the boredom routine's no-play-at-night cap read it |
 | `Shift::is_working_hours`, `hours()`, `days()` | `job.rs` | the hours alone; `09:00-17:00`; `Mon-Fri`, `Mon-Sun` (or `Mon, Wed, Sat`) |
@@ -201,6 +204,42 @@ never fetching from a pallet) and `a_district_s_steel_works_bring_steel_into_its
 10:00 (`carrying steel to the warehouse`), `expect_stored {"min": 1, "in": "steel rack"}` and
 the HUD's `steel  1 stored` by the afternoon, the statistics menu (seen failing asking for 50).
 
+## The farm
+
+The first link of the food supply chain: wheat, grown out in the wasteland and stored at the
+district's farm. Nothing eats it yet.
+
+| Layer | What | File |
+| --- | --- | --- |
+| soil | **good soil** is a terrain column, `Terrain::fertile` (`meadow` only); a crop goes only in a **plot** (`map::is_plot`: both coordinates even), so no two crops touch. `Map::can_sow(cell)` = a plot of good soil with nothing in the way **and the eight cells round it open** — so a crop never closes a gap between a lake, a heap or a wall, and never shuts anybody in or walls a way off; a map with nothing round it has no sowable plot on its edge. A crop **blocks its cell** like a heap (`Map::plant` / `unplant`, the map's `planted` set; navigation counts it open ground, so it never invalidates) | `map/terrain.rs`, `map/mod.rs` (`map` skill) |
+| fields | `sim::fields::Fields` (a `Facilities` field, `Think::fields`): every `Crop { cell, farm, sown, quality, tended }`, sorted by cell. `farm` is **the grain bin it was sown for** — a farmer's workplace — so a field outlives its farmer and the next one hired to the bin keeps it. **Grows by the clock**: `Crop::stage(now)` is `Seedling`, `Young`, `Heading` (in ear), `Ripe`, a stage every `STAGE_DAYS` (2), ripe after `GROWING_DAYS` (6); nothing is stepped. **Tended once a day** (`needs_tending`: not the day sown, not once ripe) for `TEND_QUALITY` (20) up to `BEST` (100); harvested, it yields `1 + quality / 40` sheaves (`Crop::harvest`, 1-3). `PLOTS` = 10 crops a farm | `sim/fields.rs` |
+| kinds | `JobKind::Farmer` (workplace `FeatureKind::GrainBin` — a store of `ItemKind::Wheat`, site `"farm"`, HUD `wheat`; goal `GoalId::Farm` 🌱; `FARM_HOURS`; `"uniform farmer"`: denim dungarees over a red shirt), hired last; `ItemKind::Wheat` (0.5 kg, 1 l: twelve to a pack, 🌾) | `job.rs`, `feature.rs`, `item.rs` |
+| tasks | `Sow { plot }` (`SOW_SECONDS` = 10 world min) beside a plot `can_sow` says yes to → `Effect::Sow`; `Tend { crop }` (15 min) beside a crop wanting it → `Effect::Tend`; `Harvest { crop }` (10 min) beside a ripe crop, with room in the pack for all it yields (`Inventory::room_for_many`) → `Effect::Harvest`. All named `TimedTask`s, all `Event::Worked`. The effects carry `when: Clock` | `brain/tasks/sow.rs`, `tend.rs`, `harvest.rs` |
+| the world | `effect::apply`: `Sow` sows for the unit's job's workplace, refused where somebody stands in the plot (the occupancy) or lies dead in it (`Corpses`: the dead let their cell go), it is sown already, or the field is full (`"sowed wheat at x, y: 4 of 10 sown"`); `Tend` (`"tended the wheat at x, y: kept at 60%"`); `Harvest` out of the fields, the plot opened, the sheaves into the pack (`"harvested 3 wheat at x, y, kept at 100%"`) | `sim/effect.rs` |
+| farmer | `FarmGoal` (a `Seek`), from what is true now: fewer than 10 crops → `nearest_plot` (ring by ring out from the field's crop nearest the bin, or the bin; a free plot nobody stands in or beside, no body lies in, reachable) and `Sow`; a ripe crop → `Harvest`, or the bin first if the pack has no room; a crop not tended today → `Tend`; wheat carried → the bin, `Deposit` (`Achieved`); nothing → `Blocked`, **without a log line** (it is most afternoons). So a crop harvested is sown again before the next is cut. No grain bin → `Blocked` | `brain/goals/farm.rs` |
+| menu | `now`: `storing wheat` at the bin, `in the fields` | `job.rs` |
+| on screen | crops drawn by stage (`game/crops.rs`), a click on one opens its panel (`game/croppanel.rs`); the grain bin fills like the scrap bin; HUD `wheat  N stored`; the statistics menu's `farm` and `fields` lines | `game-screen` |
+
+**The week**: sown Monday morning, tended Tuesday to Saturday (quality 100), ripe Sunday while
+the farmer is off, harvested (30 sheaves a field) and sown again Monday.
+
+**In a district** (`map-generator`): the farm is a lot building (`map/district/farm.rs`) on the
+edge lot nearest the good soil — 10 to 12 cells for 58 of 64 seeds — 8 grain bins along its side
+walls, so 8 farmers. Seed 7, the farmers' needs and tiredness off, has all 80 crops sown by
+14:43 on the Monday, through the gates and just past the wall. Two farmers going for the same
+plot is the one race; a farmer passes over a plot somebody stands beside. A one-plot gap kept
+between farms' fields was tried and dropped: farmers sowing side by side kept having ten
+minutes' work refused when a neighbour's crop went in first.
+
+Tests: `fields.rs` (stages, once a day, yield, harvest only ripe, a farm's ten, save); the
+tasks' `Rig` tests; `farm.rs`'s goal tests on a meadow site (`a_week_on_the_farm_...`: Monday
+sown, five days tended, Sunday off and ripe, Monday 30 stored and sown again; held off once
+tended); `map::district::farm` (one farm of 8 bins on the edge, nearest the soil, enough soil);
+`sim::tests::a_district_on_a_monday_sows_its_fields`;
+`save::tests::a_farm_saved_mid_week_carries_on_exactly` (`testing::farm`, `testing::skip_to`).
+QA `qa/farmer.json`: a meadow site with a grain bin, the job menu (`Mon-Sat`), ten crops by
+Monday 14:00, the crop panel, Saturday in ear at 100%, Monday 30 in the bin and the statistics.
+
 ## Saving (`savegame` skill)
 
 - `pb::Brain.job` (tag 14, `pb::Job`: `JobKind` enum — `OfficeWorker = 0`,
@@ -211,13 +250,17 @@ the HUD's `steel  1 stored` by the afternoon, the statistics menu (seen failing 
   office hours, 9), `Workplaces::save`/`restore` (one workplace to one worker, one worker to a
   workplace; a start past 23 refused), restored after `homes` in `sim/saving.rs`, then
   **cross-checked** against the entities both ways (cell and start).
+- `pb::World.crops` (tag 14, `pb::Crop { cell, farm, sown, quality, tended }`):
+  `Fields::save`/`restore`, which **plants the map again** (a save's chunks keep the ground as
+  found) and refuses a crop where none could be sown; `sim/saving.rs` then refuses one sown for
+  a farm with no grain bin.
 - `pb::World.bins` (tag 12, `pb::Bin { cell, stored }`), `Bins::save`/`restore`, restored after
   the fridges; refuses a cell with no store or a different number of stores. Which kind each
   is, is the map's. Empty in an older save, which is a map with none.
 - `WorkRoutine::on_shift` is saved as the routine's `committed`; `WorkGoal`, `CollectGoal`,
-  `BuryGoal`, `SmeltGoal` and `HaulGoal` are a `pb::Executor::Seek`; the tasks save by name
-  (`TimedTask`: `"work"`, `"keep watch"`, `"deposit"`, `"salvage for work"`, `"withdraw"`,
-  `"smelt"`...), and still read the tags the builds before wrote them under. Goals and jobs are
+  `BuryGoal`, `SmeltGoal`, `HaulGoal` and `FarmGoal` are a `pb::Executor::Seek`; the tasks save
+  by name (`TimedTask`: `"work"`, `"keep watch"`, `"deposit"`, `"salvage for work"`,
+  `"withdraw"`, `"smelt"`, `"sow"`, `"tend"`, `"harvest"`...), and still read the tags the builds before wrote them under. Goals and jobs are
   saved as their catalogue numbers (`GoalId::Collect` = 9, `JobKind::Guard` = 2...).
 - The routine was appended, so `Brain::restore` accepts a saved routine list that is a
   **prefix** of the brain's (old saves, `format1.savegame`); an executor a save does not

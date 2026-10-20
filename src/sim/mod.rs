@@ -143,6 +143,7 @@ pub mod entities;
 pub mod entity;
 pub(crate) mod facilities;
 pub mod feature;
+pub mod fields;
 pub mod fridge;
 pub mod homes;
 pub mod identity;
@@ -184,6 +185,7 @@ pub use effect::Effect;
 pub use entities::{Entities, FrozenEntities, Slot};
 pub use entity::{cell_of, Body, GameEntity, Think};
 pub use feature::{FeatureKind, Features};
+pub use fields::Fields;
 pub use fridge::Fridges;
 pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
@@ -846,6 +848,11 @@ impl GameState {
         &self.facilities.bins
     }
 
+    /// Every crop in the fields. See [`fields`].
+    pub fn fields(&self) -> &Fields {
+        &self.facilities.fields
+    }
+
     /// The dead counted so far. See [`statistics`].
     pub fn tally(&self) -> Tally {
         self.facilities.tally
@@ -854,7 +861,7 @@ impl GameState {
     /// The world in numbers, worked out now: one walk of the arena, for a
     /// screen to show, never for a tick to read. See [`statistics`].
     pub fn statistics(&self) -> Statistics {
-        Statistics::of(&self.entities, &self.facilities.features, &self.facilities.bins, &self.facilities.corpses, self.facilities.tally)
+        Statistics::of(&self.entities, &self.facilities, self.clock())
     }
 
     /// Every door's leaf and lock. See [`door`].
@@ -3281,9 +3288,12 @@ mod tests {
         //
         // Raised from 768 to 832, a cache line, on purpose: the undertaker's
         // goal slot and executor, and a count of the body item kind (776).
+        //
+        // Raised from 832 to 896, a cache line, on purpose: the farmer's goal
+        // slot and executor, and a count of the wheat item kind (856).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 832, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 896, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3762,11 +3772,12 @@ mod tests {
             assert_eq!(watches, 24);
             let undertakers = crate::map::district::crematorium::CREMATORIA * job::WATCHES.len();
             let (smelters, couriers) = (crate::map::district::steel_factory::FURNACES, crate::map::district::steel_factory::HOPPERS);
-            let jobs = desks + bins + watches + undertakers + smelters + couriers;
+            let farmers = crate::map::district::farm::GRAIN_BINS;
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
-            let (mut smelting, mut hauling) = (0, 0);
+            let (mut smelting, mut hauling, mut farming) = (0, 0, 0);
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
@@ -3800,11 +3811,16 @@ mod tests {
                         }
                         assert!(district.the(crate::map::district::steel_factory::NAME).contains(job.workplace), "seed {seed}: a {} outside the factory", job.kind.name());
                     }
+                    JobKind::Farmer => {
+                        farming += 1;
+                        assert!(district.the(crate::map::district::farm::NAME).contains(job.workplace), "seed {seed}: a grain bin outside the farm");
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
+            assert_eq!(farming, farmers, "seed {seed}: the farm's");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -3901,9 +3917,53 @@ mod tests {
         let stored = lines.iter().find(|line| line.contains("in the bin at")).expect("a line about it");
         assert!(stored.contains("scrap metal in the bin at"), "{stored}");
         for (bin, store, _) in state.bins().iter_stores() {
-            let building = if store.store().unwrap().site == "factory" { district.the(crate::map::district::steel_factory::NAME) } else { district.the(crate::map::district::warehouse::NAME) };
+            let building = match store.store().unwrap().site {
+                "factory" => district.the(crate::map::district::steel_factory::NAME),
+                "farm" => district.the(crate::map::district::farm::NAME),
+                _ => district.the(crate::map::district::warehouse::NAME),
+            };
             assert!(building.contains(bin), "{store:?} at {bin:?}");
         }
+    }
+
+    /// Seed 7 on a Monday, its farmers' needs off as the collectors' are
+    /// above, and their tiredness — a resident arrives as tired as it
+    /// happens to be, and a nap would take one home: out through the gates
+    /// to the good soil by the farm, and every one of them with a field of
+    /// its own sown by five.
+    #[test]
+    fn a_district_on_a_monday_sows_its_fields() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        let farmers: Vec<Uid> = state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::Farmer)).map(|e| e.uid()).collect();
+        assert_eq!(farmers.len(), crate::map::district::farm::GRAIN_BINS);
+        for &farmer in &farmers {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy] {
+                input.set_process(farmer, process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let fields = farmers.len() * fields::PLOTS;
+        // Measured: the last crop in at 14:43.
+        for _ in 0..9 * 1800 {
+            run(&mut state, 1);
+            if state.fields().len() == fields {
+                break;
+            }
+        }
+        assert_eq!(state.fields().len(), fields, "sown by {}", state.clock());
+        let farm = district.the(crate::map::district::farm::NAME);
+        for crop in state.fields().iter() {
+            assert!(farm.contains(crop.farm), "{crop:?} for a farm that is not the farm");
+            assert!(!state.map.contains(crop.cell) && state.map.terrain(crop.cell).is_some_and(|tile| tile.is_fertile()), "{crop:?}");
+        }
+        for &farmer in &farmers {
+            let bin = state.entities().get(farmer).unwrap().job().unwrap().workplace;
+            assert_eq!(state.fields().of(bin).count(), fields::PLOTS, "{farmer}'s field");
+        }
+
     }
 
     #[test]

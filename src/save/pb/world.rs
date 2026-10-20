@@ -46,6 +46,28 @@ pub struct World {
     /// Missing in a save from before it, which is nobody counted.
     #[prost(message, optional, tag = "13")]
     pub tally: Option<Deaths>,
+    /// Every crop in the fields (`crate::sim::fields::Fields`), by cell.
+    /// Empty in a save from before there were farmers, which is nothing sown.
+    #[prost(message, repeated, tag = "14")]
+    pub crops: Vec<Crop>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Crop {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    /// The grain bin of the farm it was sown for.
+    #[prost(message, optional, tag = "2")]
+    pub farm: Option<Cell>,
+    /// When it was sown, world seconds since the world began.
+    #[prost(double, tag = "3")]
+    pub sown: f64,
+    /// How well it has been kept, in percent.
+    #[prost(uint32, tag = "4")]
+    pub quality: u32,
+    /// The day it was last tended, or sown.
+    #[prost(uint32, tag = "5")]
+    pub tended: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

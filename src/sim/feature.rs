@@ -139,6 +139,14 @@ catalogue! {
         /// Where scrap metal is smelted into steel: a steelworker's workplace,
         /// worked from beside it. **Needs power** (`map::utilities`).
         Furnace = 13 => FeatureDef { props: &["furnace"], ..BESIDE },
+        /// The farm's store of wheat: a farmer's workplace, one farmer to a
+        /// bin, and what its field is sown for (`sim::fields`) — the harvest
+        /// goes in it.
+        GrainBin = 14 => FeatureDef {
+            props: &["grain bin"],
+            store: Some(StoreDef { holds: ItemKind::Wheat, called: "grain bin", site: "farm", hud: Some("wheat") }),
+            ..BESIDE
+        },
     }
 }
 

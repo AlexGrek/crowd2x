@@ -310,6 +310,21 @@ UNIFORMS = {
         {"d": CLOTH["green"][0], "m": CLOTH["green"][1], "s": (92, 60, 34), "c": (130, 88, 50),
          "p": TROUSERS["khaki"][0], "q": TROUSERS["khaki"][1]},
     ),
+    # Denim dungarees, the bib buttoned at its corners, over a red shirt, and
+    # muddy brown boots: the farmer's, out in the fields.
+    "farmer": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....Rbrrbr.....",
+            "....Rrkddkrr....",
+            ".....Rddddr.....",
+            ".....bddddb.....",
+            "......dbbd......",
+            "......qqqq......",
+        ],
+        {"R": CLOTH["red"][0], "r": CLOTH["red"][1], "k": BUCKLE,
+         "d": TROUSERS["jeans"][0], "b": TROUSERS["jeans"][1], "q": (84, 58, 36)},
+    ),
 }
 
 

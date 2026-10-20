@@ -25,6 +25,8 @@ use crate::save::{invalid, pb, Invalid};
 
 use super::entities::{Entities, Slot};
 use super::entity::GameEntity;
+use super::feature::FeatureKind;
+use super::fields::Fields;
 use super::homes::Homes;
 use super::job::Workplaces;
 use super::{kinds, rng, Effect, GameState, Intent, MoveOutcome};
@@ -69,6 +71,7 @@ impl GameState {
             arena: Some(self.entities.save_arena()),
             workplaces: self.facilities.workplaces.save(),
             tally: Some(self.facilities.tally.save()),
+            crops: self.facilities.fields.save(),
         }
     }
 
@@ -150,6 +153,12 @@ impl GameState {
         state.facilities.doors.restore(&world.doors)?;
         state.facilities.homes = Homes::restore(&world.homes)?;
         state.facilities.workplaces = Workplaces::restore(&world.workplaces)?;
+        // The crops, planted on the map again: a save keeps the ground as it
+        // was found, and what stands in it is the fields'.
+        state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
+        if let Some(crop) = state.facilities.fields.iter().find(|crop| state.facilities.bins.store(crop.farm) != Some(FeatureKind::GrainBin)) {
+            return invalid(format!("a crop at {}, {} sown for a farm with no grain bin", crop.cell.x, crop.cell.y));
+        }
 
         let arena = pb::required(&world.arena, "arena")?;
         let mut holders: Vec<(Point, crate::sim::Uid)> = Vec::new();

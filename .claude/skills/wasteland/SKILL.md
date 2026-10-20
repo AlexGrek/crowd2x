@@ -48,6 +48,20 @@ there; it is terrain only. Every map loaded from a file stands in one.
   held off. The generator puts the warehouse on the edge lot nearest a heap of the district's
   own wasteland (`map-generator`).
 
+## Good soil, and the fields sown in it
+
+- **The meadow is good soil** (`Terrain::fertile`): the district's farmers (`jobs` skill,
+  `FarmGoal`) sow wheat there, one crop to a **plot** (`map::is_plot`: both coordinates even),
+  nearest their farm's grain bin, within the navigation area (`goals::farm::nearest_plot`, a ring
+  scan, no route). Heaps never stand on meadow, so the two never meet.
+- **A crop is in the way like a heap** until it is harvested: the map keeps which cells are
+  planted (`Map::plant` / `unplant`), so a chunk loaded, dropped and loaded again keeps its
+  crops blocked, and reachability counts a crop as open ground, as it does a heap. What grows
+  there is the simulation's `Fields` (`sim::fields`), saved in `world.pb` — not in the chunks —
+  and planted on the map again on load.
+- The district generator puts the farm on the edge lot nearest a plot of good soil
+  (`soil_round(seed)`, worked out from the generator like `heaps_round`, `map-generator`).
+
 ## Chunks: `src/map/chunk.rs`
 
 - `CHUNK` = 32 cells. `ChunkPos` (`of`, `covering`, `around`), `Chunk` (tiles plus passable

@@ -75,7 +75,7 @@ use crate::editor::scrap::Heap;
 use crate::game::actors::{world_pos, Actor, Sim, SimInput};
 use crate::game::held::HeldItem;
 use crate::game::logview::LogView;
-use crate::game::selection::{Selected, SelectedBox};
+use crate::game::selection::{Selected, SelectedBox, SelectedCrop};
 use crate::game::speed::GameSpeed;
 use crate::sim::biology::ProcessId;
 use crate::sim::{process_pass, spawn_pass, EntityType, ItemKind};
@@ -576,6 +576,8 @@ struct Intents<'w> {
     selected: ResMut<'w, Selected>,
     /// Which distribution box is selected, beside who.
     selected_box: ResMut<'w, SelectedBox>,
+    /// Which crop is selected.
+    selected_crop: ResMut<'w, SelectedCrop>,
     /// Where `look_at` points the camera. Asked for rather than written
     /// straight onto the transform, so the map clamp applies exactly as it
     /// does to panning there by hand.
@@ -964,6 +966,9 @@ fn perform(
                 "the world holds {} entities; there is no number {index}",
                 crowd.len()
             ))?;
+            // One selection at a time, as a click makes it.
+            intents.selected_box.clear();
+            intents.selected_crop.clear();
             intents.selected.select(uid);
             Ok(Next::Now)
         }
@@ -978,8 +983,35 @@ fn perform(
                 return Err(format!("there is no distribution box at ({x}, {y})"));
             }
             intents.selected.clear();
+            intents.selected_crop.clear();
             intents.selected_box.select(at);
             Ok(Next::Now)
+        }
+
+        Step::SelectCrop { x, y } => {
+            let sim = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?;
+            let at = crate::map::Point::new(*x, *y);
+            if sim.0.fields().at(at).is_none() {
+                return Err(format!("there is no crop at ({x}, {y})"));
+            }
+            intents.selected.clear();
+            intents.selected_box.clear();
+            intents.selected_crop.select(at);
+            Ok(Next::Now)
+        }
+
+        Step::ExpectCrops { min } => {
+            let fields = intents
+                .sim
+                .as_deref()
+                .ok_or("there is no simulation — expected the game screen".to_string())?
+                .0
+                .fields();
+            let sown = fields.len() as u32;
+            (sown >= *min).then_some(Next::Now).ok_or(format!("expected at least {min} crops in the fields, found {sown}"))
         }
 
         Step::SwitchBox { x, y, on } => {

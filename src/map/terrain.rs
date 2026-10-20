@@ -43,6 +43,9 @@ pub struct Terrain {
     /// search ever asks. This is how a crowd keeps to the pavement: a road is
     /// walkable, only dearer, so it is crossed rather than walked along.
     pub cost: u8,
+    /// Whether it is **good soil**: ground a farmer sows wheat in
+    /// (`sim::fields`). The wasteland's meadow, and nothing else yet.
+    pub fertile: bool,
 }
 
 impl Terrain {
@@ -57,7 +60,13 @@ impl Terrain {
             passability: Passability::Passable,
             see_through: true,
             cost,
+            fertile: false,
         }
+    }
+
+    /// [`Terrain::ground`] that is good soil: something can be grown in it.
+    const fn soil(name: &'static str, cost: u8) -> Self {
+        Self { fertile: true, ..Self::ground(name, cost) }
     }
 
     const fn blocked(name: &'static str) -> Self {
@@ -66,6 +75,7 @@ impl Terrain {
             passability: Passability::Impassable,
             see_through: false,
             cost: 0,
+            fertile: false,
         }
     }
 
@@ -76,6 +86,7 @@ impl Terrain {
             passability: Passability::Impassable,
             see_through: true,
             cost: 0,
+            fertile: false,
         }
     }
 }
@@ -133,7 +144,8 @@ pub const TERRAIN: &[Terrain] = &[
     Terrain::ground("dirt stones", 2),
     Terrain::ground("dirt cracked", 2),
     Terrain::ground("scrub", 2),
-    Terrain::ground("meadow", 3),
+    // Where something still grows: the one good soil there is.
+    Terrain::soil("meadow", 3),
     Terrain::ground("mud", 4),
     // Seen across, never walked: a pane on the ground.
     Terrain::pane("water"),
@@ -205,6 +217,11 @@ impl TerrainId {
     pub fn is_passable(self) -> bool {
         self.terrain()
             .is_some_and(|terrain| terrain.passability.is_passable())
+    }
+
+    /// Whether it is good soil ([`Terrain::fertile`]). Unknown terrain is not.
+    pub fn is_fertile(self) -> bool {
+        self.terrain().is_some_and(|terrain| terrain.fertile && terrain.passability.is_passable())
     }
 }
 
@@ -294,6 +311,13 @@ mod tests {
             assert_eq!(TerrainId::from_name(terrain.name), Some(TerrainId(index as u16)));
         }
         assert_eq!(TerrainId::from_name("linoleum"), None);
+    }
+
+    #[test]
+    fn meadow_is_the_only_good_soil() {
+        let fertile: Vec<&str> = (0..TERRAIN.len()).map(|i| TerrainId(i as u16)).filter(|id| id.is_fertile()).map(TerrainId::name).collect();
+        assert_eq!(fertile, ["meadow"]);
+        assert!(MEADOW.is_fertile() && !TerrainId(u16::MAX).is_fertile());
     }
 
     #[test]

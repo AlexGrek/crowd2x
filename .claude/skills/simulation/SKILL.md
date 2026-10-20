@@ -62,7 +62,7 @@ it are four steps:
    handed its own outcome and revises its plan, writing only to itself. Answering a
    collision inside the move loop would mean reacting to a world that is halfway through
    the tick, with the later slots not moved yet. It may also hand back an `Effect` — a
-   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack), `Effect::Deposit { at, pieces }` / `Effect::Withdraw { at }` (a packful into or out of a store, `sim/bins.rs`; the `jobs` skill), `Effect::Died { cause }` (the unit just died: its cell, bed and workplace are freed and it is filed in `Corpses`), `Effect::TakeBody { at }` (an undertaker takes up a body: into its hand, off `Corpses`, onto `burials`) or `Effect::Cremate { at }` (logged) — into a
+   request for a change outside itself — `Effect::Fridge { at, open }`, `Effect::Door { at, key }` (hold a door open; the `doors` skill), `Effect::Salvage { at }` (a piece off a heap into the pack), `Effect::Deposit { at, pieces }` / `Effect::Withdraw { at }` (a packful into or out of a store, `sim/bins.rs`; the `jobs` skill), `Effect::Died { cause }` (the unit just died: its cell, bed and workplace are freed and it is filed in `Corpses`), `Effect::TakeBody { at }` (an undertaker takes up a body: into its hand, off `Corpses`, onto `burials`), `Effect::Cremate { at }` (logged), or `Effect::Sow` / `Tend` / `Harvest { at, when }` (a farmer's crop sown, tended or cut, `sim::fields`; the effect carries the `Clock` it was asked at, since `apply` is not handed one) — into a
    third slot-indexed buffer, since **writing only to itself** rules out flipping a fridge's
    door directly: that is a fact about the world, read by every entity beside it, not about
    the one entity that opened it.
@@ -114,7 +114,8 @@ route budget".
 
 **The world's parts are one struct, `Facilities`** (`sim/facilities.rs`): the features index,
 the fridges, the stores (`Bins`), the doors, the properties, the dead (`Corpses`), the beds
-(`Homes`) and workplaces given out, the `Tally` of the dead and the bodies to bury this tick.
+(`Homes`) and workplaces given out, the `Tally` of the dead, the crops in the fields (`Fields`,
+which plant and unplant the map with them) and the bodies to bury this tick.
 `GameState` holds one (its getters — `bins()`, `doors()`... — read it), and so does
 `testing::World` (which derefs to it), so a new part of the world is one field there, built in
 `Facilities::new`. **`Think::new(map, occupancy, log, &facilities, dt, tick, clock)` is the one

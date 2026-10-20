@@ -218,9 +218,15 @@ impl Inventory {
     /// trying — `stow` checks this itself, so there is no way to get an item in
     /// past it.
     pub fn room_for(&self, item: ItemKind) -> bool {
-        self.count(item) < Inventory::MOST_OF_A_KIND
-            && self.mass() + item.mass() <= self.capacity.mass
-            && self.volume() + item.volume() <= self.capacity.volume
+        self.room_for_many(item, 1)
+    }
+
+    /// Whether `count` more `item`s would still fit, all of them: what a
+    /// harvest asks before it starts, so nothing it yields is left lying.
+    pub fn room_for_many(&self, item: ItemKind, count: u8) -> bool {
+        self.count(item) as u32 + count as u32 <= Inventory::MOST_OF_A_KIND as u32
+            && self.mass() + item.mass() * count as f32 <= self.capacity.mass
+            && self.volume() + item.volume() * count as f32 <= self.capacity.volume
     }
 
     /// Stow one `item`. `false`, and nothing changed, when it does not fit.

@@ -1,6 +1,6 @@
 //! [`Facilities`]: the world's parts beside the map and the crowd — where
 //! the useful props are and what is in them, the doors, whose rooms, beds and
-//! workplaces are whose, the dead, and what has been counted.
+//! workplaces are whose, the dead, the fields, and what has been counted.
 //!
 //! One struct, held by [`GameState`](super::GameState) and by the tests'
 //! one-unit world (`testing::World`) alike, so **a new part of the world is
@@ -17,6 +17,7 @@ use super::bins::Bins;
 use super::corpses::Corpses;
 use super::door::Doors;
 use super::feature::Features;
+use super::fields::Fields;
 use super::fridge::Fridges;
 use super::homes::Homes;
 use super::job::Workplaces;
@@ -56,6 +57,10 @@ pub struct Facilities {
     /// The dead, counted as they die and as they are cremated: what the world
     /// no longer shows once a body has gone ([`super::statistics`]).
     pub tally: Tally,
+    /// Every crop in the fields ([`super::fields`]): sown, tended and
+    /// harvested through `Effect::Sow`, `Tend` and `Harvest`, which plant and
+    /// unplant the map with it.
+    pub fields: Fields,
     /// The bodies taken up this tick, to leave the world when the processing
     /// pass is over (`process_game_state`) — the one pass that may not remove
     /// anybody. Empty between ticks, so never saved.
@@ -77,6 +82,7 @@ impl Facilities {
             homes: Homes::new(),
             workplaces: Workplaces::new(),
             tally: Tally::default(),
+            fields: Fields::new(),
             burials: Vec::new(),
         }
     }

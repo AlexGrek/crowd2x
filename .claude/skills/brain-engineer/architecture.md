@@ -107,12 +107,15 @@ talking only to the one below:
   `jobs` skill. `SmeltGoal` (a steelworker) and `HaulGoal` (a courier) are the steel
   factory's, the same shape: what to do next from what the pack holds, the stores' stock read
   from `Think::bins` (`goals::nearest_store`, a walk of the stores of one kind), `Achieved` per
-  load stored — the `jobs` skill.
+  load stored — the `jobs` skill. `FarmGoal` (a farmer) keeps a field of crops sown, tended and
+  harvested from `Think::fields`: a free plot by a ring scan out from its field
+  (`goals::farm::nearest_plot`, no route), its own crops by a walk of the few dozen there are,
+  `Achieved` per packful of wheat stored, `Blocked` with no log line once the day's work is done.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `Sleep`, `Wait`,
   `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
   `Deposit` and `Withdraw` — into and out of any store, the item being the store's —,
-  `Smelt`, `TakeBody`, `Cremate`), `match`-dispatched so
+  `Smelt`, `TakeBody`, `Cremate`, `Sow`, `Tend`, `Harvest`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a

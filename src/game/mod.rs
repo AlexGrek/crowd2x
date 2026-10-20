@@ -53,6 +53,8 @@
 //! for a cancel it would otherwise fire on every zoom.
 
 pub mod actors;
+pub mod croppanel;
+pub mod crops;
 pub mod held;
 pub mod pool;
 pub mod hud;
@@ -111,6 +113,8 @@ impl Plugin for GamePlugin {
             selection::SelectionPlugin,
             unitpanel::UnitPanelPlugin,
             boxpanel::BoxPanelPlugin,
+            crops::CropsPlugin,
+            croppanel::CropPanelPlugin,
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))

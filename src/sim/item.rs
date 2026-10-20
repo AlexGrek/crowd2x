@@ -106,6 +106,14 @@ pub const STEEL_VOLUME: f32 = 1.0;
 /// How many pieces of scrap metal a furnace smelts into one ingot of steel.
 pub const SCRAP_PER_STEEL: u8 = 2;
 
+/// What a sheaf of wheat harvested from a crop weighs, in kilograms
+/// (`sim::fields`): light, and bulky, so a pack takes twelve — four crops'
+/// worth at their best.
+pub const WHEAT_MASS: f32 = 0.5;
+
+/// ...and the space it takes up, in litres.
+pub const WHEAT_VOLUME: f32 = 1.0;
+
 /// Everything about one kind of item: its row in [`ItemKind`]'s catalogue.
 pub struct ItemDef {
     /// How it reads in a debug view, and how a save names it.
@@ -184,6 +192,10 @@ catalogue! {
         /// An ingot of steel, smelted from scrap metal in the steel factory
         /// (`brain::tasks::Smelt`). Nothing a body can use: it is carried.
         Steel = 4 => ItemDef { name: "steel", mass: STEEL_MASS, volume: STEEL_VOLUME, emoji: "⛓", ..CARRIED },
+        /// A sheaf of wheat, harvested from a crop in the fields
+        /// (`brain::tasks::Harvest`) and stored at the farm. Not food yet: it
+        /// is carried.
+        Wheat = 5 => ItemDef { name: "wheat", mass: WHEAT_MASS, volume: WHEAT_VOLUME, emoji: "🌾", ..CARRIED },
     }
 }
 
