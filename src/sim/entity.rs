@@ -445,6 +445,12 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Whether it is seeing to its needs before a trip out for its job — for
+    /// the job menu, which says so rather than calling it a break.
+    fn is_getting_ready(&self) -> bool {
+        false
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,

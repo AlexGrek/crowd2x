@@ -1,6 +1,6 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal, salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
@@ -83,12 +83,13 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 
 | Layer | What | File |
 | --- | --- | --- |
-| routine | `WorkRoutine` ("go to work"): raises **`job.kind.goal()`** to **`WORKING` = 1.5** while `job.is_due(clock)` — `Work` at a desk or a post, `Collect` for a collector. Stateless decision (no stat, so no hysteresis); `on_shift` is kept for the brains menu and the save. **Last in `Brain::human()`** | `brain/routines.rs`, `routine.rs` |
+| routine | `WorkRoutine` ("go to work"): raises **`job.kind.goal()`** to **`WORKING` = 1.5** while `job.is_due(clock)` — `Work` at a desk or a post, `Collect` for a collector. Stateless decision (no stat, so no hysteresis); `on_shift` is kept for the brains menu and the save | `brain/routines.rs`, `routine.rs` |
+| getting ready | `ReadyRoutine` ("get ready to go out"), **last in `Brain::human()`**: before every trip out, a collector sees to its needs first — see "Getting ready" below | `brain/routines.rs` |
 | goal | `GoalId::Work` (💼) and `GoalId::Collect` (🧲), **the last two `GoalId`s** so every tie goes to the other goal | `brain/goal.rs` |
 | office and gate | `WorkGoal`: walks beside **its own desk** — or post: the job's `workplace()` feature is what has to be there — and queues `Task::work(desk, WORK_SECONDS)`, or `Task::keep_watch(post, WORK_SECONDS)` for a guard — an hour of world a stretch, `Achieved` after each, so the routine decides how many. Logs `"worked an hour at the computer at x, y"` / `"kept watch an hour at the guard post at x, y"`. No other desk to reroute to: a desk it cannot reach is `Blocked` (held off); an unpowered desk (`!features.has(Workstation, desk)`) is `Blocked` before any walk. `prioritized` forgets a remembered desk that is no longer the job's | `brain/goals/work.rs` |
 | office task | `Work { desk, seconds, watch }`: from beside it, every tick checks distance, a body, and that the workplace is still a feature (`Workstation`, which needs power, or with `watch` a `GuardPost`, which does not). Described `work at the computer at x, y` / `keep watch at the guard post at x, y`. `Action::interact` (lights the screen through `interacting_with`). Finished → `Event::Worked { world_seconds }`; **interrupted → `Worked` for the part done** (like `Sleep`) | `brain/tasks/work.rs` |
-| collecting | `CollectGoal` (state: one `Seek`): **one trip is its unit of work**, `Achieved` when a packful is in the bin, and the routine starts the next. It plans **from what is true now** and never counts: room in the pack → the heap it was working while it has anything left, else `nearest_heap`, then `move_beside` + `Task::salvage_for_work`; pack full, or no heap left and something carried → its own bin (`job.workplace`, which just has to be in `features`), `move_beside` + `Task::deposit`; no heap and nothing carried → `Blocked` with `"found no scrap left to collect"` (the hold's doubling spaces those lines). A failed walk is `Seek::setback`: elsewhere for a heap is the next nearest, a bin has none. A failed salvage (the heap emptied under it) is a cheap replan. `prioritized` forgets a target no longer worth it — an emptied heap, or a bin that is not the job's — though `process` re-checks both anyway (mutating the forget out is caught by nothing) | `brain/goals/collect.rs` |
-| nearest heap | `collect::nearest_heap`: `Map::heaps(map.navigation_area(), …)` — the site and `NAV_MARGIN` (64) round it, which a `GameState` always has loaded — keeping heaps with a side the unit may stand on that `navigation().may_reach` says it can get to and its memory does not hold out of reach; min by (manhattan, cell). No route, no allocation, once per trip decision | `brain/goals/collect.rs` |
+| collecting | `CollectGoal` (state: one `Seek`): **one trip is its unit of work**, `Achieved` when a packful is in the bin, and the routine starts the next. It plans **from what is true now** and never counts: **a trip starts from the bin** — nothing in the pack, in the district, not beside its bin and not ready (`GoalCtx::ready_to_go_out`, the routine's say) → walk beside the bin first (no task after it); room in the pack → the heap it was working while it has anything left, else `nearest_heap`, then `move_beside` + `Task::salvage_for_work`; pack full, or no heap left and something carried → its own bin (`job.workplace`, which just has to be in `features`), `move_beside` + `Task::deposit`; no heap and nothing carried → `Blocked` with `"found no scrap left to collect"` (the hold's doubling spaces those lines). A failed walk is `Seek::setback`: elsewhere for a heap is the next nearest, a bin has none. A failed salvage (the heap emptied under it) is a cheap replan. `prioritized` forgets a target no longer worth it — an emptied heap, or a bin that is not the job's — though `process` re-checks both anyway (mutating the forget out is caught by nothing) | `brain/goals/collect.rs` |
+| nearest heap | `collect::nearest_heap`: `Map::heaps(map.navigation_area(), …)` — the site and `NAV_MARGIN` (64) round it, which a `GameState` always has loaded — keeping heaps with a side the unit may stand on that `navigation().may_reach` says it can get to and its memory does not hold out of reach; min by (manhattan **from the bin while in the district**, from where it stands out in the wasteland; cell). No route, no allocation, once per trip decision. From the bin because the warehouse is built nearest the scrap: measured from home, a collector chose heaps on the far side of the district, two hours' walk round by a gate | `brain/goals/collect.rs` |
 | salvage for work | `Salvage { heap, seconds, for_work }`: `Task::salvage` (an order, `SalvageGoal`) or `Task::salvage_for_work` (the job). `for_work` reports `Event::Worked` for the piece on finishing **and for the part done when interrupted**; an order does neither | `brain/tasks/salvage.rs` |
 | storing | `Deposit { bin, seconds }`, `DEPOSIT_SECONDS` = 5 world minutes: every tick checks within one step, the bin in `features`, scrap stowed. Finished → takes every piece out of the pack (`Inventory::take_out`), writes `Effect::Deposit { at, pieces }`, reports `Event::Worked`; interrupted → `Worked` for the part done, nothing stored | `brain/tasks/deposit.rs` |
 | the world | `Effect::Deposit` is granted by `effect::apply` (`effect::deposit`): `Bins::add`, and the line `"{uid} stored N scrap metal in the bin at x, y: M stored"` (the word is the store's `StoreDef::called`). `testing::World` calls the same `apply` (`World::deposits()` counts the lines) | `sim/effect.rs` |
@@ -108,7 +109,49 @@ early and waits by the post — the one free cell inside it is the day guard's, 
 waits for it or stands at the post's outside cell through the gate.
 
 **Overnight**: at 17:00 the routine lets go wherever the collector is; it carries what it has
-into the next shift and delivers it then (the plan starts from a pack with scrap in it).
+into the next shift and delivers it then (the plan starts from a pack with scrap in it). Such a
+morning is the one trip not got ready for at the bin: with scrap in the pack it gets ready at
+home and walks out from there.
+
+### Getting ready (`ReadyRoutine`, `brain/routines.rs`)
+
+A trip out is far from any fridge or toilet, and a need past 75 (1.5, which beats work)
+calls a collector back in for that one need, then out, then back for the next. So before
+going out it **gets ready**: every need on `READY_NEEDS` 85% met (`READY` = 15).
+
+- **Which jobs**: a `JobDef::goes_out_for` column, what a trip brings back — `Some(Scrap)`
+  for the collector, `None` for the rest (a farmer's field is ten cells past the wall).
+- **When**: shift due, in the district (on the site), room in the pack, and either **beside
+  its bin** (the trip's start; `CollectGoal` goes there first) or **back in with a trip half
+  done** (called in by a need — it tops everything up at that fridge, instead of in and out
+  per need). Not at home, not out in the wasteland.
+- **What**: when any need is worse than `READY`, a list taken there and then of every need
+  worse than its `ReadyNeed::top_up` — `TOPPED_UP` (5) for thirst, hunger and the bladder, so
+  a second round does not put a drink after the toilet; `READY` for fun, since a half-hour
+  go drains while it lasts and topping it to 95% meant a second go worth less. Raised at
+  `GETTING_READY` (1.6) less `IN_TURN` (0.01) per place, in list order **drink, eat, play,
+  toilet** — the toilet last because a drink reaches the bladder over half an hour. A need
+  leaves the list when topped up; **nothing joins it meanwhile** (no turning round on the
+  way to the toilet for hunger); when it empties, a fresh list if anything is worse than
+  ready; none → **ready**, and the log says `"{uid} is ready to go out for scrap metal"`.
+  A need whose goal is held off (nothing to play on — a computer is entertainment only in a
+  home) is not waited for.
+- **Ready lasts** until it is off the site or off shift, so the walk to the gate does not
+  send it back. `GoalCtx::ready_to_go_out` tells `CollectGoal`: ready → out from wherever
+  it is to the heap nearest the bin; not ready → the bin first.
+- **Not tiredness**: only a night's sleep helps, and the shift is tuned so a rested worker
+  never reaches `EXHAUSTED` on it.
+- The job menu's `now` reads `getting ready: drink` (a needed goal in charge while the
+  routine has a list); the brains menu shows `ready to go out` and `seeing to`.
+
+**Measured** (2026-10-20, a week Mon-Fri, every resident's needs off but the four collectors',
+packfuls stored): seeds 7, 0, 42 and 1-6 — **93 pieces before, 123 after (+32%)**; the same
+trip rules without getting ready stored about a third as much as with it. With the
+collectors' needs off as well, seed 7 stores 117: the needs still take more than half of a
+shift (a drink every 3 hours, a toilet every 2-3, a meal, a go at something, each a walk), and
+time out in the wasteland — about a piece an hour there — is what scrap follows. Seed 4
+stores nothing either way (not looked into). Fun to 95% instead of 85% was a wash over nine
+seeds.
 
 **Heaps do not grow back** (`map::wasteland`; a salvage tally is forever). A district's yards
 empty over the days, nearest first, and its collectors are then held off — the current limit.
@@ -152,7 +195,7 @@ rebuilds it from the dead entities on load.
 | Layer | What | File |
 | --- | --- | --- |
 | kind | `JobKind::Undertaker`: workplace `FeatureKind::Crematorium` (`"crematorium"`, beside, no power), goal `GoalId::Bury` (⚰, the last `GoalId`), `COMMUTE`, `WATCHES`, uniform `"uniform undertaker"` (black cassock, white collar, gold cross) | `job.rs`, `feature.rs` |
-| routine | `WorkRoutine` raises `Bury` at `WORKING` while the watch is due **and whenever an undertaker has a body in hand** (`RoutineCtx::carrying`), so a body is never taken home | `brain/routines.rs` |
+| routine | `WorkRoutine` raises `Bury` at `WORKING` while the watch is due **and whenever an undertaker has a body in hand** (`RoutineCtx::inventory`'s hand), so a body is never taken home | `brain/routines.rs` |
 | goal | `BuryGoal` (a `Seek`, `pb::Executor::Seek`): body in hand → beside its own crematorium + `Task::cremate`; other item in hand → consume it first; free hand → `nearest_body` (manhattan over `Think::corpses`, a reachable side by `may_reach`, not remembered out of reach) + `Task::take_body`; none → `Blocked`. `Achieved` per body cremated | `brain/goals/bury.rs` |
 | tasks | `TakeBody { body, seconds }` (`TAKE_BODY_SECONDS` = 5 world min, within a step, body still in `corpses`, hand free) → `Effect::TakeBody`; `Cremate { crematorium, seconds }` (`CREMATE_SECONDS` = 15 world min, beside, a body in hand) → empties the hand, `Effect::Cremate`. Both `Event::Worked` (and for the part done when cut short) | `brain/tasks/take_body.rs`, `cremate.rs` |
 | world | `sim::take_body`: the lower slot wins a body; `ItemKind::Body` (70 kg, only ever in a hand, which is never refused) into the hand, off `Corpses`, onto `GameState::burials`; `bury()` despawns them after the processing pass, so nothing is pending between ticks. Logs `"{uid} took up the body of {dead} at x, y"`, `"{uid} cremated a body in the crematorium at x, y"` | `sim/mod.rs` |
@@ -262,9 +305,13 @@ Monday 14:00, the crop panel, Saturday in ear at 100%, Monday 30 in the bin and 
   by name (`TimedTask`: `"work"`, `"keep watch"`, `"deposit"`, `"salvage for work"`,
   `"withdraw"`, `"smelt"`, `"sow"`, `"tend"`, `"harvest"`...), and still read the tags the builds before wrote them under. Goals and jobs are
   saved as their catalogue numbers (`GoalId::Collect` = 9, `JobKind::Guard` = 2...).
-- The routine was appended, so `Brain::restore` accepts a saved routine list that is a
-  **prefix** of the brain's (old saves, `format1.savegame`); an executor a save does not
-  mention (`CollectGoal` in an older one) starts fresh.
+- `ReadyRoutine` saves `ready` as its `committed` and its list as `pb::RoutineState.pending`
+  (tag 3, a bit per `READY_NEEDS` place; 0 for every other routine, refused on one); a save
+  with a bit past the list, or ready with a list, is refused.
+- The routines were appended (`WorkRoutine`, then `ReadyRoutine`), so `Brain::restore`
+  accepts a saved routine list that is a **prefix** of the brain's (old saves,
+  `format1.savegame`); an executor a save does not mention (`CollectGoal` in an older one)
+  starts fresh.
 
 ## The job menu (`src/game/unitpanel.rs`)
 
@@ -272,8 +319,9 @@ Monday 14:00, the crop panel, Saturday in ear at 100%, Monday 30 in the bin and 
 `job_block(entity, clock)` — `job`, `at` (`computer at 12, 4`, `scrap bin at 30, 2`), `hours`,
 `days`, `now` — while the job's goal is in charge, what the job's row says
 (`JobDef::now(at_work, pack)`: `working`, `on the way to work`, `collecting scrap`, `storing
-scrap` while at the bin, `on watch`, `on the way to the gate`...), and otherwise `on a break:
-<goal>`, `off until 09:00`, `off until 00:00` for the night watch once its watch is over, `done
+scrap` while at the bin, `on watch`, `on the way to the gate`...), `getting ready: <goal>` while
+a collector sees to a need before a trip (`GameEntity::is_getting_ready`), and otherwise `on a
+break: <goal>`, `off until 09:00`, `off until 00:00` for the night watch once its watch is over, `done
 for the day`, `weekend`, `day off` —
 or `unemployed` (a human) / `no job` (anything else). Humans get a button
 (`Action::ToggleJob`, label `Readout::Employ`: `dismiss` / `hire`) that sends `Input::dismiss`
@@ -309,10 +357,21 @@ screen shows how full it is (`game-screen`).
   tires more than the hours awake; no scrap anywhere is held off; walled in with its bin, the
   heaps are skipped (`ROUTES_ASKED`); a heap remembered out of reach is passed over; a full
   pack goes to the bin without a heap; nobody collects at the weekend, without the job or as an
-  office worker; let go and hired at another bin, it stores in the new one.
+  office worker; let go and hired at another bin, it stores in the new one; out from its bin
+  unless ready already; and **getting ready** on the yard with a fridge, a TV and a toilet
+  (`yard_to_get_ready_in`, every need on): drink, meal, TV and toilet all before the first
+  piece, none between it and the bin, set out with every need within 2 of 85%, and the next
+  trip got ready for too.
 - `brain/routines.rs`: on shift only with a job; a collector's shift is `Collect`, never
   `Work`; ordering against every need; exhausted ties go to sleep; the night watch goes to bed
-  at 14:00 rested and is not in bed at 02:00, when the office and the unemployed are.
+  at 14:00 rested and is not in bed at 02:00, when the office and the unemployed are. Getting
+  ready (`Readiness`): every need past 85% raised in list order over work, toilet last;
+  topping up once stopped (fun only to 85%); nothing joins the list; ready lasts the walk out
+  and ends out there; starts beside the bin or back in with a half trip, nowhere else; a need
+  held off is not waited for; only a collector on shift, only processes running; the save
+  round trip and its refusals.
+- `game/unitpanel.rs`: `getting ready: drink` on the job menu.
+- `save::tests::a_collector_saved_while_it_gets_ready_for_a_trip_carries_on_exactly`.
 - `brain/goals/work.rs`: a night-watch guard sets off at 22:00, stands beside its post (no
   power), and logs `kept watch an hour`, never an hour at a computer.
 - `feature.rs`: a guard post is a `GuardPost`, beside, no power, even in a wall.

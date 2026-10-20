@@ -444,6 +444,33 @@ fn a_farm_saved_mid_week_carries_on_exactly() {
     assert!(state.fields().iter().filter(|crop| crop.tended == 2).count() > 1, "more tended after the load");
 }
 
+/// A scrap collector saved while it gets ready for a trip out — at the
+/// fridge, the TV or the toilet, with needs still on its list — comes back
+/// part way through the same list, and goes on to the same trip.
+#[test]
+fn a_collector_saved_while_it_gets_ready_for_a_trip_carries_on_exactly() {
+    let mut map = Map::new(Size::new(9, 7), FLOOR).with_wasteland(0);
+    for (name, cell) in [("scrap bin", Point::new(4, 3)), ("fridge", Point::new(7, 1)), ("tv", Point::new(7, 3)), ("toilet", Point::new(7, 5))] {
+        prop_at(&mut map, name, cell);
+    }
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 6), Point::new(8, 6));
+    let mut state = GameState::new(map, 3);
+    let collector = state.spawn(EntityType::Human, Point::new(1, 1));
+    assert_eq!(state.entities().get(collector).unwrap().job().map(|job| job.kind), Some(crate::sim::JobKind::ScrapCollector));
+    let mut ticks = 0;
+    while !state.entities().get(collector).unwrap().is_getting_ready() {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 9 * 1800, "never got ready by {}", state.clock());
+    }
+    run(&mut state, 200);
+    assert!(state.entities().get(collector).unwrap().is_getting_ready(), "done in 200 ticks: save it sooner");
+    let mut copy = side_by_side(&mut state, 3600, |_, _| Input::new());
+    assert!(!copy.entities().get(collector).unwrap().is_getting_ready(), "still getting ready after two hours");
+    let ready = |state: &mut GameState| state.log.drain().iter().any(|line| line.contains("is ready to go out"));
+    assert!(ready(&mut copy) && ready(&mut state), "both set out");
+}
+
 #[test]
 fn saving_a_loaded_world_gives_back_the_same_files() {
     let mut state = busy_district();

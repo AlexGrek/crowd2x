@@ -106,6 +106,7 @@ pub struct Script {
     /// `tools/qa.py`, which still runs the test and prints its numbers; the
     /// game only accepts the field.
     #[serde(default = "default_required")]
+    #[expect(dead_code, reason = "read by tools/qa.py; the game only accepts it")]
     pub required: bool,
     pub steps: Vec<Step>,
 

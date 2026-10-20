@@ -49,6 +49,7 @@
 use bevy::prelude::*;
 
 use crate::characters::{dog, human};
+use crate::sim::brain::routines::READY_NEEDS;
 use crate::sim::clothing::Clothing;
 use crate::sim::{Clock, EntityType, GameEntity, ItemKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
@@ -700,8 +701,9 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// `now` — what it is doing about them at `clock`, which is the line worth
 /// watching: what the job's own row says while its goal is in charge (on the
 /// way in, at the desk, out collecting scrap or storing it, on watch at a
-/// gate, seeing to the dead — [`JobKind::now`](crate::sim::JobKind::now)), away from it for something
-/// more pressing, or off.
+/// gate, seeing to the dead — [`JobKind::now`](crate::sim::JobKind::now)),
+/// getting ready for a trip out (`getting ready: eat`), away from it for
+/// something more pressing, or off.
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
@@ -711,6 +713,9 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let now = if job.is_due(clock) {
         match entity.current_goal() {
             Some(goal) if goal == job.kind.goal() => job.kind.now(at_work, entity.inventory()).to_string(),
+            Some(goal) if entity.is_getting_ready() && READY_NEEDS.iter().any(|ready| ready.need.goal == goal) => {
+                format!("getting ready: {}", goal.name())
+            }
             Some(goal) => format!("on a break: {}", goal.name()),
             None => "off".to_string(),
         }
@@ -1020,6 +1025,24 @@ mod tests {
         assert_eq!(field(&block, "at"), "scrap bin at 30, 2");
         assert_eq!(field(&block, "hours"), "09:00-17:00");
         assert_eq!(field(&block, "now"), "off until 09:00");
+    }
+
+    /// Beside its bin and thirsty: seeing to it before the trip is part of
+    /// the job, not a break from it.
+    #[test]
+    fn a_collector_getting_ready_for_a_trip_says_so_rather_than_on_a_break() {
+        use crate::sim::testing::{needy_human, prop_at, World};
+        let bin = Point::new(4, 3);
+        let mut map = crate::map::Map::new(crate::map::Size::new(9, 7), crate::map::FLOOR);
+        prop_at(&mut map, "scrap bin", bin);
+        prop_at(&mut map, "fridge", Point::new(7, 1));
+        let mut world = World::new(map);
+        world.clock = on(2, 10.0);
+        let mut person = needy_human(Point::new(3, 3), 0.0, 40.0, 0.0);
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::collector(bin)));
+        world.step(&mut person);
+        assert_eq!(person.current_goal(), Some(crate::sim::brain::GoalId::Drink));
+        assert_eq!(field(&job_block(&person, world.clock), "now"), "getting ready: drink");
     }
 
     #[test]

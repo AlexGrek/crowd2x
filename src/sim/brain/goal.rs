@@ -335,6 +335,11 @@ pub struct GoalCtx<'a> {
     /// hours. Read-only — a job is handed out and taken back from outside the
     /// world (`GameState::give_a_job`), never by a goal.
     pub job: Option<&'a Job>,
+    /// Whether it has got ready for a trip out for its job and is setting
+    /// out ([`ReadyRoutine`](super::routines::ReadyRoutine)) — read-only, the
+    /// routine's to say. What `CollectGoal` asks before it leaves for a heap:
+    /// one not ready goes to its bin first, where getting ready starts.
+    pub ready_to_go_out: bool,
     /// Who refused the move that ended the last task, when a body did.
     ///
     /// A failed walk is two different things — somebody is in the way, and

@@ -335,6 +335,10 @@ impl GameEntity for Human {
         self.brain.job().copied()
     }
 
+    fn is_getting_ready(&self) -> bool {
+        self.brain.is_getting_ready()
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }

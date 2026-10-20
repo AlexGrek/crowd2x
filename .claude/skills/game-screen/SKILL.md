@@ -94,7 +94,8 @@ since a unit picks things up while you are reading), `talents`, `clothing` (the 
 at work it reads `wearing: uniform guard (own: ...)` and the buttons change the clothes the
 worker goes home in) and `job` (the
 job, `at` (`computer at x, y`, `scrap bin at x, y` or `guard post at x, y`), hours and days, and `now` — working, on watch,
-on the way, collecting scrap, storing scrap, on a break, off, weekend —
+on the way, collecting scrap, storing scrap, getting ready (`getting ready: drink`, a collector
+seeing to a need before a trip out), on a break, off, weekend —
 live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command::Hire`; the
 `jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
 them.

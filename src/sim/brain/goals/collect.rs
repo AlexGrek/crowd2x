@@ -43,8 +43,9 @@ use super::salvage::SALVAGE_SECONDS;
 use super::{stand_beside, Seek, Stand};
 use crate::sim::brain::tasks::DEPOSIT_SECONDS;
 
-/// The heap of scrap nearest this unit, as the crow flies, that it could get
-/// to: one with a side it may stand on that the map's components say it can
+/// The heap of scrap nearest this unit's bin while it is in the district (or
+/// nearest the unit, out in the wasteland), as the crow flies, that it could
+/// get to: one with a side it may stand on that the map's components say it can
 /// reach ([`Navigation::may_reach`](crate::map::Navigation::may_reach), an
 /// O(1) lookup) and that it does not remember as out of reach. Ties go to
 /// the lower cell.
@@ -55,6 +56,12 @@ use crate::sim::brain::tasks::DEPOSIT_SECONDS;
 /// route and no allocation, asked once per trip decision.
 pub(crate) fn nearest_heap(ctx: &GoalCtx<'_>) -> Option<Point> {
     let here = ctx.body.center_position();
+    // In the district, nearest the bin, where every trip starts — whether it
+    // is standing there or at the fridge it got ready at.
+    let from = match ctx.job {
+        Some(job) if ctx.think.map.contains(here) => job.workplace,
+        _ => here,
+    };
     let now = ctx.think.clock.elapsed();
     let places = ctx.memory.out_of_reach();
     let key = ctx.body.home();
@@ -62,7 +69,7 @@ pub(crate) fn nearest_heap(ctx: &GoalCtx<'_>) -> Option<Point> {
     let navigation = map.navigation();
     let mut best: Option<(i32, Point)> = None;
     map.heaps(map.navigation_area(), |cell, _| {
-        let candidate = (here.manhattan_distance(cell) as i32, cell);
+        let candidate = (from.manhattan_distance(cell) as i32, cell);
         if best.is_some_and(|best| best <= candidate) || places.contains(cell, now) {
             return;
         }
@@ -109,9 +116,9 @@ impl CollectGoal {
     }
 
     /// Queue the walk beside the target (unless already there) and `then`,
-    /// on the back of the queue. `false` when nowhere beside it can be stood
-    /// on.
-    fn plan(&mut self, ctx: &mut GoalCtx<'_>, then: Task) -> bool {
+    /// if anything, on the back of the queue. `false` with no target, or
+    /// when nowhere beside it can be stood on.
+    fn plan(&mut self, ctx: &mut GoalCtx<'_>, then: Option<Task>) -> bool {
         let Some(target) = self.seek.target else {
             return false;
         };
@@ -122,18 +129,22 @@ impl CollectGoal {
                 let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
         }
-        let _ = ctx.tasks.push_back(then);
+        if let Some(then) = then {
+            let _ = ctx.tasks.push_back(then);
+        }
         true
     }
 
-    /// The work to do once beside the target.
+    /// The work to do once beside the target: salvage a heap; at the bin,
+    /// store what there is — or nothing, at the start of a trip.
     fn work_at(&self, ctx: &GoalCtx<'_>) -> Option<Task> {
         let target = self.seek.target?;
-        Some(if Some(target) == ctx.job.map(|job| job.workplace) {
-            Task::deposit(target, DEPOSIT_SECONDS)
+        if Some(target) == ctx.job.map(|job| job.workplace) {
+            let carrying = ctx.inventory.is_some_and(|pack| pack.count(ItemKind::Scrap) > 0);
+            carrying.then_some(Task::deposit(target, DEPOSIT_SECONDS))
         } else {
-            Task::salvage_for_work(target, SALVAGE_SECONDS)
-        })
+            Some(Task::salvage_for_work(target, SALVAGE_SECONDS))
+        }
     }
 
     /// Head for `place`, unless already on the way.
@@ -145,6 +156,11 @@ impl CollectGoal {
 
     fn forget(&mut self) {
         self.seek.forget();
+    }
+
+    /// Whether `ctx`'s unit stands beside `bin`, where every trip starts.
+    fn is_beside(ctx: &GoalCtx<'_>, bin: Point) -> bool {
+        ctx.body.center_position().manhattan_distance(bin) <= 1
     }
 }
 
@@ -196,7 +212,7 @@ impl GoalExecutor for CollectGoal {
                 } else {
                     self.seek.setback(ctx, nearest_heap)
                 };
-                if retry && let Some(then) = self.work_at(ctx) && self.plan(ctx, then) {
+                if retry && self.plan(ctx, self.work_at(ctx)) {
                     return GoalProgress::Working;
                 }
                 self.forget();
@@ -222,10 +238,29 @@ impl GoalExecutor for CollectGoal {
         // Nothing queued: what next, from the pack and the heaps.
         let carrying = inventory.count(ItemKind::Scrap) > 0;
         if inventory.room_for(ItemKind::Scrap) {
+            if !carrying
+                && !ctx.ready_to_go_out
+                && ctx.think.map.contains(ctx.body.center_position())
+                && !Self::is_beside(ctx, bin)
+                && let Some(bin) = Self::bin(ctx)
+                && nearest_heap(ctx).is_some()
+            {
+                // A trip starts from the bin, and is got ready for there
+                // (`ReadyRoutine`): not across the district at home, a long
+                // walk from the way out. Ready — got ready at the fridge
+                // beside the warehouse, or called away on the way out — it
+                // goes on to the heap nearest the bin from wherever it is.
+                self.head_for(bin);
+                if self.plan(ctx, None) {
+                    return GoalProgress::Working;
+                }
+                self.forget();
+                return GoalProgress::Blocked;
+            }
             let working = self.seek.target.filter(|&heap| heap != bin && ctx.think.map.scrap(heap).is_some());
             if let Some(heap) = working.or_else(|| nearest_heap(ctx)) {
                 self.head_for(heap);
-                if self.plan(ctx, Task::salvage_for_work(heap, SALVAGE_SECONDS)) {
+                if self.plan(ctx, Some(Task::salvage_for_work(heap, SALVAGE_SECONDS))) {
                     return GoalProgress::Working;
                 }
                 self.forget();
@@ -247,7 +282,7 @@ impl GoalExecutor for CollectGoal {
             return GoalProgress::Blocked;
         };
         self.head_for(bin);
-        if self.plan(ctx, Task::deposit(bin, DEPOSIT_SECONDS)) {
+        if self.plan(ctx, Some(Task::deposit(bin, DEPOSIT_SECONDS))) {
             GoalProgress::Working
         } else {
             self.forget();
@@ -432,13 +467,14 @@ mod tests {
     fn a_heap_remembered_as_out_of_reach_is_passed_over() {
         let mut world = yard(at(1, 10.0));
         let mut human = collector(Point::new(2, 2), BIN);
-        // The heap it would go to first: find it, forget it, remember it as
-        // out of reach.
+        // The heap it would go to first, from its bin: find it, forget it,
+        // remember it as out of reach.
         let mut first = None;
-        for _ in 0..200 {
+        for _ in 0..400 {
             step(&mut world, &mut human);
             if let Some((_, value)) = human.brain_fields().into_iter().find(|(name, _)| *name == "going to")
                 && value != "none"
+                && value != "4, 3"
             {
                 first = Some(value);
                 break;
@@ -507,6 +543,114 @@ mod tests {
             step(&mut world, &mut human);
             assert_ne!(human.brain().top_goal(), GoalId::Collect);
         }
+    }
+
+    /// [`yard`] with everything to see to a need with along its east side:
+    /// a fridge, a TV to watch (a computer anywhere but a home is office
+    /// equipment) and a toilet.
+    fn yard_to_get_ready_in(clock: Clock) -> World {
+        let mut map = Map::new(Size::new(9, 7), FLOOR).with_wasteland(0);
+        for (name, cell) in [("scrap bin", BIN), ("fridge", Point::new(7, 1)), ("tv", Point::new(7, 3)), ("toilet", Point::new(7, 5))] {
+            prop_at(&mut map, name, cell);
+        }
+        map.load_chunks(map.navigation_area());
+        let mut world = World::new(map);
+        world.clock = clock;
+        world
+    }
+
+    /// Where in the log the first line containing `needle` after line
+    /// `from` is.
+    fn line_after(world: &World, from: usize, needle: &str) -> Option<usize> {
+        world.lines().iter().skip(from).position(|line| line.contains(needle)).map(|at| at + from)
+    }
+
+    /// The point of getting ready: a collector with every need on and none of
+    /// them seen to sees to each before it leaves the site — a drink, a meal,
+    /// the TV, the toilet last — and nothing calls it back in before the
+    /// packful is in the bin. Then again before the next trip, which starts
+    /// before the shift is out.
+    #[test]
+    fn a_collector_sees_to_every_need_before_it_sets_out_and_nothing_calls_it_back() {
+        use crate::sim::brain::routines::READY;
+        let mut world = yard_to_get_ready_in(at(1, 8.4));
+        let mut human = needy_human(Point::new(2, 2), 40.0, 50.0, 40.0);
+        human.set_fun(50.0);
+        assert!(human.hire(Job::collector(BIN)));
+
+        let mut set_out_with = None;
+        for _ in 0..ticks(&world, 8.0) {
+            step(&mut world, &mut human);
+            if set_out_with.is_none() && !world.map.contains(human.center_position()) {
+                set_out_with = Some(human.stats());
+            }
+            if salvaged(&world) > 3 {
+                break;
+            }
+        }
+        let stats = set_out_with.expect("never set out");
+        // The minutes from the toilet to the edge of the site.
+        let margin = 2.0;
+        for (need, level) in [("hunger", stats.hunger()), ("thirst", stats.thirst()), ("bladder", stats.bladder()), ("boredom", stats.boredom())] {
+            assert!(level <= READY + margin, "set out with {need} at {level}: {:?}", world.lines());
+        }
+
+        // Every need seen to before the first piece of scrap — in the list's
+        // order, but a bladder past 80 (the drink's water arriving) is its
+        // own routine's to put first — and none between it and the bin.
+        let lines = world.lines();
+        let line = |from: usize, needle: &str| {
+            line_after(&world, from, needle).unwrap_or_else(|| panic!("no {needle:?} after line {from}: {lines:?}"))
+        };
+        let first_piece = line(0, "salvaged scrap metal");
+        let stored = line(first_piece, "scrap metal in the bin");
+        assert!(line(0, "is ready to go out for scrap metal") < first_piece);
+        for need in ["drank at the fridge", "ate at the fridge", "watched the TV", "used the toilet"] {
+            assert!(line(0, need) < first_piece, "{need:?} after setting out: {lines:?}");
+            assert!(line_after(&world, first_piece, need).is_none_or(|at| at > stored), "called back for {need:?}: {lines:?}");
+        }
+
+        // The second trip is got ready for too: a trip's thirst is seen to
+        // at the fridge before it, not out at the heaps.
+        let (drink, ready, out) =
+            (line(stored, "drank at the fridge"), line(stored, "is ready to go out"), line(stored, "salvaged scrap metal"));
+        assert!(drink < ready && ready < out, "{lines:?}");
+    }
+
+    /// A trip starts from the bin: a collector across the site, with nothing
+    /// in its pack and nothing to see to, goes there before the heaps — and
+    /// is ready the moment it is beside it. A collector the routine says is
+    /// ready already (got ready at a fridge, say) goes straight out.
+    #[test]
+    fn a_collector_goes_out_from_its_bin_unless_it_is_ready_already() {
+        let mut world = yard(at(1, 10.0));
+        let mut human = collector(Point::new(7, 5), BIN);
+        let mut beside_before_out = false;
+        for _ in 0..ticks(&world, 1.0) {
+            step(&mut world, &mut human);
+            beside_before_out |= human.center_position().manhattan_distance(BIN) <= 1;
+            if !world.map.contains(human.center_position()) {
+                break;
+            }
+        }
+        assert!(!world.map.contains(human.center_position()), "never set out: {:?}", human.brain_fields());
+        assert!(beside_before_out, "went out without going by its bin");
+        assert!(world.log_contains("is ready to go out for scrap metal"), "{:?}", world.lines());
+
+        // Ready, across the site: out from where it stands.
+        let mut world = yard(at(1, 10.0));
+        let mut human = collector(Point::new(7, 5), BIN);
+        human.brain_mut().set_ready_to_go_out();
+        let mut first = None;
+        for _ in 0..200 {
+            step(&mut world, &mut human);
+            first = human.brain_fields().into_iter().find(|(name, value)| *name == "going to" && value != "none");
+            if first.is_some() {
+                break;
+            }
+        }
+        let (_, first) = first.expect("set off somewhere");
+        assert_ne!(first, "4, 3", "went for its bin when it was ready already");
     }
 
     /// Let go on the way to one bin and hired at another, carrying a

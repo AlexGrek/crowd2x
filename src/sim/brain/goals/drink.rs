@@ -509,6 +509,7 @@ mod tests {
             tasks: &mut tasks,
             inventory: Some(&inventory),
             job: None,
+            ready_to_go_out: false,
             blocked_by: None,
             finished: None,
         };
@@ -548,6 +549,7 @@ mod tests {
             tasks: &mut tasks,
             inventory: Some(&inventory),
             job: None,
+            ready_to_go_out: false,
             blocked_by: None,
             finished: None,
         };

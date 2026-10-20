@@ -102,7 +102,12 @@ A new **kind** needs a `pb::Kind` variant; a new **task** nothing (a `TimedTask`
 a new **executor** a `pb::Executor` variant if none fits. Brains are rebuilt by kind (`Brain::human()`)
 and filled in, so a routine list that changes order or names refuses old saves — **add
 routines at the end**: `Brain::restore` takes a saved list that is a prefix of the brain's
-(the routines added since start fresh; `WorkRoutine` came in that way). A unit's job is
+(the routines added since start fresh; `WorkRoutine` and `ReadyRoutine` came in that way). A
+routine's state is `pb::RoutineState { name, committed, pending }`: `committed` for one with
+hysteresis, the latch for the others (`WorkRoutine::on_shift`, `ReadyRoutine`'s ready);
+`pending` (tag 3) is the get-ready routine's list of needs still to see to, a bit each, 0 and
+refused anywhere else (`save::tests::a_collector_saved_while_it_gets_ready_for_a_trip_carries_on_exactly`).
+A unit's job is
 `pb::Brain.job` (tag 14), absent = unemployed; `pb::JobKind::ScrapCollector` = 1 (`jobs`
 skill). Tags added with the scrap collectors: `pb::GoalId::Collect` = 9 (`CollectGoal` is a
 `pb::Executor::Seek`), `pb::TaskKind::Deposit(Timed)` = 12 and

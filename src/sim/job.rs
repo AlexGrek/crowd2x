@@ -21,8 +21,9 @@
 //!   (`WorkGoal`), nine to five, Monday to Friday;
 //! * the **scrap collector**: a scrap bin in the warehouse, and the heaps of
 //!   scrap out in the wasteland — out to a heap, salvage a packful, back to
-//!   the bin and store it (`CollectGoal`). One collector to a bin, office
-//!   hours;
+//!   the bin and store it (`CollectGoal`), every trip got ready for first,
+//!   every need seen to before it goes out (`ReadyRoutine`,
+//!   [`JobDef::goes_out_for`]). One collector to a bin, office hours;
 //! * the **guard**: a guard post by one of the gates in the district's wall,
 //!   stood at an hour at a time (`WorkGoal` again), round the clock: three
 //!   eight-hour [`WATCHES`] every day of the week, a guard to each, so a
@@ -97,6 +98,12 @@ pub struct JobDef {
     /// in charge: what it is doing about it, given whether it is at its own
     /// workplace and what it carries.
     pub now: fn(at_work: bool, pack: Option<&Inventory>) -> &'static str,
+    /// What a trip out of the district brings back, for a job worked on
+    /// trips out into the wasteland — and so a job whose worker **gets
+    /// ready** before each one (`ReadyRoutine`): with none of it in the pack
+    /// and still in the district, it sees to every need first. `None` for a
+    /// job that never takes anybody far from a fridge and a toilet.
+    pub goes_out_for: Option<ItemKind>,
 }
 
 catalogue! {
@@ -116,6 +123,7 @@ catalogue! {
             shifts: &[OFFICE_HOURS],
             uniform: "uniform office worker",
             now: |at_work, _| if at_work { "working" } else { "on the way to work" },
+            goes_out_for: None,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -129,6 +137,7 @@ catalogue! {
             shifts: &[OFFICE_HOURS],
             uniform: "uniform scrap collector",
             now: |at_work, _| if at_work { "storing scrap" } else { "collecting scrap" },
+            goes_out_for: Some(ItemKind::Scrap),
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -143,6 +152,7 @@ catalogue! {
             shifts: &WATCHES,
             uniform: "uniform guard",
             now: |at_work, _| if at_work { "on watch" } else { "on the way to the gate" },
+            goes_out_for: None,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -155,6 +165,7 @@ catalogue! {
             shifts: &WATCHES,
             uniform: "uniform undertaker",
             now: |at_work, _| if at_work { "cremating" } else { "seeing to the dead" },
+            goes_out_for: None,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -168,6 +179,7 @@ catalogue! {
             shifts: &[OFFICE_HOURS],
             uniform: "uniform steelworker",
             now: |at_work, _| if at_work { "smelting steel" } else { "fetching scrap, storing steel" },
+            goes_out_for: None,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -189,6 +201,7 @@ catalogue! {
                     "fetching a load"
                 }
             },
+            goes_out_for: None,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -203,6 +216,7 @@ catalogue! {
             shifts: &[FARM_HOURS],
             uniform: "uniform farmer",
             now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
+            goes_out_for: None,
         },
     }
 }
@@ -256,6 +270,12 @@ impl JobKind {
     /// The job menu's `now` line for somebody at it ([`JobDef::now`]).
     pub fn now(self, at_work: bool, pack: Option<&Inventory>) -> &'static str {
         (self.def().now)(at_work, pack)
+    }
+
+    /// What a trip out brings back, for a job worked on trips out into the
+    /// wasteland, whose worker gets ready before each ([`JobDef::goes_out_for`]).
+    pub const fn goes_out_for(self) -> Option<ItemKind> {
+        self.def().goes_out_for
     }
 }
 

@@ -153,9 +153,15 @@ pub struct RoutineState {
     /// `Routine::name`, checked against the routine in the same place.
     #[prost(string, tag = "1")]
     pub name: String,
-    /// Whether a routine with hysteresis has committed to its goal.
+    /// Whether a routine with hysteresis has committed to its goal — for the
+    /// routine that gets a worker ready to go out, whether it is ready.
     #[prost(bool, tag = "2")]
     pub committed: bool,
+    /// The needs the get-ready routine is still seeing to before a trip out,
+    /// a bit each in its list's order (`routines::READY_NEEDS`). 0 for every
+    /// other routine, and in every save from before there was one.
+    #[prost(uint32, tag = "3")]
+    pub pending: u32,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

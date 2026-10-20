@@ -33,11 +33,12 @@
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::biology::Biology;
 use crate::sim::entity::{Body, Think};
+use crate::sim::inventory::Inventory;
 use crate::sim::job::Job;
 
 use super::goal::Goals;
 use super::memory::Memory;
-use super::routines::{Need, NeedRoutine, OrdersRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
+use super::routines::{Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -56,9 +57,11 @@ pub struct RoutineCtx<'a> {
     /// Its job, if it has one — when the shift is, for
     /// [`WorkRoutine`](super::routines::WorkRoutine).
     pub job: Option<&'a Job>,
-    /// What is in its hand — a body an undertaker has still to see to the
-    /// crematorium, for [`WorkRoutine`](super::routines::WorkRoutine).
-    pub carrying: Option<crate::sim::item::ItemKind>,
+    /// What it is carrying, `None` for a kind that carries nothing: a body in
+    /// hand an undertaker has still to see to the crematorium
+    /// ([`WorkRoutine`](super::routines::WorkRoutine)), what a trip out has
+    /// brought back so far ([`ReadyRoutine`]).
+    pub inventory: Option<&'a Inventory>,
 }
 
 /// What one routine does.
@@ -86,6 +89,7 @@ pub enum Routine {
     StayBusy(StayBusyRoutine),
     Orders(OrdersRoutine),
     Work(WorkRoutine),
+    Ready(ReadyRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -117,6 +121,11 @@ impl Routine {
         Routine::Work(WorkRoutine::new())
     }
 
+    /// Before a trip out into the wasteland, see to every need first.
+    pub const fn ready() -> Routine {
+        Routine::Ready(ReadyRoutine::new())
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
@@ -124,6 +133,7 @@ impl Routine {
             Routine::StayBusy(routine) => routine.name(),
             Routine::Orders(routine) => routine.name(),
             Routine::Work(routine) => routine.name(),
+            Routine::Ready(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -137,6 +147,7 @@ impl Routine {
             Routine::StayBusy(routine) => routine.arrange(ctx, goals),
             Routine::Orders(routine) => routine.arrange(ctx, goals),
             Routine::Work(routine) => routine.arrange(ctx, goals),
+            Routine::Ready(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -149,6 +160,7 @@ impl Routine {
             Routine::StayBusy(routine) => routine.debug_fields(),
             Routine::Orders(routine) => routine.debug_fields(),
             Routine::Work(routine) => routine.debug_fields(),
+            Routine::Ready(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -160,17 +172,21 @@ impl Routine {
     /// with nothing to remember is named all the same, so that a load can
     /// check it is restoring the brain it saved.
     pub(crate) fn save(&self) -> pb::RoutineState {
-        let committed = match self {
-            Routine::Need(routine) => routine.is_committed(),
-            Routine::Sleep(routine) => routine.is_committed(),
-            Routine::StayBusy(StayBusyRoutine) => false,
-            Routine::Orders(OrdersRoutine) => false,
-            Routine::Work(routine) => routine.is_on_shift(),
+        let (committed, pending) = match self {
+            Routine::Need(routine) => (routine.is_committed(), 0),
+            Routine::Sleep(routine) => (routine.is_committed(), 0),
+            Routine::StayBusy(StayBusyRoutine) => (false, 0),
+            Routine::Orders(OrdersRoutine) => (false, 0),
+            Routine::Work(routine) => (routine.is_on_shift(), 0),
+            Routine::Ready(routine) => {
+                let (ready, pending) = routine.state();
+                (ready, pending as u32)
+            }
             // A test's dial is set from outside every tick; nothing to keep.
             #[cfg(test)]
-            Routine::Dial(_) => false,
+            Routine::Dial(_) => (false, 0),
         };
-        pb::RoutineState { name: self.name().to_string(), committed }
+        pb::RoutineState { name: self.name().to_string(), committed, pending }
     }
 
     /// Put back what [`Routine::save`] kept, into the routine in the same
@@ -179,14 +195,30 @@ impl Routine {
         if saved.name != self.name() {
             return invalid(format!("routine {:?} where {:?} should be", saved.name, self.name()));
         }
+        if saved.pending != 0 && !matches!(self, Routine::Ready(_)) {
+            return invalid(format!("routine {:?} has no needs to see to", saved.name));
+        }
         match self {
             Routine::Need(routine) => routine.set_committed(saved.committed),
             Routine::Sleep(routine) => routine.set_committed(saved.committed),
             Routine::Work(routine) => routine.set_on_shift(saved.committed),
+            Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
             Routine::StayBusy(_) | Routine::Orders(_) => {}
             #[cfg(test)]
             Routine::Dial(_) => {}
         }
         Ok(())
+    }
+
+    /// Whether this is the routine that gets a worker ready to go out, and it
+    /// is seeing to a need for it right now — for the job menu.
+    pub fn is_getting_ready(&self) -> bool {
+        matches!(self, Routine::Ready(routine) if routine.is_getting_ready())
+    }
+
+    /// Whether this is the routine that gets a worker ready to go out, and it
+    /// says the worker is ready — for the job's goal.
+    pub fn is_ready_to_go_out(&self) -> bool {
+        matches!(self, Routine::Ready(routine) if routine.state().0)
     }
 }

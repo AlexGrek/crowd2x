@@ -163,7 +163,8 @@ impl Brain {
     }
 
     /// A person: keeps fed, hydrated, comfortable, entertained and rested,
-    /// stays busy, goes to work if it has a job; and can pursue **every goal
+    /// stays busy, goes to work if it has a job, and gets ready before a trip
+    /// out into the wasteland for it; and can pursue **every goal
     /// there is an executor for** ([`GoalDef::executor`](goal::GoalDef)) —
     /// wander, eat, drink, use the toilet, play, sleep, follow an order, and
     /// whatever any job's goal is. A new goal is a row of [`GoalId`]'s
@@ -183,6 +184,7 @@ impl Brain {
                 Routine::orders(),
                 Routine::stay_busy(),
                 Routine::work(),
+                Routine::ready(),
             ],
             GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
@@ -266,7 +268,7 @@ impl Brain {
                 biology: biology.as_deref(),
                 memory,
                 job,
-                carrying: inventory.as_deref().and_then(|inventory| inventory.hand()),
+                inventory: inventory.as_deref(),
             };
             for routine in routines.iter_mut() {
                 routine.arrange(&routine_ctx, goals);
@@ -294,6 +296,7 @@ impl Brain {
                 tasks,
                 inventory: inventory.as_deref(),
                 job,
+                ready_to_go_out: routines.iter().any(Routine::is_ready_to_go_out),
                 blocked_by: *blocked_by,
                 finished: *finished,
             };
@@ -450,6 +453,22 @@ impl Brain {
     /// What it does for a living, if anything.
     pub fn job(&self) -> Option<&Job> {
         self.job.as_ref()
+    }
+
+    /// Whether it is seeing to its needs before a trip out for its job
+    /// ([`ReadyRoutine`](routines::ReadyRoutine)).
+    pub fn is_getting_ready(&self) -> bool {
+        self.routines.iter().any(Routine::is_getting_ready)
+    }
+
+    /// Ready to go out, as if it had just got ready.
+    #[cfg(test)]
+    pub(crate) fn set_ready_to_go_out(&mut self) {
+        for routine in self.routines.iter_mut() {
+            if let Routine::Ready(ready) = routine {
+                ready.set_state(true, 0).unwrap();
+            }
+        }
     }
 
     // --- saving ---
@@ -1199,7 +1218,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
@@ -1215,7 +1234,7 @@ mod tests {
         saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
         let mut saved = saved.save();
         let added = saved.routines.pop().expect("a routine to leave out");
-        assert_eq!(added.name, "go to work");
+        assert_eq!(added.name, "get ready to go out");
         saved.job = None;
 
         let mut brain = Brain::human();

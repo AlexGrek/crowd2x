@@ -22,7 +22,9 @@ energy, satisfaction, health). A need left at its worst — starving, parched, s
 health, and at none a unit dies: it lies where it fell (drawn turned 90°), thinks and moves no
 more. Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
-the heaps in the wasteland and stores it in its own bin in the district's warehouse. A
+the heaps in the wasteland and stores it in its own bin in the district's warehouse, and
+before every trip out gets ready — eats, drinks, plays and uses the toilet until every need is
+85% met — so that no need calls it back in from the far end of a trip. A
 district is walled in, with eight gates, and each gate's guard post is kept round the clock by
 three guards on eight-hour watches, every day, each sleeping by its watch; undertakers on the
 same watches carry the dead to the crematoria in the district's crematorium. Four public
@@ -83,7 +85,7 @@ to `screenshots/`.
 | **Adding a kind of thing**: a job, a building every district has, an item, a feature or store, a goal, a task, an effect, a new part of the world's state — the touch list | `add-content` (+ the owning skill) |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, watches, weekdays, commutes, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
 | Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |

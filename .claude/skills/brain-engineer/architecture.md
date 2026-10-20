@@ -50,7 +50,7 @@ talking only to the one below:
   nearest free desk it may use; `Workplaces` is the bookkeeping, read by nothing in a tick)
   and by `Command::Hire`, taken back by `Command::Dismiss` and despawn. Routines and goals
   read it as `RoutineCtx::job` / `GoalCtx::job`. The `jobs` skill has all of it.
-- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`, `OrdersRoutine`, `WorkRoutine`) own **priorities and nothing else**.
+- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`, `OrdersRoutine`, `WorkRoutine`, `ReadyRoutine`) own **priorities and nothing else**.
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
@@ -66,7 +66,11 @@ talking only to the one below:
   (`GoalId::Work` at a desk or guard post, `GoalId::Collect` for a scrap collector) at a
   flat 1.5 while the job's shift is due (09:00-17:00 Mon-Fri, from 08:30 on the way) — over
   every need at its commit level, under any need past 75, and tied with (so losing to) a
-  nap at `EXHAUSTED`. **There is no cap on how many a brain has**:
+  nap at `EXHAUSTED`. **`ReadyRoutine` gets a worker ready to go out** (the collector): before
+  a trip into the wasteland it raises eat, drink, play and relieve over work (1.6, in that
+  list's order) until every need is 85% met, then latches `ready` until the worker has gone
+  out; the goal hears it as `GoalCtx::ready_to_go_out` (the `jobs` skill, "Getting ready").
+  **There is no cap on how many a brain has**:
   `Routine` is an enum over one struct per routine type, `match`-dispatched like `Task`,
   and a brain holds them in a `Box<[Routine]>` built once at spawn — one allocation per
   unit however many routines, state inline and contiguous, no `push` so the order cannot
@@ -101,7 +105,8 @@ talking only to the one below:
   `WorkGoal` is `SleepGoal`'s shape at a desk: **its own** computer (the job's), an hour a
   stretch, `Achieved` after each, the part of an hour worked still reported when it is cut
   short; no other desk to reroute to, so an unreachable or unpowered one is `Blocked`.
-  `CollectGoal` is a scrap collector's shift, a trip at a time: the nearest heap it can get to
+  `CollectGoal` is a scrap collector's shift, a trip at a time, each from its bin (there first
+  unless the routine says it is ready): the heap nearest the bin it can get to
   (`nearest_heap`, a walk of the loaded heap lists of the navigation area, no route) while the
   pack has room, its own bin once it is full, `Achieved` when the packful is stored — the
   `jobs` skill. `SmeltGoal` (a steelworker) and `HaulGoal` (a courier) are the steel
