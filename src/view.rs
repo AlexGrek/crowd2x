@@ -54,7 +54,7 @@ use crate::render::{PixelCanvas, PixelSystems, WorldCamera};
 /// One cell. Taking a sprite from a pool inserts `Actor` and parking it removes
 /// that component again, and each of those moves the entity between archetypes,
 /// so a unit standing exactly on the edge would pay for it every frame. At a
-/// walking pace of about a cell a second this is a second of dead zone.
+/// walking pace of four cells a second this is a quarter second of dead zone.
 pub const HYSTERESIS: f32 = TILE;
 
 /// An inclusive rectangle of whole cells.

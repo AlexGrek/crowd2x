@@ -45,8 +45,9 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, Intent, MoveOutcome};
 
-const HUMAN_SPEED: f32 = 2.0;
-const DOG_SPEED: f32 = 3.5;
+/// Cells a watched second: a human crosses 120 cells in a world hour.
+const HUMAN_SPEED: f32 = 4.0;
+const DOG_SPEED: f32 = 7.0;
 
 /// Which way something is facing. The simulation's own, deliberately not
 /// `characters::dog::Facing` — see the module docs.

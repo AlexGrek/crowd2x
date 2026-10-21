@@ -1593,8 +1593,8 @@ fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
 /// can act on, where "you got 40% of the way" is not.
 ///
 /// A step that stays inside the entity's own cell is the common case by a wide
-/// margin — at a walking pace of two cells a second, a boundary is crossed
-/// about once every thirty ticks — and it costs neither of the two checks: no
+/// margin — at a walking pace of four cells a second, a boundary is crossed
+/// about once every fifteen ticks — and it costs neither of the two checks: no
 /// cell changes hands, so there is nothing to claim and nobody new to bump
 /// into. A step into a new cell is also where the [`Census`] hears of it,
 /// which matters once every thirty-odd cells, when it crosses into another
@@ -4639,5 +4639,110 @@ mod tests {
         assert!(salvaged_a > 0, "nobody salvaged anything, so the salvaging never ran");
         assert_eq!(salvaged_a, salvaged_b);
         assert_eq!(snapshot(&a), snapshot(&b));
+    }
+}
+
+#[cfg(test)]
+mod steel_probe {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// Where the scrap collectors', couriers' and steelworkers' shifts go,
+    /// over `PROBE_DAYS` days with every need on.
+    #[test]
+    #[ignore]
+    fn probe_the_scrap_and_steel_chain() {
+        let path = std::env::var("PROBE_MAP").unwrap_or_else(|_| "seed:7".into());
+        let days: u32 = std::env::var("PROBE_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(5);
+        let show = std::env::var("PROBE_LOG").ok();
+        let map = match path.strip_prefix("seed:") {
+            Some(seed) => crate::map::district::generate(seed.parse().unwrap()).map,
+            None => Map::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap(),
+        };
+        let mut state = GameState::new(map, 0x5eed_c0de);
+        state.spawn_from_spawners();
+        let input = Input::new();
+        let kinds = [job::JobKind::ScrapCollector, job::JobKind::Courier, job::JobKind::Steelworker];
+        let workers: Vec<(Uid, job::JobKind)> = state
+            .entities()
+            .iter()
+            .filter_map(|e| e.job().filter(|job| kinds.contains(&job.kind)).map(|job| (e.uid(), job.kind)))
+            .collect();
+        eprintln!("{} residents, {} chain workers", state.len(), workers.len());
+        let mut time: BTreeMap<(String, String), u32> = Default::default();
+        let mut lines: BTreeMap<(String, String), u32> = Default::default();
+        let stores = |state: &GameState| {
+            let bins = state.bins();
+            format!(
+                "bins {} hoppers {} pallets {} rack {}",
+                bins.total_in(feature::FeatureKind::ScrapBin),
+                bins.total_in(feature::FeatureKind::ScrapHopper),
+                bins.total_in(feature::FeatureKind::SteelPallet),
+                bins.total_in(feature::FeatureKind::SteelRack)
+            )
+        };
+        for tick in 0..days * 24 * 1800 {
+            process_game_state(&mut state, 1.0 / 60.0, &input);
+            for line in state.log.drain() {
+                let Some(&(uid, kind)) = workers.iter().find(|(u, _)| line.starts_with(&format!("{u} "))) else {
+                    continue;
+                };
+                let words: Vec<&str> = line.split(' ').skip(1).take(3).filter(|w| !w.chars().any(|c| c.is_ascii_digit())).collect();
+                *lines.entry((kind.name().to_string(), words.join(" "))).or_default() += 1;
+                if show.as_deref() == Some(kind.name()) || show.as_deref() == Some(&uid.to_string()) {
+                    eprintln!("  {} {line}", state.clock());
+                }
+            }
+            if tick % 150 == 0 {
+                let clock = state.clock();
+                for &(uid, kind) in &workers {
+                    let e = state.entities().get(uid).unwrap();
+                    let what = if e.is_dead() {
+                        "dead".to_string()
+                    } else if !e.job().is_some_and(|j| j.is_due(clock)) {
+                        continue;
+                    } else {
+                        let goal = e.current_goal().map(|g| g.name()).unwrap_or("none");
+                        let fields = e.brain_fields();
+                        let task = fields
+                            .iter()
+                            .find(|(k, _)| *k == "task")
+                            .map(|(_, v)| v.split(' ').next().unwrap_or("").to_string())
+                            .unwrap_or_default();
+                        let out = if state.map.contains(e.body().center_position()) { "" } else { " OUT" };
+                        format!("{goal} {task}{out}")
+                    };
+                    if std::env::var("PROBE_WHO").ok().as_deref() == Some(&uid.to_string()) {
+                        let e = state.entities().get(uid).unwrap();
+                        let fields = e.brain_fields();
+                        let pick = |name: &str| fields.iter().find(|(k, _)| *k == name).map(|(_, v)| v.clone()).unwrap_or_default();
+                        let s = *e.biology().unwrap().stats();
+                        let pack = e.inventory().map(|i| i.count(item::ItemKind::Scrap)).unwrap_or(0);
+                        eprintln!(
+                            "    {clock} {what:24} at {:?} h{:.0} t{:.0} b{:.0} f{:.0} z{:.0} pack {pack} | {} | {}",
+                            e.body().center_position(), s.hunger(), s.thirst(), s.bladder(), s.boredom(), s.tiredness(),
+                            pick("task"), e.debug_fields().iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ")
+                        );
+                    }
+                    *time.entry((kind.name().to_string(), what)).or_default() += 1;
+                }
+            }
+            if tick % (24 * 1800) == 9 * 1800 {
+                eprintln!("{} {}", state.clock(), stores(&state));
+            }
+        }
+        eprintln!("END {} {}", state.clock(), stores(&state));
+        for kind in kinds {
+            let total: u32 = time.iter().filter(|((k, _), _)| k == kind.name()).map(|(_, n)| n).sum();
+            eprintln!("== {} ({} samples of 5 min on shift)", kind.name(), total);
+            let mut rows: Vec<_> = time.iter().filter(|((k, _), _)| k == kind.name()).collect();
+            rows.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+            for ((_, what), n) in rows.iter().take(14) {
+                eprintln!("   {:5.1}%  {what}", **n as f32 * 100.0 / total as f32);
+            }
+            for ((_, verb), n) in lines.iter().filter(|((k, _), _)| k == kind.name()) {
+                eprintln!("   log {n:5}  {verb}");
+            }
+        }
     }
 }
