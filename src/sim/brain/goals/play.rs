@@ -33,7 +33,8 @@ use crate::sim::feature::{can_watch, FeatureKind, VIEWING_OFFSETS};
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
-use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
+use super::super::tasks::ARCADE_SECONDS;
+use super::{choose_nearest, choose_nearest_where, nearest_in_reach, nearest_in_reach_where, stand_beside, Seek, Stand};
 
 /// Half an hour at the computer — fifteen seconds of watching it, written in
 /// world units like every duration a body is watched standing through (see
@@ -46,30 +47,45 @@ use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 /// errand.
 pub const PLAY_SECONDS: f32 = watched(30.0 * MINUTE);
 
-/// The nearer of a computer and a TV, as the crow flies along the grid; ties
+/// The nearest of the places offered, as the crow flies along the grid; ties
 /// to the lower cell, so the answer does not depend on which was asked first.
-fn nearer(ctx: &GoalCtx<'_>, a: Option<Point>, b: Option<Point>) -> Option<Point> {
+fn nearer(ctx: &GoalCtx<'_>, places: [Option<Point>; 3]) -> Option<Point> {
     let here = ctx.body.center_position();
-    a.into_iter().chain(b).min_by_key(|&cell| (here.manhattan_distance(cell), cell))
+    places.into_iter().flatten().min_by_key(|&cell| (here.manhattan_distance(cell), cell))
 }
 
-/// The nearest computer or TV this unit does not remember as out of reach.
+/// Whether the arcade cabinet in `cabinet` works right now: its playzone has
+/// an administrator at its computer ([`crate::sim::Playzones::runs`]). A
+/// cabinet that does not is no place to go.
+fn works(ctx: &GoalCtx<'_>) -> impl Fn(Point) -> bool {
+    let playzones = ctx.think.playzones;
+    move |cabinet| playzones.runs(cabinet)
+}
+
+/// The nearest computer, TV or working arcade cabinet this unit does not
+/// remember as out of reach.
 fn amusement_in_reach(ctx: &GoalCtx<'_>) -> Option<Point> {
     nearer(
         ctx,
-        nearest_in_reach(ctx, FeatureKind::Entertainment),
-        nearest_in_reach(ctx, FeatureKind::Television),
+        [
+            nearest_in_reach(ctx, FeatureKind::Entertainment),
+            nearest_in_reach(ctx, FeatureKind::Television),
+            nearest_in_reach_where(ctx, FeatureKind::Arcade, works(ctx)),
+        ],
     )
 }
 
 /// Where a visit starts: [`amusement_in_reach`], or — when every one was
-/// given up on lately — [`choose_nearest`]'s pick of either kind.
+/// given up on lately — [`choose_nearest`]'s pick of any kind.
 fn choose_amusement(ctx: &GoalCtx<'_>) -> Option<Point> {
     amusement_in_reach(ctx).or_else(|| {
         nearer(
             ctx,
-            choose_nearest(ctx, FeatureKind::Entertainment),
-            choose_nearest(ctx, FeatureKind::Television),
+            [
+                choose_nearest(ctx, FeatureKind::Entertainment),
+                choose_nearest(ctx, FeatureKind::Television),
+                choose_nearest_where(ctx, FeatureKind::Arcade, works(ctx)),
+            ],
         )
     })
 }
@@ -126,6 +142,22 @@ impl PlayGoal {
         let Some(computer) = self.seek.target else {
             return false;
         };
+        if ctx.think.features.has(FeatureKind::Arcade, computer) {
+            let cabinet = computer;
+            // Dark: the administrator is gone, so is the game.
+            if !ctx.think.playzones.runs(cabinet) {
+                return false;
+            }
+            match stand_beside(ctx, cabinet) {
+                Stand::Nowhere => return false,
+                Stand::Here => {}
+                Stand::At(cell) => {
+                    let _ = ctx.tasks.push_back(Task::move_beside(cell));
+                }
+            }
+            let _ = ctx.tasks.push_back(Task::use_arcade(cabinet, ARCADE_SECONDS));
+            return true;
+        }
         if ctx.think.features.has(FeatureKind::Television, computer) {
             let tv = computer;
             if !can_watch(ctx.think.map, ctx.body.center_position(), tv) {
@@ -159,6 +191,17 @@ impl PlayGoal {
             ctx.body.uid(),
             computer.x,
             computer.y
+        ));
+        self.forget();
+    }
+
+    /// The game is over: say so, and start the next one from scratch.
+    fn played_arcade(&mut self, ctx: &GoalCtx<'_>, cabinet: Point) {
+        ctx.think.log.unit(ctx.body.uid(), format!(
+            "{} played the arcade cabinet at {}, {}",
+            ctx.body.uid(),
+            cabinet.x,
+            cabinet.y
         ));
         self.forget();
     }
@@ -205,6 +248,7 @@ impl GoalExecutor for PlayGoal {
         }
         match ctx.finished {
             Some(Task::UseComputer(task)) => self.played(ctx, task.computer),
+            Some(Task::UseArcade(task)) => self.played_arcade(ctx, task.cabinet),
             Some(Task::WatchTv(task)) => self.watched(ctx, task.tv),
             _ => {}
         }
@@ -239,6 +283,10 @@ impl GoalExecutor for PlayGoal {
             }
             (TaskResult::Success, Some(Task::UseComputer(task))) => {
                 self.played(ctx, task.computer);
+                return GoalProgress::Achieved;
+            }
+            (TaskResult::Success, Some(Task::UseArcade(task))) => {
+                self.played_arcade(ctx, task.cabinet);
                 return GoalProgress::Achieved;
             }
             (TaskResult::Success, Some(Task::WatchTv(task))) => {
@@ -562,5 +610,145 @@ mod tests {
 
         assert!(watch_until_done(&mut world, &mut human, 6000), "{:?}", human.brain_fields());
         assert_eq!(world.plays(), 0, "the computer was further away");
+    }
+
+    // --- the arcade ---
+
+    const COMPUTER: Point = Point::new(2, 10);
+    const CABINET: Point = Point::new(11, 7);
+
+    /// A room with one working arcade cabinet and the playzone computer that
+    /// runs it, and `extra` on top.
+    fn arcade(extra: &[(&str, Point)]) -> World {
+        let mut map = Map::new(Size::new(14, 12), FLOOR);
+        prop_at(&mut map, "arcade cabinet", CABINET);
+        prop_at(&mut map, "playzone computer", COMPUTER);
+        for &(name, cell) in extra {
+            prop_at(&mut map, name, cell);
+        }
+        World::new(map)
+    }
+
+    /// One tick with the playzone run, as its administrator would say so
+    /// every tick (`Effect::Operate`).
+    fn step_run(world: &mut World, human: &mut Human) {
+        world.playzones.run(COMPUTER);
+        world.step(human);
+    }
+
+    #[test]
+    fn a_bored_human_walks_to_a_working_arcade_cabinet_and_plays_a_game_on_it() {
+        let mut world = arcade(&[]);
+        let mut human = bored_human(Point::new(2, 2), 70.0);
+
+        let mut played = false;
+        for _ in 0..6000 {
+            step_run(&mut world, &mut human);
+            played |= human.interacting_with() == Some(CABINET);
+            if world.arcade_games() > 0 {
+                break;
+            }
+        }
+        assert!(played, "never started a game; the brain says {:?}", human.brain_fields());
+        assert!(world.log_contains("played the arcade cabinet at 11, 7"), "{:?}", human.brain_fields());
+        assert_eq!(human.center_position().manhattan_distance(CABINET), 1, "beside it, not on it");
+        assert!(human.stats().boredom() <= AMUSED, "boredom {}", human.stats().boredom());
+        assert_eq!(world.plays(), 0, "not a go on a computer");
+    }
+
+    /// No administrator at the computer, no game: a cabinet nobody runs is
+    /// not somewhere to go, however bored.
+    #[test]
+    fn a_dark_arcade_is_no_place_to_go() {
+        let mut world = arcade(&[]);
+        let mut human = bored_human(Point::new(9, 7), 95.0);
+        let start = human.position();
+
+        for _ in 0..1500 {
+            world.step(&mut human);
+            assert_ne!(human.interacting_with(), Some(CABINET), "playing a dead cabinet");
+        }
+        assert_eq!(world.arcade_games(), 0);
+        assert_eq!(human.brain().top_goal(), GoalId::Wander);
+        assert!(human.brain().goals().cooldown(GoalId::Play) > 0, "held off, not retried every tick");
+        assert_ne!(human.position(), start, "wandering meanwhile");
+    }
+
+    /// The administrator steps away in the middle of a game: every game in
+    /// the playzone is over, with none of the fun; and when they are back
+    /// the human plays again.
+    #[test]
+    fn the_administrator_leaving_ends_a_game_in_progress_and_it_is_played_again_when_they_are_back() {
+        let mut world = arcade(&[]);
+        let mut human = bored_human(Point::new(2, 2), 70.0);
+
+        let mut playing = false;
+        for _ in 0..6000 {
+            step_run(&mut world, &mut human);
+            if human.interacting_with() == Some(CABINET) {
+                playing = true;
+                break;
+            }
+        }
+        assert!(playing, "never started; {:?}", human.brain_fields());
+        let fun = human.stats().fun();
+        for _ in 0..3 {
+            step_run(&mut world, &mut human);
+        }
+
+        for _ in 0..300 {
+            world.step(&mut human);
+            assert_ne!(human.interacting_with(), Some(CABINET), "still playing with nobody at the computer");
+        }
+        assert_eq!(world.arcade_games(), 0, "a game cut short is not played");
+        assert!(human.stats().fun() <= fun, "and no fun from it: {} after {fun}", human.stats().fun());
+
+        for _ in 0..8000 {
+            step_run(&mut world, &mut human);
+            if world.arcade_games() > 0 {
+                break;
+            }
+        }
+        assert!(world.arcade_games() > 0, "never played once it was run again; {:?}", human.brain_fields());
+        assert!(human.stats().boredom() <= AMUSED, "boredom {}", human.stats().boredom());
+    }
+
+    /// The arcade is one more place to be amused, and whichever is nearest is
+    /// had: a TV beside the human beats a cabinet across the room, and a
+    /// cabinet beside it beats a TV across the room — but a cabinet that is
+    /// dark is not in the running at all.
+    #[test]
+    fn the_nearest_of_a_working_cabinet_and_a_tv_is_the_one_had_and_a_dark_cabinet_is_not_in_the_running() {
+        let tv = Point::new(3, 3);
+        let mut world = arcade(&[("tv", tv)]);
+        let mut human = bored_human(Point::new(3, 6), 70.0);
+        for _ in 0..6000 {
+            step_run(&mut world, &mut human);
+            if world.log_contains("watched the TV") || world.arcade_games() > 0 {
+                break;
+            }
+        }
+        assert!(world.log_contains("watched the TV at 3, 3") && world.arcade_games() == 0, "{:?}", human.brain_fields());
+
+        let mut world = arcade(&[("tv", tv)]);
+        let mut human = bored_human(Point::new(10, 9), 70.0);
+        for _ in 0..6000 {
+            step_run(&mut world, &mut human);
+            if world.log_contains("watched the TV") || world.arcade_games() > 0 {
+                break;
+            }
+        }
+        assert!(world.arcade_games() == 1 && !world.log_contains("watched the TV"), "{:?}", human.brain_fields());
+
+        // Beside the cabinet, but nobody runs it: the TV across the room it is.
+        let mut world = arcade(&[("tv", tv)]);
+        let mut human = bored_human(Point::new(10, 9), 70.0);
+        for _ in 0..6000 {
+            world.step(&mut human);
+            if world.log_contains("watched the TV") {
+                break;
+            }
+        }
+        assert!(world.log_contains("watched the TV at 3, 3") && world.arcade_games() == 0, "{:?}", human.brain_fields());
     }
 }

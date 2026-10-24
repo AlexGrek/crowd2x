@@ -154,6 +154,32 @@ catalogue! {
         /// at a time. The king's workplace; needs no power.
         Throne = 16 => FeatureDef { props: &["throne"], access: Access::Entered, ..BESIDE },
         DistributionBox = 17 => FeatureDef { props: &[], ..BESIDE },
+        FoodCooker = 18 => FeatureDef { props: &["food cooker"], ..BESIDE },
+        WheatHopper = 19 => FeatureDef {
+            props: &["wheat hopper"],
+            store: Some(StoreDef { holds: ItemKind::Wheat, called: "wheat hopper", site: "food factory", hud: None }),
+            ..BESIDE
+        },
+        MealPallet = 20 => FeatureDef {
+            props: &["meal pallet"],
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal pallet", site: "food factory", hud: None }),
+            ..BESIDE
+        },
+        MealRack = 21 => FeatureDef {
+            props: &["meal rack"],
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal rack", site: "warehouse", hud: Some("meals") }),
+            ..BESIDE
+        },
+        /// An arcade cabinet in a playzone: a quick go at something, played from
+        /// beside it — the quickest fun there is — and **only while the
+        /// playzone is run** ([`crate::sim::playzone::Playzones::runs`]): needs
+        /// power, like a computer, and an administrator at the playzone's
+        /// computer. Anybody's.
+        Arcade = 22 => FeatureDef { props: &["arcade cabinet"], ..BESIDE },
+        /// Where a playzone is run from: its central computer, worked from
+        /// beside it. The administrator's workplace; **needs power**. While an
+        /// administrator is on duty at it, the playzone's cabinets work.
+        PlayzoneComputer = 23 => FeatureDef { props: &["playzone computer"], ..BESIDE },
     }
 }
 

@@ -49,6 +49,8 @@ struct MapFile {
     /// every map now is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     wasteland: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    initial_stock: Vec<super::InitialStock>,
     terrain: TerrainFile,
     /// Keyed by [`ObjectLayer::name`] so the file says which list is which,
     /// rather than depending on the order two arrays happen to be written in.
@@ -105,6 +107,7 @@ pub enum MapFormatError {
     UnknownGridLayer(String),
     /// `"wasteland"` holding something other than a seed or `false`.
     MalformedWasteland(String),
+    InvalidInitialStock(Point),
     WrongRowCount { expected: i32, found: usize },
     WrongGridRowCount { layer: &'static str, expected: i32, found: usize },
     WrongGridRowWidth { layer: &'static str, row: usize, expected: i32, found: usize },
@@ -117,6 +120,7 @@ pub enum MapFormatError {
 impl fmt::Display for MapFormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidInitialStock(cell) => write!(f, "invalid or duplicate initial stock at {}, {}", cell.x, cell.y),
             Self::Json(error) => write!(f, "not valid map json: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
@@ -221,6 +225,7 @@ impl Map {
 
         let file = MapFile {
             version: FORMAT_VERSION,
+            initial_stock: self.initial_stock.clone(),
             size: SizeFile {
                 width: self.size.width,
                 height: self.size.height,
@@ -307,6 +312,12 @@ impl Map {
             }
         }
 
+        let mut stocked = std::collections::BTreeSet::new();
+        for stock in file.initial_stock {
+            if !stocked.insert(stock.cell) || !map.set_initial_stock(stock.cell, stock.pieces) {
+                return Err(MapFormatError::InvalidInitialStock(stock.cell));
+            }
+        }
         Ok(map)
     }
 }

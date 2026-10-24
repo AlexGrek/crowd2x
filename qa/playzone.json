@@ -1,0 +1,139 @@
+{
+  "name": "a playzone administrator runs the arcade from the central computer: the cabinets work while it is on duty and a bored resident plays one, and they are dark once it has gone home",
+  "state": "game",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "playzone",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor colorful", "wall purple"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "............",
+            "............",
+            "............",
+            "...-.-.-.-..",
+            ".B--------..",
+            ".=..........",
+            "............"
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 72, "y": 264 }, "kind": "generator" },
+              { "at": { "x": 72, "y": 216 }, "kind": "crate" },
+              { "at": { "x": 264, "y": 168 }, "kind": "playzone computer" },
+              { "at": { "x": 168, "y": 168 }, "kind": "arcade cabinet" },
+              { "at": { "x": 360, "y": 168 }, "kind": "arcade cabinet" },
+              { "at": { "x": 456, "y": 168 }, "kind": "arcade cabinet" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "playzone",
+  "steps": [
+    { "note": "a playzone under the open sky: the central computer at (5, 3) between three arcade cabinets at (3, 3), (7, 3) and (9, 3), all four on wiring from a box at (1, 4) fed by a generator at (1, 5). A crate stands on the box, so nobody can get to it and no electrician is hired for it. A world opens at 08:00 on day 1, a Monday" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "the computer and the cabinets are powered like any screen" },
+    { "expect_connected": { "utility": "power", "served": 4, "of": 4 } },
+    { "expect_prop_in_use": { "kind": "arcade cabinet", "in_use": false } },
+    { "expect_prop_in_use": { "kind": "playzone computer", "in_use": false } },
+
+    { "note": "one central computer is four workplaces, a day shift and an evening shift each for two groups on alternate days: the first arrival is the first group's day administrator, Monday, Wednesday, Friday and Sunday" },
+    { "spawn": { "kind": "human", "x": 5, "y": 1 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a playzone administrator at the playzone computer at 5, 3, 10:00-16:00" },
+    { "note": "the second would be the other group's day administrator: let go, it is somebody to play" },
+    { "spawn": { "kind": "human", "x": 8, "y": 1 } },
+    { "tick": 1 },
+    { "expect_entities": 2 },
+    { "select": 1 },
+    { "expect_selected": "human" },
+    { "press": "job" },
+    { "expect_text": "playzone administrator" },
+    { "expect_text": "playzone computer at 5, 3" },
+    { "expect_text": "10:00-16:00" },
+    { "expect_text": "Tue, Thu, Sat" },
+    { "press": "dismiss" },
+    { "tick": 2 },
+    { "expect_text": "unemployed" },
+    { "note": "the player needs nothing but something to do; the administrator, nothing at all" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "job" },
+    { "expect_text": "playzone administrator" },
+    { "expect_text": "10:00-16:00" },
+    { "expect_text": "Mon, Wed, Fri, Sun" },
+    { "expect_text": "on the way to the playzone" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform playzone administrator (own: " },
+
+    { "note": "a world hour is 1920 ticks. By ten o'clock the administrator is at the computer, in its uniform, running the playzone" },
+    { "tick": 3840 },
+    { "press": "job" },
+    { "expect_text": "running the playzone" },
+    { "expect_prop_in_use": { "kind": "playzone computer", "in_use": true } },
+    { "press": "close" },
+    { "key": "e" },
+    { "key": "e" },
+    { "expect_zoom": 4 },
+    { "look_at": { "x": 6, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "ten o'clock: the administrator at the central computer, the cabinets lit and waiting" },
+
+    { "note": "boredom takes six hours: by half past two in the afternoon the resident has gone to a cabinet and played a game on it, a quick one, and is amused" },
+    { "tick": 8640 },
+    { "expect_log": "played the arcade cabinet at" },
+    { "select": 1 },
+    { "expect_stat": { "stat": "fun", "min": 50 } },
+
+    { "note": "the day shift is over at four: the administrator goes home and nobody is left to run the playzone" },
+    { "tick": 3840 },
+    { "select": 0 },
+    { "press": "job" },
+    { "expect_text": "done for the day" },
+    { "expect_prop_in_use": { "kind": "playzone computer", "in_use": false } },
+    { "expect_prop_in_use": { "kind": "arcade cabinet", "in_use": false } },
+    { "press": "close" },
+    { "look_at": { "x": 6, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "half past four: the shift is over and the cabinets are dark" },
+
+    { "note": "the resident is bored again by eight in the evening and the playzone is dark, so it never plays: at nine o'clock it is thoroughly bored" },
+    { "tick": 8640 },
+    { "select": 1 },
+    { "expect_stat": { "stat": "fun", "max": 38 } },
+    { "expect_prop_in_use": { "kind": "arcade cabinet", "in_use": false } }
+  ]
+}

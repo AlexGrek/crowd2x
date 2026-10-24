@@ -137,6 +137,17 @@ The **throne** (`assets/throne.png`, 16x16, `upscaled`) is drawn by `tools/palac
 (`preview` shows it enlarged on the palace's white marble): a high-backed gilt chair with a
 jewelled crest, its back and seat buttoned crimson velvet.
 
+The **playzone** is drawn by `tools/playzone_art.py` (`preview` puts every strip on a purple
+floor, enlarged; it also writes `clothes_uniform_playzone_administrator.png` from
+`human_art.py`'s `UNIFORMS`: a purple polo, a neon cyan tie): `arcade_cabinet_idle.png` (2 frames:
+a navy cabinet under a violet marquee, the screen dark glass, the coin light blinking),
+`arcade_cabinet.png` (4 frames, the palette's `used` strip, shown while somebody plays: a shooter,
+a maze, a race, a platformer) and the central computer, `playzone_computer_idle.png` (2 frames: a
+monitor over a wooden desk with a keyboard and a coin tray, the screen dark) and
+`playzone_computer.png` (2 frames, shown while its administrator is at it: the list of games with
+the highlight moving down it). The strips swap on `Action::interact` like every computer
+(`game::props`). Run the tool with `python tools/playzone_art.py` where `uv` is not on the path.
+
 A new slot (glasses; the hat is one already) means a new array in `human.rs`, a new entry in
 `slot_paths`, `SLOT_DEPTHS` and `SLOTS`, and the tests in that file — it changes the
 paperdoll the body pool recycles, so read the `renderer` and `game-screen` skills first.

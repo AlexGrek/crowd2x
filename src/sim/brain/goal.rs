@@ -84,6 +84,7 @@ catalogue! {
         /// shift.
         Farm = 13 => GoalDef { name: "farm", emoji: "🌱", executor: Some(|| Box::new(goals::FarmGoal::new())) },
         Repair = 14 => GoalDef { name: "repair", emoji: "🔧", executor: Some(|| Box::new(goals::RepairGoal::new())) },
+        Cook = 15 => GoalDef { name: "cook", emoji: "??", executor: Some(|| Box::new(goals::CookGoal::new())) },
     }
 }
 
@@ -603,7 +604,8 @@ mod tests {
                 (GoalId::Smelt, 0.0),
                 (GoalId::Haul, 0.0),
                 (GoalId::Farm, 0.0),
-                (GoalId::Repair, 0.0)
+                (GoalId::Repair, 0.0),
+                (GoalId::Cook, 0.0)
             ]
         );
     }

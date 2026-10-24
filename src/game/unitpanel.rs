@@ -1087,6 +1087,23 @@ mod tests {
         assert_eq!(field(&job_block(&person, on(2, 23.75)), "now"), "on a break: idle", "due, and not set off");
     }
 
+    /// A playzone administrator's menu names the computer, the shift and the
+    /// days of its group, and a day of the other group's is a day off.
+    #[test]
+    fn a_playzone_administrators_job_menu_names_its_shift_and_its_groups_days() {
+        use crate::sim::job::{JobKind, PLAYZONE_SHIFTS};
+        let mut person = human();
+        assert!(GameEntity::hire(&mut person, crate::sim::Job::new(JobKind::PlayzoneAdministrator, Point::new(40, 22), PLAYZONE_SHIFTS[2])));
+        let block = job_block(&person, on(1, 7.0));
+        assert_eq!(field(&block, "job"), "playzone administrator");
+        assert_eq!(field(&block, "at"), "playzone computer at 40, 22");
+        assert_eq!(field(&block, "hours"), "16:00-22:00");
+        assert_eq!(field(&block, "days"), "Mon, Wed, Fri, Sun");
+        assert_eq!(field(&block, "now"), "off until 16:00", "a Monday: the first group's");
+        assert_eq!(field(&job_block(&person, on(2, 17.0)), "now"), "day off", "a Tuesday: the second's");
+        assert_eq!(field(&job_block(&person, on(1, 23.0)), "now"), "done for the day");
+    }
+
     #[test]
     fn a_dog_has_no_job_and_no_button_to_give_it_one() {
         let mut rng = SmallRng::seed_from_u64(1);

@@ -1,12 +1,11 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the power plant worker (the power plant's control panel, the three watches, standing by and nothing else yet; the Work task's STRETCHES), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the power plant worker (the power plant's control panel, the three watches, standing by and nothing else yet; the Work task's STRETCHES), the playzone administrator (one central computer, four shifts: a day and an evening shift for each of two groups on alternate days; the arcade cabinets work only while one is on duty beside the computer: sim::playzone, Effect::Operate, UseArcade), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
 
-A job is **what a unit does for a living, where, and when**. Nine so far, all tiring and no
-fun:
+A job is **what a unit does for a living, where, and when**. All tiring and no fun:
 
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
   Friday;
@@ -36,8 +35,15 @@ fun:
 - the **king**: the `"throne"` in the district's palace, the one there is — court held an
   hour at a time like a guard's post (`WorkGoal`, the `"hold court"` stretch), ten to four
   every day but Sunday, **and nothing else yet**: the major decisions are to be the king's
-  brain's, next. In robes and a crown always, and walking slowly (`Bearing`). Hired **last**.
-  See "The king" below.
+  brain's, next. In robes and a crown always, and walking slowly (`Bearing`). Hired after the
+  power plant workers. See "The king" below;
+- the **playzone administrator**: the `"playzone computer"` in the district's playzone — one
+  computer, **four** administrators: a day shift (10-16) and an evening shift (16-22), each kept
+  by two who take turns by the day (`PLAYZONE_SHIFTS`: group 1 Mon, Wed, Fri, Sun; group 2 Tue,
+  Thu, Sat), so every day has two shifts and two administrators on them — worked an hour at a time
+  like a desk (`WorkGoal`, the `"run the playzone"` stretch), **and while one is on duty and
+  beside the computer the playzone's arcade cabinets work** (`sim::playzone`). Hired **last**
+  (`JobKind::ALL`'s end). See "The playzone" below.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -48,13 +54,13 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name), `now` (the job menu's line), `goes_out_for` and `bearing` (below). The methods read the row. Saved as its number (`JobKind::number`) |
 | `Bearing` | `job.rs` | how somebody in the job carries themselves, on duty or off: `gait` (a share of its own pace, hurry included: `Walker::set_gait`, set by `Human::hire`/`dismiss`/`restore` from the job, **not saved**), `always_in_uniform` (`GameEntity::worn` puts the uniform on at any hour, not only while due) and `hat` (a layer over the hair with the uniform: `assets/human/hat_<hat>.png`, `characters::human::hat_path`). `WORKER` (1.0, on shift, none) for every job but the king's `ROYAL` (`KING_GAIT` 0.6, always, `"crown"`) |
 | `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers, power plant workers. `give_a_job` and `Command::Hire` walk it |
-| `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY` |
+| `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY`; `PLAYZONE_SHIFTS` = 10-16 and 16-22, each for `FIRST_GROUP` (`0b101_0101`: Mon, Wed, Fri, Sun) and `SECOND_GROUP` (`0b010_1010`: Tue, Thu, Sat), handed out day shifts first (so two keep it open every day from ten) |
 | `Job::is_due(clock)` | `job.rs` | its hours on its days **plus the kind's commute before** (`Shift::is_due_after`): the office sets off at 08:30, a guard two hours before its watch. A shift from midnight is due from the evening before if the next day is worked. (`Shift::is_due` keeps the plain `COMMUTE`.) What `WorkRoutine` and the job menu read |
 | `Shift::is_bedtime(clock)` | `job.rs` | **a worker sleeps by its shift**: the 8 hours (`BEDTIME`-`GETTING_UP`'s length) ending `UP_BEFORE_SHIFT` = 3 before the shift starts, every day. Office hours: 22-06, the clock's own night, so nothing changed for them; day watch 21-05; evening watch 05-13; night watch 13-21. `job::is_bedtime(job, clock)` falls back to `Clock::is_night` with no job. `SleepRoutine` and the boredom routine's no-play-at-night cap read it |
 | `Shift::is_working_hours`, `hours()`, `days()` | `job.rs` | the hours alone; `09:00-17:00`; `Mon-Fri`, `Mon-Sun` (or `Mon, Wed, Sat`) |
 | uniform | `job.rs`, `clothing.rs`, `entity.rs` | `JobKind::uniform()` = **`Clothing::Uniform(kind)`**, named by the row's `uniform` (`"uniform office worker"`: white shirt, navy tie; `"uniform scrap collector"`: orange hi-vis; `"uniform guard"`: navy tunic, brass...). **`GameEntity::worn(clock)`** = the uniform while `Job::is_due` (setting off to the end of the shift), else the unit's own `clothing()`. Derived from the job and the clock, never stored, so **nothing new is saved** and a loaded world dresses the same. Uniforms are `Clothing::uniforms()`, outside the wardrobe `Clothing::ALL`: never rolled at spawn, not on the clothing menu, but `Clothing::from_name` knows them. Art: `assets/human/clothes_uniform_<job>.png`, found by the name (`characters::human::clothing_path`), drawn by `tools/human_art.py` (`pixel-artist`) |
 | `Job { kind, workplace, shift }` | `job.rs` | `Copy`. The workplace is **the unit's own** desk, bin or post; the shift is chosen at hire time (the first free one of `kind.shifts()` there). `Job::new(kind, at, shift)`, `Job::office(desk)`, `Job::collector(bin)`, `Job::guard(post, watch)` |
-| `Workplaces` | `job.rs` | **(cell, shift start) → worker**, a `BTreeMap` twin of `Homes`: a desk or bin is one workplace, a post three. `claim(at, shift, uid)` (only while free), `free_shift(at, shifts)`, `release(uid)`, `worker(at, shift)`, `is_taken(at, shift)`, `len()` counts cell-and-shift pairs. Bookkeeping only — nothing in a tick reads it |
+| `Workplaces` | `job.rs` | **(cell, shift start, shift days) → worker**, a `BTreeMap` twin of `Homes`: a desk or bin is one workplace, a post three, a playzone's computer four (two shifts starting at the same hour, told apart by their days). `claim(at, shift, uid)` (only while free), `free_shift(at, shifts)`, `release(uid)`, `worker(at, shift)`, `is_taken(at, shift)`, `len()` counts cell-and-shift pairs. Bookkeeping only — nothing in a tick reads it. `Shift::mask()` is the days as a bitmask. Saved with `start` **and `days`** (`pb::Workplace.days`, tag 4); a save from before says no days and `Workplaces::settle` gives each workplace its worker's shift's days on load (`savegame`) |
 | weekday | `clock.rs` | `Weekday` (`short()`, `is_weekend()`), `Clock::weekday()` = `(day - 1) % 7`. **Day 1 is a Monday.** The HUD's `Display` is `day 1 Mon  08:00:00` |
 | desk feature | `feature.rs` | `FeatureKind::Workstation` ↔ `"computer"` (beside `Entertainment`, as a fridge is Food and Water), `Access::Beside`. A computer with no power is neither |
 | bin feature | `feature.rs` | `FeatureKind::ScrapBin` ↔ `"scrap bin"`, `Access::Beside`, **needs no power** |
@@ -354,16 +360,62 @@ its pace` on the debug menu, `hold court at the throne` and `holding court`, a c
 crown over the hair, an hour of court held, `done for the day` at 16:30 still crowned (seen
 failing with the robes on shift only).
 
+## The playzone
+
+The district's arcade: **one central computer, six arcade cabinets, four administrators** — and
+the cabinets work only while one of them is running the playzone.
+
+| Layer | What | File |
+| --- | --- | --- |
+| kind | `JobKind::PlayzoneAdministrator` (`"playzone administrator"`, number 12, **hired last**): workplace `FeatureKind::PlayzoneComputer` (`"playzone computer"`, beside, **needs power**), goal `GoalId::Work`, `PLAYZONE_COMMUTE` (2 world hours, like a guard's: the playzone is in the middle of the district and the last hired live up to two hours' walk away), `PLAYZONE_SHIFTS`, uniform `"uniform playzone administrator"` (a purple polo, a neon cyan tie), `now`: `running the playzone` / `on the way to the playzone` | `job.rs`, `feature.rs` |
+| the work | `WorkGoal` as for a desk: a `Work` stretch with `place: PlayzoneComputer` — `"run the playzone"`, logged `"ran the playzone an hour at the playzone computer at x, y"` (`STRETCHES`). The stretch starts on arrival, from the commute; running the playzone starts at the shift's hour | `brain/goals/work.rs`, `brain/tasks/work.rs` |
+| **running it** | `playzone::runs(job, cell, think)`: its workplace is a playzone computer, **the shift's hours are on** (`Shift::is_working_hours` — the commute is not duty), it stands **beside the computer**, and the computer works (powered). `Brain::react` asks `Effect::Operate { at }` of the world **every tick** that holds, whatever its task — so there is no gap between two hourly stretches, and one who steps away, goes off shift, is let go or dies simply stops saying so | `sim/playzone.rs`, `brain/mod.rs` |
+| the world | `Playzones` (a `Facilities` field, `Think::playzones`, `GameState::playzones()`): every cabinet's nearest computer (fixed by the map) and the computers being run as the last tick ended. `world_step` clears it (`begin_tick`) and grants this tick's `Operate`s (`run`); `Playzones::runs(cabinet)` is what a brain asks. `testing::World::step` does the same | `sim/playzone.rs`, `sim/effect.rs`, `sim/mod.rs`, `sim/testing.rs` |
+| the cabinets | `FeatureKind::Arcade` (`"arcade cabinet"`, beside, needs power). `PlayGoal` offers one only while `Playzones::runs` (`goals::nearest_in_reach_where` / `choose_nearest_where`), as the nearest of computer, TV and cabinet; `UseArcade` (`ARCADE_SECONDS` = 10 world minutes, a third of a go at a computer, the same `Event::Entertained`) fails any tick the cabinet is not powered **or not run**, so a game the administrator cuts short is no fun at all. Logged `"played the arcade cabinet at x, y"` | `brain/goals/play.rs`, `brain/tasks/use_arcade.rs` |
+| where | the **playzone** (`map/district/playzone.rs`), a lot building on the residential lot nearest the district's middle: `wall purple`, `floor colorful`, 6 cabinets along the side walls (every other row), the computer in the middle of the far wall (`map-generator`) | |
+
+**Who gets which shift**: the first arrival with no earlier job is the first group's day
+administrator (Mon, Wed, Fri, Sun, 10-16), the next the second group's day administrator (Tue,
+Thu, Sat), then the two evening shifts. A playzone with one administrator hired is open from ten
+to four on its group's days.
+
+Tests: `job.rs` `a_playzone_is_run_every_day_from_ten_to_ten_by_two_groups_on_alternate_days`
+(every day: a day and an evening shift, one administrator on at every quarter hour from ten to ten
+and none outside), `four_administrators_share_one_computer_two_shifts_starting_at_the_same_hour`,
+`a_workplace_saved_with_no_days_takes_the_days_of_its_workers_shift`; `playzone.rs` (nearest
+computer, only a computer can be run, save); `goals/work.rs`
+`a_playzone_administrator_runs_the_playzone_from_ten_to_four_and_the_cabinets_work_just_then` (every
+tick of the shift, none outside — seen failing with `runs` always false), `an_administrator_off_duty_leaves_the_cabinets_dark`,
+`an_administrator_away_from_the_computer_does_not_run_the_playzone`; `goals/play.rs` (plays a
+working cabinet; a dark one is no place to go; the administrator leaving ends a game in progress;
+the nearest of cabinet and TV, a dark cabinet not in the running); `tasks/use_arcade.rs`;
+`sim::tests::a_district_s_playzone_is_run_from_ten_to_ten_and_dark_outside_those_hours` and the
+four-administrators arm of `everybody_in_a_district_moves_into_a_bed_of_their_own_house`;
+`save::tests::a_playzone_saved_with_games_being_played_carries_on_exactly` (seen failing with
+`playzones_run` not restored); `game/unitpanel.rs`; `map::district::playzone`. QA
+`qa/playzone.json`: a powered room with a computer and three cabinets (a crate on the box so no
+electrician is hired for it), the first arrival hired as the first group's day administrator, the
+second let go and bored, the job menu (`10:00-16:00`, `Mon, Wed, Fri, Sun`), the uniform, the
+administrator at the computer at ten, a game played by half past two, `done for the day` and the
+cabinets dark at half past four, and the resident still bored at nine at night (seen failing with
+the cabinets never run).
+
 ## Saving (`savegame` skill)
 
 - `pb::Brain.job` (tag 14, `pb::Job`: `JobKind` enum — `OfficeWorker = 0`,
   `ScrapCollector = 1`, `Guard = 2`, `Undertaker = 3` — workplace cell, start, end, days). Absent = unemployed, which is what
   every older save reads as. `Job::save`/`restore` (refuses a broken shift or unknown kind).
-- `pb::World.workplaces` (tag 11, `pb::Workplace { desk, worker, start }` — a bin or post is a
+- `pb::World.workplaces` (tag 11, `pb::Workplace { desk, worker, start, days }` — a bin or post is a
   "desk" there; `start` (tag 3, optional) is the shift's start hour, absent in an older save =
-  office hours, 9), `Workplaces::save`/`restore` (one workplace to one worker, one worker to a
-  workplace; a start past 23 refused), restored after `homes` in `sim/saving.rs`, then
-  **cross-checked** against the entities both ways (cell and start).
+  office hours, 9; `days` (tag 4, optional) is the shift's days mask, which tells a playzone's two
+  day shifts apart, absent in an older save = the days of the shift its worker keeps,
+  `Workplaces::settle`), `Workplaces::save`/`restore` (one workplace to one worker, one worker to a
+  workplace; a start past 23 or days of none refused), restored after `homes` in `sim/saving.rs`,
+  then **cross-checked** against the entities both ways (cell, start and days).
+- `pb::World.playzones_run` (tag 16, `repeated Cell`): the playzone computers an administrator
+  was running as the tick ended (`Playzones::save`/`restore`; refuses a cell that is no playzone
+  computer). **Everything else of a playzone is the map's.** Absent in an older save = every
+  playzone unattended until the next tick.
 - `pb::World.crops` (tag 14, `pb::Crop { cell, farm, sown, quality, tended }`):
   `Fields::save`/`restore`, which **plants the map again** (a save's chunks keep the ground as
   found) and refuses a crop where none could be sown; `sim/saving.rs` then refuses one sown for

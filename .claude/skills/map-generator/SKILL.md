@@ -9,7 +9,7 @@ Everything is in **`src/map/district/`** (plain Rust, no Bevy): `mod.rs` has the
 streets, the bank, the shops, the houses, the gates and the services, `palace.rs` the palace (a
 block of its own, not a lot building), and **each lot building is
 a module of its own** — `warehouse.rs`, `restaurant.rs`, `crematorium.rs`, `steel_factory.rs`,
-`farm.rs`, `power_plant.rs` —
+`farm.rs`, `power_plant.rs`, `playzone.rs` —
 listed in `LOT_BUILDINGS`. Output is an ordinary `Map` plus a `District` record of where things
 went; nothing downstream knows it was generated.
 For the layers it writes see `map-layers`; for the networks it lays, `electrician` and
@@ -135,6 +135,18 @@ different afterwards; a seed's resident count is re-read, never assumed.)
      workplace, three watches, `jobs`). The corners keep the generators off the cells the plant
      takes its line in at (the middle of a street-facing wall) and off the wiring from there to
      the lamp in the middle — `connect` runs their line round the walls (`feed_in`). Draws no RNG.
+   - **`playzone`** (the last of `LOT_BUILDINGS`, after the food factory): the residential lot whose
+     middle is **nearest the middle of the district** (rank: manhattan distance to
+     `(WIDTH / 2, HEIGHT / 2)`), **the whole lot**, `wall purple` round `floor colorful`, a plain
+     `DOOR` in the middle of the lot's first street side, laid out with `Room`: an
+     `ARCADE CABINET` (`"arcade cabinet"`, `CABINETS` = 6) against each side wall in every other
+     row from the one inside the door to the far wall, so each has a free cell beside it, and
+     the `PLAYZONE_COMPUTER` (`"playzone computer"`, `COMPUTERS` = 1, the four administrators'
+     workplace, `jobs`) in the middle of the far wall with a free cell either side. Powered
+     things all, so `connect` wires the building. The cabinets work only while an administrator
+     is at the computer (`sim::playzone`, `jobs`). Draws no RNG; took a lot from the parks
+     (`EMPTY_LOTS` one fewer) and **seed 7's resident count did not change** (177). The constant
+     is `PLAYZONE_COMPUTER`, not `COMPUTER`: the bank's `COMPUTER` is in the module above it.
 
    History: adding the restaurants and the crematorium changed every seed's houses (the lots
    and the draws after the warehouse); the steel factory, drawing nothing, moved only which
@@ -229,7 +241,7 @@ different afterwards; a seed's resident count is re-read, never assumed.)
 | Street lamps powered at night only (controlled boxes off = day), everything else all day; >= 30 lamps; 1..=10 controllers | street lights, and not a cabinet per stretch | `the_street_lamps_have_power_at_night_only_and_everything_else_all_day` |
 | >= 90% of main cells within a street lamp's radius | the streets are lit | `the_streets_are_lit` |
 | Counts: 124 houses, 3 shops, spawners = residents, beds/fridge/toilet per house, >= 12 computers and >= 2 toilets in the bank; every lot building as many times as its `count` | the brief | `a_district_has_what_it_was_asked_for` |
-| Each lot building where and what it should be — in its own module's tests: one warehouse holding its 4 bins and its steel rack and nothing else, none elsewhere, nobody's, on the edge lot to be had nearest the scrap, its door onto the edge street facing out; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's; one steel factory holding its 2 furnaces, 2 hoppers and 2 pallets and nothing else, none elsewhere, nobody's, on no lot farther from the warehouse than a house or park lot is; one farm of 8 grain bins and nothing else, none elsewhere, nobody's, every bin with a free side, its door onto the edge street, on no edge lot farther from good soil than a house or park on the edge; enough soil (>= 2 fields' worth, the median walk out to it <= 42, the longest <= 80); one power plant on the edge holding its 2 generators and its control panel and nothing else, none elsewhere, nobody's, the panel with a free side; its generators the only power sources, on their line, and with them gone no cell of the district live | the brief; collectors and farmers step out towards the wasteland; the plant powers the district | `warehouse.rs`, `restaurant.rs`, `crematorium.rs`, `steel_factory.rs`, `farm.rs`, `power_plant.rs` tests |
+| Each lot building where and what it should be — in its own module's tests: one warehouse holding its 4 bins and its steel rack and nothing else, none elsewhere, nobody's, on the edge lot to be had nearest the scrap, its door onto the edge street facing out; 4 restaurants, one in each quarter, >= 2 fridges and 2 toilets and nothing else, nobody's; one crematorium on the edge holding its 2 crematoria and nothing else, none elsewhere, nobody's; one steel factory holding its 2 furnaces, 2 hoppers and 2 pallets and nothing else, none elsewhere, nobody's, on no lot farther from the warehouse than a house or park lot is; one farm of 8 grain bins and nothing else, none elsewhere, nobody's, every bin with a free side, its door onto the edge street, on no edge lot farther from good soil than a house or park on the edge; enough soil (>= 2 fields' worth, the median walk out to it <= 42, the longest <= 80); one power plant on the edge holding its 2 generators and its control panel and nothing else, none elsewhere, nobody's, the panel with a free side; its generators the only power sources, on their line, and with them gone no cell of the district live; one playzone holding its computer and its 6 cabinets and nothing else, none elsewhere, nobody's, on no lot farther from the middle of the district than a house or park lot is, every cabinet with a free cell beside it and the computer with two | the brief; collectors and farmers step out towards the wasteland; the plant powers the district; the arcade is where everybody can reach it | `warehouse.rs`, `restaurant.rs`, `crematorium.rs`, `steel_factory.rs`, `farm.rs`, `power_plant.rs`, `playzone.rs` tests |
 | 40-60% of houses have one `TV`, against an inside wall with `ROOM_AROUND` free cells beside it; none anywhere else; seed 7 has 184 residents | TVs to watch at home, seeds unchanged | `about_half_the_houses_have_a_tv_...`, `the_tvs_draw_nothing_from_the_district_...`; sim `in_a_district_the_bored_watch_the_tvs_in_their_own_houses` |
 | Every edge cell is the perimeter wall but the gates' leaves (`DOOR` on `ROAD`, opening off the map, reachable inside); `GATES_PER_SIDE` a side | a walled district, ways out | `the_district_is_walled_in_but_for_its_gates` |
 | One guard post per gate and none elsewhere, on the wall, two from its gate, its only on-map side a free cell inside, not in the gateway | guards stand inside, out of the way | `every_gate_has_a_guard_post_in_the_wall_with_room_inside_to_stand_at_it` |

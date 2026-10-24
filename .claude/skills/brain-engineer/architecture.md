@@ -117,7 +117,7 @@ talking only to the one below:
   (`goals::farm::nearest_plot`, no route), its own crops by a walk of the few dozen there are,
   `Achieved` per packful of wheat stored, `Blocked` with no log line once the day's work is done.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
-  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `Sleep`, `Wait`,
+  per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `UseArcade`, `Sleep`, `Wait`,
   `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
   `Deposit` and `Withdraw` — into and out of any store, the item being the store's —,
   `Smelt`, `TakeBody`, `Cremate`, `Sow`, `Tend`, `Harvest`), `match`-dispatched so

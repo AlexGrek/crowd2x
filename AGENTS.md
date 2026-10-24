@@ -581,6 +581,32 @@ world watched faster.
 
 #### The brain (`sim/brain/`)
 
+The food factory (`map/district/food_factory.rs`) follows the steel works:
+food couriers use `HaulGoal` to take wheat from farm grain bins to their
+wheat hoppers, and meals from factory pallets to warehouse meal racks.
+Food factory workers use `CookGoal` / `Cook` at powered food cookers: one
+wheat becomes one meal after thirty world minutes, then goes onto a pallet.
+`ItemKind::Meal` is stored cargo with no nutrition yet; fridges and eating
+still use `ItemKind::Food`. A new district's warehouse starts with 30 meals.
+Authored `Map::initial_stock` travels with map JSON and map.pb; `Bins` applies
+it once when creating a world, while loading restores current world stock.
+New districts include two cookers and two food courier workplaces.
+
+The playzone (`map/district/playzone.rs`, the lot nearest the district's middle)
+is an arcade: six `"arcade cabinet"`s, a quick way to stop being bored (`PlayGoal`
+offers one as the nearest amusement; `UseArcade` is a third of a go at a computer
+for the same fun), and one `"playzone computer"` run by four
+`JobKind::PlayzoneAdministrator`s: a day shift (10-16) and an evening shift
+(16-22), each kept by two who take turns by the day (`PLAYZONE_SHIFTS`: Mon, Wed,
+Fri, Sun and Tue, Thu, Sat). **A cabinet works only while an administrator is on
+duty beside the computer**: `Brain::react` asks `Effect::Operate` every tick that
+holds (`sim::playzone::runs`), `world_step` forgets the last tick's answers
+and grants this tick's, and `Playzones::runs(cabinet)` is what a brain and
+`UseArcade` ask. `Workplaces` is keyed by (cell, start hour, days) because two
+of the four shifts start at the same hour; both that and which playzones were
+being run are saved (`pb::Workplace.days`, `pb::World.playzones_run`).
+
+
 Distribution boxes can fail on a real manual on/off transition (10% for testing;
 `sim::electrical::BOX_FAILURE_CHANCE`, set to `0.01` for normal play). Damage
 disconnects their output, locks their switch and survives saving. Repair retains

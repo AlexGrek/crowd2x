@@ -22,6 +22,9 @@ pub struct SiteMap {
     /// The wasteland round the site; `None` for nothing round it.
     #[prost(message, optional, tag = "7")]
     pub wasteland: Option<Wasteland>,
+    /// Authored supplies for a new game; current supplies are in world.pb.
+    #[prost(message, repeated, tag = "8")]
+    pub initial_stock: Vec<super::Bin>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

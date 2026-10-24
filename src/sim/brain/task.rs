@@ -565,6 +565,8 @@ mod tests {
             Task::cremate(at, 17.0),
             Task::withdraw(at, 18.0),
             Task::smelt(at, 19.0),
+            Task::cook(at, 19.0),
+            Task::use_arcade(at, 23.0),
             Task::sow(at, 20.0),
             Task::tend(at, 21.0),
             Task::harvest(at, 22.0),

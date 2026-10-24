@@ -82,6 +82,14 @@ pub const COMMUTE: f32 = 0.5 * HOUR;
 /// last one leaves. One who lives nearby is early, and waits by the post.
 pub const GUARD_COMMUTE: f32 = 2.0 * HOUR;
 
+/// How long before a shift an administrator sets off for the playzone: two
+/// hours, like a guard's. The playzone is in the middle of the district and its
+/// four administrators are hired last, so they are the residents nobody nearer
+/// to it was before — up to two hours' walk away — and a playzone is only run
+/// on time if they are there when the last one leaves. One who lives nearby is
+/// early, and waits beside the computer.
+pub const PLAYZONE_COMMUTE: f32 = 2.0 * HOUR;
+
 /// How long before court a king sets off for the palace: an hour and a half.
 /// The palace is in the middle of the district, and a king walks it at
 /// [`KING_GAIT`] — from a house on the edge, an hour and a half's walk.
@@ -320,6 +328,57 @@ catalogue! {
             goes_out_for: None,
             bearing: WORKER,
         },
+        /// Makes meals from wheat at the factory's powered cooker.
+        FoodFactoryWorker = 10 => JobDef {
+            name: "food factory worker",
+            article: "a food factory worker",
+            workplace: FeatureKind::FoodCooker,
+            goal: GoalId::Cook,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform food factory worker",
+            now: |at_work, _| if at_work { "making meals" } else { "fetching wheat, storing meals" },
+            goes_out_for: None,
+            bearing: WORKER,
+        },
+        /// Brings wheat from the farm and takes meals to the warehouse.
+        FoodCourier = 11 => JobDef {
+            name: "food courier",
+            article: "a food courier",
+            workplace: FeatureKind::WheatHopper,
+            goal: GoalId::Haul,
+            commute: COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform food courier",
+            now: |_, pack| {
+                if pack.is_some_and(|pack| pack.count(ItemKind::Meal) > 0) {
+                    "carrying meals to the warehouse"
+                } else if pack.is_some_and(|pack| pack.count(ItemKind::Wheat) > 0) {
+                    "carrying wheat to the food factory"
+                } else {
+                    "fetching a load"
+                }
+            },
+            goes_out_for: None,
+            bearing: WORKER,
+        },
+        /// Runs the playzone from its central computer, one of four: a day shift
+        /// and an evening shift, each kept by two administrators who take
+        /// turns by the day ([`PLAYZONE_SHIFTS`]). **While one is at the
+        /// computer, on duty, the playzone's arcade cabinets work**
+        /// ([`super::playzone`]); when none is, they do not.
+        PlayzoneAdministrator = 12 => JobDef {
+            name: "playzone administrator",
+            article: "a playzone administrator",
+            workplace: FeatureKind::PlayzoneComputer,
+            goal: GoalId::Work,
+            commute: PLAYZONE_COMMUTE,
+            shifts: &PLAYZONE_SHIFTS,
+            uniform: "uniform playzone administrator",
+            now: |at_work, _| if at_work { "running the playzone" } else { "on the way to the playzone" },
+            goes_out_for: None,
+            bearing: WORKER,
+        },
     }
 }
 
@@ -418,6 +477,27 @@ pub const COURT_HOURS: Shift = Shift {
     days: MONDAY_TO_SATURDAY,
 };
 
+/// The first group's days at the playzone: Monday, Wednesday, Friday and
+/// Sunday, as a [`Shift::days`] mask.
+pub const FIRST_GROUP: u8 = 0b101_0101;
+
+/// The second group's: Tuesday, Thursday and Saturday. Between the two groups
+/// every day of the week is worked, and no day by both.
+pub const SECOND_GROUP: u8 = 0b010_1010;
+
+/// The playzone's four shifts, in the order they are handed out: **the day
+/// shift** (ten to four) of each group, then **the evening shift** (four to
+/// ten) of each. So every day has two shifts and two administrators on them —
+/// whichever group's day it is — and the playzone is run from ten in the
+/// morning until ten at night. Two shifts start at ten and two at four, told
+/// apart by their days ([`Workplaces`]).
+pub const PLAYZONE_SHIFTS: [Shift; 4] = [
+    Shift { start: 10, end: 16, days: FIRST_GROUP },
+    Shift { start: 10, end: 16, days: SECOND_GROUP },
+    Shift { start: 16, end: 22, days: FIRST_GROUP },
+    Shift { start: 16, end: 22, days: SECOND_GROUP },
+];
+
 /// A guard post's three watches, every day: the day, the evening and the
 /// night, in the order they are handed out. Between them, round the clock.
 pub const WATCHES: [Shift; 3] = [
@@ -477,6 +557,12 @@ impl Shift {
 
     pub const fn works_on(&self, day: Weekday) -> bool {
         self.days & (1 << day as u8) != 0
+    }
+
+    /// The days it is worked as a mask, bit 0 Monday: what tells two shifts
+    /// of the same hours apart ([`PLAYZONE_SHIFTS`]).
+    pub const fn mask(&self) -> u8 {
+        self.days
     }
 
     /// Whether it is the shift's hours on one of its days.
@@ -619,21 +705,31 @@ impl Job {
 /// [`WATCHES`]), each given to somebody of its own.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Workplaces {
-    workers: BTreeMap<(Point, u8), Uid>,
+    workers: BTreeMap<(Point, u8, u8), Uid>,
 }
+
+/// The days of a workplace restored from a save from before shifts were told
+/// apart by their days: no shift is worked on none ([`Shift::new`] refuses
+/// it), so it is never a real one, and [`Workplaces::settle`] gives it the
+/// days its worker's shift has.
+const UNSETTLED: u8 = 0;
 
 impl Workplaces {
     pub fn new() -> Workplaces {
         Workplaces::default()
     }
 
+    fn key(at: Point, shift: Shift) -> (Point, u8, u8) {
+        (at, shift.start, shift.days)
+    }
+
     /// Who works at `at` in `shift`, if anybody.
     pub fn worker(&self, at: Point, shift: Shift) -> Option<Uid> {
-        self.workers.get(&(at, shift.start)).copied()
+        self.workers.get(&Self::key(at, shift)).copied()
     }
 
     pub fn is_taken(&self, at: Point, shift: Shift) -> bool {
-        self.workers.contains_key(&(at, shift.start))
+        self.workers.contains_key(&Self::key(at, shift))
     }
 
     /// The first of `shifts` nobody works `at` in, if any: the one an
@@ -649,7 +745,7 @@ impl Workplaces {
         if self.is_taken(at, shift) {
             return false;
         }
-        self.workers.insert((at, shift.start), uid);
+        self.workers.insert(Self::key(at, shift), uid);
         true
     }
 
@@ -677,17 +773,21 @@ impl Workplaces {
         let Workplaces { workers } = self;
         workers
             .iter()
-            .map(|(&(desk, start), &worker)| pb::Workplace {
+            .map(|(&(desk, start, days), &worker)| pb::Workplace {
                 desk: Some(desk.into()),
                 worker: worker.raw(),
                 start: Some(start as u32),
+                days: Some(days as u32),
             })
             .collect()
     }
 
     /// The workplaces as given out. One workplace to one worker, and one
     /// worker to a workplace. A save from before the watches says no start:
-    /// office hours, all it could have held.
+    /// office hours, all it could have held. A save from before shifts were
+    /// told apart by their days says no days: those workplaces stay
+    /// [`UNSETTLED`] until [`Workplaces::settle`] reads them off their
+    /// workers' jobs.
     pub(crate) fn restore(saved: &[pb::Workplace]) -> Result<Workplaces, Invalid> {
         let mut workplaces = Workplaces::new();
         for place in saved {
@@ -700,13 +800,36 @@ impl Workplaces {
                 Some(Ok(start)) if start < 24 => start,
                 Some(_) => return invalid(format!("a shift at {}, {} starting at {:?}", desk.x, desk.y, place.start)),
             };
+            let days = match place.days.map(u8::try_from) {
+                None => UNSETTLED,
+                Some(Ok(days)) if days != UNSETTLED && days < 0b1000_0000 => days,
+                Some(_) => return invalid(format!("a shift at {}, {} worked on days {:?}", desk.x, desk.y, place.days)),
+            };
             if workplaces.workers.values().any(|&other| other == worker)
-                || workplaces.workers.insert((desk, start), worker).is_some()
+                || workplaces.workers.insert((desk, start, days), worker).is_some()
             {
                 return invalid(format!("{worker} and the desk at {}, {} given twice", desk.x, desk.y));
             }
         }
         Ok(workplaces)
+    }
+
+    /// Give the workplaces a save did not say the days of the days their
+    /// workers' shifts are worked on (`shift_of` is the worker's, if it has
+    /// one). Every shift before there were two of the same hours was told
+    /// apart by its start alone, so the worker's own is the only shift it can
+    /// be. One a worker's shift does not match is left [`UNSETTLED`], for the
+    /// load's cross-check to refuse.
+    pub(crate) fn settle(&mut self, shift_of: impl Fn(Uid) -> Option<Shift>) -> Result<(), Invalid> {
+        let unsettled: Vec<(Point, u8, u8)> = self.workers.keys().filter(|key| key.2 == UNSETTLED).copied().collect();
+        for key in unsettled {
+            let Some(worker) = self.workers.remove(&key) else { continue };
+            let days = shift_of(worker).filter(|shift| shift.start == key.1).map_or(UNSETTLED, |shift| shift.days);
+            if self.workers.insert((key.0, key.1, days), worker).is_some() {
+                return invalid(format!("{worker} and the desk at {}, {} given twice", key.0.x, key.0.y));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -791,9 +914,12 @@ mod tests {
                 JobKind::Farmer,
                 JobKind::PowerPlantWorker,
                 JobKind::King,
-                JobKind::Electrician
+                JobKind::Electrician,
+                JobKind::FoodFactoryWorker,
+                JobKind::FoodCourier,
+                JobKind::PlayzoneAdministrator
             ],
-            "the office first, the electrician last"
+            "the office first, new professions last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
@@ -851,10 +977,17 @@ mod tests {
         let mut twice = places.save();
         twice[1].desk = twice[0].desk;
         twice[1].start = twice[0].start;
+        twice[1].days = twice[0].days;
         assert!(Workplaces::restore(&twice).is_err(), "one desk, two workers");
         let mut watches = places.save();
         watches[1].desk = watches[0].desk;
         assert!(Workplaces::restore(&watches).is_ok(), "one post, two watches");
+        let mut never = places.save();
+        never[0].days = Some(0);
+        assert!(Workplaces::restore(&never).is_err(), "a shift worked on no day");
+        let mut week = places.save();
+        week[0].days = Some(0b1000_0000);
+        assert!(Workplaces::restore(&week).is_err(), "a shift worked on an eighth day");
         let mut late = places.save();
         late[0].start = Some(24);
         assert!(Workplaces::restore(&late).is_err(), "no shift starts at midnight's end");
@@ -903,7 +1036,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ControlPanel, "control panel"));
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a post");
         assert_eq!(kind.shifts(), WATCHES);
-        assert_eq!(JobKind::ALL[JobKind::COUNT - 3], kind);
+        assert_eq!(JobKind::ALL[7], kind);
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("on duty", "on the way to the power plant"));
         assert_eq!(kind.uniform().name(), "uniform power plant worker");
 
@@ -928,7 +1061,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::Throne, "throne"));
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a post, until there are decisions to make");
         assert_eq!(kind.shifts(), [COURT_HOURS]);
-        assert_eq!(JobKind::ALL[JobKind::COUNT - 2], kind);
+        assert_eq!(JobKind::ALL[8], kind);
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("holding court", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform king");
         assert_eq!(kind.bearing(), ROYAL);
@@ -947,6 +1080,99 @@ mod tests {
         assert!(job.is_due(at(6, 15.9)) && !job.is_due(at(7, 11.0)), "Saturday, and not Sunday");
         assert!(COURT_HOURS.is_bedtime(at(1, 23.5)) && COURT_HOURS.is_bedtime(at(2, 6.5)), "in bed eleven to seven");
         assert!(!COURT_HOURS.is_bedtime(at(1, 22.5)) && !COURT_HOURS.is_bedtime(at(2, 7.5)));
+    }
+
+    /// A playzone is run from ten to ten, every day: on every day of the week
+    /// exactly one day shift (ten to four) and one evening shift (four to
+    /// ten) are worked, by the group whose day it is — two shifts, two
+    /// administrators — and between them they cover every hour with one
+    /// administrator and none outside.
+    #[test]
+    fn a_playzone_is_run_every_day_from_ten_to_ten_by_two_groups_on_alternate_days() {
+        let kind = JobKind::PlayzoneAdministrator;
+        assert_eq!((kind.name(), kind.with_article()), ("playzone administrator", "a playzone administrator"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::PlayzoneComputer, "playzone computer"));
+        assert_eq!(kind.goal(), GoalId::Work, "stood at like a desk");
+        assert_eq!(kind.shifts(), PLAYZONE_SHIFTS);
+        assert_eq!(kind.shifts().len(), 4, "four to a computer");
+        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!((kind.now(true, None), kind.now(false, None)), ("running the playzone", "on the way to the playzone"));
+        assert_eq!(kind.uniform().name(), "uniform playzone administrator");
+
+        assert_eq!(FIRST_GROUP | SECOND_GROUP, EVERY_DAY, "between them every day");
+        assert_eq!(FIRST_GROUP & SECOND_GROUP, 0, "and no day by both");
+        assert_eq!(PLAYZONE_SHIFTS[0].days(), "Mon, Wed, Fri, Sun");
+        assert_eq!(PLAYZONE_SHIFTS[1].days(), "Tue, Thu, Sat");
+        assert_eq!(PLAYZONE_SHIFTS[0].hours(), "10:00-16:00");
+        assert_eq!(PLAYZONE_SHIFTS[2].hours(), "16:00-22:00");
+
+        for day in 1..=7 {
+            let worked: Vec<Shift> =
+                PLAYZONE_SHIFTS.into_iter().filter(|shift| shift.works_on(at(day, 12.0).weekday())).collect();
+            let mut starts: Vec<u8> = worked.iter().map(Shift::start).collect();
+            starts.sort_unstable();
+            assert_eq!(starts, [10, 16], "day {day}: a day shift and an evening shift, two administrators");
+            for quarter in 0..96 {
+                let hours = quarter as f32 / 4.0;
+                let on_duty = worked.iter().filter(|shift| shift.is_working_hours(at(day, hours))).count();
+                assert_eq!(on_duty, usize::from((10.0..22.0).contains(&hours)), "day {day}, {hours}: one administrator");
+            }
+        }
+    }
+
+    /// Four administrators at one computer, two of the shifts starting at the
+    /// same hour and told apart by their days: handed out day shifts first
+    /// (so two keep it open every day from ten), each only while it is free.
+    #[test]
+    fn four_administrators_share_one_computer_two_shifts_starting_at_the_same_hour() {
+        let computer = Point::new(5, 5);
+        let mut places = Workplaces::new();
+        let shifts = JobKind::PlayzoneAdministrator.shifts();
+        for (n, &shift) in PLAYZONE_SHIFTS.iter().enumerate() {
+            assert_eq!(places.free_shift(computer, shifts), Some(shift), "the {n}th is given the {n}th shift");
+            assert!(places.claim(computer, shift, human(n as u64 + 1)));
+            assert_eq!(places.worker(computer, shift), Some(human(n as u64 + 1)));
+        }
+        assert_eq!(places.len(), 4);
+        assert_eq!(places.free_shift(computer, shifts), None, "a fifth finds none");
+        assert!(!places.claim(computer, PLAYZONE_SHIFTS[1], human(9)), "the second group's day shift is taken");
+
+        let day_a = PLAYZONE_SHIFTS[0];
+        assert_eq!(places.release(human(1)), Some(computer));
+        assert_eq!(places.free_shift(computer, shifts), Some(day_a), "the shift the first one had is free again, and only it");
+        assert_eq!(places.worker(computer, PLAYZONE_SHIFTS[1]), Some(human(2)), "the other day shift is still the second's");
+
+        let saved = places.save();
+        assert_eq!(Workplaces::restore(&saved), Ok(places));
+        let job = Job::new(JobKind::PlayzoneAdministrator, computer, PLAYZONE_SHIFTS[3]);
+        assert_eq!(Job::restore(&job.save()), Ok(job));
+    }
+
+    /// A save from before shifts were told apart by their days gave the start
+    /// and no days: each is the days of the shift its worker keeps — even
+    /// where two kinds start at nine (office hours, Monday to Friday, and the
+    /// farm's, Monday to Saturday).
+    #[test]
+    fn a_workplace_saved_with_no_days_takes_the_days_of_its_workers_shift() {
+        let (desk, bin) = (Point::new(1, 1), Point::new(2, 1));
+        let mut places = Workplaces::new();
+        places.claim(desk, OFFICE_HOURS, human(1));
+        places.claim(bin, FARM_HOURS, human(2));
+        places.claim(bin, WATCHES[2], human(3));
+        let mut older = places.save();
+        for place in &mut older {
+            place.days = None;
+        }
+        let mut restored = Workplaces::restore(&older).unwrap();
+        assert_ne!(restored, places, "not told apart yet");
+        let shifts = [(human(1), OFFICE_HOURS), (human(2), FARM_HOURS), (human(3), WATCHES[2])];
+        restored.settle(|uid| shifts.iter().find(|&&(who, _)| who == uid).map(|&(_, shift)| shift)).unwrap();
+        assert_eq!(restored, places, "settled");
+
+        // A worker whose shift starts at another hour keeps the workplace unsettled.
+        let mut stranger = Workplaces::restore(&older).unwrap();
+        stranger.settle(|_| Some(WATCHES[0])).unwrap();
+        assert_ne!(stranger, places);
     }
 
     /// The night watch is due from the evening before — two hours before

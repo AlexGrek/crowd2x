@@ -1,25 +1,11 @@
-//! [`HaulGoal`]: a courier's shift — scrap metal from the warehouse's bins to
-//! its own hopper in the steel factory, and steel from the factory's pallets
-//! to the warehouse's rack.
+//! A courier's shift: carry input to its factory hopper and output from
+//! factory pallets to the warehouse. Steel couriers serve scrap/steel;
+//! food couriers serve farm wheat/meals. The route follows the job, so the
+//! two chains share transport behavior without exchanging their goods.
 //!
-//! One load stored is the goal's unit of work: it reports `Achieved` when a
-//! packful is in a hopper or on the rack, and the routine (`WorkRoutine`,
-//! while the shift is due) starts the next. **It plans from what is true
-//! now** and never counts:
-//!
-//! * **steel in the pack** — to the nearest steel rack and
-//!   [`Deposit`](crate::sim::brain::tasks::Deposit) it;
-//! * **scrap in the pack** — to its own hopper (the job's workplace) and
-//!   deposit it;
-//! * **an empty pack** — to the nearer of the nearest steel pallet with steel
-//!   on it and the nearest scrap bin with scrap in it, and
-//!   [`Withdraw`](crate::sim::brain::tasks::Withdraw) a packful; with neither,
-//!   nothing to carry: `Blocked`.
-//!
-//! **The trips alternate of themselves**: a load of scrap left in the
-//! factory's hopper leaves the courier beside the factory's pallets, the
-//! nearer of the two places to fill up, and a load of steel on the
-//! warehouse's rack leaves it beside the bins. Nobody tells it which way.
+//! Plans from the current pack after every handover. Empty couriers choose
+//! the nearer stocked source, favoring output on ties. One deposited load
+//! is one achieved trip; Seek supplies bounded retries and back-off.
 
 use crate::map::Point;
 use crate::save::{pb, Invalid};
@@ -31,7 +17,30 @@ use super::super::task::{Task, TaskResult};
 use super::{nearest_store, stand_beside, Seek, Stand};
 use crate::sim::brain::tasks::{DEPOSIT_SECONDS, WITHDRAW_SECONDS};
 
-/// Carry scrap and steel for a living.
+/// The stores and goods served by a courier's workplace.
+#[derive(Clone, Copy)]
+struct Route {
+    input: ItemKind,
+    output: ItemKind,
+    source: FeatureKind,
+    hopper: FeatureKind,
+    pallet: FeatureKind,
+    rack: FeatureKind,
+}
+
+impl Route {
+    fn of(ctx: &GoalCtx<'_>) -> Self {
+        if ctx.job.is_some_and(|job| job.kind == crate::sim::job::JobKind::FoodCourier) {
+            Self { input: ItemKind::Wheat, output: ItemKind::Meal, source: FeatureKind::GrainBin,
+                hopper: FeatureKind::WheatHopper, pallet: FeatureKind::MealPallet, rack: FeatureKind::MealRack }
+        } else {
+            Self { input: ItemKind::Scrap, output: ItemKind::Steel, source: FeatureKind::ScrapBin,
+                hopper: FeatureKind::ScrapHopper, pallet: FeatureKind::SteelPallet, rack: FeatureKind::SteelRack }
+        }
+    }
+}
+
+/// Carry factory inputs and outputs for a living.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct HaulGoal {
     seek: Seek,
@@ -45,14 +54,14 @@ impl HaulGoal {
     /// The courier's own hopper, if it is there: the job's workplace.
     fn hopper(ctx: &GoalCtx<'_>) -> Option<Point> {
         let at = ctx.job?.workplace;
-        ctx.think.features.has(FeatureKind::ScrapHopper, at).then_some(at)
+        ctx.think.features.has(Route::of(ctx).hopper, at).then_some(at)
     }
 
     /// The work to do once beside `target`: a hopper or a rack is somewhere
     /// to unload, a bin or a pallet somewhere to fill up.
     fn work_at(ctx: &GoalCtx<'_>, target: Point) -> Task {
         let features = ctx.think.features;
-        if features.has(FeatureKind::ScrapHopper, target) || features.has(FeatureKind::SteelRack, target) {
+        if features.has(Route::of(ctx).hopper, target) || features.has(Route::of(ctx).rack, target) {
             Task::deposit(target, DEPOSIT_SECONDS)
         } else {
             Task::withdraw(target, WITHDRAW_SECONDS)
@@ -84,13 +93,13 @@ impl HaulGoal {
         true
     }
 
-    /// The nearer of somewhere to fill up with steel and somewhere to fill
-    /// up with scrap. Ties to the steel, then the lower cell.
+    /// The nearer stocked source; ties favor the factory output.
     fn somewhere_to_fill_up(ctx: &GoalCtx<'_>) -> Option<Point> {
         let here = ctx.body.center_position();
-        let steel = nearest_store(ctx, FeatureKind::SteelPallet, true);
-        let scrap = nearest_store(ctx, FeatureKind::ScrapBin, true);
-        [steel, scrap].into_iter().flatten().min_by_key(|&cell| here.manhattan_distance(cell))
+        let route = Route::of(ctx);
+        let output = nearest_store(ctx, route.pallet, true);
+        let input = nearest_store(ctx, route.source, true);
+        [output, input].into_iter().flatten().min_by_key(|&cell| here.manhattan_distance(cell))
     }
 
     /// Whether `target` is still somewhere to go: its own hopper, a rack, or
@@ -100,8 +109,8 @@ impl HaulGoal {
         match ctx.job {
             Some(job) if job.workplace == target => Self::hopper(ctx).is_some(),
             _ => {
-                features.has(FeatureKind::SteelRack, target)
-                    || ((features.has(FeatureKind::ScrapBin, target) || features.has(FeatureKind::SteelPallet, target))
+                features.has(Route::of(ctx).rack, target)
+                    || ((features.has(Route::of(ctx).source, target) || features.has(Route::of(ctx).pallet, target))
                         && ctx.think.bins.stored(target) > 0)
             }
         }
@@ -148,8 +157,8 @@ impl GoalExecutor for HaulGoal {
                 let features = ctx.think.features;
                 let retry = match self.seek.target {
                     Some(target) if target == hopper => self.seek.setback(ctx, |_| None),
-                    Some(target) if features.has(FeatureKind::SteelRack, target) => {
-                        self.seek.setback(ctx, |ctx| nearest_store(ctx, FeatureKind::SteelRack, false))
+                    Some(target) if features.has(Route::of(ctx).rack, target) => {
+                        self.seek.setback(ctx, |ctx| nearest_store(ctx, Route::of(ctx).rack, false))
                     }
                     _ => self.seek.setback(ctx, Self::somewhere_to_fill_up),
                 };
@@ -175,9 +184,9 @@ impl GoalExecutor for HaulGoal {
             return GoalProgress::Working;
         }
 
-        let next = if inventory.count(ItemKind::Steel) > 0 {
-            nearest_store(ctx, FeatureKind::SteelRack, false)
-        } else if inventory.count(ItemKind::Scrap) > 0 {
+        let next = if inventory.count(Route::of(ctx).output) > 0 {
+            nearest_store(ctx, Route::of(ctx).rack, false)
+        } else if inventory.count(Route::of(ctx).input) > 0 {
             Self::hopper(ctx)
         } else {
             let place = Self::somewhere_to_fill_up(ctx);

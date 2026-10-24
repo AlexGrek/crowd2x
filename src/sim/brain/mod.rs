@@ -86,6 +86,7 @@ use super::biology::{Biology, Event};
 use super::entity::Think;
 use super::inventory::Inventory;
 use super::job::Job;
+use super::playzone;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
@@ -377,6 +378,16 @@ impl Brain {
                 *action = Action::None;
                 walk.halt();
             }
+        }
+
+        // 6b. A playzone's administrator on duty and beside its computer runs
+        // it, whatever the task: the cabinets work for as long as somebody
+        // says so, every tick (`sim::playzone`).
+        if effect == Effect::None
+            && let Some(job) = job
+            && playzone::runs(job, walk.body().center_position(), ctx)
+        {
+            effect = Effect::Operate { at: job.workplace };
         }
 
         // 7. As much of a hurry as the goal in charge is urgent — last, so a

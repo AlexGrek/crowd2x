@@ -390,6 +390,78 @@ fn a_district_saved_in_the_middle_of_a_working_day_carries_on_exactly() {
     });
 }
 
+
+/// A district's playzone in the middle of Monday: its administrators at the
+/// computer and some bored residents let in to play — saved while the
+/// cabinets work, a game half played and the shift part done — carries on
+/// exactly, the administrators' word that the playzone is run (the world's
+/// `playzones_run`) included. The administrators are let go in the middle of
+/// it, which turns every cabinet dark at once in both worlds.
+#[test]
+fn a_playzone_saved_with_games_being_played_carries_on_exactly() {
+    use crate::map::district::playzone::{CABINET, NAME};
+    use crate::map::ObjectLayer;
+    use crate::sim::JobKind;
+
+    let district = crate::map::district::generate(7);
+    let mut state = GameState::new(district.map.clone(), 7);
+    state.spawn_from_spawners();
+    let administrators: Vec<Uid> = state
+        .entities()
+        .iter()
+        .filter(|entity| entity.job().is_some_and(|job| job.kind == JobKind::PlayzoneAdministrator))
+        .map(|entity| entity.uid())
+        .collect();
+    assert_eq!(administrators.len(), 4);
+    let mut input = Input::new();
+    for &uid in &administrators {
+        for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+            input.set_process(uid, process, false);
+        }
+    }
+    process_game_state(&mut state, DT, &input);
+
+    // Three more, bored and nothing else, inside the playzone itself.
+    let walls = district.the(NAME);
+    let props = state.map.objects(ObjectLayer::Props).to_vec();
+    let free: Vec<Point> = walls
+        .interior()
+        .cells()
+        .filter(|&cell| state.map.is_passable(cell) && !props.iter().any(|prop| prop.cell() == cell))
+        .collect();
+    let players: Vec<Uid> = free.iter().take(3).map(|&cell| state.spawn(EntityType::Human, cell)).collect();
+    for &uid in &players {
+        set_stats(&mut state, uid, Stats::calm().with_fun(5.0));
+    }
+    assert_eq!(props.iter().filter(|prop| prop.kind.as_str() == CABINET && walls.interior().contains(prop.cell())).count(), 6);
+
+    // To the middle of the day, and on until somebody is playing a cabinet.
+    run(&mut state, 3 * 1800 + 300);
+    let playing = |state: &GameState| {
+        state.entities().iter().any(|entity| {
+            entity.interacting_with().is_some_and(|cell| props.iter().any(|prop| prop.cell() == cell && prop.kind.as_str() == CABINET))
+        })
+    };
+    let mut ticks = 0;
+    while !(playing(&state) && state.playzones().working() == 6) {
+        run(&mut state, 30);
+        ticks += 30;
+        assert!(ticks < 6000, "nobody played by {}: {} cabinets working", state.clock(), state.playzones().working());
+    }
+    assert!(!state.playzones().running().is_empty());
+    let saved = state.save_world();
+    assert_eq!(saved.playzones_run.len(), 1, "the one computer, run");
+
+    side_by_side(&mut state, 600, |tick, _| {
+        let mut input = Input::new();
+        if tick == 300 {
+            input.dismiss(administrators[0]);
+            input.dismiss(administrators[2]);
+        }
+        input
+    });
+}
+
 /// The same district once the scrap collectors have stored a packful:
 /// saved with scrap in the warehouse's bins and collectors out at the heaps
 /// with some in their packs, mid-trip — a piece half worked loose, a walk
@@ -497,6 +569,33 @@ fn the_steel_works_saved_mid_shift_carries_on_exactly() {
     let pack = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().inventory().unwrap().describe_load();
     assert_eq!(pack(&copy, courier), pack(&state, courier));
     assert!(state.bins().iter().map(|(_, stored)| stored).sum::<u32>() < 12, "some of it carried or smelted");
+}
+
+#[test]
+fn the_food_factory_saved_while_cooking_carries_on_exactly() {
+    let (mut state, worker, _) = crate::sim::testing::food_works(12, 9);
+    let mut ticks = 0;
+    while state.entities().get(worker).unwrap().interacting_with() != Some(Point::new(21, 5)) {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 6 * 1800, "no cooking by {}", state.clock());
+    }
+    let copy = side_by_side(&mut state, 5400, |_, _| Input::new());
+    assert_eq!(copy.bins(), state.bins());
+    assert!(copy.bins().total_in(crate::sim::feature::FeatureKind::MealRack) > 0);
+}
+
+#[test]
+fn loading_a_district_preserves_current_meals_without_restocking_it() {
+    let mut state = GameState::new(crate::map::district::generate(7).map, 7);
+    let rack = state.features().cells_of(crate::sim::feature::FeatureKind::MealRack)[0];
+    assert_eq!(state.bins().stored(rack), 30);
+    let mut saved = state.save_world();
+    saved.bins.iter_mut().find(|bin| bin.cell == Some(rack.into())).unwrap().stored = 23;
+    state = GameState::restore(state.map.clone(), &saved, Vec::new()).unwrap();
+    let copy = side_by_side(&mut state, 1, |_, _| Input::new());
+    assert_eq!(copy.bins().stored(rack), 23);
+    assert_eq!(copy.map.initial_stock(), state.map.initial_stock());
 }
 
 /// A farm in the middle of the week: its field sown on the Monday, the

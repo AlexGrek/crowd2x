@@ -156,7 +156,19 @@ restored). `steel_works_fixture()` sets every walker's pace back to `kinds::HUMA
 (`Walker::set_speed`, test-only) to build the world the fixture was written from. **With the
 king**: `JobKind::King` = 8 and the prop `"throne"` by name, no schema change; the walker's
 `gait` is **not saved** — `Human::restore` sets it again from the restored job. Test:
-`a_king_saved_on_the_way_to_court_walks_on_at_its_stately_pace` (seen failing with it not set). **A new oneof variant must also go in the
+`a_king_saved_on_the_way_to_court_walks_on_at_its_stately_pace` (seen failing with it not set).
+**With the playzone**: `JobKind::PlayzoneAdministrator` = 12, `FeatureKind`s 22-23 (not saved: the
+map's), the task `"use arcade"` by name and the props `"arcade cabinet"` / `"playzone computer"`
+by name — and two schema fields: `pb::Workplace.days` (tag 4, optional: the days mask of the
+shift, because a playzone's computer has **two shifts that start at the same hour**, told apart
+only by their days; absent in an older save, which `Workplaces::settle` fills in from the
+worker's own job, and the load's cross-check still compares it) and `pb::World.playzones_run`
+(tag 16, the computers an administrator was running as the tick ended: derived from the
+entities in principle, but a tick edge — an administrator whose shift's hour has just come —
+would make a loaded world differ from the one saved, so it is saved). Test:
+`a_playzone_saved_with_games_being_played_carries_on_exactly` (seen failing with it not
+restored); the old-save path is `job::tests::a_workplace_saved_with_no_days_takes_the_days_of_its_workers_shift`
+and the `format1` / steel works fixtures. **A new oneof variant must also go in the
 field's `tags = "..."` list** or it decodes as nothing (`pb::Task.kind`: "a task of no kind").
 
 ## Fast

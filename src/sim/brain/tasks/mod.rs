@@ -13,6 +13,8 @@ pub mod cremate;
 pub mod deposit;
 pub mod harvest;
 pub mod smelt;
+pub mod cook;
+pub use cook::{Cook, COOK_SECONDS};
 pub mod move_to;
 pub mod open_fridge;
 pub mod salvage;
@@ -21,6 +23,7 @@ pub mod sow;
 pub mod take_body;
 pub mod take_item;
 pub mod tend;
+pub mod use_arcade;
 pub mod use_computer;
 pub mod use_toilet;
 pub mod wait;
@@ -44,6 +47,7 @@ pub use sow::{Sow, SOW_SECONDS};
 pub use take_body::{TakeBody, TAKE_BODY_SECONDS};
 pub use take_item::TakeItem;
 pub use tend::{Tend, TEND_SECONDS};
+pub use use_arcade::{UseArcade, ARCADE_SECONDS};
 pub use use_computer::UseComputer;
 pub use use_toilet::UseToilet;
 pub use wait::Wait;
@@ -77,6 +81,8 @@ tasks! {
     Tend,
     Harvest,
     RepairBox,
+    Cook,
+    UseArcade,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

@@ -125,6 +125,14 @@ use serde::{Deserialize, Serialize};
 /// defined from this, so the two cannot drift.
 pub const PIXELS_PER_CELL: i32 = 48;
 
+/// Stock a store receives when a new game starts. Cells without a store
+/// ignore their entry, so deleting a store in the editor also removes its supply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InitialStock {
+    pub cell: Point,
+    pub pieces: u32,
+}
+
 /// The terrain layer every map has. Overlay layers, when they arrive, are
 /// indices above this one.
 pub const BASE: usize = 0;
@@ -276,6 +284,7 @@ pub struct Map {
     terrain: Vec<TerrainLayer>,
     /// Indexed by `ObjectLayer as usize`, one entry per variant.
     objects: Vec<Vec<Object>>,
+    initial_stock: Vec<InitialStock>,
     passability: PassabilityMap,
     navigation: std::sync::OnceLock<Navigation>,
     navigation_revision: u64,
@@ -341,6 +350,22 @@ fn chunk_is_all_site(pos: ChunkPos, site: Bounds) -> bool {
 }
 
 impl Map {
+    /// New-game supplies, saved with the authored map, not changed by play.
+    pub fn initial_stock(&self) -> &[InitialStock] {
+        &self.initial_stock
+    }
+
+    /// Set a store's new-game supplies. Refuse cells outside the site.
+    pub fn set_initial_stock(&mut self, cell: Point, pieces: u32) -> bool {
+        if self.size.index_of(cell).is_none() { return false; }
+        self.initial_stock.retain(|stock| stock.cell != cell);
+        if pieces > 0 {
+            self.initial_stock.push(InitialStock { cell, pieces });
+            self.initial_stock.sort_unstable_by_key(|stock| stock.cell);
+        }
+        true
+    }
+
     /// A map of `size` with its base terrain layer filled with `tile`, and
     /// nothing round it.
     pub fn new(size: Size, tile: TerrainId) -> Self {
@@ -357,6 +382,7 @@ impl Map {
             size,
             terrain: vec![TerrainLayer { tiles }],
             objects: ObjectLayer::ALL.map(|_| Vec::new()).into(),
+            initial_stock: Vec::new(),
             passability: PassabilityMap::new(size),
             navigation: Default::default(),
             navigation_revision: 0,

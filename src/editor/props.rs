@@ -117,6 +117,16 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::posed("scrap hopper", "scrap_hopper.png", 4),
     PaletteItem::posed("steel pallet", "steel_pallet.png", 4),
     PaletteItem::posed("steel rack", "steel_rack.png", 4),
+    PaletteItem::animated("food cooker", "food_cooker.png", 1).used("food_cooker_working.png", 2),
+    PaletteItem::posed("wheat hopper", "wheat_hopper.png", 4),
+    PaletteItem::posed("meal pallet", "meal_pallet.png", 4),
+    PaletteItem::posed("meal rack", "meal_rack.png", 4),
+    // The playzone, drawn by `tools/playzone_art.py`: the central computer
+    // its administrator runs it from, its screens lit while somebody is at
+    // it, and the arcade cabinets, dark and waiting for a coin until
+    // somebody plays (`sim::playzone`).
+    PaletteItem::animated("playzone computer", "playzone_computer_idle.png", 2).used("playzone_computer.png", 2),
+    PaletteItem::animated("arcade cabinet", "arcade_cabinet_idle.png", 2).used("arcade_cabinet.png", 4),
     // The farm's wooden grain bin, a farmer's workplace and store of wheat
     // (`sim::bins`), filling up on screen like the scrap bin ([`BinFill`]).
     // Drawn by `tools/farm_art.py`.

@@ -121,6 +121,8 @@ use rand::{RngExt, SeedableRng};
 
 pub mod crematorium;
 pub mod farm;
+pub mod food_factory;
+pub mod playzone;
 pub mod palace;
 pub mod power_plant;
 pub mod restaurant;
@@ -373,7 +375,7 @@ impl Siting<'_> {
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
 pub const LOT_BUILDINGS: &[&LotBuilding] =
-    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC];
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC, &food_factory::SPEC, &playzone::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -2167,7 +2169,8 @@ mod tests {
         // again once the farm, then the power plant, then the palace took a
         // lot of its own, which moved the houses, and once the district grew
         // to 9x5 blocks with a main street and the palace in the middle.
-        assert_eq!(generate(7).residents(), 184);
+        // The food factory takes one more lot before houses are laid out.
+        assert_eq!(generate(7).residents(), 177);
     }
 
     // --- the ground ---

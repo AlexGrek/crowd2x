@@ -101,6 +101,15 @@ pub const PROPS: &[Prop] = &[
     // The steel factory: its furnaces, its store of scrap to smelt and of
     // steel made, and the warehouse's rack the steel is taken to.
     Prop::blocking("furnace"),
+    Prop::blocking("food cooker"),
+    Prop::blocking("wheat hopper"),
+    Prop::blocking("meal pallet"),
+    Prop::blocking("meal rack"),
+    // The playzone: its central computer, an administrator's workplace, and
+    // the arcade cabinets it runs (`sim::playzone`). Both used from beside
+    // them.
+    Prop::blocking("playzone computer"),
+    Prop::blocking("arcade cabinet"),
     Prop::blocking("scrap hopper"),
     Prop::blocking("steel pallet"),
     Prop::blocking("steel rack"),

@@ -121,6 +121,7 @@ impl World {
             }
         };
         let effect = entity.react(&self.ctx(), outcome);
+        self.facilities.playzones.begin_tick();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         self.facilities.doors.advance(self.dt, &self.occupancy);
         self.facilities.fridges.advance(self.dt * super::clock::TIME_SCALE);
@@ -164,6 +165,11 @@ impl World {
     /// How many goes on a computer have been had here.
     pub fn plays(&self) -> usize {
         self.count("had a go on the computer")
+    }
+
+    /// How many games on an arcade cabinet have been played here.
+    pub fn arcade_games(&self) -> usize {
+        self.count("played the arcade cabinet")
     }
 
     /// How many hours have been slept in a bed here.
@@ -296,4 +302,37 @@ pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     super::process_game_state(&mut state, 1.0 / 60.0, &input);
     let _ = state.facilities.bins.add(Point::new(2, 2), scrap);
     (state, smelter, courier)
+}
+
+/// A farm's grain bin, powered food factory and warehouse, with workers
+/// hired through the normal job allocator. The farmer is removed so input
+/// and output can be accounted for exactly.
+pub fn food_works(wheat: u32, seed: u64) -> (super::GameState, Uid, Uid) {
+    let mut map = Map::new(crate::map::Size::new(24, 17), crate::map::FLOOR);
+    for (name, cell) in [
+        ("grain bin", Point::new(2, 2)),
+        ("meal rack", Point::new(2, 8)),
+        ("wheat hopper", Point::new(16, 2)),
+        ("meal pallet", Point::new(16, 8)),
+        ("food cooker", Point::new(21, 5)),
+    ] {
+        prop_at(&mut map, name, cell);
+    }
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
+    let mut state = super::GameState::new(map, seed);
+    let farmer = state.spawn(EntityType::Human, Point::new(8, 12));
+    let worker = state.spawn(EntityType::Human, Point::new(10, 12));
+    let courier = state.spawn(EntityType::Human, Point::new(12, 12));
+    assert_eq!(state.entities().get(worker).unwrap().job().unwrap().kind, super::JobKind::FoodFactoryWorker);
+    assert_eq!(state.entities().get(courier).unwrap().job().unwrap().kind, super::JobKind::FoodCourier);
+    let mut input = super::Input::new();
+    input.despawn(farmer);
+    for uid in [worker, courier] {
+        for process in super::ProcessId::ALL {
+            input.set_process(uid, process, false);
+        }
+    }
+    super::process_game_state(&mut state, 1.0 / 60.0, &input);
+    let _ = state.facilities.bins.add(Point::new(2, 2), wheat);
+    (state, worker, courier)
 }

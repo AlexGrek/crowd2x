@@ -114,6 +114,9 @@ pub const WHEAT_MASS: f32 = 0.5;
 /// ...and the space it takes up, in litres.
 pub const WHEAT_VOLUME: f32 = 1.0;
 
+/// One sheaf becomes one boxed meal; meals are stored goods until the food chain is connected.
+pub const WHEAT_PER_MEAL: u8 = 1;
+
 /// Everything about one kind of item: its row in [`ItemKind`]'s catalogue.
 pub struct ItemDef {
     /// How it reads in a debug view, and how a save names it.
@@ -196,6 +199,8 @@ catalogue! {
         /// (`brain::tasks::Harvest`) and stored at the farm. Not food yet: it
         /// is carried.
         Wheat = 5 => ItemDef { name: "wheat", mass: WHEAT_MASS, volume: WHEAT_VOLUME, emoji: "🌾", ..CARRIED },
+        /// Factory output, separate from the food supplied by fridges.
+        Meal = 6 => ItemDef { name: "meal", mass: MEAL_MASS, volume: MEAL_VOLUME, emoji: "🍱", ..CARRIED },
     }
 }
 

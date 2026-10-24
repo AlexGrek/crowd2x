@@ -53,6 +53,11 @@ pub struct World {
     /// Damaged distribution boxes, packed x, y. Older saves have none.
     #[prost(sint32, repeated, tag = "15")]
     pub boxes_damaged: Vec<i32>,
+    /// The playzones' computers an administrator was running as the tick
+    /// ended (`crate::sim::playzone::Playzones`). Older saves have none,
+    /// which is every playzone unattended until the next tick.
+    #[prost(message, repeated, tag = "16")]
+    pub playzones_run: Vec<Cell>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -121,6 +126,13 @@ pub struct Workplace {
     /// which is office hours (9).
     #[prost(uint32, optional, tag = "3")]
     pub start: Option<u32>,
+    /// The days the shift is worked on, bit 0 Monday: a playzone's computer
+    /// is two day shifts and two evening shifts, a pair of each starting at
+    /// the same hour on alternate days. Absent in a save from before there
+    /// were two shifts of the same hour, which is the days of the shift its
+    /// worker keeps (`Workplaces::settle`).
+    #[prost(uint32, optional, tag = "4")]
+    pub days: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

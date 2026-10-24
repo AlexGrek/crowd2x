@@ -156,6 +156,7 @@ pub mod light_switch;
 pub mod log;
 pub mod occupancy;
 pub mod path;
+pub mod playzone;
 pub mod property;
 pub(crate) mod rng;
 mod saving;
@@ -197,6 +198,7 @@ pub use light_switch::LightSwitches;
 pub use log::Log;
 pub use occupancy::Occupancy;
 pub use path::{Path, PathFinder};
+pub use playzone::Playzones;
 #[cfg(test)]
 pub use path::find_path;
 pub use property::{Properties, PropertyId};
@@ -869,6 +871,12 @@ impl GameState {
     /// What every scrap bin holds. See [`bins`].
     pub fn bins(&self) -> &Bins {
         &self.facilities.bins
+    }
+
+    /// Which playzones are being run, and so which arcade cabinets work. See
+    /// [`playzone`].
+    pub fn playzones(&self) -> &Playzones {
+        &self.facilities.playzones
     }
 
     /// Every crop in the fields. See [`fields`].
@@ -1883,6 +1891,8 @@ fn world_step(
     effects: &mut [Effect],
     dt: f32,
 ) {
+    // Who runs a playzone is said afresh every tick (`Effect::Operate`).
+    facilities.playzones.begin_tick();
     for (slot, effect) in effects.iter_mut().enumerate() {
         let asked = std::mem::take(effect);
         if asked != Effect::None
@@ -3323,7 +3333,9 @@ mod tests {
         // walker is in (920).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 960, "a Human is {human} bytes, {brain} of them brain");
+        // Raised from 960 to 1024 for the cook goal slot/executor and meal
+        // inventory count; a Human is now 984 bytes.
+        assert!(human <= 1024, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3808,7 +3820,12 @@ mod tests {
             let kings = crate::map::district::palace::THRONES;
             assert_eq!(kings, 1, "one king");
             let electricians = state.features().count(feature::FeatureKind::DistributionBox) * job::WATCHES.len();
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians;
+            let food_workers = crate::map::district::food_factory::COOKERS;
+            let food_couriers = crate::map::district::food_factory::HOPPERS;
+            // The playzone's one computer is run by four: two shifts of two.
+            let administrators = crate::map::district::playzone::COMPUTERS * job::PLAYZONE_SHIFTS.len();
+            assert_eq!(administrators, 4);
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -3816,6 +3833,7 @@ mod tests {
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             let mut panels: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
+            let mut computers: std::collections::BTreeMap<Point, Vec<(u8, u8)>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
                 let Some(job) = entity.job() else { continue };
                 match job.kind {
@@ -3858,8 +3876,18 @@ mod tests {
                         );
                         panels.entry(job.workplace).or_default().push(job.shift.start());
                     }
+                    JobKind::FoodFactoryWorker | JobKind::FoodCourier => {
+                        assert!(district.the(crate::map::district::food_factory::NAME).contains(job.workplace), "seed {seed}: food job outside its factory");
+                    }
                     JobKind::Electrician => {
                         assert!(state.has_box(job.workplace));
+                    }
+                    JobKind::PlayzoneAdministrator => {
+                        assert!(
+                            district.the(crate::map::district::playzone::NAME).contains(job.workplace),
+                            "seed {seed}: a playzone computer outside the playzone"
+                        );
+                        computers.entry(job.workplace).or_default().push((job.shift.start(), job.shift.mask()));
                     }
                     JobKind::King => {
                         reigning += 1;
@@ -3885,6 +3913,17 @@ mod tests {
             for (panel, mut starts) in panels {
                 starts.sort_unstable();
                 assert_eq!(starts, [0, 8, 16], "seed {seed}: the watches at the control panel at {panel:?}");
+            }
+            // The playzone's computer run by four: a day and an evening shift
+            // for each of the two groups, so every day of the week has a
+            // day shift and an evening shift and two administrators on them.
+            assert_eq!(computers.len(), crate::map::district::playzone::COMPUTERS, "seed {seed}");
+            for (computer, mut shifts) in computers {
+                shifts.sort_unstable();
+                let (first, second) = (job::FIRST_GROUP, job::SECOND_GROUP);
+                let mut expected = [(10, first), (10, second), (16, first), (16, second)];
+                expected.sort_unstable();
+                assert_eq!(shifts, expected, "seed {seed}: the shifts at {computer:?}");
             }
             // In the order they arrived: every desk taken before the first
             // collector was hired, every bin before the first guard.
@@ -3940,6 +3979,58 @@ mod tests {
         assert!(kept * 10 >= looks * 9, "{kept} of {looks} post-looks kept, by {}", state.clock());
     }
 
+    /// A district's playzone on a Monday (the first group's day), its
+    /// administrators' needs switched off as the guards' are above: its
+    /// arcade cabinets are dark in the morning, all of them work from ten
+    /// o'clock — through the change from the day shift to the evening shift
+    /// at four — and are dark again from ten at night. Looked at every
+    /// quarter of an hour.
+    #[test]
+    fn a_district_s_playzone_is_run_from_ten_to_ten_and_dark_outside_those_hours() {
+        use crate::map::district::playzone::CABINETS;
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        let administrators: Vec<Uid> = state
+            .entities()
+            .iter()
+            .filter(|e| e.job().is_some_and(|job| job.kind == JobKind::PlayzoneAdministrator))
+            .map(|e| e.uid())
+            .collect();
+        assert_eq!(administrators.len(), 4);
+        for &administrator in &administrators {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+                input.set_process(administrator, process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let working = |state: &GameState| state.facilities.playzones.working();
+        assert_eq!(working(&state), 0, "nobody is there at eight");
+
+        // 1800 ticks a world hour, from eight o'clock: a look every quarter of
+        // an hour to eleven at night.
+        let (mut dark_by_day, mut kept, mut looks, mut dark_by_night) = (0, 0, 0, 0);
+        let mut when = Vec::new();
+        for quarter in 0..60 {
+            run(&mut state, 450);
+            state.log.drain();
+            let hours = 8.0 + (quarter + 1) as f32 / 4.0;
+            if hours < 9.99 {
+                dark_by_day += working(&state);
+            } else if (10.5..21.75).contains(&hours) {
+                looks += 1;
+                kept += usize::from(working(&state) == CABINETS);
+                when.push((hours, working(&state)));
+            } else if hours > 22.01 {
+                dark_by_night += working(&state);
+            }
+        }
+        assert_eq!(dark_by_day, 0, "cabinets working before ten");
+        assert_eq!(dark_by_night, 0, "cabinets working after ten");
+        assert!(kept * 10 >= looks * 9, "{kept} of {looks} looks had the playzone run: {when:?}");
+    }
+
     /// A district's collectors, on a Monday: out to the heaps round it from
     /// half past eight, and before the shift is over the first packfuls are
     /// in the warehouse's bins. Their needs are switched off: seed 7's
@@ -3966,11 +4057,11 @@ mod tests {
         for _ in 0..9 * 1800 {
             run(&mut state, 1);
             lines.extend(state.log.drain().into_iter().filter(|line| line.contains("scrap")));
-            if state.bins().total() > 0 {
+            if state.bins().total_in(feature::FeatureKind::ScrapBin) > 0 {
                 break;
             }
         }
-        assert!(state.bins().total() > 0, "nothing stored by {}; {:?}", state.clock(), &lines[lines.len().saturating_sub(20)..]);
+        assert!(state.bins().total_in(feature::FeatureKind::ScrapBin) > 0, "nothing stored by {}; {:?}", state.clock(), &lines[lines.len().saturating_sub(20)..]);
         assert!(lines.iter().any(|line| line.contains("salvaged scrap metal")));
         let stored = lines.iter().find(|line| line.contains("in the bin at")).expect("a line about it");
         assert!(stored.contains("scrap metal in the bin at"), "{stored}");
@@ -3978,6 +4069,7 @@ mod tests {
             let building = match store.store().unwrap().site {
                 "factory" => district.the(crate::map::district::steel_factory::NAME),
                 "farm" => district.the(crate::map::district::farm::NAME),
+                "food factory" => district.the(crate::map::district::food_factory::NAME),
                 _ => district.the(crate::map::district::warehouse::NAME),
             };
             assert!(building.contains(bin), "{store:?} at {bin:?}");
@@ -4085,6 +4177,57 @@ mod tests {
         }
         let stats = state.statistics();
         assert!(stats.stock("warehouse", ItemKind::Steel) > 0);
+    }
+
+    #[test]
+    fn wheat_from_the_farm_becomes_meals_in_the_warehouse_without_feeding_anybody() {
+        let (mut state, worker, courier) = crate::sim::testing::food_works(12, 3);
+        run(&mut state, 8 * 1800);
+        assert!(state.bins().total_in(feature::FeatureKind::MealRack) >= 2, "{:?}", state.statistics());
+        let stock: u32 = state.bins().iter().map(|(_, n)| n).sum();
+        let carried: u32 = [worker, courier].into_iter().map(|uid| {
+            let pack = state.entities().get(uid).unwrap().inventory().unwrap();
+            u32::from(pack.count(ItemKind::Wheat)) + u32::from(pack.count(ItemKind::Meal))
+        }).sum();
+        assert_eq!(stock + carried, 12, "one wheat per meal, with nothing lost or duplicated");
+        assert_eq!(ItemKind::Meal.nutrition(), 0.0, "stored goods are outside the food chain");
+        assert_eq!(state.features().count(feature::FeatureKind::Food), 0);
+        assert_eq!(state.statistics().stock("warehouse", ItemKind::Meal), state.bins().total_in(feature::FeatureKind::MealRack));
+    }
+
+    #[test]
+    fn food_production_is_deterministic_in_the_parallel_rounds() {
+        let build = || {
+            let (mut state, _, _) = crate::sim::testing::food_works(24, 5);
+            for i in 0..PARALLEL_AT {
+                state.spawn(EntityType::Dog, Point::new(i as i32 % 24, 13 + i as i32 / 24));
+            }
+            state
+        };
+        let (mut a, mut b) = (build(), build());
+        assert!(a.len() > PARALLEL_AT);
+        for _ in 0..6 * 1800 {
+            process_game_state(&mut a, 1.0 / 60.0, &Input::new());
+            process_game_state(&mut b, 1.0 / 60.0, &Input::new());
+        }
+        assert!(a.bins().total_in(feature::FeatureKind::MealRack) > 0);
+        assert_eq!(a.bins(), b.bins());
+        for (left, right) in a.entities().iter().zip(b.entities().iter()) {
+            assert_eq!(left.save(), right.save());
+        }
+    }
+
+    #[test]
+    fn a_new_district_starts_with_thirty_warehouse_meals_even_after_saving_the_map() {
+        for seed in [0, 7, 42] {
+            let district = crate::map::district::generate(seed);
+            let map = Map::from_json(&district.map.to_json().unwrap()).unwrap();
+            let mut state = GameState::new(map, seed);
+            assert_eq!(state.bins().total_in(feature::FeatureKind::MealRack), 30);
+            state.spawn_from_spawners();
+            assert_eq!(state.bins().total_in(feature::FeatureKind::MealRack), 30);
+            assert_eq!(state.bins().total_in(feature::FeatureKind::MealPallet), 0);
+        }
     }
 
     #[test]

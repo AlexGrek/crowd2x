@@ -21,6 +21,7 @@ use super::fields::Fields;
 use super::fridge::Fridges;
 use super::homes::Homes;
 use super::job::Workplaces;
+use super::playzone::Playzones;
 use super::property::Properties;
 use super::statistics::Tally;
 use super::uid::Uid;
@@ -62,6 +63,10 @@ pub struct Facilities {
     /// harvested through `Effect::Sow`, `Tend` and `Harvest`, which plant and
     /// unplant the map with it.
     pub fields: Fields,
+    /// Which arcade cabinets work: those whose playzone computer an
+    /// administrator was running as the last tick ended (`Effect::Operate`,
+    /// [`super::playzone`]).
+    pub playzones: Playzones,
     /// The bodies taken up this tick, to leave the world when the processing
     /// pass is over (`process_game_state`) — the one pass that may not remove
     /// anybody. Empty between ticks, so never saved.
@@ -85,6 +90,7 @@ impl Facilities {
             workplaces: Workplaces::new(),
             tally: Tally::default(),
             fields: Fields::new(),
+            playzones: Playzones::from_map(map),
             burials: Vec::new(),
         }
     }

@@ -85,6 +85,12 @@ pub enum Effect {
     /// fields, its plot open again, and what it yields into the unit's pack —
     /// granted only with room for all of it.
     Harvest { at: Point, when: Clock },
+    /// The unit is running the playzone from the computer at `at`: on duty
+    /// and beside it (`brain::Brain::react`, [`super::playzone::runs`]). Asked
+    /// **every tick** it is, and the world step forgets last tick's answers
+    /// before granting this one's, so the playzone's cabinets work exactly
+    /// as long as somebody is saying so.
+    Operate { at: Point },
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -135,6 +141,10 @@ pub(crate) fn apply(
             None => log.unit(entity.uid(), format!("{} found nothing to tend at {}, {}", entity.uid(), at.x, at.y)),
         },
         Effect::Harvest { at, when } => harvest(entity, map, facilities, log, at, when),
+        Effect::Operate { at } => {
+            // Not logged: it is said every tick of a shift.
+            let _ = facilities.playzones.run(at);
+        }
     }
 }
 

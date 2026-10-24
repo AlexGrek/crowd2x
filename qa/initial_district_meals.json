@@ -1,0 +1,18 @@
+{
+  "name": "a new district has a food factory, its workers and thirty warehouse meals",
+  "state": "game",
+  "timeout": 120,
+  "given": { "maps": [{ "name": "district", "district": 7 }] },
+  "open": "district",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "expect_stored": { "min": 30, "in": "meal rack" } },
+    { "press": "statistics" },
+    { "expect_text": "30   meal" },
+    { "expect_text": "food factory workers of 2 posts" },
+    { "expect_text": "food couriers of 2 posts" },
+    { "shot": "the new district's food stocks and jobs" },
+    { "press": "close" }
+  ]
+}

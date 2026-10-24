@@ -26,6 +26,8 @@ pub const WAREHOUSE_BINS: usize = 4;
 /// Where the steel a courier brings from the steel factory is kept: one on
 /// the warehouse's long wall away from its door (`sim::bins`).
 pub const STEEL_RACK: &str = "steel rack";
+pub const MEAL_RACK: &str = "meal rack";
+pub const INITIAL_MEALS: u32 = 30;
 const WALL: &str = "wall brown";
 const FLOOR: &str = "floor diagonal";
 
@@ -42,7 +44,7 @@ pub const SPEC: LotBuilding = LotBuilding {
     },
     build: warehouse,
     tiles: &[WALL, FLOOR],
-    props: &[SCRAP_BIN, STEEL_RACK],
+    props: &[SCRAP_BIN, STEEL_RACK, MEAL_RACK],
 };
 
 /// The warehouse, on `lot`: a room as big as a shop, a plain door — anybody
@@ -74,6 +76,11 @@ fn warehouse(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lo
     // cell either side of it before the corners' bins.
     let rack_y = if side == Side::North { inside.y } else { inside.top() };
     props.push(object(STEEL_RACK, Point::new(inside.x + inside.w / 2, rack_y)));
+    // A second rack in the middle aisle, with space on every side and
+    // neither corner bins nor either leaf of the entrance obstructed.
+    let meals = Point::new(inside.x + inside.w / 2, inside.y + 1);
+    props.push(object(MEAL_RACK, meals));
+    assert!(map.set_initial_stock(meals, INITIAL_MEALS));
     walls
 }
 
@@ -95,10 +102,10 @@ mod tests {
             let warehouse = district.the(NAME);
             let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| warehouse.interior().contains(prop.cell()));
             assert!(
-                inside.clone().all(|prop| [SCRAP_BIN, STEEL_RACK].contains(&prop.kind.as_str())),
+                inside.clone().all(|prop| [SCRAP_BIN, STEEL_RACK, MEAL_RACK].contains(&prop.kind.as_str())),
                 "seed {seed}: the warehouse holds bins and a rack only"
             );
-            assert_eq!(inside.count(), WAREHOUSE_BINS + 1, "seed {seed}");
+            assert_eq!(inside.count(), WAREHOUSE_BINS + 2, "seed {seed}");
             assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), SCRAP_BIN), WAREHOUSE_BINS, "seed {seed}: bins nowhere else");
             assert_eq!(props_in(map, warehouse, STEEL_RACK), 1, "seed {seed}: a rack for the steel");
             assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), STEEL_RACK), 1, "seed {seed}: and none elsewhere");

@@ -49,7 +49,7 @@ impl Bins {
         Bins { cells: Vec::new(), kinds: Vec::new(), stored: Vec::new() }
     }
 
-    /// Every store on `map`, each empty.
+    /// Every store on `map`, filled with its authored new-game supplies.
     pub fn from_map(map: &Map) -> Bins {
         let mut found: Vec<(Point, FeatureKind)> = map
             .objects(ObjectLayer::Props)
@@ -60,7 +60,11 @@ impl Bins {
         found.dedup_by_key(|&mut (cell, _)| cell);
         let stored = vec![0; found.len()];
         let (cells, kinds) = found.into_iter().unzip();
-        Bins { cells, kinds, stored }
+        let mut bins = Bins { cells, kinds, stored };
+        for stock in map.initial_stock() {
+            let _ = bins.add(stock.cell, stock.pieces);
+        }
+        bins
     }
 
     fn index(&self, cell: Point) -> Option<usize> {

@@ -40,7 +40,12 @@ plot, tends every crop once a day for quality, and six days and four growth stag
 harvests it ripe and stores the wheat in its own grain bin. A power plant on the edge powers
 the whole district — its two generators are the only source of power — and its control panel
 is kept round the clock by three power plant workers on the guards' watches, who just stand
-by it for now. A palace filling the middle block, on the wide main street that runs gate to
+by it for now. A playzone — an arcade — on the residential lot nearest the district's middle has
+six arcade cabinets, the quickest fun there is for the bored (a game is a third of a go at a
+computer), and one central computer run by four administrators: a day shift (10-16) and an
+evening shift (16-22), each kept by two who take turns by the day (Mon, Wed, Fri, Sun and Tue,
+Thu, Sat) — **and the cabinets work only while an administrator is on duty and at that
+computer**. A palace filling the middle block, on the wide main street that runs gate to
 gate, seats the district's one king, who holds court at its
 throne ten to four but Sundays, in purple robes and a crown always, walking at a stately pace;
 the major decisions are to be the king's. A crop is in the way like a heap of
@@ -93,7 +98,7 @@ to `screenshots/`.
 | **Adding a kind of thing**: a job, a building every district has, an item, a feature or store, a goal, a task, an effect, a new part of the world's state — the touch list | `add-content` (+ the owning skill) |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes; how fast it walks (its pace, urgency, hurrying) | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), the power plant's workers and control panel, the king and the palace's throne (a job's `Bearing`: gait, robes always, a crown), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), the power plant's workers and control panel, the playzone's administrators (four shifts at one computer, two groups on alternate days) and the arcade cabinets that work only while one is at it, the king and the palace's throne (a job's `Bearing`: gait, robes always, a crown), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
 | Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
@@ -167,6 +172,7 @@ src/sim/job.rs          jobs, shifts, watches, who works which workplace    [job
 src/sim/bins.rs         the stores: scrap bins, steel racks, hoppers, pallets, grain bins [jobs]
 src/sim/fields.rs       the crops of wheat: sown, growing, tended, harvested  [jobs, map]
 src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
+src/sim/playzone.rs     which arcade cabinets work: an administrator at the computer [jobs, simulation]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
@@ -189,6 +195,7 @@ tools/steel_factory_art.py draws the furnace, scrap hopper, steel pallet and rac
 tools/farm_art.py       draws the grain bin and the wheat at its four stages     [pixel-artist]
 tools/power_plant_art.py draws the generator and the control panel              [pixel-artist]
 tools/palace_art.py     draws the palace's throne                               [pixel-artist]
+tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and the administrator's uniform [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

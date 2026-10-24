@@ -73,6 +73,7 @@ impl GameState {
             workplaces: self.facilities.workplaces.save(),
             tally: Some(self.facilities.tally.save()),
             crops: self.facilities.fields.save(),
+            playzones_run: self.facilities.playzones.save(),
         }
     }
 
@@ -160,6 +161,9 @@ impl GameState {
         state.facilities.doors.restore(&world.doors)?;
         state.facilities.homes = Homes::restore(&world.homes)?;
         state.facilities.workplaces = Workplaces::restore(&world.workplaces)?;
+        // Which playzones were being run as the tick ended: derived from the
+        // map but for that, which only the tick that ended it knew.
+        state.facilities.playzones.restore(&world.playzones_run)?;
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
@@ -200,6 +204,10 @@ impl GameState {
                 return invalid(format!("a bed belongs to {:#x}, who is not here", home.owner));
             }
         }
+        // A save from before shifts were told apart by their days did not say
+        // which a workplace was given for: the one its worker keeps.
+        let crowd = &state.entities;
+        state.facilities.workplaces.settle(|uid| crowd.get(uid).and_then(|entity| entity.job()).map(|job| job.shift))?;
         // A desk is given with a job, and taken back with it: whoever works
         // at a desk has the job that says so, and everybody with a job has
         // its desk.
@@ -215,7 +223,9 @@ impl GameState {
             let worker = crate::sim::Uid::from_raw(place.worker);
             let works_here = worker.and_then(|uid| state.entities.get(uid)).and_then(|entity| entity.job());
             let start = place.start.unwrap_or(crate::sim::job::OFFICE_HOURS.start() as u32);
-            if works_here.map(|job| (Some(pb::Cell::from(job.workplace)), job.shift.start() as u32)) != Some((place.desk, start)) {
+            if works_here.map(|job| (Some(pb::Cell::from(job.workplace)), job.shift.start() as u32)) != Some((place.desk, start))
+                || works_here.zip(place.days).is_some_and(|(job, days)| job.shift.mask() as u32 != days)
+            {
                 return invalid(format!("a desk belongs to {:#x}, who does not work there", place.worker));
             }
         }

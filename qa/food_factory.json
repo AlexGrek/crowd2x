@@ -1,0 +1,311 @@
+{
+  "name": "food factory workers and couriers turn farm wheat into meals in the warehouse",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "food works",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 14,
+            "height": 7
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor",
+              "block"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B------------.",
+            "............-.",
+            "............-.",
+            "............-.",
+            "..............",
+            "..............",
+            ".............."
+          ],
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 24,
+                  "y": 24
+                },
+                "kind": "transformer"
+              },
+              {
+                "at": {
+                  "x": 600,
+                  "y": 168
+                },
+                "kind": "food cooker"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 72
+                },
+                "kind": "wheat hopper"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 264
+                },
+                "kind": "meal pallet"
+              },
+              {
+                "at": {
+                  "x": 120,
+                  "y": 168
+                },
+                "kind": "meal rack"
+              },
+              {
+                "at": {
+                  "x": 216,
+                  "y": 72
+                },
+                "kind": "grain bin"
+              }
+            ],
+            "spawners": []
+          },
+          "initial_stock": [
+            {
+              "cell": {
+                "x": 4,
+                "y": 1
+              },
+              "pieces": 12
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "open": "food works",
+  "steps": [
+    {
+      "note": "a food cooker at (12, 3) wired to the transformer, a hopper at (9, 1), a pallet at (9, 5), a meal rack at (2, 3); no scrap bin, so nobody is a collector"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 2
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 3,
+        "y": 1
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 11,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a food factory worker at the food cooker at 12, 3, 09:00-17:00"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 4,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a food courier at the wheat hopper at 9, 1, 09:00-17:00"
+    },
+    {
+      "note": "every need off, so this is a test about the work"
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "note": "the food courier fetches wheat from the farm grain bin"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "note": "by ten the wheat is in the hopper and the food factory worker has some of it"
+    },
+    {
+      "tick": 3000
+    },
+    {
+      "measure": {
+        "name": "food production",
+        "ticks": 600
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "the food factory worker making meals"
+    },
+    {
+      "select": 2
+    },
+    {
+      "press": "job"
+    },
+    {
+      "shot": "the courier's job, an hour into the shift"
+    },
+    {
+      "note": "by the afternoon a meal is on the warehouse's rack"
+    },
+    {
+      "tick": 7200
+    },
+    {
+      "expect_stored": {
+        "min": 1,
+        "in": "meal rack"
+      }
+    },
+    {
+      "press": "statistics"
+    },
+    {
+      "expect_text": "food factory workers of 1 posts"
+    },
+    {
+      "expect_text": "food couriers of 1 posts"
+    },
+    {
+      "shot": "the statistics with meals in the warehouse"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "wait": 0.2
+    },
+    {
+      "shot": "the food works in the afternoon"
+    }
+  ]
+}

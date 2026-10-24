@@ -9,6 +9,8 @@
 
 pub mod bury;
 pub mod collect;
+pub mod cook;
+pub use cook::CookGoal;
 pub mod drink;
 pub mod eat;
 pub mod farm;
@@ -78,13 +80,19 @@ pub const MAX_REROUTES: u8 = 3;
 /// Only among the features this unit may use: one in somebody else's
 /// property is not there for it at all ([`Think::may_use`](crate::sim::Think::may_use)).
 pub(super) fn nearest_in_reach(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Point> {
+    nearest_in_reach_where(ctx, kind, |_| true)
+}
+
+/// [`nearest_in_reach`], among only the features `works` says yes to — an
+/// arcade cabinet that is running, say ([`Playzones::runs`](crate::sim::Playzones::runs)).
+pub(super) fn nearest_in_reach_where(ctx: &GoalCtx<'_>, kind: FeatureKind, works: impl Fn(Point) -> bool) -> Option<Point> {
     let here = ctx.body.center_position();
     let now = ctx.think.clock.elapsed();
     let places = ctx.memory.out_of_reach();
     let key = ctx.body.home();
     ctx.think
         .features
-        .nearest_where(kind, here, |cell| ctx.think.may_use(cell, key) && !places.contains(cell, now))
+        .nearest_where(kind, here, |cell| works(cell) && ctx.think.may_use(cell, key) && !places.contains(cell, now))
 }
 
 /// The store of `kind` — a bin, a rack, a hopper, a pallet — nearest this
@@ -108,7 +116,12 @@ pub(super) fn nearest_store(ctx: &GoalCtx<'_>, kind: FeatureKind, stocked: bool)
 /// out; the memory is for choosing *between* places, not for refusing the
 /// last one.
 pub(super) fn choose_nearest(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Point> {
-    nearest_in_reach(ctx, kind).or_else(|| {
+    choose_nearest_where(ctx, kind, |_| true)
+}
+
+/// [`choose_nearest`], among only the features `works` says yes to.
+pub(super) fn choose_nearest_where(ctx: &GoalCtx<'_>, kind: FeatureKind, works: impl Fn(Point) -> bool) -> Option<Point> {
+    nearest_in_reach_where(ctx, kind, &works).or_else(|| {
         let now = ctx.think.clock.elapsed();
         let places = ctx.memory.out_of_reach();
         let here = ctx.body.center_position();
@@ -116,7 +129,8 @@ pub(super) fn choose_nearest(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Poi
         // Ties go to the nearer, then the lower cell, so the answer does not
         // depend on the order the memory was written in.
         let key = ctx.body.home();
-        ctx.think.features.cells_of(kind).iter().copied().filter(|&cell| ctx.think.may_use(cell, key)).min_by(|&a, &b| {
+        let usable = |cell: &Point| works(*cell) && ctx.think.may_use(*cell, key);
+        ctx.think.features.cells_of(kind).iter().copied().filter(usable).min_by(|&a, &b| {
             forgiven(a)
                 .total_cmp(&forgiven(b))
                 .then((here.manhattan_distance(a), a).cmp(&(here.manhattan_distance(b), b)))

@@ -429,6 +429,26 @@ UNIFORMS["electrician"] = (
 )
 
 
+# A cream apron over a green shirt, and a matching courier jacket.
+UNIFORMS["food_factory_worker"] = (
+    UNIFORMS["steelworker"][0],
+    {**UNIFORMS["steelworker"][1], "g": (64, 112, 76), "a": (222, 220, 192), "l": (250, 244, 218)},
+)
+UNIFORMS["food_courier"] = (
+    UNIFORMS["courier"][0],
+    {**UNIFORMS["courier"][1], "d": (134, 124, 88), "m": (216, 202, 152)},
+)
+
+
+# A purple polo shirt with a neon cyan tie over the office's charcoal
+# trousers: the playzone administrator's, at the central computer.
+UNIFORMS["playzone_administrator"] = (
+    UNIFORMS["office_worker"][0],
+    {**UNIFORMS["office_worker"][1],
+     "d": CLOTH["purple"][0], "m": CLOTH["purple"][1], "l": CLOTH["purple"][2], "t": (80, 224, 232)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

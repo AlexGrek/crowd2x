@@ -581,6 +581,39 @@ first, built at compile time.
    mid-programme, power lost), `goals/play.rs` (a seat in view rather than beside, round a
    wall, nowhere in sight held off with `ROUTES_ASKED`, the nearer of computer and TV).
 
+## Worked example: the arcade (a feature that works only while somebody is at work)
+
+A fourth amusement for `PlayGoal`, and the first feature whose working depends on **what
+another unit is doing right now**. Power is static (the `Features` index), so that is not
+where it goes: it is `sim::playzone::Playzones`, a `Facilities` field read through
+`Think::playzones`, rewritten every tick by the world step.
+
+1. **Features.** `FeatureKind::Arcade` ↔ `"arcade cabinet"` and `FeatureKind::PlayzoneComputer`
+   ↔ `"playzone computer"`, both `Beside`, both powered (`CONSUMERS`).
+2. **Who says the playzone is run.** Not a task and not a goal: `Brain::react` asks
+   `Effect::Operate { at }` every tick `playzone::runs(job, cell, think)` holds (the job's
+   workplace is a playzone computer, its shift's hours are on, it stands beside the computer,
+   the computer works). Asked from the brain, not from the `Work` task, because between two
+   hourly stretches no task is running for a tick. `world_step` calls
+   `Playzones::begin_tick` then grants the tick's effects, so **nothing is ever undone**: an
+   administrator who leaves, is let go or dies just stops saying so. `testing::World::step`
+   does the same, so a unit test of an administrator needs nothing extra; a test of a *player*
+   calls `world.playzones.run(computer)` before each `step`.
+3. **Task.** `tasks/use_arcade.rs`: `UseArcade { cabinet, seconds }` is `UseComputer` with
+   `ctx.think.playzones.runs(cabinet)` checked every tick beside the power, so a game
+   the administrator cuts short fails and is no fun at all. `ARCADE_SECONDS` = 10 world minutes,
+   a third of a go at a computer, for the same `Event::Entertained`: that is the whole of "quick
+   fun". Saved by name, `"use arcade"` (`TimedTask`, no schema change).
+4. **Goal.** No new goal: `PlayGoal` offers a cabinet only while it works
+   (`goals::nearest_in_reach_where` / `choose_nearest_where`, which take the extra condition
+   the plain `nearest_in_reach` / `choose_nearest` pass `|_| true` for), as the nearest of
+   computer, TV and cabinet; `plan` refuses a cabinet that has gone dark. Logged
+   `"{uid} played the arcade cabinet at x, y"` (`World::arcade_games()`).
+5. **Tests.** `tasks/use_arcade.rs`, `goals/play.rs` (a working cabinet is played, a dark one is
+   no place to go, an administrator leaving ends a game and it is played again when they are
+   back, nearest of cabinet and TV), `goals/work.rs` (the administrator side) and the district
+   and save tests listed in `jobs`.
+
 `Think::bins` is what every store holds (`sim::bins`), beside `Think::corpses`: a goal may
 read a store's stock the way it reads a heap's (`goals::nearest_store`), never write it — a
 task asks with `Effect::Deposit` / `Effect::Withdraw`.

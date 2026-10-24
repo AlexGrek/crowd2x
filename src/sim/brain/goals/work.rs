@@ -593,4 +593,93 @@ mod tests {
         assert!(relieved, "never went; brain {:?}", human.brain_fields());
         assert!(back, "never came back to the desk; brain {:?}", human.brain_fields());
     }
+
+    /// A playzone's administrator on the first group's day shift: sets off at
+    /// half past nine, stands beside the computer and runs the playzone from
+    /// ten to four — **its arcade cabinets work through every tick of the
+    /// shift** (the hour-long stretches changing over included) **and at no
+    /// other time**: not while it is still on its way or waiting for ten, not
+    /// from four on.
+    #[test]
+    fn a_playzone_administrator_runs_the_playzone_from_ten_to_four_and_the_cabinets_work_just_then() {
+        use crate::sim::feature::FeatureKind;
+        use crate::sim::job::{JobKind, PLAYZONE_SHIFTS};
+        let computer = Point::new(11, 7);
+        let cabinet = Point::new(2, 7);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "playzone computer", computer);
+        prop_at(&mut map, "arcade cabinet", cabinet);
+        let mut world = World::new(map);
+        world.clock = at(1, 9.3);
+        let mut human = worker(Point::new(2, 2), computer);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::PlayzoneAdministrator, computer, PLAYZONE_SHIFTS[0])));
+
+        let (mut first, mut last, mut at_computer) = (None, None, false);
+        for _ in 0..ticks(&world, 7.0) {
+            let hours = world.clock.hours();
+            step(&mut world, &mut human);
+            let runs = world.playzones.runs(cabinet);
+            at_computer |= matches!(human.brain().current_task(), Some(Task::Work(Work { place: FeatureKind::PlayzoneComputer, .. })));
+            if !(10.0..16.0).contains(&hours) {
+                assert!(!runs, "the cabinets work at {hours:.3}, off duty");
+            } else if runs {
+                first.get_or_insert(hours);
+                last = Some(hours);
+            } else {
+                assert!(first.is_none(), "the cabinets went dark at {hours:.3}, in the middle of the shift; first run {first:?}");
+            }
+        }
+        assert!(at_computer, "never ran the computer; brain {:?}", human.brain_fields());
+        assert!(first.is_some_and(|hours| hours < 10.05), "should be running from ten sharp, was {first:?}");
+        assert!(last.is_some_and(|hours| hours > 15.95), "and until four, was {last:?}");
+        assert!(world.log_contains("ran the playzone an hour at the playzone computer at 11, 7"), "{:?}", world.lines());
+    }
+
+    /// Off duty — the other group's day — an administrator does not go in:
+    /// the playzone is not run at all.
+    #[test]
+    fn an_administrator_off_duty_leaves_the_cabinets_dark() {
+        use crate::sim::job::{JobKind, PLAYZONE_SHIFTS};
+        let (computer, cabinet) = (Point::new(11, 7), Point::new(2, 7));
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "playzone computer", computer);
+        prop_at(&mut map, "arcade cabinet", cabinet);
+        let mut world = World::new(map);
+        // A Tuesday: the second group's.
+        world.clock = at(2, 9.3);
+        let mut human = worker(Point::new(2, 2), computer);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::PlayzoneAdministrator, computer, PLAYZONE_SHIFTS[0])));
+        for _ in 0..ticks(&world, 7.0) {
+            step(&mut world, &mut human);
+            assert!(!world.playzones.runs(cabinet), "run on a day off, at {}", world.clock);
+        }
+        assert!(!world.log_contains("ran the playzone"));
+    }
+
+    /// An administrator who steps away from the computer during the shift
+    /// stops running the playzone until it is back beside it.
+    #[test]
+    fn an_administrator_away_from_the_computer_does_not_run_the_playzone() {
+        use crate::sim::job::{JobKind, PLAYZONE_SHIFTS};
+        let (computer, cabinet) = (Point::new(11, 7), Point::new(2, 7));
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "playzone computer", computer);
+        prop_at(&mut map, "arcade cabinet", cabinet);
+        let mut world = World::new(map);
+        world.clock = at(1, 10.5);
+        let mut human = worker(Point::new(10, 7), computer);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::PlayzoneAdministrator, computer, PLAYZONE_SHIFTS[0])));
+        for _ in 0..200 {
+            step(&mut world, &mut human);
+        }
+        assert!(world.playzones.runs(cabinet), "at the computer in the middle of the shift: run");
+
+        // Taken away, far from it: not run for the moment it takes to come back.
+        human.body_mut().set_position((1.5, 1.5));
+        world.step(&mut human);
+        assert!(!world.playzones.runs(cabinet), "two rooms away: not run");
+    }
 }

@@ -549,6 +549,10 @@ pub struct Think<'a> {
     /// by [`super::world_step`]: what a farmer looks through for what wants
     /// doing in its field ([`super::fields`]).
     pub fields: &'a super::fields::Fields,
+    /// Which arcade cabinets work, as of the start of this tick, changed only
+    /// by [`super::world_step`]: whether a playzone has an administrator at
+    /// its computer ([`super::playzone`]).
+    pub playzones: &'a super::playzone::Playzones,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -593,6 +597,7 @@ impl<'a> Think<'a> {
             corpses: &facilities.corpses,
             bins: &facilities.bins,
             fields: &facilities.fields,
+            playzones: &facilities.playzones,
             electrical: &facilities.electrical,
             dt,
             tick,

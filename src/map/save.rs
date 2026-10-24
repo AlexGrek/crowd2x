@@ -72,6 +72,7 @@ impl Map {
             .map(|layer| pb::TerrainLayer { tiles: layer.tiles.iter().map(|&tile| palette.index(tile)).collect() })
             .collect();
         pb::SiteMap {
+            initial_stock: self.initial_stock.iter().map(|stock| pb::Bin { cell: Some(stock.cell.into()), stored: stock.pieces }).collect(),
             width: self.size.width,
             height: self.size.height,
             terrain_names: palette.names,
@@ -154,6 +155,13 @@ impl Map {
                     .get(kind as usize)
                     .ok_or_else(|| Invalid::new(format!("{} {kind} of {}", layer.name(), objects.kinds.len())))?;
                 map.add_object(layer, Object { at, kind: ObjectKind::new(name.clone()) });
+            }
+        }
+        let mut stocked = std::collections::BTreeSet::new();
+        for stock in &saved.initial_stock {
+            let cell = pb::cell(stock.cell, "initial stock")?;
+            if !stocked.insert(cell) || !map.set_initial_stock(cell, stock.stored) {
+                return invalid(format!("invalid or duplicate initial stock at {}, {}", cell.x, cell.y));
             }
         }
         Ok(map)

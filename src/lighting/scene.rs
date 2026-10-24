@@ -138,6 +138,18 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "furnace",
         Emission { color: [1.1, 0.55, 0.22], radius: 3.5, always_on: false },
     ),
+    // An arcade cabinet's screen: a violet glow round it while somebody
+    // plays, dark otherwise.
+    (
+        "arcade cabinet",
+        Emission { color: [0.7, 0.4, 0.95], radius: 3.0, always_on: false },
+    ),
+    // The playzone's central computer, a cool glow like an office
+    // computer's while its administrator is at it.
+    (
+        "playzone computer",
+        Emission { color: [0.4, 0.75, 0.95], radius: 2.5, always_on: false },
+    ),
     // A sodium lamp on a post: an orange pool on the street. Always on as
     // far as the lightmap knows — what puts it out by day is the street
     // light controller on its box taking the power away
