@@ -1,6 +1,6 @@
 ---
 name: electrician
-description: Knowledge base for crowd2x's electrical grid - transformers, power lines, distribution boxes, wiring, what needs power (fridges, computers, ceiling, tube and street lamps), street light controllers that switch a street circuit by daylight, in-house light switches on a wall that switch their room's lamps, how power is computed, switching boxes on and off in the game, how power reaches the brain, the fridges, the lighting and the x-ray overlay, and how the district generator wires buildings. Maps every concept to the file and function that owns it (no code). Use for any task about electricity, power, lamps going dark, a fridge or computer that "does nothing", distribution boxes, the box panel, wiring fixtures, or adding a new powered thing or power source.
+description: Knowledge base for crowd2x's electrical grid - transformers and the power plant's generators (a district's only source, their line run round the plant's walls), power lines, distribution boxes, wiring, what needs power (fridges, computers, ceiling, tube and street lamps), street light controllers that switch a street circuit by daylight, in-house light switches on a wall that switch their room's lamps, how power is computed, switching boxes on and off in the game, how power reaches the brain, the fridges, the lighting and the x-ray overlay, and how the district generator wires buildings. Maps every concept to the file and function that owns it (no code). Use for any task about electricity, power, lamps going dark, a fridge or computer that "does nothing", distribution boxes, the box panel, wiring fixtures, or adding a new powered thing or power source.
 ---
 
 # Electrician: the power grid
@@ -12,8 +12,9 @@ For the layer framework itself (file format, editor table, overlay mechanics) se
 
 ## The model in one paragraph
 
-A **transformer** (a prop on the street that blocks its cell) puts high voltage into the
-**power line** under its own cell. The line runs, cell to 4-neighbour cell, to
+A **transformer** (a prop on the street that blocks its cell) — or a **generator**
+(`"generator"`, the same kind of source, two of them in a district's **power plant**, which
+is what powers a district) — puts high voltage into the **power line** under its own cell. The line runs, cell to 4-neighbour cell, to
 **distribution boxes**. A box the line reaches, and that is **switched on**, feeds the
 **wiring** around it with low voltage. A **consumer** - fridge, computer, ceiling lamp, tube
 lamp - works only when **live wiring (or a live box) is under its own cell**. A line straight
@@ -51,8 +52,8 @@ begins (simulation state, not saved). In the game a click on a switch cell flips
 | Cell values: nothing / wiring / line / box, written `.` `-` `=` `B` | `src/map/grid.rs` | `GridLayer::Power`, module `power` (`NONE`, `WIRING`, `LINE`, `BOX`), `alphabet` |
 | Reading/writing a cell | `src/map/mod.rs` | `Map::grid`, `Map::set_grid`, `grid_cells`, `grid_count` |
 | Saved in a map file | `src/map/format.rs` | top-level `"power"` rows, `encode_grid`, `decode_grid`, `MalformedGrid` |
-| Transformer is a source; who needs power | `src/map/utilities.rs` | `SOURCES`, `CONSUMERS`, `Utility::Power`, `needs`, `source_of` |
-| Transformer blocks its cell | `src/map/props.rs` | `PROPS` entry `"transformer"`; also `"street lamp"`, `"street light controller"` |
+| Transformer and generator are sources; who needs power | `src/map/utilities.rs` | `SOURCES` (`"transformer"`, `"generator"`, `"sewer"`), `CONSUMERS`, `Utility::Power`, `needs`, `source_of` |
+| Transformer blocks its cell | `src/map/props.rs` | `PROPS` entry `"transformer"`; also `"generator"`, `"control panel"` (the power plant's), `"street lamp"`, `"street light controller"` |
 | Street light controllers | `src/map/utilities.rs` | `CONTROLLER`, `controlled_boxes(map)` (every box on the circuit of a box with a controller on it, sorted), `circuit(map, cell)` (the wiring+boxes joined to a cell); `"street lamp"` in `CONSUMERS` |
 | Daylight switching | `src/sim/mod.rs`, `src/sim/sun.rs` | `GameState` fields `controlled`, `street_lights_on`, `other_light` (supply + features with the street lights the other way); private `follow_daylight` (top of `process_pass`: swaps `other_light` in when `clock.sun().is_dark()` flips - no flood), private `refresh_supply` (shared with `switch_box` and `switch_light`: floods both, via free fn `flood_supply`), `is_controlled`, `street_lights_on`; `PHOTOCELL_DARK` |
 | Computing what is live | `src/map/utilities.rs` | `Supply::from_map`, `Supply::with_boxes_off`, private `flood` (three fills: line from transformers, wiring from fed+on boxes, pipes); `.with_lights_off(cells)` marks cells whose switched lamps are off (`switched_off`, empty while none is) |
@@ -70,7 +71,7 @@ begins (simulation state, not saved). In the game a click on a switch cell flips
 | Lamps and screens | `src/lighting/scene.rs` | `Light::needs_power`, `Light::name` (the `EMITTERS` key); `LightScene::from_map(map, supply)` keeps every emitter, enabled only if powered; `apply_supply` re-switches always-on powered lights by `supply.serves(light.name, light.cell)`, so a light switch counts |
 | Lighting following a switch | `src/lighting/mod.rs` | `follow_power` (compares `Lighting::supply_generation` to the sim's), runs before `switch_lights_in_use` |
 | Editor palette | `src/editor/grids.rs` | `POWER_PALETTE`: `"wiring"`, `"power line"`, `"distribution box"` (entry i paints value i+1, `value_of`); layer row `"power"` in `editor::LAYERS` (key `5`) |
-| Transformer in the editor | `src/editor/props.rs` | props `PALETTE` entry `"transformer"`, art `assets/transformer.png` |
+| Transformer in the editor | `src/editor/props.rs` | props `PALETTE` entry `"transformer"`, art `assets/transformer.png`; `"generator"` (`generator.png`, 2 frames, its fan turning) |
 | Painting cable | `src/editor/mod.rs` | `edit` -> `Target::Grid` brush: `grids::stroke` from `BrushStroke.last`, also on release; right button erases |
 | X-ray drawing | `src/editor/grids.rs` | `paint` / private `paint_power`, `cable`, `arm`; colours `WIRING_LIVE/DEAD`, `LINE_LIVE/DEAD`, `BOX_BODY/EDGE`, consumer lights `SERVED`/`UNSERVED`; in the game paints from the sim's supply (`sim_generation`) |
 | "power a/b" readouts | `src/editor/grids.rs` + `src/game/hud.rs` | `GridOverlay::summary`; editor HUD line `connected`, game stats line `wired` |
@@ -78,8 +79,8 @@ begins (simulation state, not saved). In the game a click on a switch cell flips
 | The box's switch | `src/game/boxpanel.rs` | `BoxPanelPlugin`, `BoxAction::{Toggle, Close}`, `BoxReadout::{State, Toggle}`, `feeds`; buttons labelled `switch off` / `switch on` / `close`; a controlled box's state line names its controller and whether it holds the box open until dark |
 | Placing a light switch | `src/editor/props.rs`, `src/editor/mod.rs` | `PALETTE` entry `PaletteItem::posed("light switch", "light_switch.png", 2)`; `place` returns whether it placed, via `placement` (wall-mounted -> `mount::mount`, else anywhere); `on_wall(at, side)` (drawn at the cell centre, quarter turns); private `Fit::{Free, Door, Wall}` in `sync_prop_window`/`spawn_prop` (depth from the kept `at.y`); `update_cursor` shows the ghost turned onto its wall or tinted `REFUSED_TINT`; `Tool::describe` hint |
 | Flipping one in the game | `src/game/selection.rs`, `src/game/props.rs` | `pick`: a click on a cell with nobody in it and a switch pushes `Input::switch_light(cell, !on)` and selects nothing (asked before the box); `SwitchPlate { showing_on }` + `flip_switches` (frame 0 on, 1 off) |
-| District wiring | `src/map/district/mod.rs` | `TRANSFORMER` at `(WIDTH-1, 0)`, `connect` (line main mid-street, skipping buildings), `service_entry` (box just inside the wall nearest a main, spur out to it, `LONGEST_SPUR`), then `lay_over_empty` wiring to each consumer; `light_streets` / `wire_run` / `place_controllers` (street lamps on a few long circuits with junction boxes at line crossings, one controller each) |
-| Art | `assets/` | `transformer.png`, `wiring.png`, `power_line.png`, `distribution_box.png`, `street_lamp.png`, `street_light_controller.png` (16x16; the last two drawn by `tools/street_art.py`); `light_switch.png` (two 16x16 frames on/off, drawn for a wall above, by `tools/switch_art.py`) |
+| District wiring | `src/map/district/mod.rs`, `power_plant.rs` | **no transformer**: the power plant (`district/power_plant.rs`, a lot building on the edge) has two `GENERATOR`s in its far corners and is the district's only source. `connect` (line main mid-street, skipping buildings), `service_entry` (box just inside the wall nearest a main, spur out to it, `LONGEST_SPUR`), then for a building with a source in it `feed_in` (a `LINE` from under each generator into the wall beside it and round the walls, breadth first, to the spur — never across the floor, so the plant's wiring never meets it), then `lay_over_empty` wiring to each consumer; `light_streets` / `wire_run` / `place_controllers` (street lamps on a few long circuits with junction boxes at line crossings, one controller each) |
+| Art | `assets/` | `transformer.png`, `generator.png` (2 frames, `tools/power_plant_art.py`), `wiring.png`, `power_line.png`, `distribution_box.png`, `street_lamp.png`, `street_light_controller.png` (16x16; the last two drawn by `tools/street_art.py`); `light_switch.png` (two 16x16 frames on/off, drawn for a wall above, by `tools/switch_art.py`) |
 
 ## Data flow of a switch
 
@@ -146,7 +147,10 @@ time (08:00: off).
 
 Unit: `map::utilities::tests` (`a_fridge_is_powered_through_a_line_a_box_and_wiring...`,
 `a_box_switched_off_passes_the_line_on...`, `a_box_feeds_what_is_on_its_wiring...`,
-`serve_everything_serves_everything`), `sim::tests::switching_a_box_off_takes_its_fridges_away...`,
+`serve_everything_serves_everything`, `a_generator_feeds_the_line_it_stands_on_like_a_transformer`),
+`map::district::power_plant::tests::the_power_plant_powers_the_whole_district_and_nothing_else_does`
+(the generators the only sources, on their line; with them gone no cell is live),
+`sim::tests::switching_a_box_off_takes_its_fridges_away...`,
 `sim::fridge::tests::a_fridge_with_no_power_is_as_warm_as_the_room...`,
 `sim::feature::tests::a_fridge_with_no_power_and_a_toilet_with_no_drain...`,
 `tasks::take_item::tests::taking_from_a_fridge_with_no_power...`,
@@ -156,7 +160,7 @@ Unit: `map::utilities::tests` (`a_fridge_is_powered_through_a_line_a_box_and_wir
 `editor::grids::tests::live_wiring_is_bright...`, district
 `everything_that_needs_power_or_water_in_a_district_has_it`,
 `a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one` (outdoor wiring only
-on controlled street-light circuits), `the_street_lamps_have_power_at_night_only...`,
+on controlled street-light circuits; the only line indoors is under a generator), `the_street_lamps_have_power_at_night_only...`,
 `the_streets_are_lit`; street lights: `utilities::tests::a_controller_switches_the_box_it_stands_on...`,
 `sim::tests::a_street_light_controller_powers_its_lamps_from_dusk_to_dawn`,
 `lighting::scene::tests::a_street_lamp_lights_when_its_controller_closes_its_box`,
@@ -167,6 +171,7 @@ on controlled street-light circuits), `the_street_lamps_have_power_at_night_only
 `lighting::scene::tests::a_lamp_goes_dark_at_its_light_switch...`,
 `editor::props::tests::a_wall_mounted_prop_is_placed_only_beside_a_wall`, `a_switch_is_drawn_in_its_cell_turned_to_its_wall`.
 QA: `qa/power_and_water.json` (lay it in the editor, play, switch the box off and on),
+`qa/power_plant.json` (a room powered by a generator alone, its lamp served),
 `qa/street_lights_at_night.json` (dark at 08:00, lit at 23:00, dark the next morning),
 `qa/ceiling_and_lamps_editor.json` (wires its lamp), `qa/light_switch.json` (refused mid-room,
 placed on the far wall and on a corner's left wall, clicked off in the game, back on from the
@@ -180,6 +185,12 @@ other switch). Steps: `expect_connected {utility: "power"}`, `expect_grid {layer
   `utilities::serve_everything` wires a `GameState` map. Fixtures and QA inline maps:
   `uv run tools/wire_map.py <file>`.
 - Wiring adjacent to a line does not connect - only through a box.
+- **A district has no transformer**: its power plant's generators are the only source, so a
+  district map with them taken out is dark everywhere. A building with a source in it gets its
+  line round its walls (`feed_in`); put anything powered on a generator's cell, or a generator
+  where the wiring from the box to the lamp runs (the middle of a street-facing wall, or the
+  line from there to the room's middle), and the wiring has a gap - the plant's layout keeps
+  the generators in the far corners for that reason.
 - An unpowered lamp is still in `LightScene::lights`, disabled - count `enabled`, as
   `expect_lighting {lights_on}` does.
 - Computers' lights are switchable (in-use), so `apply_supply` skips them; no power means

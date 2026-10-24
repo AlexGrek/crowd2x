@@ -107,6 +107,11 @@ pub const PROPS: &[Prop] = &[
     // The farm's store of wheat, a farmer's workplace (`sim::job`). Used from
     // beside it.
     Prop::blocking("grain bin"),
+    // The power plant: its generators, which feed the power line under them
+    // like a transformer (`super::utilities`), and the control panel its
+    // workers keep (`sim::job`), used from beside it.
+    Prop::blocking("generator"),
+    Prop::blocking("control panel"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

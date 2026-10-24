@@ -3773,13 +3773,16 @@ mod tests {
             let undertakers = crate::map::district::crematorium::CREMATORIA * job::WATCHES.len();
             let (smelters, couriers) = (crate::map::district::steel_factory::FURNACES, crate::map::district::steel_factory::HOPPERS);
             let farmers = crate::map::district::farm::GRAIN_BINS;
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers;
+            let operators = crate::map::district::power_plant::CONTROL_PANELS * job::WATCHES.len();
+            assert_eq!(operators, 3);
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
             let (mut smelting, mut hauling, mut farming) = (0, 0, 0);
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
+            let mut panels: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
                 let Some(job) = entity.job() else { continue };
                 match job.kind {
@@ -3815,6 +3818,13 @@ mod tests {
                         farming += 1;
                         assert!(district.the(crate::map::district::farm::NAME).contains(job.workplace), "seed {seed}: a grain bin outside the farm");
                     }
+                    JobKind::PowerPlantWorker => {
+                        assert!(
+                            district.the(crate::map::district::power_plant::NAME).contains(job.workplace),
+                            "seed {seed}: a control panel outside the power plant"
+                        );
+                        panels.entry(job.workplace).or_default().push(job.shift.start());
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
@@ -3827,6 +3837,13 @@ mod tests {
             for (post, mut starts) in posts {
                 starts.sort_unstable();
                 assert_eq!(starts, [0, 8, 16], "seed {seed}: the watches at {post:?}");
+            }
+            // The power plant's control panel kept the same way, by its three
+            // workers.
+            assert_eq!(panels.len(), crate::map::district::power_plant::CONTROL_PANELS, "seed {seed}");
+            for (panel, mut starts) in panels {
+                starts.sort_unstable();
+                assert_eq!(starts, [0, 8, 16], "seed {seed}: the watches at the control panel at {panel:?}");
             }
             // In the order they arrived: every desk taken before the first
             // collector was hired, every bin before the first guard.

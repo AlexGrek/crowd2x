@@ -2,8 +2,8 @@
 //!
 //! Ninety-two houses with one or two people living in each, a bank laid out
 //! like an office, three empty shops, a warehouse where the scrap collectors
-//! store what they bring in from the wasteland, and streets to walk between
-//! them. The same seed always gives the same district — every choice is
+//! store what they bring in from the wasteland, a power plant that powers all
+//! of it, and streets to walk between them. The same seed always gives the same district — every choice is
 //! drawn from one [`SmallRng`] in a fixed order — so a district somebody
 //! liked can be made again from its number.
 //!
@@ -33,7 +33,8 @@
 //!   before any house, one module each, listed in [`LOT_BUILDINGS`]: the
 //!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
 //!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
-//!   the warehouse, the [`farm`] on the edge lot nearest the good soil. **A new one is a module with a [`LotBuilding`] in it and
+//!   the warehouse, the [`farm`] on the edge lot nearest the good soil, the
+//!   [`power_plant`] on the edge. **A new one is a module with a [`LotBuilding`] in it and
 //!   a line in that list**; everything else — the lot it takes from the
 //!   houses, its roof, lamp, windows, power, its place in
 //!   [`District::buildings`] — follows from the list;
@@ -71,10 +72,12 @@
 //! # Power and water
 //!
 //! Laid last, like the lamps and for the same reason: from the buildings as
-//! built, without the seed. A [`TRANSFORMER`] stands in one corner of the
-//! district and a [`SEWER`] in the opposite one, and a power line and a sewer
-//! main run down the middle of every street, under the paving, skipping
-//! whatever a building stands on. Every building with something to power has
+//! built, without the seed. The [`power_plant`]'s generators are the
+//! district's one source of power, a [`SEWER`] in a corner drains it, and a
+//! power line and a sewer main run down the middle of every street, under the
+//! paving, skipping whatever a building stands on. The plant's line runs from
+//! under each generator into its walls and round them to where it goes out
+//! to the main, as every building's does ([`feed_in`]). Every building with something to power has
 //! a distribution box just inside its wall nearest a street, a line out to
 //! the main under the street, and wiring from the box to every lamp, fridge
 //! and computer inside; every building with a toilet has a pipe from its
@@ -109,6 +112,7 @@ use rand::{RngExt, SeedableRng};
 
 pub mod crematorium;
 pub mod farm;
+pub mod power_plant;
 pub mod restaurant;
 pub mod steel_factory;
 pub mod warehouse;
@@ -201,8 +205,6 @@ const HOUSE_DOOR: &str = "house door";
 /// How wide every doorway is, in leaves: one person coming in and one going
 /// out of a one-cell door is a standoff neither of them can resolve.
 pub const DOOR_WIDTH: i32 = 2;
-/// What powers the district, in its bottom-right corner.
-pub const TRANSFORMER: &str = "transformer";
 /// What lights a street at night.
 pub const STREET_LAMP: &str = "street lamp";
 /// Cells between two street lamps along one side of a street: close enough
@@ -295,7 +297,7 @@ impl Siting<'_> {
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
 pub const LOT_BUILDINGS: &[&LotBuilding] =
-    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC];
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -398,7 +400,8 @@ pub struct District {
     pub shops: Vec<Rect>,
     /// Every lot building ([`LOT_BUILDINGS`]) by name, in the order they were
     /// built: the warehouse, the restaurants, the crematorium, the steel
-    /// factory. Ask for one with [`District::the`] or [`District::all`].
+    /// factory, the farm, the power plant. Ask for one with [`District::the`]
+    /// or [`District::all`].
     pub lot_buildings: Vec<(&'static str, Rect)>,
     /// The lots left as grass: the residential lots without a house, and the
     /// shop block's fourth.
@@ -856,9 +859,10 @@ fn glaze(map: &mut Map, walls: Rect) {
     }
 }
 
-/// The transformer, the sewer, the mains along the streets and every
-/// building's connection to them. Last, from the buildings as built, and
-/// without the seed — see the module docs.
+/// The sewer, the mains along the streets and every building's connection to
+/// them — the power plant's too, which is where the power comes from
+/// ([`feed_in`]). Last, from the buildings as built, and without the seed —
+/// see the module docs.
 fn connect(map: &mut Map, buildings: &[Rect]) {
     let inside_any = |cell: Point| buildings.iter().any(|walls| walls.contains(cell));
 
@@ -882,13 +886,11 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
         map.set_grid(GridLayer::Water, cell, water::PIPE);
     }
 
-    // The sources, in two corners of the street round the edge, inside the
-    // perimeter wall, each on its network and joined to the main.
-    let transformer = Point::new(WIDTH - 2, 1);
+    // The sewer, in a corner of the street round the edge, inside the
+    // perimeter wall, joined to the main. The power comes from the power
+    // plant, which is joined to it like any building, below.
     let sewer = Point::new(1, HEIGHT - 2);
-    map.add_object(ObjectLayer::Props, object(TRANSFORMER, transformer));
     map.add_object(ObjectLayer::Props, object(SEWER, sewer));
-    utilities::lay(map, GridLayer::Power, power::LINE, transformer, Point::new(WIDTH - 1 - STREET / 2, STREET / 2));
     utilities::lay(map, GridLayer::Water, water::PIPE, sewer, Point::new(STREET / 2, HEIGHT - 1 - STREET / 2));
 
     for &walls in buildings {
@@ -904,9 +906,18 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
                 .collect()
         };
         let (powered, drained) = (wants(Utility::Power), wants(Utility::Water));
-        if !powered.is_empty() {
+        let sources: Vec<Point> = map
+            .objects(ObjectLayer::Props)
+            .iter()
+            .filter(|object| walls.contains(object.cell()) && utilities::source_of(object.kind.as_str()) == Some(Utility::Power))
+            .map(Object::cell)
+            .collect();
+        if !powered.is_empty() || !sources.is_empty() {
             let entry = service_entry(map, GridLayer::Power, power::LINE, walls, &others);
-            map.set_grid(GridLayer::Power, entry, power::BOX);
+            feed_in(map, walls, &sources);
+            if !powered.is_empty() {
+                map.set_grid(GridLayer::Power, entry, power::BOX);
+            }
             for cell in powered {
                 utilities::lay_over_empty(map, GridLayer::Power, power::WIRING, entry, cell);
             }
@@ -988,7 +999,7 @@ fn light_streets(map: &mut Map, buildings: &[Rect]) {
                 && match map.grid(GridLayer::Power, cell) {
                     power::NONE => map.is_passable(cell),
                     // A line crossing: a junction, unless something stands on
-                    // it (the transformer).
+                    // it.
                     power::LINE => map.is_passable(cell),
                     // Street wiring laid by a stretch before.
                     _ => true,
@@ -1127,6 +1138,50 @@ fn blocks_nothing(map: &Map, cell: Point) -> bool {
         .filter(|&i| open[i] && !(open[(i + 7) % 8] && open[(i + 6) % 8]))
         .count();
     starts <= 1
+}
+
+/// A power plant's own line: from under each of its `sources` (the
+/// generators) into the wall beside it and round the walls — never across the
+/// floor — to the line already in them, which is where the building's line
+/// goes out to the main ([`service_entry`]) or an earlier generator's. So the
+/// only line indoors is under the generators themselves, and the wiring laid
+/// from the box to the lamps never meets it: wiring beside a line is not fed
+/// by it, and a lamp on a line would be dead.
+///
+/// The walk round is the shortest along the walls, the way round decided by
+/// the order the neighbours are tried in, so the same building is always
+/// wired the same way.
+fn feed_in(map: &mut Map, walls: Rect, sources: &[Point]) {
+    let size = map.size();
+    for &source in sources {
+        // Breadth first from the generator over the ring of the walls, to the
+        // first cell of it already on the line.
+        let mut came_from: Vec<Option<Point>> = vec![None; size.area()];
+        let mut queue = std::collections::VecDeque::from([source]);
+        came_from[size.index_of(source).unwrap()] = Some(source);
+        let mut reached = None;
+        while let Some(cell) = queue.pop_front() {
+            if cell != source && map.grid(GridLayer::Power, cell) == power::LINE {
+                reached = Some(cell);
+                break;
+            }
+            for next in cell.cardinal_neighbours() {
+                if walls.on_edge(next)
+                    && let Some(index) = size.index_of(next)
+                    && came_from[index].is_none()
+                {
+                    came_from[index] = Some(cell);
+                    queue.push_back(next);
+                }
+            }
+        }
+        let mut cell = reached.expect("district: a generator with no wall round to the plant's line");
+        while cell != source {
+            map.set_grid(GridLayer::Power, cell, power::LINE);
+            cell = came_from[size.index_of(cell).unwrap()].unwrap();
+        }
+        map.set_grid(GridLayer::Power, source, power::LINE);
+    }
 }
 
 /// Where a building takes a network in: the inside cell in the middle of
@@ -1617,7 +1672,7 @@ mod tests {
         }
         for name in BEDS
             .iter()
-            .chain(&[FRIDGE, TOILET, COMPUTER, TV, GUARD_POST, TRANSFORMER, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
+            .chain(&[FRIDGE, TOILET, COMPUTER, TV, GUARD_POST, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
             .chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.props))
         {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
@@ -1644,18 +1699,26 @@ mod tests {
     fn a_power_line_never_runs_inside_a_building_and_wiring_never_outside_one() {
         // The voltages meet only in a box, and a box is just inside a wall:
         // anything else is a line through somebody's kitchen or a cable
-        // across the street.
+        // across the street. The one line indoors is the one under each of
+        // the power plant's generators, which feed it.
         for seed in SEEDS {
             let district = generate(seed);
             let map = &district.map;
             let buildings = district.buildings();
+            let generators: Vec<Point> = map
+                .objects(ObjectLayer::Props)
+                .iter()
+                .filter(|prop| prop.kind.as_str() == power_plant::GENERATOR)
+                .map(Object::cell)
+                .collect();
+            assert_eq!(generators.len(), power_plant::GENERATORS, "seed {seed}");
             // Outdoors, wiring is the street lights' and nobody else's: every
             // outdoor circuit has a controlled box in it and nothing indoors.
             let controlled = utilities::controlled_boxes(map);
             let indoors = |cell: Point| buildings.iter().any(|walls| walls.interior().contains(cell));
             for cell in map.size().points() {
                 match map.grid(GridLayer::Power, cell) {
-                    power::LINE => assert!(!indoors(cell), "seed {seed}: a line indoors at {cell:?}"),
+                    power::LINE => assert!(!indoors(cell) || generators.contains(&cell), "seed {seed}: a line indoors at {cell:?}"),
                     power::WIRING | power::BOX if !indoors(cell) => {
                         let circuit = utilities::circuit(map, cell);
                         assert!(
@@ -2000,8 +2063,9 @@ mod tests {
     #[test]
     fn the_tvs_draw_nothing_from_the_district_so_a_seed_builds_the_same_houses() {
         // Seed 7's resident count, read before there were any TVs — and
-        // again once the farm took a lot of its own, which moved the houses.
-        assert_eq!(generate(7).residents(), 143);
+        // again once the farm, then the power plant, took a lot of its own,
+        // which moved the houses.
+        assert_eq!(generate(7).residents(), 139);
     }
 
     // --- the ground ---
@@ -2069,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_stands_on_the_pavement_but_the_transformer_and_the_sewer() {
+    fn nothing_stands_on_the_pavement_but_the_sewer() {
         // A lamp post on a pavement one cell wide sends everybody walking it
         // out into the road and back.
         let pavement = tile(PAVEMENT);
@@ -2077,7 +2141,7 @@ mod tests {
             let map = generate(seed).map;
             for prop in map.objects(ObjectLayer::Props) {
                 if map.terrain(prop.cell()) == Some(pavement) {
-                    assert!([TRANSFORMER, SEWER].contains(&prop.kind.as_str()), "seed {seed}: a {} on the pavement at {:?}", prop.kind.as_str(), prop.cell());
+                    assert_eq!(prop.kind.as_str(), SEWER, "seed {seed}: a {} on the pavement at {:?}", prop.kind.as_str(), prop.cell());
                 }
             }
         }

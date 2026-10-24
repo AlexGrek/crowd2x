@@ -102,13 +102,22 @@ the game picks like the scrap bin's; and the wheat at its four stages, one 16x16
 and `wheat_4.png` are one mask of ears on stalks (`TALL`) coloured green and gold. The game
 draws the one for the crop's stage (`game/crops.rs`). Carried wheat is the emoji 🌾.
 
+The **power plant** is drawn by `tools/power_plant_art.py` (`preview` puts every strip on the
+plant's blue floor, enlarged): `generator.png` (2 frames, `animated`: a green-grey housing, a
+round fan grille whose blades turn from a cross to a flat saltire, a yellow plate with a black
+bolt, a green status lamp blinking, hazard stripes along its foot) and the control panel,
+`control_panel_idle.png` (2 frames: dark screens, a standby dot, buttons blinking) and
+`control_panel.png` (2 frames: the screens showing green traces, shown while a power plant
+worker stands by it — the palette's `used` strip, `game::props`).
+
 ### Adding a layer kind that is not hair or clothes
 
 **Work uniforms** are in `tools/human_art.py` too: `UNIFORMS`, a mask and its own colours per
 job (`t` a tie, `s` a reflective band, `k` brass; the undertaker's black cassock to the ankles
 with a white collar `w` and a gold cross `y`; the steelworker's brown leather apron over a
 charcoal shirt; the courier's green jacket with a satchel on a strap; the farmer's denim
-dungarees, the bib buttoned at its corners, over a red shirt), written by `generate` as
+dungarees, the bib buttoned at its corners, over a red shirt; the power plant worker's teal
+boiler suit with a yellow bolt patch `y` on the chest), written by `generate` as
 `assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
 the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
 everybody's seeded look); each is `Clothing::Uniform(job)`, named by the job's row

@@ -147,6 +147,9 @@ catalogue! {
             store: Some(StoreDef { holds: ItemKind::Wheat, called: "grain bin", site: "farm", hud: Some("wheat") }),
             ..BESIDE
         },
+        /// Where a power plant is run from: its control panel, stood at from
+        /// beside it. A power plant worker's workplace; needs no power.
+        ControlPanel = 15 => FeatureDef { props: &["control panel"], ..BESIDE },
     }
 }
 

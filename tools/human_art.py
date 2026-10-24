@@ -325,6 +325,22 @@ UNIFORMS = {
         {"R": CLOTH["red"][0], "r": CLOTH["red"][1], "k": BUCKLE,
          "d": TROUSERS["jeans"][0], "b": TROUSERS["jeans"][1], "q": (84, 58, 36)},
     ),
+    # A teal boiler suit, one piece from the collar to the ankles, a yellow
+    # lightning patch on the chest, a black belt and boots: the power plant
+    # worker's, at the control panel.
+    "power_plant_worker": (
+        [
+            "", "", "", "", "", "", "", "",
+            ".....dmmlyd.....",
+            "....dmmmmmmd....",
+            ".....bbkbbb.....",
+            ".....dmmmmd.....",
+            "......dmmd......",
+            "......qqqq......",
+        ],
+        {"d": CLOTH["teal"][0], "m": CLOTH["teal"][1], "l": CLOTH["teal"][2], "y": CLOTH["yellow"][1],
+         "k": BUCKLE, "b": (20, 20, 24), "q": (30, 30, 34)},
+    ),
 }
 
 

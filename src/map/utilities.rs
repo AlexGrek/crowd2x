@@ -4,8 +4,9 @@
 //! [`GridLayer`] under the floor, and the things at the other end that do
 //! not work without it:
 //!
-//! * **Power.** A `"transformer"` puts high voltage into the **power line**
-//!   under it; the line runs to **distribution boxes**, and a box that the
+//! * **Power.** A `"transformer"` — or a power plant's `"generator"` —
+//!   puts high voltage into the **power line** under it; the line runs to
+//!   **distribution boxes**, and a box that the
 //!   line reaches gives out low voltage along the **wiring** — and only
 //!   wiring is what a lamp, a fridge or a computer can plug into. A consumer
 //!   standing on a power line gets nothing (it would not survive it), and a
@@ -79,7 +80,8 @@ pub enum Network {
 }
 
 /// What feeds a network, by the prop name a map stores.
-pub const SOURCES: &[(&str, Utility)] = &[("transformer", Utility::Power), ("sewer", Utility::Water)];
+pub const SOURCES: &[(&str, Utility)] =
+    &[("transformer", Utility::Power), ("generator", Utility::Power), ("sewer", Utility::Water)];
 
 /// What does not work without a network, by the name a map stores — a prop's
 /// or a lamp's. A name may appear once: nothing needs two utilities yet.
@@ -514,6 +516,21 @@ mod tests {
 
         // Switched off and on again is the supply it was.
         assert_eq!(Supply::from_map(&map).with_lights_off([]), on);
+    }
+
+    /// A power plant's generator is a source like a transformer: it feeds
+    /// the line under it, and nothing it does not stand on.
+    #[test]
+    fn a_generator_feeds_the_line_it_stands_on_like_a_transformer() {
+        let mut map = street("==B--");
+        let fridge = Point::new(4, 0);
+        map.remove_object(ObjectLayer::Props, &at("transformer", Point::new(0, 0)));
+        assert!(!Supply::from_map(&map).serves("fridge", fridge), "no source");
+        map.add_object(ObjectLayer::Props, at("generator", Point::new(0, 0)));
+        assert_eq!(source_of("generator"), Some(Utility::Power));
+        assert!(Supply::from_map(&map).serves("fridge", fridge));
+        map.set_grid(GridLayer::Power, Point::new(0, 0), power::NONE);
+        assert!(!Supply::from_map(&map).serves("fridge", fridge), "off its line");
     }
 
     #[test]

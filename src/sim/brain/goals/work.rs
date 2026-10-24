@@ -1,6 +1,8 @@
 //! [`WorkGoal`]: walk to one's own desk and work a shift at it — or to
-//! one's own guard post and keep a watch there, which is the same goal: the
-//! job says which ([`JobKind::workplace`](crate::sim::job::JobKind::workplace)).
+//! one's own guard post and keep a watch there, or to the power plant's
+//! control panel and stand by, which is the same goal: the job says which
+//! ([`JobKind::workplace`](crate::sim::job::JobKind::workplace)), and the
+//! stretch is a [`Work`] at it.
 //!
 //! [`PlayGoal`](super::PlayGoal)'s plan — [`MoveTo`](crate::sim::brain::tasks::MoveTo)
 //! beside a computer, then a timed task at it — with two differences.
@@ -22,7 +24,6 @@
 use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, HOUR};
-use crate::sim::job::JobKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
@@ -59,11 +60,6 @@ impl WorkGoal {
         ctx.think.features.has(job.kind.workplace(), job.workplace).then_some(job.workplace)
     }
 
-    /// Whether the job is a watch at a guard post rather than a desk.
-    fn on_watch(ctx: &GoalCtx<'_>) -> bool {
-        ctx.job.is_some_and(|job| job.kind == JobKind::Guard)
-    }
-
     /// Queue the rest **from what is true now**, on the back of the queue:
     /// walk beside the desk (unless already there), work it. `false` when
     /// there is nowhere to stand to work it.
@@ -78,12 +74,10 @@ impl WorkGoal {
                 let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
         }
-        let stretch = if WorkGoal::on_watch(ctx) {
-            Task::keep_watch(desk, WORK_SECONDS)
-        } else {
-            Task::work(desk, WORK_SECONDS)
+        let Some(job) = ctx.job else {
+            return false;
         };
-        let _ = ctx.tasks.push_back(stretch);
+        let _ = ctx.tasks.push_back(Task::work_at(job.kind.workplace(), desk, WORK_SECONDS));
         true
     }
 
@@ -94,11 +88,8 @@ impl WorkGoal {
     /// One stretch done: say so, and start the next from scratch.
     fn worked(&mut self, ctx: &GoalCtx<'_>, task: Work) {
         let (uid, at) = (ctx.body.uid(), task.desk);
-        ctx.think.log.push(if task.watch {
-            format!("{uid} kept watch an hour at the guard post at {}, {}", at.x, at.y)
-        } else {
-            format!("{uid} worked an hour at the computer at {}, {}", at.x, at.y)
-        });
+        let done = task.words().1;
+        ctx.think.log.push(format!("{uid} {done} an hour at the {} at {}, {}", task.place.prop(), at.x, at.y));
         self.forget();
     }
 }
@@ -309,7 +300,7 @@ mod tests {
         let mut watching = false;
         for _ in 0..ticks(&world, 1.6) {
             step(&mut world, &mut human);
-            watching |= matches!(human.brain().current_task(), Some(Task::Work(Work { watch: true, .. })));
+            watching |= matches!(human.brain().current_task(), Some(Task::Work(Work { place: crate::sim::feature::FeatureKind::GuardPost, .. })));
             if world.log_contains("kept watch an hour") {
                 break;
             }
@@ -319,6 +310,45 @@ mod tests {
         assert_eq!(world.works(), 0, "not an hour at a computer");
         assert!(world.clock.hours() < 8.0 || world.clock.hours() > 22.0, "the night");
         assert_eq!(human.center_position().manhattan_distance(post), 1, "beside the post, not on it");
+        assert_eq!(human.brain().top_goal(), GoalId::Work, "and still at it");
+    }
+
+    /// A power plant worker on the day watch sets off at half past seven,
+    /// stands by its control panel (which needs no power) an hour at a time,
+    /// and says so as standing by — not as an hour at a computer or a watch.
+    #[test]
+    fn a_power_plant_worker_on_the_day_watch_stands_by_at_its_control_panel() {
+        use crate::sim::feature::FeatureKind;
+        use crate::sim::job::{JobKind, WATCHES};
+        let panel = Point::new(11, 7);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "control panel", panel);
+        let mut world = World::new(map);
+        world.clock = at(1, 7.3);
+        let mut human = worker(Point::new(2, 2), panel);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::PowerPlantWorker, panel, WATCHES[0])));
+
+        for _ in 0..ticks(&world, 0.1) {
+            step(&mut world, &mut human);
+        }
+        assert_ne!(human.brain().top_goal(), GoalId::Work, "twenty past seven: not yet");
+
+        world.clock = at(1, 7.55);
+        let mut standing_by = false;
+        for _ in 0..ticks(&world, 1.6) {
+            step(&mut world, &mut human);
+            standing_by |=
+                matches!(human.brain().current_task(), Some(Task::Work(Work { place: FeatureKind::ControlPanel, .. })));
+            if world.log_contains("stood by an hour") {
+                break;
+            }
+        }
+        assert!(standing_by, "never stood by the panel; brain {:?}", human.brain_fields());
+        assert!(world.log_contains("stood by an hour at the control panel at 11, 7"), "{:?}", world.lines());
+        assert_eq!(world.works(), 0, "not an hour at a computer");
+        assert!(!world.log_contains("kept watch"), "nor a watch at a post");
+        assert_eq!(human.center_position().manhattan_distance(panel), 1, "beside the panel, not on it");
         assert_eq!(human.brain().top_goal(), GoalId::Work, "and still at it");
     }
 

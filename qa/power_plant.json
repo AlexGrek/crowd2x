@@ -1,0 +1,139 @@
+{
+  "name": "a generator powers a room, and three power plant workers keep its control panel round the clock",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "power plant",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "tiles blue", "block"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "ceiling": [
+            "############",
+            "############",
+            "############",
+            "############",
+            "############",
+            "############",
+            "############"
+          ],
+          "power": [
+            "............",
+            "............",
+            "............",
+            ".....-......",
+            ".B----......",
+            ".=..........",
+            "............"
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 72, "y": 264 }, "kind": "generator" },
+              { "at": { "x": 168, "y": 264 }, "kind": "control panel" },
+              { "at": { "x": 504, "y": 72 }, "kind": "bed 1" },
+              { "at": { "x": 504, "y": 168 }, "kind": "bed 2" },
+              { "at": { "x": 504, "y": 264 }, "kind": "bed 3" }
+            ],
+            "lamps": [
+              { "at": { "x": 264, "y": 168 }, "kind": "ceiling lamp" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "power plant",
+  "steps": [
+    { "note": "a power plant in one room: a generator at (1, 5) standing on its line, a box under it at (1, 4) and wiring from the box to the ceiling lamp at (5, 3) - no transformer anywhere. The control panel at (3, 5), three beds by the east wall. A world opens at 08:00 on day 1, a Monday" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "the generator is a source of power like a transformer: the lamp it feeds has power" },
+    { "expect_connected": { "utility": "power", "served": 1, "of": 1 } },
+
+    { "note": "one control panel is three workplaces: the day, the evening and the night watch, handed out in that order" },
+    { "spawn": { "kind": "human", "x": 8, "y": 1 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a power plant worker at the control panel at 3, 5, 08:00-16:00" },
+    { "spawn": { "kind": "human", "x": 8, "y": 3 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a power plant worker at the control panel at 3, 5, 16:00-24:00" },
+    { "spawn": { "kind": "human", "x": 8, "y": 5 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as a power plant worker at the control panel at 3, 5, 00:00-08:00" },
+    { "expect_entities": 3 },
+
+    { "note": "every need but tiredness switched off, so this is a test about the watches" },
+    { "select": 2 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "select": 1 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "job" },
+    { "expect_text": "power plant worker" },
+    { "expect_text": "control panel at 3, 5" },
+    { "expect_text": "08:00-16:00" },
+    { "expect_text": "Mon-Sun" },
+
+    { "note": "the day watch is due already: twenty world minutes on it stands by the panel, and does nothing else" },
+    { "tick": 640 },
+    { "expect_text": "on duty" },
+    { "press": "brains" },
+    { "expect_text": "stand by at the control panel at 3, 5" },
+    { "note": "on duty it is in the power plant's uniform" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform power plant worker (own: " },
+    { "press": "job" },
+    { "look_at": { "x": 5, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "twenty past eight: the day watch standing by the panel, its screens lit, the generator turning" },
+
+    { "note": "an hour at the panel is an hour stood by" },
+    { "tick": 1920 },
+    { "expect_log": "stood by an hour at the control panel at 3, 5" },
+
+    { "note": "half past four: the evening watch has taken over and the day watch is done" },
+    { "tick": 13824 },
+    { "expect_text": "done for the day" },
+    { "select": 1 },
+    { "press": "job" },
+    { "expect_text": "16:00-24:00" },
+    { "expect_text": "on duty" },
+    { "shot": "half past four: the evening watch at the panel" },
+
+    { "note": "the lamp kept its power all day: nothing a worker does switches the plant" },
+    { "expect_connected": { "utility": "power", "served": 1, "of": 1 } }
+  ]
+}

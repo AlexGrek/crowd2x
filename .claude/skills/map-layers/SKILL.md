@@ -83,7 +83,7 @@ entering either (`grids::reset`).
 
 | | Source (a prop that blocks its cell **and** is a network node there) | Carrier | Consumers (`CONSUMERS`) |
 | --- | --- | --- | --- |
-| Power | `"transformer"` feeds the `LINE`/`BOX` under it | line -> box -> `WIRING` | `fridge`, `computer`, `ceiling lamp`, `tube lamp` |
+| Power | `"transformer"` or a power plant's `"generator"` feeds the `LINE`/`BOX` under it | line -> box -> `WIRING` | `fridge`, `computer`, `tv`, `furnace`, `ceiling lamp`, `tube lamp`, `street lamp` |
 | Water | `"sewer"` drains the `PIPE` under it | pipes | `toilet` |
 
 Rules, all through the consumer's **own cell**: powered = live `WIRING` or `BOX` under it
@@ -122,12 +122,15 @@ a box selects it (`SelectedBox`, exclusive with `Selected`, same frame sprite);
 
 ## The district generator wires itself (`src/map/district/mod.rs`, `connect`)
 
-After roofs and lamps, seed-independent: transformer at `(WIDTH-1, 0)`, sewer at
-`(0, HEIGHT-1)`, a `LINE` and a `PIPE` main down the middle of every street (skipping building
-rects), and per building `service_entry` - the inside cell in the middle of the wall whose
-straight run out reaches a main soonest without crossing another building (`LONGEST_SPUR`) -
-holding the `BOX` (power) or pipe entry; then `lay_over_empty` wiring / `lay` pipes to each
-consumer inside. Tests over 64 seeds: every consumer served; no line indoors, no wiring outdoors.
+After roofs and lamps, seed-independent: no transformer — the power plant's two
+`"generator"`s are the district's only source — a sewer at `(1, HEIGHT-2)`, a `LINE` and a
+`PIPE` main down the middle of every street (skipping building rects), and per building
+`service_entry` - the inside cell in the middle of the wall whose straight run out reaches a
+main soonest without crossing another building (`LONGEST_SPUR`) - holding the `BOX` (power) or
+pipe entry; a building with a source in it (the plant) gets `feed_in`: a `LINE` from under each
+generator round its walls to that spur; then `lay_over_empty` wiring / `lay` pipes to each
+consumer inside. Tests over 64 seeds: every consumer served; no line indoors but under a
+generator, no wiring outdoors.
 
 ## Recipes
 

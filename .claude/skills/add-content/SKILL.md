@@ -33,7 +33,9 @@ ever removed or renumbered.
    `map/utilities.rs` if it needs power or water, a `PALETTE` row in `editor/props.rs` (art), and
    an `EMITTERS` entry in `lighting/scene.rs` if it glows.
 3. **Its goal**, if new: a `GoalId` row and `brain/goals/<goal>.rs` (`pub mod` + `pub use` in
-   `goals/mod.rs`). A job worked by standing at it (a desk, a post) can reuse `GoalId::Work`.
+   `goals/mod.rs`). A job worked by standing at it (a desk, a post, the power plant's control
+   panel) reuses `GoalId::Work`, with its workplace's row in `STRETCHES`
+   (`brain/tasks/work.rs`: what a stretch there is called and saved as, and what the log says).
 4. **Its tasks**, if new: see "Adding a task".
 5. **Its uniform**: the PNG `assets/human/clothes_uniform_<job name with _>.png`, drawn by
    `tools/human_art.py` (`pixel-artist`). `Clothing::Uniform(JobKind)` and its art path follow from

@@ -41,7 +41,11 @@
 //! * the **farmer**: a grain bin at the farm, and a field of wheat out in
 //!   the wasteland's good soil — sown, tended every day, harvested ripe and
 //!   the wheat stored in the bin (`FarmGoal`, `sim::fields`). Nine to five,
-//!   [`FARM_HOURS`]: every day but Sunday.
+//!   [`FARM_HOURS`]: every day but Sunday;
+//! * the **power plant worker**: the control panel of the power plant, which
+//!   powers the district — stood by an hour at a time (`WorkGoal`, like a
+//!   desk or a post) and nothing else yet. Round the clock like a guard: the
+//!   three [`WATCHES`] of the panel a worker each.
 //!
 //! **A worker sleeps by its shift** ([`Shift::is_bedtime`]): the eight hours
 //! that end [`UP_BEFORE_SHIFT`] before it starts. For office hours that is
@@ -110,7 +114,8 @@ catalogue! {
     /// Every kind of job there is, **in the order a job is offered to an
     /// arrival** (`GameState::give_a_job`): the bank's desks first, then the
     /// bins, then the gates, then the crematoria, then the steel factory's
-    /// furnaces and hoppers. A new job goes on the end, and so is hired last.
+    /// furnaces and hoppers, then the farm's grain bins, then the power
+    /// plant's control panel. A new job goes on the end, and so is hired last.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum JobKind: JobDef {
         /// Sits at a computer and works it. Tiring, and no fun.
@@ -217,6 +222,21 @@ catalogue! {
             uniform: "uniform farmer",
             now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
             goes_out_for: Some(ItemKind::Wheat),
+        },
+        /// Stands by at the power plant's control panel for one of the three
+        /// [`WATCHES`] of the day, an hour at a time like a guard at a post
+        /// (`WorkGoal`): the plant runs round the clock. There is nothing to
+        /// do at the panel yet but be there.
+        PowerPlantWorker = 7 => JobDef {
+            name: "power plant worker",
+            article: "a power plant worker",
+            workplace: FeatureKind::ControlPanel,
+            goal: GoalId::Work,
+            commute: COMMUTE,
+            shifts: &WATCHES,
+            uniform: "uniform power plant worker",
+            now: |at_work, _| if at_work { "on duty" } else { "on the way to the power plant" },
+            goes_out_for: None,
         },
     }
 }
@@ -673,9 +693,10 @@ mod tests {
                 JobKind::Undertaker,
                 JobKind::Steelworker,
                 JobKind::Courier,
-                JobKind::Farmer
+                JobKind::Farmer,
+                JobKind::PowerPlantWorker
             ],
-            "the office first, the farm last"
+            "the office first, the power plant last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
@@ -772,6 +793,31 @@ mod tests {
         assert_eq!(places.release(human(2)), Some(post));
         assert_eq!(places.free_shift(post, kind.shifts()), Some(WATCHES[1]), "the evening is free again");
         let job = Job::guard(post, WATCHES[2]);
+        assert_eq!(Job::restore(&job.save()), Ok(job));
+    }
+
+    /// A power plant worker stands by at the plant's control panel like a
+    /// guard at a post: the work goal, the three watches, a worker to each,
+    /// hired last; on duty at the panel, on the way there otherwise.
+    #[test]
+    fn a_power_plant_worker_keeps_the_control_panel_round_the_clock_and_is_hired_last() {
+        let kind = JobKind::PowerPlantWorker;
+        assert_eq!((kind.name(), kind.with_article()), ("power plant worker", "a power plant worker"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ControlPanel, "control panel"));
+        assert_eq!(kind.goal(), GoalId::Work, "stood at like a post");
+        assert_eq!(kind.shifts(), WATCHES);
+        assert_eq!(JobKind::ALL.last(), Some(&kind));
+        assert_eq!((kind.now(true, None), kind.now(false, None)), ("on duty", "on the way to the power plant"));
+        assert_eq!(kind.uniform().name(), "uniform power plant worker");
+
+        let panel = Point::new(30, 4);
+        let mut places = Workplaces::new();
+        for (n, &watch) in WATCHES.iter().enumerate() {
+            assert_eq!(places.free_shift(panel, kind.shifts()), Some(watch));
+            assert!(places.claim(panel, watch, human(n as u64 + 1)));
+        }
+        assert_eq!(places.free_shift(panel, kind.shifts()), None, "three workers to a panel");
+        let job = Job::new(kind, panel, WATCHES[1]);
         assert_eq!(Job::restore(&job.save()), Ok(job));
     }
 

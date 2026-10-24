@@ -1,11 +1,11 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the power plant worker (the power plant's control panel, the three watches, standing by and nothing else yet; the Work task's STRETCHES), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
 
-A job is **what a unit does for a living, where, and when**. Seven so far, all tiring and no
+A job is **what a unit does for a living, where, and when**. Eight so far, all tiring and no
 fun:
 
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
@@ -28,7 +28,11 @@ fun:
   steel rack. See "The steel works" below;
 - the **farmer**: their own grain bin at the district's farm, nine to five **every day but
   Sunday** — a field of ten crops of wheat sown in the good soil out in the wasteland, tended
-  every day, harvested when ripe and the wheat stored in the bin. See "The farm" below.
+  every day, harvested when ripe and the wheat stored in the bin. See "The farm" below;
+- the **power plant worker**: their own watch (the guards' `WATCHES`, every day) at the
+  `"control panel"` of the district's power plant — stood by an hour at a time like a guard's
+  post (`WorkGoal`, the `"stand by"` stretch), **and nothing else yet**. The plant's one panel
+  takes 3, hired **last**. See "The power plant" below.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -37,7 +41,7 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | Concept | Where | What |
 | --- | --- | --- |
 | `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name) and `now` (the job menu's line). The methods read the row. Saved as its number (`JobKind::number`) |
-| `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers. `give_a_job` and `Command::Hire` walk it |
+| `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers, power plant workers. `give_a_job` and `Command::Hire` walk it |
 | `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY` |
 | `Job::is_due(clock)` | `job.rs` | its hours on its days **plus the kind's commute before** (`Shift::is_due_after`): the office sets off at 08:30, a guard two hours before its watch. A shift from midnight is due from the evening before if the next day is worked. (`Shift::is_due` keeps the plain `COMMUTE`.) What `WorkRoutine` and the job menu read |
 | `Shift::is_bedtime(clock)` | `job.rs` | **a worker sleeps by its shift**: the 8 hours (`BEDTIME`-`GETTING_UP`'s length) ending `UP_BEFORE_SHIFT` = 3 before the shift starts, every day. Office hours: 22-06, the clock's own night, so nothing changed for them; day watch 21-05; evening watch 05-13; night watch 13-21. `job::is_bedtime(job, clock)` falls back to `Clock::is_night` with no job. `SleepRoutine` and the boredom routine's no-play-at-night cap read it |
@@ -86,8 +90,8 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | routine | `WorkRoutine` ("go to work"): raises **`job.kind.goal()`** to **`WORKING` = 1.5** while `job.is_due(clock)` — `Work` at a desk or a post, `Collect` for a collector. Stateless decision (no stat, so no hysteresis); `on_shift` is kept for the brains menu and the save | `brain/routines.rs`, `routine.rs` |
 | getting ready | `ReadyRoutine` ("get ready to go out"), **last in `Brain::human()`**: before every trip out, a collector sees to its needs first — see "Getting ready" below | `brain/routines.rs` |
 | goal | `GoalId::Work` (💼) and `GoalId::Collect` (🧲), **the last two `GoalId`s** so every tie goes to the other goal | `brain/goal.rs` |
-| office and gate | `WorkGoal`: walks beside **its own desk** — or post: the job's `workplace()` feature is what has to be there — and queues `Task::work(desk, WORK_SECONDS)`, or `Task::keep_watch(post, WORK_SECONDS)` for a guard — an hour of world a stretch, `Achieved` after each, so the routine decides how many. Logs `"worked an hour at the computer at x, y"` / `"kept watch an hour at the guard post at x, y"`. No other desk to reroute to: a desk it cannot reach is `Blocked` (held off); an unpowered desk (`!features.has(Workstation, desk)`) is `Blocked` before any walk. `prioritized` forgets a remembered desk that is no longer the job's | `brain/goals/work.rs` |
-| office task | `Work { desk, seconds, watch }`: from beside it, every tick checks distance, a body, and that the workplace is still a feature (`Workstation`, which needs power, or with `watch` a `GuardPost`, which does not). Described `work at the computer at x, y` / `keep watch at the guard post at x, y`. `Action::interact` (lights the screen through `interacting_with`). Finished → `Event::Worked { world_seconds }`; **interrupted → `Worked` for the part done** (like `Sleep`) | `brain/tasks/work.rs` |
+| office, gate and power plant | `WorkGoal`: walks beside **its own desk** — or post, or control panel: the job's `workplace()` feature is what has to be there — and queues `Task::work_at(job.kind.workplace(), desk, WORK_SECONDS)` — an hour of world a stretch, `Achieved` after each, so the routine decides how many. Logs `"{uid} {done} an hour at the {prop} at x, y"` from the stretch's words: `"worked an hour at the computer at x, y"` / `"kept watch an hour at the guard post at x, y"` / `"stood by an hour at the control panel at x, y"`. No other desk to reroute to: a desk it cannot reach is `Blocked` (held off); an unpowered desk (`!features.has(Workstation, desk)`) is `Blocked` before any walk. `prioritized` forgets a remembered desk that is no longer the job's | `brain/goals/work.rs` |
+| office task | `Work { desk, seconds, place }`: from beside it, every tick checks distance, a body, and that the workplace is still a `place` feature (`Workstation`, which needs power; `GuardPost` and `ControlPanel`, which do not). **`STRETCHES`** (`tasks/work.rs`) is every workplace a job is stood at, with what a stretch there is and was: `(Workstation, "work", "worked")`, `(GuardPost, "keep watch", "kept watch")`, `(ControlPanel, "stand by", "stood by")` — the first word is also the name it is saved under. Constructors `Task::work`, `Task::keep_watch`, `Task::work_at(place, ...)`. Described `work at the computer at x, y` / `keep watch at the guard post at x, y` / `stand by at the control panel at x, y`. `Action::interact` (lights the screen through `interacting_with`). Finished → `Event::Worked { world_seconds }`; **interrupted → `Worked` for the part done** (like `Sleep`) | `brain/tasks/work.rs` |
 | collecting | `CollectGoal` (state: one `Seek`): **one trip is its unit of work**, `Achieved` when a packful is in the bin, and the routine starts the next. It plans **from what is true now** and never counts: **a trip starts from the bin** — nothing in the pack, in the district, not beside its bin and not ready (`GoalCtx::ready_to_go_out`, the routine's say) → walk beside the bin first (no task after it); room in the pack → the heap it was working while it has anything left, else `nearest_heap`, then `move_beside` + `Task::salvage_for_work`; pack full, or no heap left and something carried → its own bin (`job.workplace`, which just has to be in `features`), `move_beside` + `Task::deposit`; no heap and nothing carried → `Blocked` with `"found no scrap left to collect"` (the hold's doubling spaces those lines). A failed walk is `Seek::setback`: elsewhere for a heap is the next nearest, a bin has none. A failed salvage (the heap emptied under it) is a cheap replan. `prioritized` forgets a target no longer worth it — an emptied heap, or a bin that is not the job's — though `process` re-checks both anyway (mutating the forget out is caught by nothing) | `brain/goals/collect.rs` |
 | nearest heap | `collect::nearest_heap`: `Map::heaps(map.navigation_area(), …)` — the site and `NAV_MARGIN` (64) round it, which a `GameState` always has loaded — keeping heaps with a side the unit may stand on that `navigation().may_reach` says it can get to and its memory does not hold out of reach; min by (manhattan **from the bin while in the district**, from where it stands out in the wasteland; cell). No route, no allocation, once per trip decision. From the bin because the warehouse is built nearest the scrap: measured from home, a collector chose heaps on the far side of the district, two hours' walk round by a gate | `brain/goals/collect.rs` |
 | salvage for work | `Salvage { heap, seconds, for_work }`: `Task::salvage` (an order, `SalvageGoal`) or `Task::salvage_for_work` (the job). `for_work` reports `Event::Worked` for the piece on finishing **and for the part done when interrupted**; an order does neither | `brain/tasks/salvage.rs` |
@@ -283,6 +287,35 @@ tended); `map::district::farm` (one farm of 8 bins on the edge, nearest the soil
 QA `qa/farmer.json`: a meadow site with a grain bin, the job menu (`Mon-Sat`), ten crops by
 Monday 14:00, the crop panel, Saturday in ear at 100%, Monday 30 in the bin and the statistics.
 
+## The power plant
+
+The district's power comes from its **power plant** (`map/district/power_plant.rs`, a lot building
+on the edge: two `"generator"`s, the power sources, and one `"control panel"` between them;
+`electrician`, `map-generator`). The panel is the power plant worker's workplace.
+
+| Layer | What | File |
+| --- | --- | --- |
+| kind | `JobKind::PowerPlantWorker` (`"power plant worker"`, number 7): workplace `FeatureKind::ControlPanel` (`"control panel"`, beside, **no power**), goal `GoalId::Work`, `COMMUTE`, `WATCHES` (three to a panel), uniform `"uniform power plant worker"` (a teal boiler suit, a yellow bolt patch), hired last | `job.rs`, `feature.rs` |
+| the work | `WorkGoal` as for a guard: beside its own panel, a `Work` stretch with `place: ControlPanel` — `"stand by"`, logged `"stood by an hour at the control panel at x, y"`. **It does nothing else yet**: the plant powers the district whether anybody is there or not | `brain/goals/work.rs`, `brain/tasks/work.rs` |
+| menu | `now`: `on duty` at the panel, `on the way to the power plant` | `job.rs` |
+| on screen | the panel's screens light while somebody stands by it (`used` strip, `game::props`); the generators' fans turn | `editor/props.rs`, `tools/power_plant_art.py` |
+
+**Making them do something** (feeding the generators fuel, the plant going dark when nobody
+keeps it): a goal of its own instead of `GoalId::Work`, and the supply would have to follow the
+simulation — a generator switched like a box (`GameState::switch_box`'s path), never a map edit.
+
+Tests: `job.rs` `a_power_plant_worker_keeps_the_control_panel_round_the_clock_and_is_hired_last`;
+`tasks/work.rs` `every_job_stood_at_has_a_stretch_of_its_own` (every `GoalId::Work` job's
+workplace in `STRETCHES`, no name twice), `standing_by_at_a_control_panel_needs_no_power`;
+`goals/work.rs` `a_power_plant_worker_on_the_day_watch_stands_by_at_its_control_panel`;
+`sim::tests::everybody_in_a_district_moves_into_a_bed_of_their_own_house` (the panel's three
+watches 0, 8 and 16, inside the plant, hired last); `map::district::power_plant` tests. QA
+`qa/power_plant.json`: one room powered by a generator (its lamp `expect_connected` 1 of 1, no
+transformer — seen failing with the power rows upside down, a lamp with no power), three
+arrivals hired to the panel in watch order, the job menu (`Mon-Sun`, `on duty`), `stand by at
+the control panel` on the brains menu, the uniform on the clothing menu, an hour stood by, and
+the evening watch on at 16:30 with the day watch `done for the day`.
+
 ## Saving (`savegame` skill)
 
 - `pb::Brain.job` (tag 14, `pb::Job`: `JobKind` enum — `OfficeWorker = 0`,
@@ -302,7 +335,7 @@ Monday 14:00, the crop panel, Saturday in ear at 100%, Monday 30 in the bin and 
   is, is the map's. Empty in an older save, which is a map with none.
 - `WorkRoutine::on_shift` is saved as the routine's `committed`; `WorkGoal`, `CollectGoal`,
   `BuryGoal`, `SmeltGoal`, `HaulGoal` and `FarmGoal` are a `pb::Executor::Seek`; the tasks save
-  by name (`TimedTask`: `"work"`, `"keep watch"`, `"deposit"`, `"salvage for work"`,
+  by name (`TimedTask`: `"work"`, `"keep watch"`, `"stand by"` (the `Work` task's `STRETCHES`), `"deposit"`, `"salvage for work"`,
   `"withdraw"`, `"smelt"`, `"sow"`, `"tend"`, `"harvest"`...), and still read the tags the builds before wrote them under. Goals and jobs are
   saved as their catalogue numbers (`GoalId::Collect` = 9, `JobKind::Guard` = 2...).
 - `ReadyRoutine` saves `ready` as its `committed` and its list as `pb::RoutineState.pending`
@@ -432,8 +465,10 @@ tiring, bins not restored).
 2. **A workplace** that is a new prop: a `FeatureKind` row (`sim/feature.rs`) and the prop's map
    rows (passability, power, art); in the district, a lot building with that many of them
    (`map-generator`).
-3. If the work is not "stand beside a prop for an hour", **a goal of its own** (a `GoalId` row,
-   its file) and tasks (`tasks!`); what it does to the body is an `Event` the processes decide on.
+3. If the work is "stand beside a prop for an hour", `GoalId::Work` and **a row in
+   `STRETCHES`** (`brain/tasks/work.rs`: the workplace, what a stretch there is and was — a test
+   fails without it). If not, **a goal of its own** (a `GoalId` row, its file) and tasks
+   (`tasks!`); what it does to the body is an `Event` the processes decide on.
 4. **The uniform's PNG** (`tools/human_art.py`).
 
 Hiring, `WorkRoutine`, the save, the uniform, the job menu and the statistics menu need nothing.

@@ -1,6 +1,7 @@
 //! [`Work`]: sit at one's own desk and work it for a while — or stand at
-//! one's own guard post and keep watch, which is the same task
-//! ([`Work::watch`]).
+//! one's own guard post and keep watch, or by the power plant's control
+//! panel, which is the same task at another workplace ([`Work::place`],
+//! [`STRETCHES`]).
 //!
 //! [`UseComputer`](super::UseComputer)'s shape — a prop used from beside it,
 //! time passing and nothing changing hands — with what the body gets out of it
@@ -32,20 +33,32 @@ pub struct Work {
     /// How long this stretch lasts, in **watched** seconds. The body is told
     /// it in world seconds ([`TIME_SCALE`] more).
     pub seconds: f32,
-    /// A watch at a guard post rather than a stretch at a computer: `desk`
-    /// is the post, which needs no power. The same work otherwise, as
-    /// tiring and as little fun.
-    pub watch: bool,
+    /// What the workplace is, and has to stay for the stretch to go on: a
+    /// computer (`Workstation`, which needs power), a guard post, a control
+    /// panel — one of [`STRETCHES`]. The same work at each, as tiring and as
+    /// little fun.
+    pub place: FeatureKind,
 }
 
+/// Every workplace a job is worked at by standing at it — its job's goal is
+/// `WorkGoal` — and how a stretch there reads: what it is, which is also the
+/// name it is saved under (`"keep watch"`), and what it was, for the log
+/// (`"kept watch"`). A new job of the kind needs its workplace here; a test
+/// holds every such job to it.
+pub const STRETCHES: [(FeatureKind, &str, &str); 3] = [
+    (FeatureKind::Workstation, "work", "worked"),
+    (FeatureKind::GuardPost, "keep watch", "kept watch"),
+    (FeatureKind::ControlPanel, "stand by", "stood by"),
+];
+
 impl Work {
-    /// What the workplace has to be for the stretch to go on.
-    const fn place(&self) -> FeatureKind {
-        if self.watch {
-            FeatureKind::GuardPost
-        } else {
-            FeatureKind::Workstation
-        }
+    /// What a stretch is ("keep watch") and was ("kept watch") at this
+    /// workplace ([`STRETCHES`]).
+    pub fn words(&self) -> (&'static str, &'static str) {
+        STRETCHES
+            .iter()
+            .find(|(place, _, _)| *place == self.place)
+            .map_or(("work", "worked"), |&(_, doing, done)| (doing, done))
     }
 }
 
@@ -61,7 +74,7 @@ impl TaskExecutor for Work {
         if ctx.here().manhattan_distance(self.desk) > 1 || ctx.biology.is_none() {
             return TaskResult::Failed;
         }
-        if !ctx.think.features.has(self.place(), self.desk) {
+        if !ctx.think.features.has(self.place, self.desk) {
             return TaskResult::Failed;
         }
 
@@ -96,43 +109,45 @@ impl TaskExecutor for Work {
     }
 
     fn describe(&self) -> String {
-        if self.watch {
-            format!("keep watch at the guard post at {}, {}", self.desk.x, self.desk.y)
-        } else {
-            format!("work at the computer at {}, {}", self.desk.x, self.desk.y)
-        }
+        format!("{} at the {} at {}, {}", self.words().0, self.place.prop(), self.desk.x, self.desk.y)
     }
 }
 
 impl Task {
     /// Work the desk in `desk`, from a cell beside it, for `seconds`.
     pub const fn work(desk: Point, seconds: f32) -> Task {
-        Task::Work(Work { desk, seconds, watch: false })
+        Task::work_at(FeatureKind::Workstation, desk, seconds)
     }
 
     /// Keep watch at the guard post in `post`, from a cell beside it, for
-    /// `seconds`: a guard's stretch, which is work ([`Work::watch`]).
+    /// `seconds`: a guard's stretch, which is work.
     pub const fn keep_watch(post: Point, seconds: f32) -> Task {
-        Task::Work(Work { desk: post, seconds, watch: true })
+        Task::work_at(FeatureKind::GuardPost, post, seconds)
+    }
+
+    /// A stretch at the workplace in `desk`, which is a `place` — one of
+    /// [`STRETCHES`] — from a cell beside it, for `seconds`.
+    pub const fn work_at(place: FeatureKind, desk: Point, seconds: f32) -> Task {
+        Task::Work(Work { desk, seconds, place })
     }
 }
 
-/// Saved as `work`, or `keep watch`: the desk or post and the seconds.
+/// Saved by what it is at its workplace ([`STRETCHES`]: `work`, `keep watch`,
+/// `stand by`): the workplace and the seconds.
 impl SavedTask for Work {
     fn save(&self) -> pb::TaskKind {
-        task::named(if self.watch { "keep watch" } else { "work" }, Some(self.desk), self.seconds)
+        task::named(self.words().0, Some(self.desk), self.seconds)
     }
 
     fn restore(saved: &pb::TaskKind) -> Option<Result<Work, Invalid>> {
-        let ((cell, seconds), watch) = match saved {
-            pb::TaskKind::Work(task) => ((task.cell, task.seconds), false),
-            pb::TaskKind::KeepWatch(task) => ((task.cell, task.seconds), true),
-            _ => match task::read_named(saved, "work") {
-                Some(found) => (found, false),
-                None => (task::read_named(saved, "keep watch")?, true),
-            },
+        let ((cell, seconds), place) = match saved {
+            pb::TaskKind::Work(task) => ((task.cell, task.seconds), FeatureKind::Workstation),
+            pb::TaskKind::KeepWatch(task) => ((task.cell, task.seconds), FeatureKind::GuardPost),
+            _ => STRETCHES
+                .iter()
+                .find_map(|&(place, doing, _)| Some((task::read_named(saved, doing)?, place)))?,
         };
-        Some(task::cell_and_seconds(cell, seconds, "work").map(|(desk, seconds)| Work { desk, seconds, watch }))
+        Some(task::cell_and_seconds(cell, seconds, "work").map(|(desk, seconds)| Work { desk, seconds, place }))
     }
 }
 
@@ -225,5 +240,44 @@ mod tests {
         assert_eq!(rig.action.interacting_with(), Some(DESK));
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         assert_eq!(rig.walk.body().center_position(), beside);
+    }
+
+    /// Every job worked by standing at its workplace — the work goal's — has
+    /// a stretch there of its own: one it is described and logged by, and a
+    /// name no other workplace's stretch is saved under.
+    #[test]
+    fn every_job_stood_at_has_a_stretch_of_its_own() {
+        use crate::sim::brain::GoalId;
+        use crate::sim::job::JobKind;
+        let stood_at = JobKind::ALL.into_iter().filter(|kind| kind.goal() == GoalId::Work);
+        for kind in stood_at {
+            assert!(
+                STRETCHES.iter().any(|&(place, _, _)| place == kind.workplace()),
+                "a {} has no stretch at its {}",
+                kind.name(),
+                kind.workplace_name()
+            );
+        }
+        for (i, (place, doing, _)) in STRETCHES.iter().enumerate() {
+            assert!(STRETCHES[..i].iter().all(|(other, said, _)| other != place && said != doing), "{doing} twice");
+        }
+        let panel = Task::work_at(FeatureKind::ControlPanel, DESK, 1.0);
+        assert_eq!(panel.describe(), "stand by at the control panel at 6, 6");
+        assert_eq!(Task::keep_watch(DESK, 1.0).describe(), "keep watch at the guard post at 6, 6");
+        assert_eq!(Task::work(DESK, 1.0).describe(), "work at the computer at 6, 6");
+    }
+
+    /// A control panel needs no power, as a guard post does not: a stretch
+    /// at one goes on in a room with no wiring at all.
+    #[test]
+    fn standing_by_at_a_control_panel_needs_no_power() {
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "control panel", DESK);
+        let mut rig = Rig::new(map, Point::new(5, 6));
+        let dead = crate::map::utilities::Supply::from_map(&rig.world.map);
+        rig.world.features = crate::sim::feature::Features::from_map(&rig.world.map, &dead);
+        let mut task = Task::work_at(FeatureKind::ControlPanel, DESK, 0.5);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
     }
 }

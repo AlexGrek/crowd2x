@@ -35,7 +35,10 @@ factory and the steel back to the warehouse's rack. Every worker wears its job's
 its shift is due. A farm on the edge nearest the wasteland's good soil (meadow) has eight
 farmers, nine to five every day but Sunday: each sows a field of ten crops of wheat, one to a
 plot, tends every crop once a day for quality, and six days and four growth stages later
-harvests it ripe and stores the wheat in its own grain bin. A crop is in the way like a heap of
+harvests it ripe and stores the wheat in its own grain bin. A power plant on the edge powers
+the whole district — its two generators are the only source of power — and its control panel
+is kept round the clock by three power plant workers on the guards' watches, who just stand
+by it for now. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
 the dead.
@@ -76,7 +79,7 @@ to `screenshots/`.
 | The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD, the statistics menu, crops drawn and the crop panel | `game-screen` |
 | The map data model, passability, catalogues, spawners, the file format | `map` |
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
-| Power: transformers, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
+| Power: transformers, the power plant's generators, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
 | Water: sewer, pipes, toilets that nobody uses | `plumber` |
 | Doors, locks, property and bed ownership, who may enter a house | `doors` (+ `brain-engineer`) |
 | The seeded district generator, its perimeter wall, gates and guard posts | `map-generator` |
@@ -85,7 +88,7 @@ to `screenshots/`.
 | **Adding a kind of thing**: a job, a building every district has, an item, a feature or store, a goal, a task, an effect, a new part of the world's state — the touch list | `add-content` (+ the owning skill) |
 | What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), the power plant's workers and control panel, hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
 | Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
@@ -169,6 +172,7 @@ tools/crematorium_art.py draws the crematorium the undertakers bring the dead to
 tools/tv_art.py         draws the TV, dark and showing a picture               [pixel-artist]
 tools/steel_factory_art.py draws the furnace, scrap hopper, steel pallet and rack [pixel-artist]
 tools/farm_art.py       draws the grain bin and the wheat at its four stages     [pixel-artist]
+tools/power_plant_art.py draws the generator and the control panel              [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

@@ -568,6 +568,7 @@ mod tests {
             Task::sow(at, 20.0),
             Task::tend(at, 21.0),
             Task::harvest(at, 22.0),
+            Task::work_at(crate::sim::feature::FeatureKind::ControlPanel, at, 23.0),
         ]
     }
 

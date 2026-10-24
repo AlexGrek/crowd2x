@@ -70,8 +70,8 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
   exceptions, used by entering, and `brain-engineer`'s `architecture.md` ("The brain") says how a cell can stay impassable
   here and still be walked into by exactly one unit.
 - **Power and water are derived, never authored** (`map/utilities.rs`, `Supply`), from
-  the two networks and the props standing on them. A `"transformer"` feeds the **power
-  line** in its own cell; a **distribution box** the line reaches feeds the **wiring**; a
+  the two networks and the props standing on them. A `"transformer"` (or a power plant's
+  `"generator"`) feeds the **power line** in its own cell; a **distribution box** the line reaches feeds the **wiring**; a
   lamp, fridge or computer is powered when live wiring runs under its own cell. A line
   straight into a fridge does not count, and neither does wiring no box feeds. A
   `"sewer"` drains the pipes in its cell, and a toilet with a live pipe under it works.
@@ -130,9 +130,9 @@ rule hand each resident its own. **Every building is roofed, walls included, and
 streets and yards are open sky**; a house and a shop get one `"ceiling lamp"` in the middle,
 the bank a grid of `"tube lamp"`s every `OFFICE_LAMP_SPACING` cells — laid out last, from the
 buildings, without drawing on the seed, so adding them changed no district. **Power and water
-are laid the same way, after that**: a transformer in the bottom-right corner, a sewer in the
-top-left, a power line and a sewer main down the middle of every street (broken where the bank
-stands across one), and for each building a box and a pipe entry just inside the wall nearest
+are laid the same way, after that**: the power plant's generators feed the line (no
+transformer), a sewer in a corner, a power line and a sewer main down the middle of every
+street (broken where the bank stands across one), and for each building a box and a pipe entry just inside the wall nearest
 a main, a straight run out to it, and wiring or pipes inside to everything that needs them.
 Last, street lamps along both sides of every street on a few long circuits, one controller
 each (`light_streets`). A
