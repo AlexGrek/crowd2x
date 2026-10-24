@@ -67,6 +67,9 @@ impl TaskExecutor for TakeItem {
                     // checked before the action started and every tick since.
                     let _ = inventory.set_hand(Some(self.item));
                 }
+                if fridge.is_some() {
+                    *ctx.effect = crate::sim::Effect::Buy { item: self.item };
+                }
                 TaskResult::Success
             }
             state => TaskResult::of(state),
@@ -137,6 +140,19 @@ mod tests {
         assert_eq!(rig.hand(), None, "not yet: the fridge is still being opened");
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         assert_eq!(rig.hand(), Some(ItemKind::Food));
+        assert_eq!(rig.effect, crate::sim::Effect::None, "a non-fridge does not charge");
+    }
+
+    #[test]
+    fn taking_from_a_fridge_charges_only_when_the_item_reaches_the_hand() {
+        let fridge = Point::new(5, 5);
+        let mut rig = rig_beside_a_fridge(fridge);
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 0.2);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert_eq!(rig.effect, crate::sim::Effect::None);
+        assert_eq!(rig.run(&mut task, 100), TaskResult::Success);
+        assert_eq!(rig.effect, crate::sim::Effect::Buy { item: ItemKind::Food });
     }
 
     /// Its box switched off on the way there: open or not, a fridge with no

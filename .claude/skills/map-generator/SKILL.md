@@ -323,3 +323,7 @@ three watches, and the palace's king last) and
   0): with needs on, 6-8 posts kept on Monday morning, a few after noon, **none from Tuesday**;
   with the guards' needs off every post is kept nearly round the clock for two days. Fixing it is the brain's (crowd-aware choice of fridge, toilet and
   computer, or residents keeping to their own house), or more public places to spread over.
+
+The palace also places one powered accountant computer four cells along the far
+wall from its throne, off the carpet. It draws no RNG. The accountant is hired
+last at this desk; palace and district supply tests require it to be powered.

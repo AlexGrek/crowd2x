@@ -121,6 +121,7 @@ impl World {
             }
         };
         let effect = entity.react(&self.ctx(), outcome);
+        self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         self.facilities.doors.advance(self.dt, &self.occupancy);

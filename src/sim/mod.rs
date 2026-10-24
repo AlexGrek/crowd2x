@@ -138,6 +138,7 @@ pub mod clock;
 pub mod clothing;
 pub mod corpses;
 pub mod door;
+pub mod economy;
 pub mod effect;
 pub mod electrical;
 pub mod entities;
@@ -335,6 +336,11 @@ pub enum Command {
     /// Take a unit's job away and give its workplace back
     /// ([`GameState::dismiss`]).
     Dismiss(Uid),
+    /// Set one of the economy's numbers ([`economy::Tariff`]) to `value`:
+    /// cents for money, percent for the tax, minutes for an account — the
+    /// player at the economy menu. Kept in bounds and logged
+    /// ([`GameState::set_tariff`]).
+    SetTariff { tariff: economy::Tariff, value: i64 },
 }
 
 /// One frame's worth of input to the simulation.
@@ -416,6 +422,11 @@ impl Input {
 
     pub fn dismiss(&mut self, uid: Uid) -> &mut Input {
         self.commands.push(Command::Dismiss(uid));
+        self
+    }
+
+    pub fn set_tariff(&mut self, tariff: economy::Tariff, value: i64) -> &mut Input {
+        self.commands.push(Command::SetTariff { tariff, value });
         self
     }
 
@@ -884,6 +895,26 @@ impl GameState {
         &self.facilities.fields
     }
 
+    /// The district's money. See [`economy`].
+    pub fn economy(&self) -> &economy::Economy {
+        &self.facilities.economy
+    }
+
+    /// Run the economy by `tariffs` from now on: what a new game reads out of
+    /// `economy.yaml` before anybody arrives, since an arrival's grant and
+    /// cash are the tariffs' of the moment.
+    pub fn set_tariffs(&mut self, tariffs: economy::Tariffs) {
+        self.facilities.economy.set_tariffs(tariffs);
+    }
+
+    /// Set one tariff, kept in bounds, and say so ([`Command::SetTariff`]).
+    /// What it was set to.
+    pub fn set_tariff(&mut self, tariff: economy::Tariff, value: i64) -> i64 {
+        let set = self.facilities.economy.set_tariff(tariff, value);
+        self.log.important(self.facilities.economy.tariffs().said(tariff));
+        set
+    }
+
     /// The dead counted so far. See [`statistics`].
     pub fn tally(&self) -> Tally {
         self.facilities.tally
@@ -990,11 +1021,15 @@ impl GameState {
     /// somewhere else would make a test that spawns at a known cell lie.
     pub fn spawn(&mut self, kind: EntityType, at: Point) -> Uid {
         let uid = self.mint_uid(kind);
-        let entity = {
+        let (entity, cash) = {
             // Split off a per-entity stream so the shape of an entity does not
             // depend on how many were made before it.
             let mut rng = SmallRng::seed_from_u64(self.rng.random());
-            kinds::build(uid, kind, at, &mut rng)
+            let entity = kinds::build(uid, kind, at, &mut rng);
+            // The stream's last draw, so every roll before it is the one it
+            // was before there was money.
+            let cash = (kind == EntityType::Human).then(|| self.facilities.economy.tariffs().roll_cash(&mut rng));
+            (entity, cash)
         };
         let slot = self.entities.insert(entity);
 
@@ -1017,6 +1052,11 @@ impl GameState {
         self.census.file(slot, at);
 
         self.log.unit(uid, format!("spawned {uid} at {},{}", at.x, at.y));
+        if let Some(cash) = cash {
+            self.facilities.economy.roll(self.clock().day());
+            self.facilities.economy.open(uid, cash);
+            self.log.unit(uid, format!("{uid} arrived with {cash}"));
+        }
         self.give_a_bed(uid, at);
         // After the bed: the key that comes with it says which desks are
         // somewhere it may go.
@@ -1193,6 +1233,8 @@ impl GameState {
                 // desk.
                 self.facilities.homes.release(uid);
                 self.facilities.workplaces.release(uid);
+                // What it had, or owed, goes to the budget.
+                let _ = self.facilities.economy.close(uid);
                 self.log.unit(uid, format!("despawned {uid}"));
                 true
             }
@@ -1415,6 +1457,7 @@ fn bury(state: &mut GameState) {
 /// buffer sized to the arena as it goes, which is what lets
 /// [`process_pass`] index it without a bounds concern and without touching it.
 pub fn spawn_pass(state: &mut GameState, input: &Input) {
+    state.facilities.economy.roll(state.clock().day());
     if state.facilities.electrical.supply_dirty {
         state.refresh_supply();
     }
@@ -1466,6 +1509,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::Dismiss(uid) => {
                 state.dismiss(*uid);
+            }
+            Command::SetTariff { tariff, value } => {
+                state.set_tariff(*tariff, *value);
             }
         }
     }
@@ -1557,7 +1603,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // same tick has to settle the same way on every run. A fridge's
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
-    world_step(&mut table, map, log, facilities, occupancy, effects, dt);
+    world_step(&mut table, map, log, facilities, occupancy, effects, dt, clock);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1882,6 +1928,7 @@ fn react_for(
 /// a pack, a packful into a store, a body into a hand, all of them writes into
 /// the world and the unit together, which is why this step — the one that
 /// settles races between units, in slot order — is where they happen.
+#[allow(clippy::too_many_arguments)]
 fn world_step(
     table: &mut FrozenEntities<'_>,
     map: &mut Map,
@@ -1890,7 +1937,10 @@ fn world_step(
     occupancy: &mut Occupancy,
     effects: &mut [Effect],
     dt: f32,
+    clock: Clock,
 ) {
+    // A new day's book, before anything is paid or bought on it.
+    facilities.economy.roll(clock.day());
     // Who runs a playzone is said afresh every tick (`Effect::Operate`).
     facilities.playzones.begin_tick();
     for (slot, effect) in effects.iter_mut().enumerate() {
@@ -3764,6 +3814,7 @@ mod tests {
 
         state.effects[first_slot] = Effect::Fridge { at: fridge, open: true };
         state.effects[second_slot] = Effect::Fridge { at: fridge, open: false };
+        let clock = state.clock();
         world_step(
             &mut state.entities.freeze(),
             &mut state.map,
@@ -3772,6 +3823,7 @@ mod tests {
             &mut state.occupancy,
             &mut state.effects,
             0.0,
+            clock,
         );
 
         assert!(!state.fridges().is_open(fridge), "the later slot's request should have won");
@@ -3825,11 +3877,13 @@ mod tests {
             // The playzone's one computer is run by four: two shifts of two.
             let administrators = crate::map::district::playzone::COMPUTERS * job::PLAYZONE_SHIFTS.len();
             assert_eq!(administrators, 4);
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators;
+            // The accountant's one computer, beside the throne.
+            let accountants = 1;
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
-            let (mut smelting, mut hauling, mut farming, mut reigning) = (0, 0, 0, 0);
+            let (mut smelting, mut hauling, mut farming, mut reigning, mut accounting) = (0, 0, 0, 0, 0);
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             let mut panels: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
@@ -3893,6 +3947,10 @@ mod tests {
                         reigning += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: a throne outside the palace");
                     }
+                    JobKind::Accountant => {
+                        accounting += 1;
+                        assert!(district.palace.contains(job.workplace), "seed {seed}: the accountant outside the palace");
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
@@ -3900,6 +3958,9 @@ mod tests {
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
             assert_eq!(reigning, kings, "seed {seed}: the palace's");
+            assert_eq!(accounting, accountants, "seed {seed}: the palace's accountant");
+            let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
+            assert_eq!(last, Some(JobKind::Accountant), "seed {seed}: the accountant hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -4947,3 +5008,6 @@ mod steel_probe {
         }
     }
 }
+
+#[cfg(test)]
+mod economy_tests;

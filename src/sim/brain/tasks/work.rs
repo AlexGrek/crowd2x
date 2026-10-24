@@ -44,8 +44,9 @@ pub struct Work {
 /// name it is saved under (`"keep watch"`), and what it was, for the log
 /// (`"kept watch"`). A new job of the kind needs its workplace here; a test
 /// holds every such job to it.
-pub const STRETCHES: [(FeatureKind, &str, &str); 5] = [
+pub const STRETCHES: [(FeatureKind, &str, &str); 6] = [
     (FeatureKind::Workstation, "work", "worked"),
+    (FeatureKind::AccountantComputer, "keep the books", "kept the books"),
     (FeatureKind::GuardPost, "keep watch", "kept watch"),
     (FeatureKind::ControlPanel, "stand by", "stood by"),
     (FeatureKind::Throne, "hold court", "held court"),

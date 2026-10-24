@@ -246,3 +246,11 @@ before leaving still reports).
 a fresh world from the map's spawners; `look_where_it_was` (OnEnter, after
 `aim_camera_at_map`) puts back the saved camera, zoom and speed from `LoadedView`. The
 format, the store and the guarantee: `savegame` skill.
+
+## Economy controls
+
+The economy button beside statistics opens game/economy.rs, an opaque scoped modal.
+Select a tariff, lower/raise, restore YAML defaults, or close (escape also closes).
+Values read Sim live; writes queue SetTariff. Statistics includes budget, daily
+flows, cash, debt and outstanding shifts/care days, with jobs in a second column.
+The job panel adds live cash, gross wage and owed counts. See ../economy/SKILL.md.

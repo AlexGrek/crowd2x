@@ -44,7 +44,7 @@ struct CloseStatistics;
 
 /// The menu's text, rewritten as the world changes.
 #[derive(Component)]
-struct StatisticsText;
+struct StatisticsText(bool);
 
 pub struct StatisticsPlugin;
 
@@ -109,7 +109,10 @@ fn open(
             DespawnOnExit(AppState::Game),
             children![
                 label("statistics", FONT_TITLE, TEXT),
-                (StatisticsText, label(String::new(), FONT_BODY, TEXT)),
+                (Node { column_gap: px(6), ..default() }, children![
+                    (StatisticsText(false), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
+                    (StatisticsText(true), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
+                ]),
             ],
         ))
         .id();
@@ -147,19 +150,28 @@ pub(super) fn close_statistics(commands: &mut Commands, menu: &mut StatisticsMen
 }
 
 /// Keep the menu saying what is true, while it is open.
-fn update_text(menu: Res<StatisticsMenu>, sim: Option<Res<Sim>>, mut texts: Query<&mut Text, With<StatisticsText>>) {
+fn update_text(menu: Res<StatisticsMenu>, sim: Option<Res<Sim>>, mut texts: Query<(&StatisticsText, &mut Text)>) {
     if menu.0.is_none() {
         return;
     }
     let Some(sim) = sim else { return };
     let wanted = describe(&GameState::statistics(&sim.0));
-    for mut text in &mut texts {
+    let (left, jobs) = columns(&wanted);
+    for (column, mut text) in &mut texts {
+        let wanted = if column.0 { &jobs } else { &left };
         // Compared before writing: the same string written again still costs
         // a re-layout.
-        if **text != wanted {
+        if **text != *wanted {
             **text = wanted.clone();
         }
     }
+}
+
+/// Keep fourteen job rows beside the overview so the menu fits a 180px canvas.
+fn columns(text: &str) -> (String, String) {
+    let Some((overview, rest)) = text.split_once("\njobs") else { return (text.to_string(), String::new()); };
+    let Some((jobs, accounts)) = rest.split_once("\ndead") else { return (text.to_string(), String::new()); };
+    (format!("{overview}\ndead{accounts}"), format!("jobs{jobs}"))
 }
 
 /// The menu's text: four sections, a line or a few each, in columns.
@@ -192,6 +204,17 @@ pub fn describe(stats: &Statistics) -> String {
         "dead       {:>4}   lying {}  carried {}  cremated {}",
         stats.died, stats.lying, stats.carried, stats.cremated
     ));
+    let economy = &stats.economy;
+    out.push_str(&format!("\n\nbudget     {}   tax {}%\n", economy.budget, economy.tax_percent));
+    if let Some(book) = economy.today {
+        out.push_str(&format!("today      {}   wages {}\n", book.balance().signed(), book.wages));
+        out.push_str(&format!("           care {}  taxes {}\n", book.care, book.taxes.signed()));
+        out.push_str(&format!("           sales {}  estates {}\n", book.sales.signed(), book.estates.signed()));
+    }
+    out.push_str(&format!("cash       {}   {} held\n", economy.accounts, economy.cash));
+    out.push_str(&format!("           average {}\n", economy.average));
+    out.push_str(&format!("           {} in debt for {}\n", economy.in_debt, economy.debt));
+    out.push_str(&format!("owed       {} shifts  {} care days", economy.shifts, economy.care_days));
     out
 }
 
@@ -234,6 +257,7 @@ mod tests {
             lying: 1,
             carried: 1,
             cremated: 1,
+            economy: Default::default(),
         };
         let text = describe(&stats);
         assert!(text.contains("alive        13   humans 12  dogs 1"), "{text}");
@@ -258,6 +282,7 @@ mod tests {
             lying: 0,
             carried: 0,
             cremated: 0,
+            economy: Default::default(),
         };
         let text = describe(&stats);
         assert!(text.contains("warehouse         none") && text.contains("factory           none"), "{text}");

@@ -65,6 +65,7 @@ pub mod saving;
 pub mod selection;
 pub mod speed;
 pub mod statistics;
+pub mod economy;
 pub mod unitpanel;
 pub mod boxpanel;
 pub mod electrical;
@@ -122,6 +123,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
+            .add_plugins(economy::EconomyPlugin)
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),
@@ -340,6 +342,7 @@ fn leave(
     gamepads: Query<&Gamepad>,
     mut menu: ResMut<hud::SpawnMenu>,
     mut statistics: ResMut<statistics::StatisticsMenu>,
+    mut economy: ResMut<economy::EconomyMenu>,
     mut scope: ResMut<Scope>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -352,6 +355,8 @@ fn leave(
     }
     if menu.0.is_some() {
         hud::close_spawn_menu(&mut commands, &mut menu, &mut scope);
+    } else if economy.root.is_some() {
+        economy::close_economy(&mut commands, &mut economy, &mut scope);
     } else if statistics.0.is_some() {
         statistics::close_statistics(&mut commands, &mut statistics, &mut scope);
     } else {

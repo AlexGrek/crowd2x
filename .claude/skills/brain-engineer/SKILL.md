@@ -326,3 +326,10 @@ and the top executor's `debug_fields`.
 | `result` flickers `in progress`, no task | `process` returns `Working` with nothing queued, every tick |
 | Frame rate drops only on some maps | a failure path returns `Working` instead of `Blocked`, re-routing every tick; check `ROUTES_ASKED` |
 | An effect happens twice or never | it is applied in the goal instead of the task, or lost on handover (use `deprioritized`) |
+
+## Timesheet (steps 4b and 6c)
+
+Brain records shifts after goal selection, including the commute, and unemployed
+days as the day turns. After tasks and playzone Operate, a free effect slot emits
+Record and clears pending entries; an occupied slot keeps them for a later tick.
+It is saved at Brain tag 15. See ../economy/SKILL.md for payroll and accounting.

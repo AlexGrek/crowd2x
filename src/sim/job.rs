@@ -51,6 +51,13 @@
 //!   decisions a king makes are to come. [`COURT_HOURS`], every day but
 //!   Sunday. A king carries itself as one ([`Bearing`], [`ROYAL`]): its
 //!   robes and crown always on, on duty or not, and a stately walk.
+//! * the **accountant**: the computer beside the palace's throne, office
+//!   hours — the district's books closed a day at a time, and how the budget
+//!   stands said in the log ([`Paperwork::Books`]).
+//!
+//! **Every job is paid** (`sim::economy`): a wage a shift, by its tier in
+//! `economy.yaml`, paid by the office workers, whose paperwork is the payroll
+//! ([`Paperwork::Payroll`]).
 //!
 //! **A worker sleeps by its shift** ([`Shift::is_bedtime`]): the eight hours
 //! that end [`UP_BEFORE_SHIFT`] before it starts. For office hours that is
@@ -158,6 +165,27 @@ pub struct JobDef {
     /// How somebody in it carries themselves, on duty or off: [`WORKER`], or
     /// the king's [`ROYAL`].
     pub bearing: Bearing,
+    /// The paperwork a job stood at a computer does between hours of plain
+    /// work (`WorkGoal`): the office's payroll, the accountant's books.
+    /// `None` for every other job.
+    pub paperwork: Option<Paperwork>,
+    /// Paid for every shift it is employed through, whether there was
+    /// anything to do or not (`brain::timesheet`): an electrician is on call,
+    /// and goes out only when a box fails. Every other job is paid for the
+    /// shifts it was on duty for.
+    pub on_call: bool,
+}
+
+/// What a job stood at a computer does at it when there is something to do
+/// ([`JobDef::paperwork`]), in place of an hour's plain work.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Paperwork {
+    /// Pay whoever is owed, an account at a time (`Task::payroll`), while
+    /// anybody is ([`super::economy::Economy::owing`]).
+    Payroll,
+    /// Close the books for a day gone by (`Task::close_books`), while one is
+    /// unclosed ([`super::economy::Economy::unclosed_day`]).
+    Books,
 }
 
 catalogue! {
@@ -165,8 +193,10 @@ catalogue! {
     /// arrival** (`GameState::give_a_job`): the bank's desks first, then the
     /// bins, then the gates, then the crematoria, then the steel factory's
     /// furnaces and hoppers, then the farm's grain bins, then the power
-    /// plant's control panel, then the palace's throne, then the electrician crew's box. A new job goes on the
-    /// end, and so is hired last.
+    /// plant's control panel, then the palace's throne, then the electrician
+    /// crew's box, the food factory, the playzone and the accountant's
+    /// computer in the palace. A new job goes on the end, and so is hired
+    /// last — and needs its wage in `economy.yaml`.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum JobKind: JobDef {
         /// Sits at a computer and works it. Tiring, and no fun.
@@ -178,9 +208,11 @@ catalogue! {
             commute: COMMUTE,
             shifts: &[OFFICE_HOURS],
             uniform: "uniform office worker",
-            now: |at_work, _| if at_work { "working" } else { "on the way to work" },
+            now: |at_work, _| if at_work { "doing the payroll" } else { "on the way to work" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: Some(Paperwork::Payroll),
+            on_call: false,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -196,6 +228,8 @@ catalogue! {
             now: |at_work, _| if at_work { "storing scrap" } else { "collecting scrap" },
             goes_out_for: Some(ItemKind::Scrap),
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -212,6 +246,8 @@ catalogue! {
             now: |at_work, _| if at_work { "on watch" } else { "on the way to the gate" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -226,6 +262,8 @@ catalogue! {
             now: |at_work, _| if at_work { "cremating" } else { "seeing to the dead" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -241,6 +279,8 @@ catalogue! {
             now: |at_work, _| if at_work { "smelting steel" } else { "fetching scrap, storing steel" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -264,6 +304,8 @@ catalogue! {
             },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -280,6 +322,8 @@ catalogue! {
             now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
             goes_out_for: Some(ItemKind::Wheat),
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Stands by at the power plant's control panel for one of the three
         /// [`WATCHES`] of the day, an hour at a time like a guard at a post
@@ -296,6 +340,8 @@ catalogue! {
             now: |at_work, _| if at_work { "on duty" } else { "on the way to the power plant" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Holds court at the throne in the district's palace, an hour at a
         /// time like a guard at a post (`WorkGoal`), every day but Sunday —
@@ -313,6 +359,8 @@ catalogue! {
             now: |at_work, _| if at_work { "holding court" } else { "on the way to the palace" },
             goes_out_for: None,
             bearing: ROYAL,
+            paperwork: None,
+            on_call: false,
         },
         /// Repairs failed boxes across the map, one worker per watch at
         /// the public service box indexed by Features.
@@ -327,6 +375,8 @@ catalogue! {
             now: |_, _| "checking for damaged boxes",
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: true,
         },
         /// Makes meals from wheat at the factory's powered cooker.
         FoodFactoryWorker = 10 => JobDef {
@@ -340,6 +390,8 @@ catalogue! {
             now: |at_work, _| if at_work { "making meals" } else { "fetching wheat, storing meals" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Brings wheat from the farm and takes meals to the warehouse.
         FoodCourier = 11 => JobDef {
@@ -361,6 +413,8 @@ catalogue! {
             },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
         },
         /// Runs the playzone from its central computer, one of four: a day shift
         /// and an evening shift, each kept by two administrators who take
@@ -378,6 +432,27 @@ catalogue! {
             now: |at_work, _| if at_work { "running the playzone" } else { "on the way to the playzone" },
             goes_out_for: None,
             bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+        },
+        /// Keeps the district's books at the computer beside the palace's
+        /// throne, office hours: closes them a day at a time, saying how the
+        /// day, the week and the budget stand ([`Paperwork::Books`],
+        /// `Task::close_books`), and works an hour at a time between. One
+        /// computer, so one accountant, hired last.
+        Accountant = 13 => JobDef {
+            name: "accountant",
+            article: "the accountant",
+            workplace: FeatureKind::AccountantComputer,
+            goal: GoalId::Work,
+            commute: GUARD_COMMUTE,
+            shifts: &[OFFICE_HOURS],
+            uniform: "uniform accountant",
+            now: |at_work, _| if at_work { "keeping the books" } else { "on the way to the palace" },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: Some(Paperwork::Books),
+            on_call: false,
         },
     }
 }
@@ -442,6 +517,18 @@ impl JobKind {
     /// How somebody in this job carries themselves ([`JobDef::bearing`]).
     pub const fn bearing(self) -> Bearing {
         self.def().bearing
+    }
+
+    /// The paperwork done at its workplace when there is some
+    /// ([`JobDef::paperwork`]).
+    pub const fn paperwork(self) -> Option<Paperwork> {
+        self.def().paperwork
+    }
+
+    /// Whether it is paid for every shift it is employed through
+    /// ([`JobDef::on_call`]): the electrician's.
+    pub const fn is_on_call(self) -> bool {
+        self.def().on_call
     }
 }
 
@@ -917,7 +1004,8 @@ mod tests {
                 JobKind::Electrician,
                 JobKind::FoodFactoryWorker,
                 JobKind::FoodCourier,
-                JobKind::PlayzoneAdministrator
+                JobKind::PlayzoneAdministrator,
+                JobKind::Accountant
             ],
             "the office first, new professions last"
         );
@@ -1051,6 +1139,28 @@ mod tests {
         assert_eq!(Job::restore(&job.save()), Ok(job));
     }
 
+    /// The accountant: the computer in the palace, office hours, the books
+    /// its paperwork, hired last; the office's paperwork the payroll; and the
+    /// electrician the one job paid on call.
+    #[test]
+    fn the_accountant_keeps_the_books_in_the_palace_and_is_hired_last() {
+        let kind = JobKind::Accountant;
+        assert_eq!((kind.name(), kind.with_article()), ("accountant", "the accountant"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::AccountantComputer, "accountant computer"));
+        assert_eq!(kind.goal(), GoalId::Work);
+        assert_eq!(kind.shifts(), [OFFICE_HOURS]);
+        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!((kind.now(true, None), kind.now(false, None)), ("keeping the books", "on the way to the palace"));
+        assert_eq!(kind.uniform().name(), "uniform accountant");
+        assert_eq!(kind.paperwork(), Some(Paperwork::Books));
+        assert_eq!(JobKind::OfficeWorker.paperwork(), Some(Paperwork::Payroll));
+        assert_eq!(JobKind::OfficeWorker.now(true, None), "doing the payroll");
+        let others = JobKind::ALL.into_iter().filter(|&job| job != kind && job != JobKind::OfficeWorker);
+        assert!(others.clone().all(|job| job.paperwork().is_none()));
+        let on_call: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_call()).collect();
+        assert_eq!(on_call, [JobKind::Electrician]);
+    }
+
     /// The king: the palace's throne, held court at like a post, ten to four
     /// every day but Sunday, hired last, one to a throne; robes and crown
     /// always on, and a stately walk — and nobody else carries themselves so.
@@ -1095,7 +1205,7 @@ mod tests {
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a desk");
         assert_eq!(kind.shifts(), PLAYZONE_SHIFTS);
         assert_eq!(kind.shifts().len(), 4, "four to a computer");
-        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!(JobKind::ALL[12], kind, "hired before the accountant");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("running the playzone", "on the way to the playzone"));
         assert_eq!(kind.uniform().name(), "uniform playzone administrator");
 

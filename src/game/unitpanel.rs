@@ -485,7 +485,7 @@ fn menu_contents(
         Menu::Job => {
             parent.spawn((
                 Readout::Job,
-                label(job_block(entity, sim.0.clock()), FONT_BODY, TEXT),
+                label(job_and_cash(&sim, entity), FONT_BODY, TEXT),
             ));
             // Only for a kind that can work: a dog has no job to lose and
             // nobody would give it one.
@@ -656,7 +656,7 @@ fn update_readouts(
             Readout::Items => items_block(entity),
             Readout::Talents => talents_block(entity),
             Readout::Freeze => freeze_label(entity).to_string(),
-            Readout::Job => job_block(entity, sim.0.clock()),
+            Readout::Job => job_and_cash(&sim, entity),
             Readout::Employ => employ_label(entity).to_string(),
             Readout::Title => title(entity),
         };
@@ -728,6 +728,19 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// gate, seeing to the dead — [`JobKind::now`](crate::sim::JobKind::now)),
 /// getting ready for a trip out (`getting ready: eat`), away from it for
 /// something more pressing, or off.
+fn job_and_cash(sim: &Sim, entity: &dyn GameEntity) -> String {
+    let mut text = job_block(entity, sim.0.clock());
+    let economy = sim.0.economy();
+    if let Some(account) = economy.account(entity.uid()) {
+        text.push_str(&format!("\ncash    {}", account.cash));
+        if let Some(job) = entity.job() {
+            text.push_str(&format!("\nwage    {} a shift", economy.tariffs().wage(job.kind)));
+        }
+        text.push_str(&format!("\nowed    {} shifts, {} care days", account.shifts, account.care_days));
+    }
+    text
+}
+
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();

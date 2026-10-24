@@ -1,0 +1,586 @@
+{
+  "name": "wages, care, accounts and live economy controls",
+  "state": "game",
+  "open": "district office",
+  "timeout": 180,
+  "given": {
+    "maps": [
+      {
+        "name": "district office",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 18,
+            "height": 12
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B-------------....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "..................",
+            "..................",
+            ".................."
+          ],
+          "objects": {
+            "props": [
+              { "at": { "x": 24, "y": 24 }, "kind": "transformer" },
+              {
+                "at": {
+                  "x": 168,
+                  "y": 408
+                },
+                "kind": "computer"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 408
+                },
+                "kind": "guard post"
+              },
+              {
+                "at": {
+                  "x": 648,
+                  "y": 408
+                },
+                "kind": "accountant computer"
+              },
+              {
+                "at": {
+                  "x": 648,
+                  "y": 168
+                },
+                "kind": "fridge"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "arrived with"
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 3,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 4,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 5,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 3
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 6,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 4
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 7,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 5
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "cash"
+    },
+    {
+      "expect_text": "owed"
+    },
+    {
+      "press": "economy"
+    },
+    {
+      "expect_text": "$60.00 a shift"
+    },
+    {
+      "press": "food"
+    },
+    {
+      "press": "raise"
+    },
+    {
+      "expect_text": "food: $1.50"
+    },
+    {
+      "expect_log": "the price of food is now $1.50"
+    },
+    {
+      "shot": "economy settings"
+    },
+    {
+      "press": "raise"
+    },
+    {
+      "expect_text": "food: $2.00"
+    },
+    {
+      "press": "defaults"
+    },
+    {
+      "expect_text": "food: $1.00"
+    },
+    {
+      "press": "raise"
+    },
+    {
+      "expect_text": "food: $1.50"
+    },
+    {
+      "press": "lower"
+    },
+    {
+      "expect_text": "food: $1.00"
+    },
+    {
+      "press": "tax"
+    },
+    {
+      "press": "raise"
+    },
+    {
+      "expect_text": "tax: 21%"
+    },
+    {
+      "press": "lower"
+    },
+    {
+      "expect_text": "tax: 20%"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "game"
+    },
+    {
+      "tick": 52000
+    },
+    {
+      "expect_visible_log": "closed the books for day 1"
+    },
+    {
+      "press": "statistics"
+    },
+    {
+      "expect_text": "budget"
+    },
+    {
+      "expect_text": "$20.00"
+    },
+    {
+      "shot": "economy statistics"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "select": 4
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "accountant"
+    },
+    {
+      "expect_text": "keeping the books"
+    },
+    {
+      "expect_text": "$60.00 a shift"
+    },
+    {
+      "shot": "the accountant and its account"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "look_at": {
+        "x": 13,
+        "y": 8
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "the accountant at its computer"
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "$40.00 a shift"
+    },
+    {
+      "expect_text": "0 shifts"
+    },
+    {
+      "shot": "cash and wage"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    }
+  ]
+}

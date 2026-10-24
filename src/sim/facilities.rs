@@ -16,6 +16,7 @@ use crate::map::Map;
 use super::bins::Bins;
 use super::corpses::Corpses;
 use super::door::Doors;
+use super::economy::Economy;
 use super::feature::Features;
 use super::fields::Fields;
 use super::fridge::Fridges;
@@ -67,6 +68,10 @@ pub struct Facilities {
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
     pub playzones: Playzones,
+    /// The district's money: the budget, every unit's account, the books
+    /// ([`super::economy`]). Changed by `Effect::Record`, `Payroll`, `Buy`
+    /// and `CloseBooks`, and by the spawn pass as units come and go.
+    pub economy: Economy,
     /// The bodies taken up this tick, to leave the world when the processing
     /// pass is over (`process_game_state`) — the one pass that may not remove
     /// anybody. Empty between ticks, so never saved.
@@ -91,6 +96,7 @@ impl Facilities {
             tally: Tally::default(),
             fields: Fields::new(),
             playzones: Playzones::from_map(map),
+            economy: Economy::default(),
             burials: Vec::new(),
         }
     }

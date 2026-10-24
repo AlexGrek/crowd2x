@@ -559,6 +559,8 @@ mod tests {
             Task::salvage(at, 11.0),
             Task::salvage_for_work(at, 12.0),
             Task::work(at, 13.0),
+            Task::payroll(at, 5.0),
+            Task::close_books(at, 15.0),
             Task::keep_watch(at, 14.0),
             Task::deposit(at, 15.0),
             Task::take_body(at, 16.0),

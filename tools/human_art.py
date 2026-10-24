@@ -449,6 +449,17 @@ UNIFORMS["playzone_administrator"] = (
 )
 
 
+# Charcoal waistcoat, white shirt and sleeve garters, with a green tie.
+UNIFORMS["accountant"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....dwtwmd.....", "....gmdtmmlg....", ".....bbkbbb.....",
+     ".....pppppp.....", "......pqqp......", "......pqqp......"],
+    {"d": (36, 38, 44), "m": (66, 70, 78), "l": (236, 238, 232),
+     "w": (238, 240, 234), "g": (54, 62, 60), "t": (50, 150, 90),
+     "b": BELT, "k": BUCKLE, "p": TROUSERS["charcoal"][0], "q": TROUSERS["charcoal"][1]},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

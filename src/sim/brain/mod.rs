@@ -35,9 +35,12 @@
 //! 3. if the goal on top changed: old.deprioritized() -> current task
 //!      abandoned, walk halted -> queue cleared -> new.prioritized()
 //! 4. ONLY IF the goal changed or no task is current: top.process(last result)
+//! 4b.  the timesheet: on duty or not, a shift over, a day turned (`timesheet`)
 //! 5.   ...which manages the task queue
 //! 6. the current task's executor runs (the front of the queue, if none is
 //!      current), and writes the task's result
+//! 6b. a playzone administrator on duty at its computer runs it (`Operate`)
+//! 6c. with the effect still free, what the timesheet owes goes to the world
 //! 7. the walker is told how urgent the goal on top is, and hurries that much
 //! ```
 //!
@@ -69,6 +72,7 @@ pub mod routine;
 pub mod routines;
 pub mod task;
 pub mod tasks;
+pub mod timesheet;
 
 pub use action::{Action, ActionState};
 pub use attention::Attention;
@@ -77,6 +81,7 @@ pub use memory::{Memory, Recall};
 pub use perception::Perception;
 pub use routine::{Routine, RoutineCtx, RoutineExecutor};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
+pub use timesheet::Timesheet;
 
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
@@ -103,6 +108,9 @@ pub struct Brain {
     /// Handed out and taken back from outside the world
     /// ([`Brain::hire`], [`Brain::dismiss`]), read by routines and goals.
     job: Option<Job>,
+    /// The shifts it was on duty for and the days it went without a job,
+    /// until the world's books have heard of them ([`timesheet`]).
+    timesheet: Timesheet,
     /// Run in this order every tick, as many as the brain was built with.
     ///
     /// Sized once, at construction, in the spawn pass — the one pass allowed to
@@ -146,6 +154,7 @@ impl Brain {
             attention: Attention::default(),
             memory: Memory::new(),
             job: None,
+            timesheet: Timesheet::new(),
             routines: routines.into_iter().collect(),
             goals: Goals::new(),
             executors: [const { None }; GoalId::COUNT],
@@ -223,6 +232,7 @@ impl Brain {
             attention,
             memory,
             job,
+            timesheet,
             routines,
             goals,
             executors,
@@ -351,6 +361,13 @@ impl Brain {
             }
         }
 
+        // 4b. The timesheet: on duty if the job's goal is in charge while the
+        // shift is due, a shift owed once it is over, a care day for each
+        // day turned without a job. A person's only: nothing else is paid.
+        if body.uid().kind() == Some(EntityType::Human) {
+            timesheet.tick(job, ctx.clock, goals.top());
+        }
+
         // 6. The current task's executor, which writes the task's result and
         // may ask something of the world beyond this entity.
         let mut effect = Effect::None;
@@ -388,6 +405,14 @@ impl Brain {
             && playzone::runs(job, walk.body().center_position(), ctx)
         {
             effect = Effect::Operate { at: job.workplace };
+        }
+
+        // 6c. What it is owed, told the world with the first tick nothing
+        // else is asked of it; until then the timesheet keeps it.
+        if effect == Effect::None
+            && let Some(record) = timesheet.take()
+        {
+            effect = record;
         }
 
         // 7. As much of a hurry as the goal in charge is urgent — last, so a
@@ -471,6 +496,11 @@ impl Brain {
         self.job.as_ref()
     }
 
+    /// What it is owed for and has not told the world yet ([`timesheet`]).
+    pub fn timesheet(&self) -> &Timesheet {
+        &self.timesheet
+    }
+
     /// Whether it is seeing to its needs before a trip out for its job
     /// ([`ReadyRoutine`](routines::ReadyRoutine)).
     pub fn is_getting_ready(&self) -> bool {
@@ -499,6 +529,7 @@ impl Brain {
             attention,
             memory,
             job,
+            timesheet,
             routines,
             goals,
             executors,
@@ -532,6 +563,7 @@ impl Brain {
             blocked_by: blocked_by.map(Uid::raw),
             last_result: last_result.save(),
             job: job.map(|job| job.save()),
+            timesheet: Some(timesheet.save()),
         }
     }
 
@@ -557,6 +589,7 @@ impl Brain {
         self.attention = Attention::restore(pb::required(&saved.attention, "attention")?)?;
         self.memory = Memory::restore(pb::required(&saved.memory, "memory")?)?;
         self.job = saved.job.as_ref().map(Job::restore).transpose()?;
+        self.timesheet = Timesheet::restore(saved.timesheet.as_ref())?;
         self.goals = Goals::restore(pb::required(&saved.goals, "goals")?)?;
         for state in &saved.executors {
             let goal = GoalId::restore(state.goal, "executor")?;
@@ -651,6 +684,7 @@ impl Brain {
         for routine in self.routines.iter() {
             fields.extend(routine.debug_fields());
         }
+        fields.extend(self.timesheet.debug_fields());
         if let Some(executor) = self.executors[top as usize].as_deref() {
             fields.extend(executor.debug_fields());
         }

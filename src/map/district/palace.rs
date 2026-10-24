@@ -16,6 +16,12 @@ pub const NAME: &str = "palace";
 /// door down the length of the hall. Needs no power.
 pub const THRONE: &str = "throne";
 pub const THRONES: usize = 1;
+/// Where the district's books are kept: the accountant's computer, in the
+/// far wall [`ACCOUNTANT_OFFSET`] cells along from the throne, off the
+/// carpet. Needs power, which the hall's lamps bring in.
+pub const ACCOUNTANT_COMPUTER: &str = "accountant computer";
+/// How far along the far wall from the throne the accountant sits.
+pub const ACCOUNTANT_OFFSET: i32 = 4;
 /// The block it stands on: the one in the middle of the district, which
 /// has the main street along its front (`super::MAIN`).
 pub const BLOCK: (i32, i32) = (BLOCKS_X / 2, BLOCKS_Y / 2);
@@ -29,13 +35,14 @@ const CARPET: &str = "floor red";
 /// Every tile it paints with, for the catalogue test.
 pub const TILES: &[&str] = &[WALL, FLOOR, CARPET];
 /// Every prop it places but its doors, for the catalogue test.
-pub const PROPS: &[&str] = &[THRONE];
+pub const PROPS: &[&str] = &[THRONE, ACCOUNTANT_COMPUTER];
 
 /// The palace: the whole of the middle block, `WALL` round `FLOOR`, a plain
 /// door — nobody's property — in the middle of the wall onto the main
 /// street, and the [`THRONE`] in the middle of the far wall across the hall
 /// from it ([`Room`]), a `CARPET` two cells wide running from the door to
-/// it; the rest open floor, lit by a grid of lamps (`super::roof_and_light`).
+/// it, and the [`ACCOUNTANT_COMPUTER`] along the wall from it; the rest open
+/// floor, lit by a grid of lamps (`super::roof_and_light`).
 /// Draws nothing from the RNG.
 pub(super) fn palace(map: &mut Map, props: &mut Vec<Object>) -> Rect {
     let walls = block(BLOCK.0, BLOCK.1);
@@ -54,6 +61,7 @@ pub(super) fn palace(map: &mut Map, props: &mut Vec<Object>) -> Rect {
         }
     }
     props.push(object(THRONE, room.at(room.wide / 2, room.deep - 1)));
+    props.push(object(ACCOUNTANT_COMPUTER, room.at(room.wide / 2 + ACCOUNTANT_OFFSET, room.deep - 1)));
     walls
 }
 
@@ -65,8 +73,9 @@ mod tests {
     use crate::map::ObjectLayer;
 
     /// One palace, the whole of the block in the middle of the district: its
-    /// throne and nothing else, nobody's, the throne with a free cell beside
-    /// it to hold court from, none anywhere else, and its door onto the main
+    /// throne and the accountant's computer and nothing else, nobody's, each
+    /// with a free cell beside it to work from, none anywhere else, the
+    /// computer off the carpet and powered, and its door onto the main
     /// street.
     #[test]
     fn a_district_has_one_palace_filling_its_middle_block_with_a_throne_in_it() {
@@ -84,14 +93,24 @@ mod tests {
             }
 
             let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| palace.interior().contains(prop.cell()));
-            assert!(inside.clone().all(|prop| prop.kind.as_str() == THRONE), "seed {seed}: the palace holds its throne only");
+            assert!(inside.clone().all(|prop| PROPS.contains(&prop.kind.as_str())), "seed {seed}: the palace holds its throne and computer only");
             assert_eq!(props_in(map, palace, THRONE), THRONES, "seed {seed}");
             assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), THRONE), THRONES, "seed {seed}: a throne elsewhere");
+            assert_eq!(props_in(map, palace, ACCOUNTANT_COMPUTER), 1, "seed {seed}");
+            assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), ACCOUNTANT_COMPUTER), 1, "seed {seed}: one elsewhere");
+            let computer = inside.clone().find(|prop| prop.kind.as_str() == ACCOUNTANT_COMPUTER).unwrap().cell();
+            assert!(
+                computer.cardinal_neighbours().into_iter().any(|cell| palace.interior().contains(cell) && map.is_passable(cell)),
+                "seed {seed}: nowhere to stand at the accountant's computer at {computer:?}"
+            );
+            assert_ne!(map.terrain(computer), Some(tile(CARPET)), "seed {seed}: the computer on the carpet");
+            let supply = crate::map::utilities::Supply::from_map(map);
+            assert!(supply.serves(ACCOUNTANT_COMPUTER, computer), "seed {seed}: the accountant's computer has no power");
             let properties = crate::sim::Properties::from_map(map);
             for cell in palace.cells() {
                 assert_eq!(properties.of(cell), None, "seed {seed}: the palace is nobody's property");
             }
-            let throne = inside.clone().next().unwrap().cell();
+            let throne = inside.clone().find(|prop| prop.kind.as_str() == THRONE).unwrap().cell();
             assert!(
                 throne.cardinal_neighbours().into_iter().any(|cell| palace.interior().contains(cell) && map.is_passable(cell)),
                 "seed {seed}: nowhere to stand at the throne at {throne:?}"

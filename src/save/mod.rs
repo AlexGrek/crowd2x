@@ -79,6 +79,7 @@ pub const MANIFEST: &str = "manifest.pb";
 pub const MAP: &str = "map.pb";
 pub const WORLD: &str = "world.pb";
 pub const VIEW: &str = "view.pb";
+pub const ECONOMY: &str = "economy.pb";
 const ENTITIES: &str = "entities/";
 const CHUNKS: &str = "chunks/";
 
@@ -156,6 +157,7 @@ pub fn snapshot(state: &GameState, meta: &SaveMeta, view: Option<&pb::View>) -> 
         (MANIFEST.to_string(), manifest.encode_to_vec()),
         (MAP.to_string(), state.map.save_site().encode_to_vec()),
         (WORLD.to_string(), state.save_world().encode_to_vec()),
+        (ECONOMY.to_string(), state.economy().save().encode_to_vec()),
     ];
     files.extend(chunks.into_iter().enumerate().map(|(index, bytes)| (shard(CHUNKS, index), bytes)));
     files.extend(entities.into_iter().enumerate().map(|(index, bytes)| (shard(ENTITIES, index), bytes)));
@@ -230,7 +232,9 @@ pub fn restore(files: &SaveFiles) -> Result<LoadedGame, SaveError> {
         .into_iter()
         .flatten()
         .collect();
-    let state = GameState::restore(map, &world, entities).in_file(WORLD)?;
+    let mut state = GameState::restore(map, &world, entities).in_file(WORLD)?;
+    let economy = files.get(ECONOMY).map(|bytes| decode::<pb::Economy>(ECONOMY, bytes)).transpose()?;
+    state.restore_economy(economy.as_ref()).in_file(ECONOMY)?;
     let view = files.get(VIEW).map(|bytes| decode(VIEW, bytes)).transpose()?;
     Ok(LoadedGame { state, manifest, view })
 }

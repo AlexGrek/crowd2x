@@ -562,3 +562,12 @@ tiring, bins not restored).
 4. **The uniform's PNG** (`tools/human_art.py`).
 
 Hiring, `WorkRoutine`, the save, the uniform, the job menu and the statistics menu need nothing.
+
+## Payroll and the accountant
+
+JobDef.paperwork is Payroll for the office, Books for the accountant, None otherwise.
+Office workers process owed accounts at powered desks, five world minutes each.
+The accountant (job 13, hired last) uses the powered accountant computer beside the
+palace throne, Mon?Fri 09?17, a two-hour commute, and closes finished daily books.
+Wages are $60 office/accountant/scrap/farmer, $100 king and $40 all other jobs.
+Timesheets, care, tax and the job panel cash readout: see ../economy/SKILL.md.

@@ -231,3 +231,12 @@ decodes shards in parallel. Measured, release, this machine (2026-10-17,
 
 Mutation-checked when written: breaking `PathFinder::restore` or `Schedule::restore` fails the
 side-by-side tests.
+
+## Economy state
+
+New archives include optional economy.pb (pb::Economy): signed cents, accounts,
+payroll cursor, 28 books, closed_through and tariffs by job/item name. Restore
+checks accounts against humans and death state. Old archives synthesize accounts
+without retroactive wages. Brain tag 15 is Timesheet, fresh when absent. Payroll
+and CloseBooks use stable TimedTask names. Save fingerprints include economy.pb.
+See ../economy/SKILL.md for the complete contract.

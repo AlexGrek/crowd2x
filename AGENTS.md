@@ -1056,3 +1056,11 @@ system that decides something, a `Component` holding agent state, or a second fu
 that advances the world is the thing to not do; add an entity kind, an `Intent` variant or
 a `Command` instead. Read the `dev` skill's "Scaling to thousands of actors" section, and
 its "The GameState contract", before writing anything simulation-shaped.
+
+
+### Economy
+
+The current economy is documented in [.claude/skills/economy/SKILL.md](.claude/skills/economy/SKILL.md):
+integer-cent cash and budget, worked shifts, office payroll, unemployment care,
+tax, fridge prices, accountant reports, economy.yaml defaults, a live economy
+menu and optional economy.pb saves. New jobs/items require named YAML entries.

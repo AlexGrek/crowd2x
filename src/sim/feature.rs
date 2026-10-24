@@ -180,6 +180,10 @@ catalogue! {
         /// beside it. The administrator's workplace; **needs power**. While an
         /// administrator is on duty at it, the playzone's cabinets work.
         PlayzoneComputer = 23 => FeatureDef { props: &["playzone computer"], ..BESIDE },
+        /// Where the district's books are kept: the accountant's computer in
+        /// the palace, worked from beside it. **Needs power**, and is nothing
+        /// to play on.
+        AccountantComputer = 24 => FeatureDef { props: &["accountant computer"], ..BESIDE },
     }
 }
 

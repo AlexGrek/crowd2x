@@ -268,6 +268,12 @@ fn build_world(
             // Whoever the map says lives here. Straight into the world
             // rather than through `SimInput`, so they are there on the first
             // frame drawn.
+            let (tariffs, warning) = super::economy::load_tariffs();
+            state.set_tariffs(tariffs);
+            if let Some(warning) = warning {
+                warn!("{warning}");
+                state.log.important(warning);
+            }
             state.spawn_from_spawners();
             state
         }

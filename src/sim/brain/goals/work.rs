@@ -23,7 +23,8 @@
 
 use crate::map::Point;
 use crate::save::{pb, Invalid};
-use crate::sim::clock::{watched, HOUR};
+use crate::sim::clock::{watched, HOUR, MINUTE};
+use crate::sim::job::Paperwork;
 use crate::sim::feature::Access;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
@@ -78,7 +79,16 @@ impl WorkGoal {
         let Some(job) = ctx.job else {
             return false;
         };
-        let _ = ctx.tasks.push_back(Task::work_at(job.kind.workplace(), desk, WORK_SECONDS));
+        let task = match job.kind.paperwork() {
+            Some(Paperwork::Payroll) if ctx.think.economy.owing() > 0 => {
+                Task::payroll(desk, watched(ctx.think.economy.tariffs().minutes_per_account as f32 * MINUTE))
+            }
+            Some(Paperwork::Books) if ctx.think.economy.unclosed_day(ctx.think.clock.day()).is_some() => {
+                Task::close_books(desk, super::super::tasks::BOOKS_SECONDS)
+            }
+            _ => Task::work_at(job.kind.workplace(), desk, WORK_SECONDS),
+        };
+        let _ = ctx.tasks.push_back(task);
         true
     }
 
@@ -168,6 +178,10 @@ impl GoalExecutor for WorkGoal {
                 self.worked(ctx, task);
                 return GoalProgress::Achieved;
             }
+            (TaskResult::Success, Some(Task::Payroll(_) | Task::CloseBooks(_))) => {
+                self.forget();
+                return GoalProgress::Achieved;
+            }
             (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
             _ => {}
         }
@@ -249,6 +263,47 @@ mod tests {
     /// would: these tests are about the time of day.
     fn step(world: &mut World, human: &mut Human) {
         world.step_in_time(human);
+    }
+
+    #[test]
+    fn a_clerk_pays_an_account_then_returns_to_ordinary_work() {
+        use crate::sim::economy::Money;
+        use crate::sim::job::JobKind;
+        let desk = Point::new(6, 5);
+        let mut world = office(desk, at(1, 10.0));
+        let mut human = worker(Point::new(5, 5), desk);
+        let payee = Uid::new(EntityType::Human, 1001);
+        world.economy.open(payee, Money::ZERO);
+        world.economy.record(payee, 1, Some(JobKind::Guard), 0);
+        let mut payroll = false;
+        for _ in 0..ticks(&world, 0.3) {
+            step(&mut world, &mut human);
+            payroll |= matches!(human.brain().current_task(), Some(Task::Payroll(_)));
+        }
+        assert!(payroll);
+        assert_eq!(world.economy.account(payee).unwrap().cash, Money::dollars(32));
+        assert_eq!(world.economy.owing(), 0);
+        assert!(matches!(human.brain().current_task(), Some(Task::Work(_))));
+    }
+
+    #[test]
+    fn the_accountant_closes_friday_and_the_weekend_on_monday() {
+        use crate::sim::job::{JobKind, OFFICE_HOURS};
+        let desk = Point::new(6, 5);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "accountant computer", desk);
+        let mut world = World::new(map);
+        world.clock = at(8, 9.0);
+        for day in 5..=8 { world.economy.roll(day); }
+        let mut human = worker(Point::new(5, 5), desk);
+        human.dismiss();
+        human.hire(Job::new(JobKind::Accountant, desk, OFFICE_HOURS));
+        for _ in 0..ticks(&world, 1.8) { step(&mut world, &mut human); }
+        assert_eq!(world.economy.closed_through(), 7);
+        for day in 5..=7 {
+            assert!(world.log_contains(&format!("closed the books for day {day}")), "{:?}", world.lines());
+        }
+        assert!(matches!(human.brain().current_task(), Some(Task::Work(_))));
     }
 
     #[test]

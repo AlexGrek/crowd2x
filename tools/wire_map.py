@@ -25,7 +25,7 @@ import sys
 
 # The impassable tiles of `map::TERRAIN`.
 BLOCKED = {"void", "wall brown", "wall brown big", "wall purple", "wall red", "block"}
-POWERED = {"fridge", "computer", "ceiling lamp", "tube lamp"}
+POWERED = {"fridge", "computer", "accountant computer", "ceiling lamp", "tube lamp"}
 DRAINED = {"toilet"}
 SOURCES = {"transformer", "sewer"}
 CELL = 48

@@ -90,7 +90,7 @@
     { "note": "it sets off at half past eight: 70 world minutes on, ten past nine, it is at its desk" },
     { "tick": 2240 },
     { "expect_prop_in_use": { "kind": "computer", "in_use": true } },
-    { "expect_text": "working" },
+    { "expect_text": "doing the payroll" },
     { "shot": "ten past nine: at the desk, and the screen is on" },
 
     { "note": "a stretch at the desk is an hour of world, 1920 ticks" },

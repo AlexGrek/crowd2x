@@ -574,7 +574,9 @@ mod tests {
     #[test]
     fn a_collector_sees_to_every_need_before_it_sets_out_and_nothing_calls_it_back() {
         use crate::sim::brain::routines::READY;
-        let mut world = yard_to_get_ready_in(at(1, 8.4));
+        // Begin when the shift is due. Before it, wandering may legitimately
+        // leave this tiny site, which is not a work trip to test readiness on.
+        let mut world = yard_to_get_ready_in(at(1, 8.5));
         let mut human = needy_human(Point::new(2, 2), 40.0, 50.0, 40.0);
         human.set_fun(50.0);
         assert!(human.hire(Job::collector(BIN)));

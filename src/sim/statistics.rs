@@ -15,6 +15,7 @@
 use crate::save::pb;
 
 use super::clock::Clock;
+use super::economy::{Economy, DayBook, Money};
 use super::entities::Entities;
 use super::facilities::Facilities;
 use super::feature::FeatureKind;
@@ -85,8 +86,40 @@ impl FieldStock {
     }
 }
 
+/// Money is counted on demand, never with a per-unit scan during a tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct EconomyStats {
+    pub budget: Money,
+    pub tax_percent: u32,
+    pub today: Option<DayBook>,
+    pub accounts: u32,
+    pub cash: Money,
+    pub average: Money,
+    pub in_debt: u32,
+    pub debt: Money,
+    pub shifts: u32,
+    pub care_days: u32,
+}
+
+impl EconomyStats {
+    fn of(economy: &Economy) -> Self {
+        let mut stats = Self { budget: economy.budget(), tax_percent: economy.tariffs().tax_percent,
+            today: economy.today().copied(), ..Self::default() };
+        for account in economy.accounts().iter().filter(|account| !account.dead) {
+            stats.accounts += 1;
+            stats.cash += account.cash;
+            if account.cash.is_negative() { stats.in_debt += 1; stats.debt -= account.cash; }
+            stats.shifts += account.shifts as u32;
+            stats.care_days += account.care_days as u32;
+        }
+        if stats.accounts > 0 { stats.average = Money(stats.cash.as_cents() / stats.accounts as i64); }
+        stats
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statistics {
+    pub economy: EconomyStats,
     /// The living, by kind, in [`EntityType::ALL`] order.
     pub alive: Vec<(EntityType, u32)>,
     /// What every building with stores holds, one entry a site, in the order
@@ -169,6 +202,7 @@ impl Statistics {
         }
         stock.quality = (!fields.is_empty()).then(|| quality / fields.len() as u32);
         Statistics {
+            economy: EconomyStats::of(&facilities.economy),
             alive: alive.to_vec(),
             sites,
             fields: stock,

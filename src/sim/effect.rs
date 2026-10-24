@@ -16,6 +16,7 @@ use super::feature::FeatureKind;
 use super::fields::PLOTS;
 use super::inventory::Inventory;
 use super::item::ItemKind;
+use super::job::JobKind;
 use super::log::Log;
 use super::occupancy::Occupancy;
 use super::property::PropertyId;
@@ -91,6 +92,20 @@ pub enum Effect {
     /// before granting this one's, so the playzone's cabinets work exactly
     /// as long as somebody is saying so.
     Operate { at: Point },
+    /// The unit's own timesheet (`brain::timesheet`): `shifts` more shifts
+    /// worked as `job`, and `care_days` more days gone by out of work, to be
+    /// paid by a clerk ([`super::economy::Economy::record`]).
+    Record { shifts: u8, job: Option<JobKind>, care_days: u8 },
+    /// A clerk has finished an account at the desk at `at`
+    /// (`brain::tasks::Payroll`): whoever is next to be paid is paid
+    /// ([`super::economy::Economy::pay_next`]).
+    Payroll { at: Point },
+    /// The unit took `item` out of a fridge (`brain::tasks::TakeItem`): it
+    /// pays the price, debt or not ([`super::economy::Economy::buy`]).
+    Buy { item: ItemKind },
+    /// The accountant has closed the books for `day`
+    /// (`brain::tasks::CloseBooks`, which has said how they stand).
+    CloseBooks { day: u32 },
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -145,6 +160,22 @@ pub(crate) fn apply(
             // Not logged: it is said every tick of a shift.
             let _ = facilities.playzones.run(at);
         }
+        // An account nobody opened — a test's world of one — is nobody's
+        // business: the economy ignores it.
+        Effect::Record { shifts, job, care_days } => {
+            facilities.economy.record(entity.uid(), shifts as u16, job, care_days as u16);
+        }
+        Effect::Payroll { at: _ } => {
+            let _ = facilities.economy.pay_next(entity.uid(), log);
+        }
+        Effect::Buy { item } => {
+            let uid = entity.uid();
+            if let Some(price) = facilities.economy.buy(uid, item).filter(|price| *price != super::economy::Money::ZERO) {
+                let cash = facilities.economy.account(uid).map_or(price, |account| account.cash);
+                log.unit(uid, format!("{uid} paid {price} for {}: {cash} left", item.name()));
+            }
+        }
+        Effect::CloseBooks { day } => facilities.economy.close_books(day),
     }
 }
 
@@ -261,6 +292,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     facilities.workplaces.release(uid);
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
+    facilities.economy.died(uid);
     let _ = entity.dismiss();
     log.important(format!("{uid} died of {cause}"));
 }

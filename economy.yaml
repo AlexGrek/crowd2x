@@ -1,0 +1,50 @@
+# The economy a new game starts with (`src/sim/economy.rs`, the `economy`
+# skill). Read when a new game is built — `CROWD2X_ECONOMY` names another
+# file — and built into the game as its defaults. A saved game keeps its own
+# numbers. The game's `economy` menu changes them while playing and never
+# writes this file.
+#
+# Money is in dollars, to the cent. Jobs and items are named as the game
+# names them, and every one must be here: a name missing or unknown is an
+# error, and the game falls back on its built-in defaults.
+
+# The share of every wage paid back into the district's budget, in percent.
+tax: 20
+# What somebody with no job is paid for every day it goes by, untaxed.
+care package: 20
+# What the district's budget is granted for every arrival.
+budget per arrival: 1000
+# What an arrival has on it: a whole number of dollars, lowest to highest.
+starting cash: [10, 90]
+# How long an office worker spends on one account, in world minutes.
+minutes per account: 5
+
+# What a shift is paid, before tax, every job by name (`src/sim/job.rs`).
+# A new job needs its line here.
+wages:
+  office worker: 60           # mid
+  scrap collector: 60         # mid
+  guard: 40                   # low
+  undertaker: 40              # low
+  steelworker: 40             # low
+  courier: 40                 # low
+  farmer: 60                  # mid
+  power plant worker: 40      # low
+  king: 100                   # high
+  electrician: 40             # low
+  food factory worker: 40     # low
+  food courier: 40            # low
+  playzone administrator: 40  # low
+  accountant: 60              # mid
+
+# What a thing costs taken from a fridge, every item by name
+# (`src/sim/item.rs`). Only a fridge sells anything; the rest are never
+# bought, and cost nothing.
+prices:
+  food: 1           # a meal out of a fridge
+  water: 0          # a drink out of a fridge
+  scrap metal: 0
+  body: 0
+  steel: 0
+  wheat: 0
+  meal: 0

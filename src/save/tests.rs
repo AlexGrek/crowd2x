@@ -26,6 +26,53 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn an_economy_saved_mid_payroll_carries_on_exactly() {
+    use crate::sim::economy::{Money, Tariff};
+    let mut map = Map::new(Size::new(12, 9), FLOOR);
+    prop_at(&mut map, "computer", Point::new(4, 4));
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 8), Point::new(11, 8));
+    let mut state = GameState::new(map, 13);
+    let clerk = state.spawn(EntityType::Human, Point::new(3, 4));
+    let payee = state.spawn(EntityType::Human, Point::new(8, 4));
+    let mut input = Input::new();
+    for uid in [clerk, payee] {
+        for process in ProcessId::ALL { input.set_process(uid, process, false); }
+    }
+    process_game_state(&mut state, DT, &input);
+    // The first unpaid care day reaches the clerk on Tuesday morning.
+    for _ in 0..46_000 {
+        process_game_state(&mut state, DT, &Input::new());
+        if state.entities().get(clerk).unwrap().brain_fields().iter().any(|(key, value)| *key == "task" && value.starts_with("do the payroll")) {
+            break;
+        }
+    }
+    assert!(state.economy().owing() > 0);
+    assert!(state.entities().get(clerk).unwrap().brain_fields().iter().any(|(key, value)| *key == "task" && value.starts_with("do the payroll")));
+    state.set_tariff(Tariff::Price(ItemKind::Food), 150);
+    let before = state.economy().account(payee).unwrap().cash;
+    let copy = side_by_side(&mut state, 600, |_, _| Input::new());
+    assert_eq!(state.economy(), copy.economy());
+    assert_eq!(state.economy().account(payee).unwrap().cash, before + Money::dollars(20));
+    assert_eq!(copy.economy().tariffs().price(ItemKind::Food), Money(150));
+}
+
+#[test]
+fn a_save_without_an_economy_opens_accounts_and_refuses_accounts_for_strangers() {
+    let mut state = GameState::new(Map::new(Size::new(8, 8), FLOOR), 19);
+    let human = state.spawn(EntityType::Human, Point::new(3, 3));
+    state.spawn(EntityType::Dog, Point::new(5, 3));
+    let mut files = snapshot(&state, &meta(), None);
+    files.files.retain(|(name, _)| name != ECONOMY);
+    let old = restore(&files).unwrap().state;
+    assert_eq!(old.economy().accounts().len(), 1);
+    assert_eq!(old.economy().account(human).unwrap().cash.as_cents(), (10 + (human.raw() % 81) as i64) * 100);
+    let mut economy = state.economy().save();
+    economy.accounts.clear();
+    files.files.push((ECONOMY.to_string(), economy.encode_to_vec()));
+    assert!(restore(&files).is_err(), "missing account for a living human");
+}
+
+#[test]
 fn a_damaged_box_and_an_electrician_mid_repair_resume_identically_after_loading() {
     let at = Point::new(3, 3);
     let mut map = Map::new(Size::new(8, 7), FLOOR);
@@ -84,7 +131,7 @@ fn old_saves_recover_the_original_seeded_clothing() {
 /// round it, which says only what is in memory, and which each world's
 /// reclaiming sweeps let go of on their own schedule.
 fn fingerprint(state: &GameState) -> Vec<Vec<u8>> {
-    let mut parts = vec![state.save_world().encode_to_vec()];
+    let mut parts = vec![state.save_world().encode_to_vec(), state.economy().save().encode_to_vec()];
     parts.extend(state.save_entities(SLOTS_PER_FILE, |shard| shard.encode_to_vec()));
     let salvaged: Vec<_> = state
         .map
@@ -117,6 +164,7 @@ fn assert_same(a: &GameState, b: &GameState, when: &str) {
         assert_eq!(x.save(), y.save(), "{when}: {}", x.uid());
     }
     assert_eq!(a.save_world(), b.save_world(), "{when}: the world");
+    assert_eq!(a.economy(), b.economy(), "{when}: the economy");
     panic!("{when}: the worlds differ in something a save keeps");
 }
 
@@ -969,7 +1017,23 @@ fn write_the_steel_works_fixture() {
 #[test]
 fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
     let mut loaded = restore(&SaveFiles::from_zip(STEEL_WORKS).unwrap()).expect("it loads").state;
-    let mut fresh = steel_works_fixture();
+    // The old fixture predates money and timesheets. Put the freshly replayed
+    // reference through that same migration, while still comparing every
+    // pre-existing brain, entity and world field with the golden archive.
+    let reference = steel_works_fixture();
+    let mut files = snapshot(&reference, &meta(), None);
+    files.files.retain(|(name, _)| name != ECONOMY);
+    for (name, bytes) in &mut files.files {
+        if !name.starts_with(ENTITIES) { continue; }
+        let mut shard = pb::EntityShard::decode(bytes.as_slice()).unwrap();
+        for slot in &mut shard.slots {
+            if let Some(pb::Kind::Human(human)) = &mut slot.kind {
+                human.brain.as_mut().unwrap().timesheet = None;
+            }
+        }
+        *bytes = shard.encode_to_vec();
+    }
+    let mut fresh = restore(&files).unwrap().state;
     assert_same(&fresh, &loaded, "just loaded");
     for tick in 0..1800 {
         run(&mut fresh, 1);

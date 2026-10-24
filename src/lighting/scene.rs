@@ -126,6 +126,11 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "computer",
         Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
     ),
+    // The accountant's in the palace, the same screen.
+    (
+        "accountant computer",
+        Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
+    ),
     // A TV's picture: a bigger, softer glow than a monitor's, on while
     // anybody is watching.
     (

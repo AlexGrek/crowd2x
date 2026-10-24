@@ -110,6 +110,9 @@ pub const PROPS: &[Prop] = &[
     // them.
     Prop::blocking("playzone computer"),
     Prop::blocking("arcade cabinet"),
+    // The palace: the accountant's computer beside the throne, used from
+    // beside it like an office's.
+    Prop::blocking("accountant computer"),
     Prop::blocking("scrap hopper"),
     Prop::blocking("steel pallet"),
     Prop::blocking("steel rack"),

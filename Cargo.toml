@@ -39,6 +39,10 @@ rayon = "1.11"
 # because a map wants a format other tools and a human in a diff can read.
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# `economy.yaml`, the economy's defaults (`sim::economy`): YAML so every
+# number can carry a comment beside it. Deprecated upstream but stable, and
+# already in the local registry, so it builds offline.
+serde_yaml = "0.9"
 # A `.savegame` is a zip of those Protobuf files. Deflate only, through the
 # flate2/zlib-rs already in the tree, so any zip tool opens a save; its
 # `ZipFileBuilder` compresses the entries in parallel.

@@ -7,6 +7,10 @@
 //! for why they are not boxed, and for adding one: a file here, and its name
 //! in the [`tasks!`](super::task::tasks) list below.
 
+pub mod close_books;
+pub mod payroll;
+pub use close_books::{CloseBooks, BOOKS_SECONDS};
+pub use payroll::Payroll;
 pub mod close_fridge;
 pub mod consume_item;
 pub mod cremate;
@@ -83,6 +87,8 @@ tasks! {
     RepairBox,
     Cook,
     UseArcade,
+    Payroll,
+    CloseBooks,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

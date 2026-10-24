@@ -117,3 +117,7 @@ reads the queue (`Stage::of`) ignores tasks it does not know.
   each, in the layer that owns the concern (`map`, `editor`, `lighting` skills).
 - **Old save tags**: `pb::TaskKind` tags 3-19 are only ever read (each task's `TimedTask::legacy`);
   never extend them.
+
+A new job also needs its wage in economy.yaml; a new item needs its price there.
+The embedded defaults test refuses missing or unknown catalogue names. Jobs worked
+at desks declare JobDef.paperwork (None, Payroll or Books); see ../economy/SKILL.md.

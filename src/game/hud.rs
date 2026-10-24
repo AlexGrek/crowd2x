@@ -269,6 +269,7 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                     super::saving::buttons(),
                 ),
                 super::statistics::open_button(),
+                super::economy::open_button(),
             ]),
             logview::panel(),
         ],

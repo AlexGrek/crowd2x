@@ -54,6 +54,19 @@ impl RestoredEntity {
 }
 
 impl GameState {
+    /// One account per human. Older archives receive deterministic opening cash.
+    pub(crate) fn restore_economy(&mut self, saved: Option<&pb::Economy>) -> Result<(), Invalid> {
+        let mut humans: Vec<_> = self.entities.iter_slots()
+            .filter(|(_, entity)| entity.kind() == Some(super::EntityType::Human))
+            .map(|(_, entity)| (entity.uid(), entity.is_dead())).collect();
+        humans.sort_unstable_by_key(|&(uid, _)| uid);
+        self.facilities.economy = match saved {
+            Some(saved) => super::economy::Economy::restore(saved, &humans)?,
+            None => super::economy::Economy::fresh(super::economy::Tariffs::default(), &humans),
+        };
+        Ok(())
+    }
+
     /// Everything about the world that is not an entity, the map or a
     /// chunk.
     pub fn save_world(&self) -> pb::World {

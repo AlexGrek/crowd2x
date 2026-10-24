@@ -47,6 +47,28 @@ pub struct Brain {
     /// jobs — is somebody with none.
     #[prost(message, optional, tag = "14")]
     pub job: Option<Job>,
+    /// What it is owed for and has not told the world yet
+    /// (`crate::sim::brain::timesheet::Timesheet`). Absent — a save from
+    /// before there was money — is a fresh one.
+    #[prost(message, optional, tag = "15")]
+    pub timesheet: Option<Timesheet>,
+}
+
+/// A unit's own timesheet.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Timesheet {
+    /// The day it last looked at the clock; 0 before it has.
+    #[prost(uint32, tag = "1")]
+    pub day: u32,
+    /// The job it is on duty for, `JobKind::number`; absent, none.
+    #[prost(int32, optional, tag = "2")]
+    pub clocked: Option<i32>,
+    #[prost(uint32, tag = "3")]
+    pub shifts: u32,
+    #[prost(int32, optional, tag = "4")]
+    pub shift_job: Option<i32>,
+    #[prost(uint32, tag = "5")]
+    pub care_days: u32,
 }
 
 /// A job: what it is, where, and when (`crate::sim::job::Job`).

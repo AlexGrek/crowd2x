@@ -53,6 +53,10 @@ scrap, and a click on one says how it is growing. The game screen's `statistics`
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
 the dead.
 
+Cash and a district budget now track wages, taxes, care packages and fridge purchases.
+Office workers do the payroll; the palace accountant reports daily and weekly balances.
+The economy menu changes the running game?s tariffs, whose defaults are economy.yaml.
+
 ## Commands
 
 ```sh
@@ -103,6 +107,7 @@ to `screenshots/`.
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
+| Money, budget, wages, taxes, care, fridge prices, timesheets, payroll, accountant, economy.yaml or economy menu | `economy` (+ `jobs`, `savegame` as needed) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 
 ## Rules that hold everywhere
@@ -173,6 +178,8 @@ src/sim/bins.rs         the stores: scrap bins, steel racks, hoppers, pallets, g
 src/sim/fields.rs       the crops of wheat: sown, growing, tended, harvested  [jobs, map]
 src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
 src/sim/playzone.rs     which arcade cabinets work: an administrator at the computer [jobs, simulation]
+src/sim/economy.rs      cash, budget, tariffs, accounts and daily books      [economy]
+src/game/economy.rs     live tariff menu and YAML loading                    [economy, game-screen]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]

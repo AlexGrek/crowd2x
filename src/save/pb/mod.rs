@@ -26,6 +26,7 @@
 //! hundreds of cells, and a message per cell would be twice the bytes.
 
 pub mod brain;
+pub mod economy;
 pub mod entity;
 pub mod manifest;
 pub mod map;
@@ -33,6 +34,7 @@ pub mod view;
 pub mod world;
 
 pub use brain::*;
+pub use economy::*;
 pub use entity::*;
 pub use manifest::*;
 pub use map::*;
