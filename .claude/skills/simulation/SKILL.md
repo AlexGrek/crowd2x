@@ -256,6 +256,12 @@ next spawn fills. Removal leaves a **tombstone** rather than
 by it, and reordering the tail on every despawn would make iteration order, and so the
 simulation, non-deterministic.
 
+**How fast a walker goes** is its own pace (`Walker::speed`, cells a watched second: a dog's 7,
+a person's `HUMAN_SPEED` 4 times a pace of its own rolled at spawn, ±15%) times its hurry —
+up to `walker::HURRY` (0.75) more, eased in and out over a watched second and set by the brain
+from the urgency of the goal in charge (`brain-engineer`, architecture.md, "How fast it walks").
+`MAX_STEP` still caps a tick's step. Think reads it; react sets it; both are saved.
+
 Positions are in **cell units, not pixels**: `(3.5, 2.5)` is the middle of cell `(3, 2)`,
 and `center_position()` is `position.floor()`, derived so the two cannot disagree. How
 many screen pixels a cell is drawn at is a fact about the art, and `actors.rs` is where it

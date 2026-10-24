@@ -36,6 +36,17 @@
 //! is not orthogonal**: a walker picks up the next heading as it crosses into
 //! a cell rather than at the middle of it, so it cuts corners.
 //!
+//! # How fast
+//!
+//! A walker has a pace of its own, [`Walker::speed`] — a kind's speed, and
+//! for a person a little more or less ([`kinds`](super::kinds) rolls it) —
+//! and goes faster than that when it is in a hurry. **How much of a hurry is
+//! the brain's to say** ([`Walker::hurry`], told the urgency of the goal in
+//! charge every tick); how fast that gets it there is the walker's: it eases
+//! towards the hurry it is asked for over [`SECONDS_TO_HURRY`], from a
+//! standstill on every walk, so a unit breaks into a run rather than jumping
+//! to one. Flat out is [`HURRY`] over its own pace.
+//!
 //! # Where the searching happens
 //!
 //! [`Walker::think`] does arithmetic and nothing else — it walks the route it
@@ -95,6 +106,15 @@ const ARRIVED: f32 = 1e-4;
 /// property worth relying on.
 pub const MAX_STEP: f32 = 0.5;
 
+/// How much faster than its own pace a walker goes flat out: three quarters
+/// again, a person's walk become a run (and as fast as a dog trots).
+pub const HURRY: f32 = 0.75;
+
+/// Watched seconds it takes a walker to go from its own pace to flat out,
+/// and from flat out back to its pace: half a dozen cells of a person
+/// breaking into a run. Watched, not world time — this is something seen.
+pub const SECONDS_TO_HURRY: f32 = 1.0;
+
 /// The part of an entity that walks: shared by every kind, because "has a
 /// position, a route, and somewhere that route ends" is not specific to any of
 /// them.
@@ -108,8 +128,18 @@ pub struct Walker {
     /// How to get where it is going, cell by cell, orthogonally. Empty means
     /// it is not going anywhere.
     route: Box<Route>,
-    /// Cells per second.
+    /// Its own pace, cells per watched second: how fast it walks when it
+    /// is in no hurry.
     speed: f32,
+    /// How much of a hurry it is in, 0 (its own pace) to 1 (flat out,
+    /// [`HURRY`] faster): eased towards the urgency the brain asks for
+    /// ([`Walker::hurry`]), and 0 whenever it has nowhere to go.
+    hurry: f32,
+    /// What share of its own pace it walks at, hurry and all: 1, or less
+    /// for somebody whose job says so (a king, `job::Bearing::gait`).
+    /// **Not saved**: its owner sets it from the job whenever the job is
+    /// handed out, taken back or loaded ([`Walker::set_gait`]).
+    gait: f32,
     /// What far searching it may still do this tick, while the react step
     /// has it metered ([`Walker::meter`]); `None`, unmetered, is
     /// [`FAR_LIMIT`] a search and nothing shared — a walker driven by a test.
@@ -155,6 +185,8 @@ impl Walker {
             body: Body::at_cell(uid, cell),
             route: Box::default(),
             speed,
+            hurry: 0.0,
+            gait: 1.0,
             meter: None,
             searching: false,
         }
@@ -168,8 +200,50 @@ impl Walker {
         &mut self.body
     }
 
+    /// Its own pace, cells per watched second, in no hurry.
     pub fn speed(&self) -> f32 {
         self.speed
+    }
+
+    /// How fast it is going right now: its own pace, and as much faster as
+    /// the hurry it is in, at the gait it keeps.
+    pub fn current_speed(&self) -> f32 {
+        self.speed * self.gait * (1.0 + HURRY * self.hurry)
+    }
+
+    /// Walk at `gait` of its own pace from now on ([`Walker::gait`]'s
+    /// field): what the job says, set by whoever holds the job.
+    pub fn set_gait(&mut self, gait: f32) {
+        self.gait = gait;
+    }
+
+    /// What share of its own pace it walks at.
+    pub fn gait(&self) -> f32 {
+        self.gait
+    }
+
+    /// How much of a hurry it is in, 0 to 1.
+    pub fn hurrying(&self) -> f32 {
+        self.hurry
+    }
+
+    /// **Hurry as much as `urgency` (0 to 1) says**, for one tick of `dt`
+    /// watched seconds: the hurry it is in moves towards it by no more than
+    /// `dt` / [`SECONDS_TO_HURRY`], up or down. With nowhere to go it is in
+    /// no hurry at all, so every walk sets off at its own pace and speeds up.
+    ///
+    /// The brain calls it once a tick, after the task has run, with the
+    /// urgency of the goal in charge; nothing else writes the hurry. A NaN
+    /// asks for nothing.
+    pub fn hurry(&mut self, urgency: f32, dt: f32) {
+        if !self.is_walking() {
+            self.hurry = 0.0;
+            return;
+        }
+        let wanted = if urgency > 0.0 { urgency.min(1.0) } else { 0.0 };
+        let most = dt / SECONDS_TO_HURRY;
+        // Clamped again: `a + (b - a)` may land an ulp past `b`.
+        self.hurry = (self.hurry + (wanted - self.hurry).clamp(-most, most)).clamp(0.0, 1.0);
     }
 
     /// **Walk the plan.** Aim at the centre of the next cell in the path, and
@@ -198,7 +272,7 @@ impl Walker {
             return Intent::Idle;
         }
 
-        let step = (self.speed * ctx.dt).min(distance).min(MAX_STEP);
+        let step = (self.current_speed() * ctx.dt).min(distance).min(MAX_STEP);
         Intent::Move {
             to: (x + dx / distance * step, y + dy / distance * step),
         }
@@ -499,8 +573,13 @@ impl Walker {
                 },
             ),
             ("path", format!("{} cells", self.route.path.len())),
-            ("speed", format!("{:.2} cells/s", self.speed)),
+            ("speed", format!("{:.2} cells/s", self.current_speed())),
+            ("pace", format!("{:.2} cells/s", self.speed)),
+            ("hurry", format!("{:.0}%", self.hurry * 100.0)),
         ]
+        .into_iter()
+        .chain((self.gait != 1.0).then(|| ("gait", format!("{:.0}% of its pace", self.gait * 100.0))))
+        .collect()
     }
 
     /// The route still to walk, current step first — see
@@ -515,7 +594,8 @@ impl Walker {
     /// the meter, which only exists while the react step has it lent out,
     /// and not the repair buffer, which is scratch.
     pub(crate) fn save(&self) -> pb::Walker {
-        let Walker { body, route, speed, meter: _, searching: _ } = self;
+        // Not the gait: the job it comes from is saved, and sets it again.
+        let Walker { body, route, speed, hurry, gait: _, meter: _, searching: _ } = self;
         let Route { path, repair: _, pending, request } = &**route;
         pb::Walker {
             body: Some(body.save()),
@@ -531,6 +611,7 @@ impl Walker {
                 }
             }),
             search: pending.as_ref().map(|finder| finder.save()),
+            hurry: *hurry,
         }
     }
 
@@ -541,6 +622,9 @@ impl Walker {
         let body = Body::restore(pb::required(&saved.body, "body")?)?;
         if !(saved.speed.is_finite() && saved.speed > 0.0) {
             return invalid(format!("walks at {} cells a second", saved.speed));
+        }
+        if !(0.0..=1.0).contains(&saved.hurry) {
+            return invalid(format!("in a hurry of {}", saved.hurry));
         }
         let request = match &saved.request {
             None => None,
@@ -577,8 +661,15 @@ impl Walker {
                 request,
             }),
             speed: saved.speed,
+            hurry: saved.hurry,
+            gait: 1.0,
             meter: None,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_speed(&mut self, speed: f32) {
+        self.speed = speed;
     }
 
     #[cfg(test)]
@@ -674,6 +765,86 @@ mod tests {
         assert!(walker.route.pending.is_none());
         assert!(!walker.is_searching());
         assert!(!walker.is_walking());
+    }
+
+    /// How far one tick's step takes `walker`, in cells.
+    fn stride(walker: &Walker, world: &World) -> f32 {
+        let Intent::Move { to } = walker.think(&world.ctx(0)) else {
+            panic!("it should be walking");
+        };
+        let (x, y) = walker.body().position();
+        ((to.0 - x).powi(2) + (to.1 - y).powi(2)).sqrt()
+    }
+
+    #[test]
+    fn a_walker_in_a_hurry_breaks_into_a_run_over_a_second_and_goes_no_faster() {
+        let world = World::new(Map::new(Size::new(30, 3), FLOOR));
+        let mut walker = walker(Point::new(1, 1));
+        assert!(walker.route_to(&world.ctx(0), Point::new(28, 1)));
+        let dt = 1.0 / 60.0;
+        let calm = stride(&walker, &world);
+        assert!((calm - 2.0 * dt).abs() < 1e-6, "its own pace: {calm}");
+
+        // Half a second in, half way to a run, and no more.
+        for _ in 0..30 {
+            walker.hurry(1.0, dt);
+        }
+        assert!((walker.hurrying() - 0.5).abs() < 1e-4, "{}", walker.hurrying());
+        assert!(stride(&walker, &world) > calm);
+
+        for _ in 0..60 {
+            walker.hurry(1.0, dt);
+        }
+        assert_eq!(walker.hurrying(), 1.0);
+        let run = stride(&walker, &world);
+        assert!((run - calm * (1.0 + HURRY)).abs() < 1e-6, "flat out: {run}");
+
+        // Asked for more than all there is, or for nothing it can read.
+        walker.hurry(7.0, dt);
+        assert_eq!(walker.hurrying(), 1.0);
+        walker.hurry(f32::NAN, dt);
+        assert!(walker.hurrying() < 1.0, "a NaN is no hurry, eased down to");
+    }
+
+    #[test]
+    fn a_walker_slows_back_to_its_own_pace_and_stops_hurrying_when_it_stops() {
+        let world = World::new(Map::new(Size::new(30, 3), FLOOR));
+        let mut walker = walker(Point::new(1, 1));
+        assert!(walker.route_to(&world.ctx(0), Point::new(28, 1)));
+        let dt = 1.0 / 60.0;
+        for _ in 0..60 {
+            walker.hurry(1.0, dt);
+        }
+        walker.hurry(0.0, dt);
+        assert!(walker.hurrying() > 0.9, "slows down, does not stop dead: {}", walker.hurrying());
+        for _ in 0..60 {
+            walker.hurry(0.0, dt);
+        }
+        assert_eq!(walker.hurrying(), 0.0);
+
+        for _ in 0..60 {
+            walker.hurry(1.0, dt);
+        }
+        walker.halt();
+        walker.hurry(1.0, dt);
+        assert_eq!(walker.hurrying(), 0.0, "nowhere to go: the next walk sets off at its own pace");
+    }
+
+    #[test]
+    fn a_hurry_is_saved_and_restored() {
+        let world = World::new(Map::new(Size::new(30, 3), FLOOR));
+        let mut walker = walker(Point::new(1, 1));
+        assert!(walker.route_to(&world.ctx(0), Point::new(28, 1)));
+        for _ in 0..20 {
+            walker.hurry(1.0, 1.0 / 60.0);
+        }
+        let restored = Walker::restore(&walker.save(), 0).unwrap();
+        assert_eq!(restored.hurrying(), walker.hurrying());
+        assert_eq!(restored.current_speed(), walker.current_speed());
+
+        let mut saved = walker.save();
+        saved.hurry = 1.5;
+        assert!(Walker::restore(&saved, 0).is_err(), "more than flat out is refused");
     }
 
     #[test]

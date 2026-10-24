@@ -34,7 +34,7 @@
 //!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
 //!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
 //!   the warehouse, the [`farm`] on the edge lot nearest the good soil, the
-//!   [`power_plant`] on the edge. **A new one is a module with a [`LotBuilding`] in it and
+//!   [`power_plant`] on the edge, the [`palace`] nearest the middle. **A new one is a module with a [`LotBuilding`] in it and
 //!   a line in that list**; everything else — the lot it takes from the
 //!   houses, its roof, lamp, windows, power, its place in
 //!   [`District::buildings`] — follows from the list;
@@ -112,6 +112,7 @@ use rand::{RngExt, SeedableRng};
 
 pub mod crematorium;
 pub mod farm;
+pub mod palace;
 pub mod power_plant;
 pub mod restaurant;
 pub mod steel_factory;
@@ -297,7 +298,7 @@ impl Siting<'_> {
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
 pub const LOT_BUILDINGS: &[&LotBuilding] =
-    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC];
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC, &palace::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -2063,9 +2064,9 @@ mod tests {
     #[test]
     fn the_tvs_draw_nothing_from_the_district_so_a_seed_builds_the_same_houses() {
         // Seed 7's resident count, read before there were any TVs — and
-        // again once the farm, then the power plant, took a lot of its own,
-        // which moved the houses.
-        assert_eq!(generate(7).residents(), 139);
+        // again once the farm, then the power plant, then the palace took a
+        // lot of its own, which moved the houses.
+        assert_eq!(generate(7).residents(), 140);
     }
 
     // --- the ground ---

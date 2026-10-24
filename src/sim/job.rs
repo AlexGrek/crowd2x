@@ -45,7 +45,12 @@
 //! * the **power plant worker**: the control panel of the power plant, which
 //!   powers the district — stood by an hour at a time (`WorkGoal`, like a
 //!   desk or a post) and nothing else yet. Round the clock like a guard: the
-//!   three [`WATCHES`] of the panel a worker each.
+//!   three [`WATCHES`] of the panel a worker each;
+//! * the **king**: the throne in the district's palace, the one there is —
+//!   court held an hour at a time (`WorkGoal`) and nothing else yet: the
+//!   decisions a king makes are to come. [`COURT_HOURS`], every day but
+//!   Sunday. A king carries itself as one ([`Bearing`], [`ROYAL`]): its
+//!   robes and crown always on, on duty or not, and a stately walk.
 //!
 //! **A worker sleeps by its shift** ([`Shift::is_bedtime`]): the eight hours
 //! that end [`UP_BEFORE_SHIFT`] before it starts. For office hours that is
@@ -76,6 +81,40 @@ pub const COMMUTE: f32 = 0.5 * HOUR;
 /// walk away — and a watch is only kept if the next guard is there when the
 /// last one leaves. One who lives nearby is early, and waits by the post.
 pub const GUARD_COMMUTE: f32 = 2.0 * HOUR;
+
+/// How long before court a king sets off for the palace: an hour and a half.
+/// The palace is in the middle of the district, and a king walks it at
+/// [`KING_GAIT`] — from a house on the edge, an hour and a half's walk.
+pub const KING_COMMUTE: f32 = 1.5 * HOUR;
+
+/// How fast a king walks, as a share of its own pace: slowly. A king does not
+/// run, either — late, or starving, it walks briskly at best (the hurry is a
+/// share of its pace too).
+pub const KING_GAIT: f32 = 0.6;
+
+/// How somebody in a job carries themselves, on duty or off: what the job
+/// does to a person beyond the hours it keeps them.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Bearing {
+    /// How fast it walks, as a share of its own pace — and of any hurry it is
+    /// in (`Walker::set_gait`, set from the job at hire, let go and load).
+    pub gait: f32,
+    /// Whether its uniform is worn **always**, or only while the shift is
+    /// due (`GameEntity::worn`).
+    pub always_in_uniform: bool,
+    /// What it wears on its head with the uniform, over its hair:
+    /// `assets/human/hat_<hat>.png` (`characters::human::hat_path`), drawn by
+    /// `tools/human_art.py`.
+    pub hat: Option<&'static str>,
+}
+
+/// Every job but the king's: its own pace, its uniform for the shift, its
+/// own hair.
+pub const WORKER: Bearing = Bearing { gait: 1.0, always_in_uniform: false, hat: None };
+
+/// The king's: a stately walk ([`KING_GAIT`]), its robes always on, and a
+/// crown.
+pub const ROYAL: Bearing = Bearing { gait: KING_GAIT, always_in_uniform: true, hat: Some("crown") };
 
 /// Everything about one kind of job: its row in [`JobKind`]'s catalogue.
 pub struct JobDef {
@@ -108,6 +147,9 @@ pub struct JobDef {
     /// and still in the district, it sees to every need first. `None` for a
     /// job that never takes anybody far from a fridge and a toilet.
     pub goes_out_for: Option<ItemKind>,
+    /// How somebody in it carries themselves, on duty or off: [`WORKER`], or
+    /// the king's [`ROYAL`].
+    pub bearing: Bearing,
 }
 
 catalogue! {
@@ -115,7 +157,8 @@ catalogue! {
     /// arrival** (`GameState::give_a_job`): the bank's desks first, then the
     /// bins, then the gates, then the crematoria, then the steel factory's
     /// furnaces and hoppers, then the farm's grain bins, then the power
-    /// plant's control panel. A new job goes on the end, and so is hired last.
+    /// plant's control panel, then the palace's throne. A new job goes on the
+    /// end, and so is hired last.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum JobKind: JobDef {
         /// Sits at a computer and works it. Tiring, and no fun.
@@ -129,6 +172,7 @@ catalogue! {
             uniform: "uniform office worker",
             now: |at_work, _| if at_work { "working" } else { "on the way to work" },
             goes_out_for: None,
+            bearing: WORKER,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -143,6 +187,7 @@ catalogue! {
             uniform: "uniform scrap collector",
             now: |at_work, _| if at_work { "storing scrap" } else { "collecting scrap" },
             goes_out_for: Some(ItemKind::Scrap),
+            bearing: WORKER,
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -158,6 +203,7 @@ catalogue! {
             uniform: "uniform guard",
             now: |at_work, _| if at_work { "on watch" } else { "on the way to the gate" },
             goes_out_for: None,
+            bearing: WORKER,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -171,6 +217,7 @@ catalogue! {
             uniform: "uniform undertaker",
             now: |at_work, _| if at_work { "cremating" } else { "seeing to the dead" },
             goes_out_for: None,
+            bearing: WORKER,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -185,6 +232,7 @@ catalogue! {
             uniform: "uniform steelworker",
             now: |at_work, _| if at_work { "smelting steel" } else { "fetching scrap, storing steel" },
             goes_out_for: None,
+            bearing: WORKER,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -207,6 +255,7 @@ catalogue! {
                 }
             },
             goes_out_for: None,
+            bearing: WORKER,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -222,6 +271,7 @@ catalogue! {
             uniform: "uniform farmer",
             now: |at_work, _| if at_work { "storing wheat" } else { "in the fields" },
             goes_out_for: Some(ItemKind::Wheat),
+            bearing: WORKER,
         },
         /// Stands by at the power plant's control panel for one of the three
         /// [`WATCHES`] of the day, an hour at a time like a guard at a post
@@ -237,6 +287,24 @@ catalogue! {
             uniform: "uniform power plant worker",
             now: |at_work, _| if at_work { "on duty" } else { "on the way to the power plant" },
             goes_out_for: None,
+            bearing: WORKER,
+        },
+        /// Holds court at the throne in the district's palace, an hour at a
+        /// time like a guard at a post (`WorkGoal`), every day but Sunday —
+        /// and nothing else yet: what a king decides is to come. One throne,
+        /// so one king, hired last. In its robes and crown always, and
+        /// walking at a stately pace ([`ROYAL`]).
+        King = 8 => JobDef {
+            name: "king",
+            article: "the king",
+            workplace: FeatureKind::Throne,
+            goal: GoalId::Work,
+            commute: KING_COMMUTE,
+            shifts: &[COURT_HOURS],
+            uniform: "uniform king",
+            now: |at_work, _| if at_work { "holding court" } else { "on the way to the palace" },
+            goes_out_for: None,
+            bearing: ROYAL,
         },
     }
 }
@@ -297,6 +365,11 @@ impl JobKind {
     pub const fn goes_out_for(self) -> Option<ItemKind> {
         self.def().goes_out_for
     }
+
+    /// How somebody in this job carries themselves ([`JobDef::bearing`]).
+    pub const fn bearing(self) -> Bearing {
+        self.def().bearing
+    }
 }
 
 /// Monday to Friday, as a [`Shift::days`] mask.
@@ -320,6 +393,14 @@ pub const OFFICE_HOURS: Shift = Shift {
 pub const FARM_HOURS: Shift = Shift {
     start: 9,
     end: 17,
+    days: MONDAY_TO_SATURDAY,
+};
+
+/// Court: ten to four, every day but Sunday. A king is up at seven and in bed
+/// by eleven ([`Shift::is_bedtime`]).
+pub const COURT_HOURS: Shift = Shift {
+    start: 10,
+    end: 16,
     days: MONDAY_TO_SATURDAY,
 };
 
@@ -694,9 +775,10 @@ mod tests {
                 JobKind::Steelworker,
                 JobKind::Courier,
                 JobKind::Farmer,
-                JobKind::PowerPlantWorker
+                JobKind::PowerPlantWorker,
+                JobKind::King
             ],
-            "the office first, the power plant last"
+            "the office first, the king last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
@@ -800,13 +882,13 @@ mod tests {
     /// guard at a post: the work goal, the three watches, a worker to each,
     /// hired last; on duty at the panel, on the way there otherwise.
     #[test]
-    fn a_power_plant_worker_keeps_the_control_panel_round_the_clock_and_is_hired_last() {
+    fn a_power_plant_worker_keeps_the_control_panel_round_the_clock_and_is_hired_before_the_king() {
         let kind = JobKind::PowerPlantWorker;
         assert_eq!((kind.name(), kind.with_article()), ("power plant worker", "a power plant worker"));
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ControlPanel, "control panel"));
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a post");
         assert_eq!(kind.shifts(), WATCHES);
-        assert_eq!(JobKind::ALL.last(), Some(&kind));
+        assert_eq!(JobKind::ALL[JobKind::COUNT - 2], kind);
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("on duty", "on the way to the power plant"));
         assert_eq!(kind.uniform().name(), "uniform power plant worker");
 
@@ -819,6 +901,37 @@ mod tests {
         assert_eq!(places.free_shift(panel, kind.shifts()), None, "three workers to a panel");
         let job = Job::new(kind, panel, WATCHES[1]);
         assert_eq!(Job::restore(&job.save()), Ok(job));
+    }
+
+    /// The king: the palace's throne, held court at like a post, ten to four
+    /// every day but Sunday, hired last, one to a throne; robes and crown
+    /// always on, and a stately walk — and nobody else carries themselves so.
+    #[test]
+    fn the_king_holds_court_at_its_throne_in_its_crown_and_walks_slowly() {
+        let kind = JobKind::King;
+        assert_eq!((kind.name(), kind.with_article()), ("king", "the king"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::Throne, "throne"));
+        assert_eq!(kind.goal(), GoalId::Work, "stood at like a post, until there are decisions to make");
+        assert_eq!(kind.shifts(), [COURT_HOURS]);
+        assert_eq!(JobKind::ALL.last(), Some(&kind));
+        assert_eq!((kind.now(true, None), kind.now(false, None)), ("holding court", "on the way to the palace"));
+        assert_eq!(kind.uniform().name(), "uniform king");
+        assert_eq!(kind.bearing(), ROYAL);
+        assert!(ROYAL.gait < 1.0 && ROYAL.always_in_uniform && ROYAL.hat == Some("crown"));
+        assert!(JobKind::ALL.into_iter().filter(|&other| other != kind).all(|other| other.bearing() == WORKER));
+
+        let throne = Point::new(10, 4);
+        let mut places = Workplaces::new();
+        assert_eq!(places.free_shift(throne, kind.shifts()), Some(COURT_HOURS));
+        assert!(places.claim(throne, COURT_HOURS, human(1)));
+        assert_eq!(places.free_shift(throne, kind.shifts()), None, "one king to a throne");
+        let job = Job::new(kind, throne, COURT_HOURS);
+        assert_eq!(Job::restore(&job.save()), Ok(job));
+
+        assert!(!job.is_due(at(1, 8.4)) && job.is_due(at(1, 8.6)), "sets off at half past eight");
+        assert!(job.is_due(at(6, 15.9)) && !job.is_due(at(7, 11.0)), "Saturday, and not Sunday");
+        assert!(COURT_HOURS.is_bedtime(at(1, 23.5)) && COURT_HOURS.is_bedtime(at(2, 6.5)), "in bed eleven to seven");
+        assert!(!COURT_HOURS.is_bedtime(at(1, 22.5)) && !COURT_HOURS.is_bedtime(at(2, 7.5)));
     }
 
     /// The night watch is due from the evening before — two hours before

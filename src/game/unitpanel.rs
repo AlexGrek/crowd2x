@@ -509,7 +509,7 @@ fn portrait(
         Some(EntityType::Human) => {
             let look = look_from(entity, clock);
             portrait.with_children(|stack| {
-                let paths = [Some(human::BASE), Some(look.eyes), look.clothes, Some(look.hair)];
+                let paths = [Some(human::BASE), Some(look.eyes), look.clothes, Some(look.hair), look.hat];
                 for (slot, path) in paths.into_iter().enumerate() {
                     let mut layer = stack.spawn((
                         layer_node(),
@@ -573,7 +573,9 @@ fn clothing_menu(parent: &mut ChildSpawnerCommands, entity: &dyn GameEntity, ass
                     })
                         .with_children(|preview| {
                             let preview_look = human::Look {
-                                clothes: human::clothing_path(outfit), ..look.clone()
+                                clothes: human::clothing_path(outfit),
+                                hat: human::hat_path(outfit),
+                                ..look.clone()
                             };
                             for path in human::portrait_layers(&preview_look) {
                                 preview.spawn((layer_node(), ImageNode::new(assets.load(path))));

@@ -14,11 +14,11 @@
     { "note": "no cheaper way. Plaza (perf_simulation) is all floor and never pays that; this does" },
     { "key": "p" },
     { "tick": 1 },
-    { "note": "seed 7: 139 residents, one spawner each" },
-    { "expect_entities": 139 },
+    { "note": "seed 7: 140 residents, one spawner each" },
+    { "expect_entities": 140 },
 
     { "note": "a crowd wandering the whole district, every walk a far route over its streets" },
-    { "populate": { "kind": "human", "count": 861 } },
+    { "populate": { "kind": "human", "count": 860 } },
     { "expect_entities": 1000 },
     { "measure": { "name": "1000 humans on a district", "ticks": 600 } },
 

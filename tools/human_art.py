@@ -13,7 +13,9 @@ feet row 14.
 
 `generate` prints the `HAIR` and `CLOTHES` arrays for `src/characters/human.rs`,
 and writes the work uniforms (`UNIFORMS`, `clothes_uniform_<job>.png`), which are
-not in the wardrobe a crowd is dressed from and so not in `CLOTHES`.
+not in the wardrobe a crowd is dressed from and so not in `CLOTHES`, and the
+hats that come with a uniform (`HATS`, `hat_<name>.png`: the king's crown), a
+layer of their own drawn over the hair.
 """
 
 import os
@@ -341,6 +343,40 @@ UNIFORMS = {
         {"d": CLOTH["teal"][0], "m": CLOTH["teal"][1], "l": CLOTH["teal"][2], "y": CLOTH["yellow"][1],
          "k": BUCKLE, "b": (20, 20, 24), "q": (30, 30, 34)},
     ),
+    # A royal purple robe to the floor, an ermine cape over the shoulders and
+    # ermine down its front and round its hem, a gold chain across the chest:
+    # the king's, worn always, with the crown (`HATS`).
+    "king": (
+        [
+            "", "", "", "", "", "", "",
+            "....wewwwwew....",
+            "....dygYYgyd....",
+            "....dmlwwmmd....",
+            "....dmlwwmmd....",
+            "....dmlwwmmd....",
+            "....dmlwwmmd....",
+            "...dmmlwwmmmd...",
+            "...wewwwwwwew...",
+        ],
+        {"d": (58, 20, 78), "m": (96, 38, 122), "l": (134, 70, 162),
+         "w": (238, 236, 228), "e": (24, 24, 28), "y": (232, 190, 64), "Y": (176, 132, 40), "g": (250, 224, 120)},
+    ),
+}
+
+# What is worn on the head with a uniform, over the hair (`sim::job::Bearing::hat`):
+# a mask and its colours, like a uniform. Rows 0-2 are above the head, where
+# only hair is; the crown sits on top of whatever hair there is.
+HATS = {
+    # A gold crown of three points, a red jewel in its band.
+    "crown": (
+        [
+            ".....o.oo.o.....",
+            ".....yoyyoy.....",
+            ".....lyrryY.....",
+            ".....YYYYYY.....",
+        ],
+        {"o": (60, 40, 8), "l": (252, 226, 128), "y": (232, 190, 64), "Y": (164, 118, 30), "r": (200, 30, 40)},
+    ),
 }
 
 
@@ -389,6 +425,12 @@ def uniform_layers():
         yield f"clothes_uniform_{job}.png", paint(mask, colours)
 
 
+def hat_layers():
+    """Every (file name, image) of a hat worn with a uniform."""
+    for name, (mask, colours) in HATS.items():
+        yield f"hat_{name}.png", paint(mask, colours)
+
+
 def write_png(path, rows):
     raw = b"".join(b"\x00" + bytes(v for px in row for v in px) for row in rows)
     def chunk(kind, body):
@@ -432,7 +474,7 @@ def generate():
         for name, image in layers:
             write_png(os.path.join(human, name), image)
             lists[key].append(f"human/{name}")
-    for name, image in uniform_layers():
+    for name, image in list(uniform_layers()) + list(hat_layers()):
         write_png(os.path.join(human, name), image)
     for key, paths in lists.items():
         print(f"pub(super) const {key}: [&str; {len(paths)}] = [")
@@ -442,7 +484,8 @@ def generate():
 
 
 def preview(out, scale=4):
-    """Hair on one row per style and every outfit below, all on the base body."""
+    """Hair on one row per style and every outfit below, all on the base body;
+    last, the king in robes and crown with every hairstyle."""
     human = os.path.join(ASSETS, "human")
     base = load(os.path.join(human, "human_base.png"))
     eyes = load(os.path.join(human, "eyes_brown.png"))
@@ -455,6 +498,15 @@ def preview(out, scale=4):
         cells.append([(None, img) for img in row])
     for i in range(0, len(outfits), cols):
         cells.append([(img, hair[i % len(hair)][1]) for _, img in outfits[i : i + cols]])
+    robe = dict(uniform_layers())["clothes_uniform_king.png"]
+    crown = dict(hat_layers())["hat_crown.png"]
+    crowned = []
+    for style in HAIR_STYLES:
+        head = [list(r) for r in next(img for name, img in hair if name.startswith(f"hair_{style}_"))]
+        over(head, crown)
+        crowned.append((robe, head))
+    for i in range(0, len(crowned), cols):
+        cells.append(crowned[i : i + cols])
     pad = 18
     W, H = cols * pad, len(cells) * pad
     sheet = [[(60, 64, 60, 255)] * W for _ in range(H)]

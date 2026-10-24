@@ -150,6 +150,9 @@ catalogue! {
         /// Where a power plant is run from: its control panel, stood at from
         /// beside it. A power plant worker's workplace; needs no power.
         ControlPanel = 15 => FeatureDef { props: &["control panel"], ..BESIDE },
+        /// Where a king holds court: the palace's throne, stood at from beside
+        /// it. The king's workplace, and there is one; needs no power.
+        Throne = 16 => FeatureDef { props: &["throne"], ..BESIDE },
     }
 }
 

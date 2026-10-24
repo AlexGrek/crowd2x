@@ -45,9 +45,35 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, Intent, MoveOutcome};
 
-/// Cells a watched second: a human crosses 120 cells in a world hour.
-const HUMAN_SPEED: f32 = 4.0;
+/// Cells a watched second: a human crosses 120 cells in a world hour — at
+/// the pace of an average one ([`own_pace`]).
+pub const HUMAN_SPEED: f32 = 4.0;
 const DOG_SPEED: f32 = 7.0;
+
+/// How far a person's own pace is from the average one, as a fraction of it:
+/// the standard deviation it is rolled with ([`own_pace`])...
+const PACE_SPREAD: f32 = 0.06;
+
+/// ...and the furthest it may be either way. Slight, on purpose: a crowd that
+/// walks at a few different speeds, not one where somebody dawdles at half
+/// the pace of the rest.
+pub const PACE_RANGE: f32 = 0.15;
+
+/// A person's own pace, as a multiple of [`HUMAN_SPEED`]: rolled once, from a
+/// normal distribution round 1 ([`PACE_SPREAD`]), tails outside
+/// [`PACE_RANGE`] rolled again rather than piled up at its ends — as a
+/// talent is rolled.
+fn own_pace(rng: &mut SmallRng) -> f32 {
+    loop {
+        // Box-Muller, (0, 1] keeping ln(0) out.
+        let radius = (-2.0 * (1.0 - rng.random::<f32>()).ln()).sqrt();
+        let angle = std::f32::consts::TAU * rng.random::<f32>();
+        let pace = 1.0 + PACE_SPREAD * radius * angle.cos();
+        if (pace - 1.0).abs() <= PACE_RANGE {
+            return pace;
+        }
+    }
+}
 
 /// Which way something is facing. The simulation's own, deliberately not
 /// `characters::dog::Facing` — see the module docs.
@@ -87,17 +113,22 @@ pub struct Human {
 
 impl Human {
     pub fn new(uid: Uid, cell: Point, rng: &mut SmallRng) -> Human {
+        // Rolled in this order, each after what was there before it, so that
+        // adding one changed nothing already rolled.
+        let biology = Biology::new(Stats::random(rng));
+        let identity = Identity::human(rng);
+        let talents = Talents::random(rng);
+        let schedule = Schedule::new(rng.random());
+        let pace = own_pace(rng);
         Human {
             clothing: Clothing::initial(uid.body()),
-            walk: Walker::new(uid, cell, HUMAN_SPEED),
+            walk: Walker::new(uid, cell, HUMAN_SPEED * pace),
             brain: Brain::human(),
-            biology: Biology::new(Stats::random(rng)),
-            identity: Identity::human(rng),
+            biology,
+            identity,
             inventory: Inventory::human(),
-            talents: Talents::random(rng),
-            // Rolled last, so everything rolled before it is what it was
-            // before there were schedules.
-            schedule: Schedule::new(rng.random()),
+            talents,
+            schedule,
         }
     }
 
@@ -323,12 +354,16 @@ impl GameEntity for Human {
         true
     }
 
+    /// The job goes in the brain, and how the job has it walk
+    /// ([`Bearing::gait`](super::job::Bearing)) into the walker.
     fn hire(&mut self, job: Job) -> bool {
         self.brain.hire(job);
+        self.walk.set_gait(gait(Some(&job)));
         true
     }
 
     fn dismiss(&mut self) -> Option<Job> {
+        self.walk.set_gait(gait(None));
         self.brain.dismiss()
     }
 
@@ -359,12 +394,21 @@ impl GameEntity for Human {
     }
 }
 
+/// What share of its own pace somebody with `job` walks at: what the job's
+/// [`Bearing`](super::job::Bearing) says, its own pace with none.
+fn gait(job: Option<&Job>) -> f32 {
+    job.map_or(1.0, |job| job.kind.bearing().gait)
+}
+
 impl Human {
     /// A person as saved, standing beside a map whose navigation is at
-    /// `revision` ([`Walker::restore`]).
+    /// `revision` ([`Walker::restore`]). Its gait is not saved: it comes back
+    /// from the job, as it was set from it.
     fn restore(saved: &pb::Human, revision: u64) -> Result<Human, Invalid> {
         let mut brain = Brain::human();
         brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        let mut walk = Walker::restore(pb::required(&saved.walker, "walker")?, revision)?;
+        walk.set_gait(gait(brain.job()));
         Ok(Human {
             clothing: match saved.clothing.as_deref() {
                 Some(name) => Clothing::from_name(name)
@@ -376,7 +420,7 @@ impl Human {
                     Clothing::initial(uid.body())
                 }
             },
-            walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
+            walk,
             brain,
             biology: Biology::restore(pb::required(&saved.biology, "biology")?)?,
             identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
@@ -746,6 +790,86 @@ mod tests {
         two.step(&mut b);
 
         assert_eq!(a.walk.path(), b.walk.path());
+    }
+
+    /// A king is in its robes and crown at any hour of any day, and walks the
+    /// same hall at a stately pace — the same person, slower; let go, it is
+    /// back in its own clothes and at its own pace.
+    #[test]
+    fn a_king_wears_its_robes_always_and_walks_slower_than_it_would() {
+        use crate::sim::clock::{Clock, DAY, HOUR, TIME_SCALE};
+        use crate::sim::clothing::Clothing;
+        use crate::sim::job::{Job, JobKind, COURT_HOURS, KING_GAIT};
+        let at = |day: u32, hours: f32| {
+            let world = (day - 1) as f64 * DAY as f64 + (hours as f64 - 8.0) * HOUR as f64;
+            Clock::after_watching(world / TIME_SCALE as f64)
+        };
+        let walked = |king: bool| {
+            let mut map = Map::new(Size::new(40, 3), FLOOR);
+            crate::sim::testing::prop_at(&mut map, "fridge", Point::new(38, 1));
+            let mut world = World::new(map);
+            let mut human = crate::sim::testing::needy_human(Point::new(1, 1), 70.0, 0.0, 0.0);
+            if king {
+                assert!(human.hire(Job::new(JobKind::King, Point::new(20, 0), COURT_HOURS)));
+            }
+            for _ in 0..120 {
+                world.step(&mut human);
+            }
+            (human.position().0 - 1.5, human)
+        };
+        let (subject, _) = walked(false);
+        let (king, mut human) = walked(true);
+        assert!((king / subject - KING_GAIT).abs() < 0.05, "a king walked {king} cells where it would have walked {subject}");
+        assert_eq!(human.walk.current_speed(), human.walk.speed() * KING_GAIT);
+
+        *human.clothing_mut().unwrap() = Clothing::SundressRed;
+        for (day, hours) in [(1, 3.0), (1, 12.0), (2, 22.0), (7, 12.0)] {
+            assert_eq!(human.worn(at(day, hours)), Some(Clothing::Uniform(JobKind::King)), "day {day} at {hours}");
+        }
+        human.dismiss();
+        assert_eq!(human.worn(at(1, 12.0)), Some(Clothing::SundressRed));
+        assert_eq!(human.walk.current_speed(), human.walk.speed(), "its own pace again");
+    }
+
+    #[test]
+    fn people_walk_at_slightly_different_paces_of_their_own() {
+        let paces: Vec<f32> = (0..500)
+            .map(|seed| {
+                let mut rng = SmallRng::seed_from_u64(seed);
+                Human::new(Uid::new(EntityType::Human, seed + 1), Point::new(1, 1), &mut rng).walk.speed() / HUMAN_SPEED
+            })
+            .collect();
+        assert!(paces.iter().all(|pace| (pace - 1.0).abs() <= PACE_RANGE), "slightly, and no more");
+        let mean = paces.iter().sum::<f32>() / paces.len() as f32;
+        let spread = (paces.iter().map(|pace| (pace - mean).powi(2)).sum::<f32>() / paces.len() as f32).sqrt();
+        assert!((mean - 1.0).abs() < 0.01, "round the average pace: {mean}");
+        assert!((spread - PACE_SPREAD).abs() < 0.01, "spread as rolled: {spread}");
+
+        let again = |seed| Human::new(Uid::new(EntityType::Human, 9), Point::new(1, 1), &mut SmallRng::seed_from_u64(seed)).walk.speed();
+        assert_eq!(again(4), again(4), "the same stream, the same pace");
+    }
+
+    /// The same person, and a fridge at the end of a hall: peckish, it walks
+    /// there at its own pace; starving, it breaks into a run.
+    #[test]
+    fn a_starving_human_runs_to_the_fridge_and_a_peckish_one_walks() {
+        let distance = |hunger: f32| {
+            let mut map = Map::new(Size::new(40, 3), FLOOR);
+            crate::sim::testing::prop_at(&mut map, "fridge", Point::new(38, 1));
+            let mut world = World::new(map);
+            let mut human = crate::sim::testing::needy_human(Point::new(1, 1), hunger, 0.0, 0.0);
+            for _ in 0..150 {
+                world.step(&mut human);
+            }
+            assert_eq!(human.brain.top_goal(), GoalId::Eat);
+            (human.position().0 - 1.5, human.walk.hurrying())
+        };
+        let (walked, calm) = distance(70.0);
+        let (ran, hurry) = distance(100.0);
+        assert_eq!(calm, 0.0);
+        assert_eq!(hurry, 1.0, "flat out after a second and a half");
+        assert!(ran > walked * 1.4, "ran {ran} cells where it walked {walked}");
+        assert!(ran < walked * (1.0 + crate::sim::walker::HURRY), "and got up to speed, not started at it");
     }
 
     #[test]

@@ -134,9 +134,19 @@ pub const MAX_BACKOFF: u8 = 6;
 /// every routine raises what it cares about; so a priority is always what the
 /// routines want *now*, and a routine that stops caring about a goal needs to
 /// do nothing to let it fall.
+///
+/// **Beside every priority, an urgency**: how soon, where the priority is how
+/// badly. Arranged the same way, by the same routines, and read for one thing
+/// — how much of a hurry the unit is in while the goal on top is in charge
+/// ([`Walker::hurry`](crate::sim::walker::Walker::hurry)). Two numbers, not
+/// one: getting ready for a trip out is wanted over a shift and is no hurry,
+/// and a shift is a hurry only for somebody late for it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Goals {
     priority: [f32; GoalId::COUNT],
+    /// How urgent each goal is, 0 (no hurry) to 1 (flat out), raised by the
+    /// routines with the priorities ([`Goals::hurry`]).
+    urgency: [f32; GoalId::COUNT],
     /// Ticks before a goal that reported itself impossible may top the list
     /// again. Deliberately *not* the priority: a routine will keep raising a
     /// goal it cannot see is impossible, and zeroing the priority would make
@@ -158,6 +168,7 @@ impl Goals {
     pub const fn new() -> Goals {
         Goals {
             priority: [0.0; GoalId::COUNT],
+            urgency: [0.0; GoalId::COUNT],
             cooldown: [0; GoalId::COUNT],
             strikes: [0; GoalId::COUNT],
             top: GoalId::Idle,
@@ -166,6 +177,12 @@ impl Goals {
 
     pub fn priority(&self, goal: GoalId) -> f32 {
         self.priority[goal.index()]
+    }
+
+    /// How urgent `goal` is, 0 to 1: how much of a hurry a unit is in while
+    /// it is in charge.
+    pub fn urgency(&self, goal: GoalId) -> f32 {
+        self.urgency[goal.index()]
     }
 
     pub fn cooldown(&self, goal: GoalId) -> u16 {
@@ -189,10 +206,24 @@ impl Goals {
         *priority = priority.max(at_least);
     }
 
+    /// Make `goal` at least `urgency` urgent (0 to 1), whoever wants it.
+    ///
+    /// A max, like [`Goals::raise_to`], and for the same reason. Urgency is
+    /// the goal's and not the routine's: a meal wanted by the routine getting
+    /// a worker ready is as urgent as the hunger behind it says.
+    pub fn hurry(&mut self, goal: GoalId, urgency: f32) {
+        // Not `max(urgency.min(1.0))` alone: `NaN.min(1.0)` is 1, and a
+        // routine that divided by zero has not asked for a run.
+        if urgency > 0.0 {
+            let current = &mut self.urgency[goal.index()];
+            *current = current.max(urgency.min(1.0));
+        }
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Goals {
-        let Goals { priority, cooldown, strikes, top } = self;
+        let Goals { priority, urgency, cooldown, strikes, top } = self;
         pb::Goals {
             top: top.number(),
             slots: GoalId::ALL
@@ -202,6 +233,7 @@ impl Goals {
                     priority: priority[goal.index()],
                     cooldown: cooldown[goal.index()] as u32,
                     strikes: strikes[goal.index()] as u32,
+                    urgency: urgency[goal.index()],
                 })
                 .collect(),
         }
@@ -217,16 +249,23 @@ impl Goals {
             let (Ok(cooldown), Ok(strikes)) = (u16::try_from(slot.cooldown), u8::try_from(slot.strikes)) else {
                 return invalid(format!("{} held off {} ticks after {} strikes", goal.name(), slot.cooldown, slot.strikes));
             };
+            if !(0.0..=1.0).contains(&slot.urgency) {
+                return invalid(format!("{} is {} urgent", goal.name(), slot.urgency));
+            }
             goals.priority[goal.index()] = slot.priority;
+            goals.urgency[goal.index()] = slot.urgency;
+
             goals.cooldown[goal.index()] = cooldown;
             goals.strikes[goal.index()] = strikes;
         }
         Ok(goals)
     }
 
-    /// Zero every priority, ready for the routines to arrange the list again.
+    /// Zero every priority and urgency, ready for the routines to arrange
+    /// the list again.
     pub(super) fn clear_priorities(&mut self) {
         self.priority = [0.0; GoalId::COUNT];
+        self.urgency = [0.0; GoalId::COUNT];
     }
 
     /// One tick off every cooldown.

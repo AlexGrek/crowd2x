@@ -23,7 +23,7 @@ ever removed or renumbered.
 | `ItemKind` / `ItemDef` | `sim/item.rs` | name (saved by it), consume time, nutrition, hydration, taste, mass, volume, **emoji** (how it is drawn in a hand) |
 | `FeatureKind` / `FeatureDef` | `sim/feature.rs` | the **prop names** that are one, `Access` (beside, entered, watched), and for a store a `StoreDef`: what it holds, what the log calls it, its `site` (the statistics menu's building), its HUD word |
 | `GoalId` / `GoalDef` | `sim/brain/goal.rs` | name, emoji, **executor constructor** — which is what puts the goal in every `Brain::human()`. Ties go to the goal listed first, so a job's goal goes after the needs |
-| `JobKind` / `JobDef` | `sim/job.rs` | name, article, workplace `FeatureKind`, goal, commute, shifts, **uniform name**, and the job menu's `now` line (`fn(at_work, pack) -> &str`). `ALL` order is the **hiring order** |
+| `JobKind` / `JobDef` | `sim/job.rs` | name, article, workplace `FeatureKind`, goal, commute, shifts, **uniform name**, the job menu's `now` line (`fn(at_work, pack) -> &str`), `goes_out_for`, and its `Bearing` (`WORKER`, or the king's `ROYAL`: gait, uniform always, a hat). `ALL` order is the **hiring order** |
 
 ## Adding a job
 
@@ -39,7 +39,8 @@ ever removed or renumbered.
 4. **Its tasks**, if new: see "Adding a task".
 5. **Its uniform**: the PNG `assets/human/clothes_uniform_<job name with _>.png`, drawn by
    `tools/human_art.py` (`pixel-artist`). `Clothing::Uniform(JobKind)` and its art path follow from
-   the row's `uniform` name.
+   the row's `uniform` name. A hat with it (the king's crown) is the `Bearing`'s `hat` and a
+   `HATS` mask, `assets/human/hat_<name>.png`.
 6. **Somewhere to work**, for a district: a lot building (below) or props in an existing one.
 
 Nothing else: hiring (`JobKind::ALL`), `WorkRoutine`, the save (the kind's number), the statistics

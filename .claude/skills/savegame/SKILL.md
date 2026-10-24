@@ -147,7 +147,16 @@ stands on it) and refuses a crop where nothing could be sown; `sim/saving.rs` re
 for a farm with no grain bin. `JobKind::Farmer` = 6, `GoalId::Farm` = 13 (a
 `pb::Executor::Seek`), the tasks `"sow"`, `"tend"`, `"harvest"` by name and the item `"wheat"` by
 name: no schema change but the one field. The test fingerprint (`save/tests.rs`) includes the
-map's planted cells. Test: `a_farm_saved_mid_week_carries_on_exactly`. **A new oneof variant must also go in the
+map's planted cells. Test: `a_farm_saved_mid_week_carries_on_exactly`. **With paces and
+hurrying**: a person's own pace is the walker's `speed` (tag 2, always saved, so an older save's
+people keep the 4.0 everybody walked at); `pb::Walker.hurry` (tag 6, 0-1, absent = 0, refused
+outside it) and `pb::GoalSlot.urgency` (tag 5, 0-1, absent = 0, refused outside it). Test:
+`a_crowd_saved_as_it_breaks_into_a_run_carries_on_exactly` (seen failing with either not
+restored). `steel_works_fixture()` sets every walker's pace back to `kinds::HUMAN_SPEED`
+(`Walker::set_speed`, test-only) to build the world the fixture was written from. **With the
+king**: `JobKind::King` = 8 and the prop `"throne"` by name, no schema change; the walker's
+`gait` is **not saved** — `Human::restore` sets it again from the restored job. Test:
+`a_king_saved_on_the_way_to_court_walks_on_at_its_stately_pace` (seen failing with it not set). **A new oneof variant must also go in the
 field's `tags = "..."` list** or it decodes as nothing (`pb::Task.kind`: "a task of no kind").
 
 ## Fast

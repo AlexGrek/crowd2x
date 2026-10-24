@@ -352,6 +352,42 @@ mod tests {
         assert_eq!(human.brain().top_goal(), GoalId::Work, "and still at it");
     }
 
+    /// The king sets off for court at half past eight, slowly, and holds it
+    /// at its throne from ten: an hour's stretch beside the throne, logged as
+    /// court held.
+    #[test]
+    fn the_king_holds_court_beside_its_throne() {
+        use crate::sim::feature::FeatureKind;
+        use crate::sim::job::{JobKind, COURT_HOURS};
+        let throne = Point::new(11, 7);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "throne", throne);
+        let mut world = World::new(map);
+        world.clock = at(1, 8.3);
+        let mut human = worker(Point::new(2, 2), throne);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::King, throne, COURT_HOURS)));
+
+        for _ in 0..ticks(&world, 0.1) {
+            step(&mut world, &mut human);
+        }
+        assert_ne!(human.brain().top_goal(), GoalId::Work, "twenty past eight: not yet");
+
+        world.clock = at(1, 9.9);
+        let mut holding_court = false;
+        for _ in 0..ticks(&world, 1.6) {
+            step(&mut world, &mut human);
+            holding_court |= matches!(human.brain().current_task(), Some(Task::Work(Work { place: FeatureKind::Throne, .. })));
+            if world.log_contains("held court an hour") {
+                break;
+            }
+        }
+        assert!(holding_court, "never held court; brain {:?}", human.brain_fields());
+        assert!(world.log_contains("held court an hour at the throne at 11, 7"), "{:?}", world.lines());
+        assert_eq!(world.works(), 0, "not an hour at a computer");
+        assert_eq!(human.center_position().manhattan_distance(throne), 1, "beside the throne, not on it");
+    }
+
     #[test]
     fn at_five_o_clock_the_worker_stops_and_the_time_worked_still_tired_it() {
         let desk = Point::new(6, 5);

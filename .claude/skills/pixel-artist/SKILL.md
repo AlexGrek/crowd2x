@@ -117,14 +117,27 @@ job (`t` a tie, `s` a reflective band, `k` brass; the undertaker's black cassock
 with a white collar `w` and a gold cross `y`; the steelworker's brown leather apron over a
 charcoal shirt; the courier's green jacket with a satchel on a strap; the farmer's denim
 dungarees, the bib buttoned at its corners, over a red shirt; the power plant worker's teal
-boiler suit with a yellow bolt patch `y` on the chest), written by `generate` as
+boiler suit with a yellow bolt patch `y` on the chest; the king's royal purple robe to the
+floor, an ermine cape `w`/`e` and ermine down its front and round its hem, a gold chain `y`),
+written by `generate` as
 `assets/human/clothes_uniform_<job>.png` and drawn in the preview's last row. They are not in
 the printed `CLOTHES` list (the wardrobe a crowd is dressed from, whose order is what keeps
 everybody's seeded look); each is `Clothing::Uniform(job)`, named by the job's row
 (`JobDef::uniform`, `"uniform steelworker"`), and `clothing_path` finds every outfit's PNG by its
 name, spaces to underscores (`jobs`). A new job needs one, and nothing in the code.
 
-A new slot (a hat, glasses) means a new array in `human.rs`, a new entry in
+**Hats** go with a uniform: `HATS` in `tools/human_art.py` (a mask and colours, rows 0-3 —
+above the head, where only hair is, and the brow), written as `assets/human/hat_<name>.png`.
+The king's `crown` is the one so far: three gold points tipped dark so they read on blonde
+hair, a red jewel in the band. A job names its hat in its `Bearing` (`sim::job`), and
+`characters::human::hat_path` finds the PNG; it is the paperdoll's **fourth slot**, drawn over
+the hair. `preview` ends with a row of the king in robes and crown on every hairstyle.
+
+The **throne** (`assets/throne.png`, 16x16, `upscaled`) is drawn by `tools/palace_art.py`
+(`preview` shows it enlarged on the palace's white marble): a high-backed gilt chair with a
+jewelled crest, its back and seat buttoned crimson velvet.
+
+A new slot (glasses; the hat is one already) means a new array in `human.rs`, a new entry in
 `slot_paths`, `SLOT_DEPTHS` and `SLOTS`, and the tests in that file — it changes the
 paperdoll the body pool recycles, so read the `renderer` and `game-screen` skills first.
 

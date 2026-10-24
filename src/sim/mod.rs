@@ -3291,9 +3291,13 @@ mod tests {
         //
         // Raised from 832 to 896, a cache line, on purpose: the farmer's goal
         // slot and executor, and a count of the wheat item kind (856).
+        //
+        // Raised from 896 to 960, a cache line, on purpose: an urgency beside
+        // every goal's priority (56 bytes, `Goals::urgency`) and the hurry a
+        // walker is in (920).
         let human = std::mem::size_of::<Human>();
         let brain = std::mem::size_of::<Brain>();
-        assert!(human <= 896, "a Human is {human} bytes, {brain} of them brain");
+        assert!(human <= 960, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3775,11 +3779,13 @@ mod tests {
             let farmers = crate::map::district::farm::GRAIN_BINS;
             let operators = crate::map::district::power_plant::CONTROL_PANELS * job::WATCHES.len();
             assert_eq!(operators, 3);
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators;
+            let kings = crate::map::district::palace::THRONES;
+            assert_eq!(kings, 1, "one king");
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
-            let (mut smelting, mut hauling, mut farming) = (0, 0, 0);
+            let (mut smelting, mut hauling, mut farming, mut reigning) = (0, 0, 0, 0);
             let (mut clerks, mut collectors) = (0, 0);
             let mut posts: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
             let mut panels: std::collections::BTreeMap<Point, Vec<u8>> = std::collections::BTreeMap::new();
@@ -3825,12 +3831,17 @@ mod tests {
                         );
                         panels.entry(job.workplace).or_default().push(job.shift.start());
                     }
+                    JobKind::King => {
+                        reigning += 1;
+                        assert!(district.the(crate::map::district::palace::NAME).contains(job.workplace), "seed {seed}: a throne outside the palace");
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
+            assert_eq!(reigning, kings, "seed {seed}: the palace's");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");

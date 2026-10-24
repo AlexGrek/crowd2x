@@ -1615,7 +1615,7 @@ fn perform(
             let doll = checks.paperdolls.iter().find(|(actor, _)| actor.0 == uid);
             if *drawn {
                 let (_, doll) = doll.ok_or("selected person has no world sprite")?;
-                let (sprite, visibility) = checks.clothing_sprites.get(doll.layers[1]).map_err(|_| "missing world clothing layer")?;
+                let (sprite, visibility) = checks.clothing_sprites.get(doll.layers[crate::characters::human::CLOTHES_SLOT]).map_err(|_| "missing world clothing layer")?;
                 if !matches(&sprite.image, visibility) {
                     return Err(format!("world sprite does not show {worn}"));
                 }

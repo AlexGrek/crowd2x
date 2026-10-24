@@ -5,7 +5,7 @@ description: Jobs in crowd2x - who works where and when. The Job model (kind, ow
 
 # Jobs
 
-A job is **what a unit does for a living, where, and when**. Eight so far, all tiring and no
+A job is **what a unit does for a living, where, and when**. Nine so far, all tiring and no
 fun:
 
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
@@ -32,7 +32,12 @@ fun:
 - the **power plant worker**: their own watch (the guards' `WATCHES`, every day) at the
   `"control panel"` of the district's power plant — stood by an hour at a time like a guard's
   post (`WorkGoal`, the `"stand by"` stretch), **and nothing else yet**. The plant's one panel
-  takes 3, hired **last**. See "The power plant" below.
+  takes 3, hired after the farmers. See "The power plant" below;
+- the **king**: the `"throne"` in the district's palace, the one there is — court held an
+  hour at a time like a guard's post (`WorkGoal`, the `"hold court"` stretch), ten to four
+  every day but Sunday, **and nothing else yet**: the major decisions are to be the king's
+  brain's, next. In robes and a crown always, and walking slowly (`Bearing`). Hired **last**.
+  See "The king" below.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -40,7 +45,8 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 
 | Concept | Where | What |
 | --- | --- | --- |
-| `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name) and `now` (the job menu's line). The methods read the row. Saved as its number (`JobKind::number`) |
+| `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name), `now` (the job menu's line), `goes_out_for` and `bearing` (below). The methods read the row. Saved as its number (`JobKind::number`) |
+| `Bearing` | `job.rs` | how somebody in the job carries themselves, on duty or off: `gait` (a share of its own pace, hurry included: `Walker::set_gait`, set by `Human::hire`/`dismiss`/`restore` from the job, **not saved**), `always_in_uniform` (`GameEntity::worn` puts the uniform on at any hour, not only while due) and `hat` (a layer over the hair with the uniform: `assets/human/hat_<hat>.png`, `characters::human::hat_path`). `WORKER` (1.0, on shift, none) for every job but the king's `ROYAL` (`KING_GAIT` 0.6, always, `"crown"`) |
 | `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers, power plant workers. `give_a_job` and `Command::Hire` walk it |
 | `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY` |
 | `Job::is_due(clock)` | `job.rs` | its hours on its days **plus the kind's commute before** (`Shift::is_due_after`): the office sets off at 08:30, a guard two hours before its watch. A shift from midnight is due from the evening before if the next day is worked. (`Shift::is_due` keeps the plain `COMMUTE`.) What `WorkRoutine` and the job menu read |
@@ -88,6 +94,7 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 | Layer | What | File |
 | --- | --- | --- |
 | routine | `WorkRoutine` ("go to work"): raises **`job.kind.goal()`** to **`WORKING` = 1.5** while `job.is_due(clock)` — `Work` at a desk or a post, `Collect` for a collector. Stateless decision (no stat, so no hysteresis); `on_shift` is kept for the brains menu and the save | `brain/routines.rs`, `routine.rs` |
+| late | `WorkRoutine` also makes `GoalId::Work` **urgent** (`Goals::hurry`) for a worker kept at one place — desk, guard post, control panel — standing more than a cell (`AT_WORK`) from its workplace once the shift's hours have begun (`Shift::is_working_hours`): `LATE` = 0.5 at the start, 1 an hour (`LATE_BY`) late, so it hurries in, and back from a need that took it away. Stateless: a job worked on the move (collector, courier, farmer, steelworker, undertaker) is never late. Urgency only sets walking speed (`brain-engineer`, "How fast it walks") | `brain/routines.rs` |
 | getting ready | `ReadyRoutine` ("get ready to go out"), **last in `Brain::human()`**: before every trip out, a collector sees to its needs first — see "Getting ready" below | `brain/routines.rs` |
 | goal | `GoalId::Work` (💼) and `GoalId::Collect` (🧲), **the last two `GoalId`s** so every tie goes to the other goal | `brain/goal.rs` |
 | office, gate and power plant | `WorkGoal`: walks beside **its own desk** — or post, or control panel: the job's `workplace()` feature is what has to be there — and queues `Task::work_at(job.kind.workplace(), desk, WORK_SECONDS)` — an hour of world a stretch, `Achieved` after each, so the routine decides how many. Logs `"{uid} {done} an hour at the {prop} at x, y"` from the stretch's words: `"worked an hour at the computer at x, y"` / `"kept watch an hour at the guard post at x, y"` / `"stood by an hour at the control panel at x, y"`. No other desk to reroute to: a desk it cannot reach is `Blocked` (held off); an unpowered desk (`!features.has(Workstation, desk)`) is `Blocked` before any walk. `prioritized` forgets a remembered desk that is no longer the job's | `brain/goals/work.rs` |
@@ -260,7 +267,7 @@ district's farm. Nothing eats it yet.
 | --- | --- | --- |
 | soil | **good soil** is a terrain column, `Terrain::fertile` (`meadow` only); a crop goes only in a **plot** (`map::is_plot`: both coordinates even), so no two crops touch. `Map::can_sow(cell)` = a plot of good soil with nothing in the way **and the eight cells round it open** — so a crop never closes a gap between a lake, a heap or a wall, and never shuts anybody in or walls a way off; a map with nothing round it has no sowable plot on its edge. A crop **blocks its cell** like a heap (`Map::plant` / `unplant`, the map's `planted` set; navigation counts it open ground, so it never invalidates) | `map/terrain.rs`, `map/mod.rs` (`map` skill) |
 | fields | `sim::fields::Fields` (a `Facilities` field, `Think::fields`): every `Crop { cell, farm, sown, quality, tended }`, sorted by cell. `farm` is **the grain bin it was sown for** — a farmer's workplace — so a field outlives its farmer and the next one hired to the bin keeps it. **Grows by the clock**: `Crop::stage(now)` is `Seedling`, `Young`, `Heading` (in ear), `Ripe`, a stage every `STAGE_DAYS` (2), ripe after `GROWING_DAYS` (6); nothing is stepped. **Tended once a day** (`needs_tending`: not the day sown, not once ripe) for `TEND_QUALITY` (20) up to `BEST` (100); harvested, it yields `1 + quality / 40` sheaves (`Crop::harvest`, 1-3). `PLOTS` = 10 crops a farm | `sim/fields.rs` |
-| kinds | `JobKind::Farmer` (workplace `FeatureKind::GrainBin` — a store of `ItemKind::Wheat`, site `"farm"`, HUD `wheat`; goal `GoalId::Farm` 🌱; `FARM_HOURS`; `"uniform farmer"`: denim dungarees over a red shirt), hired last; `ItemKind::Wheat` (0.5 kg, 1 l: twelve to a pack, 🌾) | `job.rs`, `feature.rs`, `item.rs` |
+| kinds | `JobKind::Farmer` (workplace `FeatureKind::GrainBin` — a store of `ItemKind::Wheat`, site `"farm"`, HUD `wheat`; goal `GoalId::Farm` 🌱; `FARM_HOURS`; `"uniform farmer"`: denim dungarees over a red shirt), hired after the steel works; `ItemKind::Wheat` (0.5 kg, 1 l: twelve to a pack, 🌾) | `job.rs`, `feature.rs`, `item.rs` |
 | tasks | `Sow { plot }` (`SOW_SECONDS` = 10 world min) beside a plot `can_sow` says yes to → `Effect::Sow`; `Tend { crop }` (15 min) beside a crop wanting it → `Effect::Tend`; `Harvest { crop }` (10 min) beside a ripe crop, with room in the pack for all it yields (`Inventory::room_for_many`) → `Effect::Harvest`. All named `TimedTask`s, all `Event::Worked`. The effects carry `when: Clock` | `brain/tasks/sow.rs`, `tend.rs`, `harvest.rs` |
 | the world | `effect::apply`: `Sow` sows for the unit's job's workplace, refused where somebody stands in the plot (the occupancy) or lies dead in it (`Corpses`: the dead let their cell go), it is sown already, or the field is full (`"sowed wheat at x, y: 4 of 10 sown"`); `Tend` (`"tended the wheat at x, y: kept at 60%"`); `Harvest` out of the fields, the plot opened, the sheaves into the pack (`"harvested 3 wheat at x, y, kept at 100%"`) | `sim/effect.rs` |
 | farmer | `FarmGoal` (a `Seek`), from what is true now: fewer than 10 crops → `nearest_plot` (ring by ring out from the field's crop nearest the bin, or the bin; a free plot nobody stands in or beside, no body lies in, reachable) and `Sow`; a ripe crop → `Harvest`, or the bin first if the pack has no room; a crop not tended today → `Tend`; wheat carried → the bin, `Deposit` (`Achieved`); nothing → `Blocked`, **without a log line** (it is most afternoons). So a crop harvested is sown again before the next is cut. No grain bin → `Blocked` | `brain/goals/farm.rs` |
@@ -295,7 +302,7 @@ on the edge: two `"generator"`s, the power sources, and one `"control panel"` be
 
 | Layer | What | File |
 | --- | --- | --- |
-| kind | `JobKind::PowerPlantWorker` (`"power plant worker"`, number 7): workplace `FeatureKind::ControlPanel` (`"control panel"`, beside, **no power**), goal `GoalId::Work`, `COMMUTE`, `WATCHES` (three to a panel), uniform `"uniform power plant worker"` (a teal boiler suit, a yellow bolt patch), hired last | `job.rs`, `feature.rs` |
+| kind | `JobKind::PowerPlantWorker` (`"power plant worker"`, number 7): workplace `FeatureKind::ControlPanel` (`"control panel"`, beside, **no power**), goal `GoalId::Work`, `COMMUTE`, `WATCHES` (three to a panel), uniform `"uniform power plant worker"` (a teal boiler suit, a yellow bolt patch), hired after the farmers, before the king | `job.rs`, `feature.rs` |
 | the work | `WorkGoal` as for a guard: beside its own panel, a `Work` stretch with `place: ControlPanel` — `"stand by"`, logged `"stood by an hour at the control panel at x, y"`. **It does nothing else yet**: the plant powers the district whether anybody is there or not | `brain/goals/work.rs`, `brain/tasks/work.rs` |
 | menu | `now`: `on duty` at the panel, `on the way to the power plant` | `job.rs` |
 | on screen | the panel's screens light while somebody stands by it (`used` strip, `game::props`); the generators' fans turn | `editor/props.rs`, `tools/power_plant_art.py` |
@@ -315,6 +322,37 @@ transformer — seen failing with the power rows upside down, a lamp with no pow
 arrivals hired to the panel in watch order, the job menu (`Mon-Sun`, `on duty`), `stand by at
 the control panel` on the brains menu, the uniform on the clothing menu, an hour stood by, and
 the evening watch on at 16:30 with the day watch `done for the day`.
+
+## The king
+
+The district's **king** — one, since a palace has one throne. What it decides comes next; for
+now it is the job's frame: where, when, and how a king carries itself.
+
+| Layer | What | File |
+| --- | --- | --- |
+| kind | `JobKind::King` (`"king"`, `"the king"`, number 8, **hired last**): workplace `FeatureKind::Throne` (`"throne"`, beside, no power), goal `GoalId::Work`, `KING_COMMUTE` (1.5 world hours: a slow walk to the middle of the district), `[COURT_HOURS]` (10-16 `MONDAY_TO_SATURDAY`: up at 7, in bed by 23, `Shift::is_bedtime`), uniform `"uniform king"` (a royal purple robe to the floor, an ermine cape, front and hem, a gold chain), `bearing: ROYAL` | `job.rs`, `feature.rs` |
+| the work | `WorkGoal` as for a post: beside its throne, a `Work` stretch with `place: Throne` — `"hold court"`, logged `"held court an hour at the throne at x, y"`. Like the office it starts on arrival, from setting off at 08:30. Late for court it hurries, at its gait (`WorkRoutine`'s lateness: `GoalId::Work`) | `brain/goals/work.rs`, `brain/tasks/work.rs` |
+| bearing | robes and crown on at every hour of every day (`always_in_uniform`), its own clothes back when let go; walks at `KING_GAIT` of its own pace, its hurry too — a starving king walks briskly at best | `job.rs`, `entity.rs`, `kinds.rs` |
+| drawn | the crown is the paperdoll's **hat** slot, drawn over the hair (`characters::human`, `SLOTS` = 4, `HAT_SLOT`), in the world and the portrait; `actors::sync_clothing` redraws it with the outfit | `characters/human.rs`, `game/actors.rs`, `game/unitpanel.rs` |
+| menu | `now`: `holding court` at the throne, `on the way to the palace` | `job.rs` |
+| where | the **palace** (`map/district/palace.rs`), a lot building on the lot nearest the district's middle: the whole lot, `wall red` and `floor white`, the throne in the middle of the far wall facing the door (`map-generator`) | |
+
+**The decisions, next**: a goal of the king's own in place of `GoalId::Work` (a new `GoalId` row
+and the job row's `goal`), or a routine only a king's brain raises (`WorkRoutine` reads the job;
+`RoutineCtx::job` has the kind) — the brain is where it goes, never a Bevy system.
+
+Tests: `job.rs` `the_king_holds_court_at_its_throne_in_its_crown_and_walks_slowly`;
+`goals/work.rs` `the_king_holds_court_beside_its_throne`; `kinds.rs`
+`a_king_wears_its_robes_always_and_walks_slower_than_it_would` (seen failing with the robes on
+shift only, and with no gait set on hire); `save::tests::a_king_saved_on_the_way_to_court_walks_on_at_its_stately_pace`
+(seen failing with the gait not set again on load); `characters::human`
+`the_kings_robes_come_with_a_crown_on_top_of_the_hair`; `map::district::palace`;
+`sim::tests::everybody_in_a_district_moves_into_a_bed_of_their_own_house` (one king, in the
+palace, hired last). QA `qa/king.json`: a throne room, the arrival hired as the king, the job
+menu (`10:00-16:00`, `Mon-Sat`, `off until 10:00`), `wearing: uniform king` at 08:00, `60% of
+its pace` on the debug menu, `hold court at the throne` and `holding court`, a close-up of the
+crown over the hair, an hour of court held, `done for the day` at 16:30 still crowned (seen
+failing with the robes on shift only).
 
 ## Saving (`savegame` skill)
 

@@ -38,6 +38,10 @@ files come only from what the routine needs *around* it:
   wandering is `BUSY` (0.1). Urgency is only comparable across needs on one scale. A floor or
   special case must be ordered against the committed needs (see the priority table in
   `.claude/skills/brain-engineer/SKILL.md`) and a test must assert that order.
+- **Urgency is separate from priority.** A routine may also say how soon (`goals.hurry(goal,
+  0..1)`, beside `raise_to`): it only sets how fast its unit walks while that goal is on top. A
+  `Need` gives its `urgent_at` (`URGENT`, 75, or `NEVER_URGENT`); a routine type works it out
+  as `WorkRoutine` does lateness. Raise none for a want that is no hurry.
 - **Hysteresis.** Commit at a high level, release at a lower one, kept in a `committed` field
   on the routine. Without it a stat hovering at one threshold makes a unit turn round halfway
   to the goal. `&mut self` in `arrange` exists for this.

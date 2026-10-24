@@ -50,7 +50,7 @@ talking only to the one below:
   nearest free desk it may use; `Workplaces` is the bookkeeping, read by nothing in a tick)
   and by `Command::Hire`, taken back by `Command::Dismiss` and despawn. Routines and goals
   read it as `RoutineCtx::job` / `GoalCtx::job`. The `jobs` skill has all of it.
-- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`, `OrdersRoutine`, `WorkRoutine`, `ReadyRoutine`) own **priorities and nothing else**.
+- **routines** (`NeedRoutine`, `SleepRoutine`, `StayBusyRoutine`, `OrdersRoutine`, `WorkRoutine`, `ReadyRoutine`) own **priorities and urgencies and nothing else** (urgency: how much of a hurry a goal is, below "How fast it walks").
   The list is zeroed every tick and each routine raises what it cares about
   (`Goals::raise_to` is a max, so two routines cannot undo each other). `NeedRoutine` is
   one routine built from a `Need` — `HUNGER` ("keep fed"), `THIRST` ("keep hydrated"),
@@ -188,6 +188,25 @@ The search is 4-connected and movement is not: a walker leaves for the next cell
 it is inside the current one, so the line it walks cuts corners — except the last cell,
 which a walk ends in the *middle* of. `path.rs` says why corner cutting can never skip a
 cell the search vetted.
+
+**How fast it walks** is the walker's own pace (`Walker::speed`: a dog's 7 cells a watched
+second; a person's 4 times its own pace, rolled at spawn from a normal round 1, sd 0.06,
+within ±15% — `kinds::own_pace`, the last roll of the per-entity stream so nothing else
+changed) times its hurry. **Urgency is the routines' and the hurry the walker's**: beside
+every priority `Goals` keeps an urgency, 0-1, zeroed and raised (`Goals::hurry`, a max)
+by the same routines every tick; step 7 of the pipeline, after the task has run, hands the
+urgency of the goal on top to `Walker::hurry`, which eases its hurry towards it by at most
+`dt / SECONDS_TO_HURRY` (1 watched second) a tick, up or down, and drops it to 0 whenever it
+has no route — every walk sets off at its own pace and breaks into a run. Flat out is
+`HURRY` (0.75) over its pace. All of it times the walker's `gait`, a share its job sets
+(`job::Bearing::gait`: 1, or the king's 0.6), so a king walks slowly and hurries slowly. What is urgent: a need past `URGENT` (75, where a need
+outranks a shift), rising to 1 at 100 (`Need::urgent_at`; boredom `NEVER_URGENT`); and being
+late — a worker kept at one place (`GoalId::Work`: desk, guard post, control panel) not
+within a cell of it once its shift's hours have begun, `LATE` (0.5) rising to 1 an hour in.
+Stateless on purpose: a job worked on the move is never late, and a worker coming back from
+a need hurries back. The brains menu lists `urgent` goals; the walker's debug fields say
+`speed` (now), `pace` and `hurry`. Both the hurry (`pb::Walker.hurry`) and the urgencies
+(`pb::GoalSlot.urgency`) are saved.
 
 **Features** (`sim/feature.rs`) are what props are *for*: `FeatureKind`'s catalogue (a
 `catalogue!` row a kind: its prop names, its `Access`, and for a store what it holds) binds a

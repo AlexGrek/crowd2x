@@ -20,11 +20,12 @@ writing any of them.
 | --- | --- | --- | --- | --- |
 | perception | *who is in front of it?* | its heading, `Occupancy`, the terrain, a static cone table; every 7th tick | its own sightings | `brain/perception.rs` |
 | attention | *is any of that news?* | the sightings, world time since the last look | its own faces; hands each new one to the brain, which turns a human into `Event::Met` | `brain/attention.rs` |
-| routine | *how badly is each goal wanted?* | biology (stats, switches), body, `Think` | the priority list only | `brain/routines.rs` |
+| routine | *how badly is each goal wanted, and how soon?* | biology (stats, switches), body, `Think` | the priority list and its urgencies only | `brain/routines.rs` |
 | goal executor | *how is this want pursued?* | biology, hands, memory, `Think`, last task result | the task queue, memory, its own fields | `brain/goals/` |
 | task executor | *how is one small step done?* | everything in `TaskCtx` | the action, hands, events to the body, and its unit's own `Effect` | `brain/tasks/` |
 | effect / world step | *what does a task's request outside its own unit become?* | every entity's `Effect` for the tick | world state no single entity owns — a fridge's door, a door's leaf, a piece off a heap of scrap (into the pack), a packful into a scrap bin | `sim/mod.rs` (`Effect`, `world_step`), `sim/fridge.rs`, `sim/door.rs`, `sim/bins.rs` |
 | action | *what is the body doing, how long for?* | walker, `dt`, move outcome | its own clock, the walker's route | `brain/action.rs` |
+| walker | *how fast?* | its own pace, the urgency of the goal on top (step 7) | its hurry, eased over a watched second | `sim/walker.rs` (`Walker::hurry`) |
 | feature | *what is this prop for, and does it work?* | the map's props and its `Supply` — at `GameState::new`, and again whenever a distribution box is switched | nothing | `sim/feature.rs`; power: `electrician` skill, water: `plumber` |
 | item | *what can be held, what is it made of?* | — | nothing | `sim/item.rs` |
 | inventory | *what is being carried, and does it still fit?* | its own slots | only a task writes it | `sim/inventory.rs` |
@@ -51,6 +52,7 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
                 -> queue cleared -> new.prioritized
 4. top.process(last)             ONLY if the goal just changed or no task is current
 6. current task's executor runs  (pops the queue front if none is current)
+7. walk.hurry(urgency of the top goal, dt)  (0 with no route: every walk starts at its pace)
 ```
 
 This order has consequences:
@@ -79,6 +81,7 @@ This order has consequences:
 | carry a new thing | an **item** variant with what it is made of (`nutrition`, `hydration`, `consume_seconds`, `mass`, `volume`), **and its art** in `characters/item.rs` — a texture or an emoji; `item::art` has no wildcard arm, so it will not compile without one |
 | change *when* something is chosen | the routine's priority curve, not the goal |
 | change *how* something is done | the goal executor, not the routine |
+| hurry when something is urgent | `goals.hurry(goal, 0..1)` in the routine that raises it, beside `raise_to` — a `Need`'s `urgent_at`, or a rule like `WorkRoutine`'s lateness. Urgency is per goal, read only for the goal on top, and only changes walking speed |
 
 Never add a Bevy system that decides something, a `Component` holding agent state, or a new
 `Intent` variant for a behaviour. `Intent` stays `Idle | Move`.
@@ -223,6 +226,13 @@ Priorities are unitless `f32`s compared only against each other.
 | `ReadyRoutine` → eat / drink / play / relieve | before a trip out for a job that goes out (`JobDef::goes_out_for`: the collector): `GETTING_READY = 1.6` less 0.01 per place on its list (drink, eat, play, toilet), so over work and under any need past 80, for each need it is seeing to until every one is 85% met. Starts beside the bin or back in with a half trip, keeps a list (no need joins it mid-way) and a `ready` latch until it goes out; tells `CollectGoal` through `GoalCtx::ready_to_go_out`; reads the pack through `RoutineCtx::inventory` and held-off goals through `Goals::cooldown`. The `jobs` skill, "Getting ready" |
 | `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
+
+**Urgency is a second number, not the priority** (`Goals::urgency`, 0-1): how much of a
+hurry the unit walks in while that goal is on top, up to `HURRY` (1.75x) its own pace. A need
+past `URGENT` (75) — `(level - 75) / 25`; boredom never. Late for a desk, post or panel
+(`GoalId::Work`, more than a cell away once the hours begin): `LATE` 0.5, rising to 1 an hour
+late. Getting ready (1.6) and a shift on time (1.5) are wanted badly and are no hurry, which is
+why urgency is not read off the priority. "How fast it walks" in [architecture.md](architecture.md).
 
 Put a new need on the same 0–2 scale so that urgency is comparable across needs. Give a
 routine **hysteresis** (commit at a high threshold, release at a low one, with a `committed`

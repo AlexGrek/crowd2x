@@ -112,6 +112,10 @@ pub struct Walker {
     /// The unfinished search behind `request`, when it kept its own.
     #[prost(message, optional, tag = "5")]
     pub search: Option<PathSearch>,
+    /// How much of a hurry it is in, 0 to 1 (`Walker::hurry`); absent = 0,
+    /// its own pace, which is all anybody walked at before.
+    #[prost(float, tag = "6")]
+    pub hurry: f32,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

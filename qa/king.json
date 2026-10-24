@@ -1,0 +1,108 @@
+{
+  "name": "the king is hired at the throne, wears robes and a crown always, walks slowly and holds court ten to four",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "throne room",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "floor white", "wall red"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 456, "y": 168 }, "kind": "throne" },
+              { "at": { "x": 72, "y": 72 }, "kind": "bed 1" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "throne room",
+  "steps": [
+    { "note": "a throne room under the open sky: the throne at (9, 3), a bed in the corner. A world opens at 08:00 on day 1, a Monday" },
+    { "key": "q" },
+    { "key": "q" },
+    { "expect_zoom": 2 },
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "the throne is the king's workplace, and there is one: the arrival is hired as the king, to hold court ten to four" },
+    { "spawn": { "kind": "human", "x": 3, "y": 3 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as the king at the throne at 9, 3, 10:00-16:00" },
+    { "expect_entities": 1 },
+
+    { "note": "every need but tiredness switched off, so this is a test about the king" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "press": "job" },
+    { "expect_text": "king" },
+    { "expect_text": "throne at 9, 3" },
+    { "expect_text": "10:00-16:00" },
+    { "expect_text": "Mon-Sat" },
+    { "expect_text": "off until 10:00" },
+
+    { "note": "eight o'clock, two hours before court: already in the robes and crown, which a king never takes off" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform king (own: " },
+    { "note": "and it walks at three fifths of its own pace" },
+    { "press": "debug" },
+    { "expect_text": "60% of its pace" },
+    { "press": "job" },
+    { "look_at": { "x": 5, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "eight o'clock: the king in purple robes and a gold crown, before court" },
+
+    { "note": "a quarter past ten (a tick is 1.875 world seconds): at the throne, holding court" },
+    { "tick": 4200 },
+    { "press": "brains" },
+    { "expect_text": "hold court at the throne at 9, 3" },
+    { "press": "job" },
+    { "expect_text": "holding court" },
+    { "shot": "a quarter past ten: the king holding court beside the throne" },
+    { "press": "close" },
+    { "key": "e" },
+    { "key": "e" },
+    { "expect_zoom": 4 },
+    { "look_at": { "x": 8, "y": 3 } },
+    { "wait": 0.3 },
+    { "shot": "close up: the crown drawn over the king's hair in the world, the throne beside it" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "press": "job" },
+
+    { "note": "an hour beside the throne is an hour of court held" },
+    { "tick": 1920 },
+    { "expect_log": "held court an hour at the throne at 9, 3" },
+
+    { "note": "half past four: court is over and the king is done for the day, and still in its robes and crown" },
+    { "tick": 10200 },
+    { "expect_text": "done for the day" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform king (own: " },
+    { "shot": "half past four: court over, the king still crowned" }
+  ]
+}

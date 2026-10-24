@@ -199,6 +199,60 @@ fn a_saved_world_carries_on_exactly_as_if_it_had_never_been_saved() {
     side_by_side(&mut copy, 300, |_, _| Input::new());
 }
 
+/// People starving at one end of a hall and the fridge at the other, each at
+/// a pace of its own, saved as they break into a run: how much of a hurry
+/// each is in, and how urgent its meal is, come back as they were.
+#[test]
+fn a_crowd_saved_as_it_breaks_into_a_run_carries_on_exactly() {
+    let mut map = Map::new(Size::new(40, 6), FLOOR);
+    prop_at(&mut map, "fridge", Point::new(38, 2));
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 5), Point::new(39, 5));
+    let mut state = GameState::new(map, 4);
+    for y in 1..5 {
+        let uid = state.spawn(EntityType::Human, Point::new(1, y));
+        set_stats(&mut state, uid, Stats::calm().with_hunger(100.0).with_fun(100.0).with_stamina(100.0));
+    }
+    let breaking_into_a_run = |state: &GameState| {
+        state.entities().iter().any(|entity| entity.walker().is_some_and(|walker| walker.hurrying() > 0.2 && walker.hurrying() < 0.8))
+    };
+    let mut ticks = 0;
+    while !breaking_into_a_run(&state) {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 120, "nobody hurried");
+    }
+    let paces: Vec<u32> = state.entities().iter().map(|entity| entity.walker().unwrap().speed().to_bits()).collect();
+    assert!(paces.iter().any(|&pace| pace != paces[0]), "everybody at one pace");
+    side_by_side(&mut state, 300, |_, _| Input::new());
+}
+
+/// The king on its way to court, saved and loaded: its stately gait is not
+/// saved but comes back from the job, so it walks on exactly as it would have.
+#[test]
+fn a_king_saved_on_the_way_to_court_walks_on_at_its_stately_pace() {
+    let mut map = Map::new(Size::new(40, 6), FLOOR);
+    prop_at(&mut map, "throne", Point::new(38, 2));
+    let mut state = GameState::new(map, 5);
+    let king = state.spawn(EntityType::Human, Point::new(1, 2));
+    assert_eq!(state.entities().get(king).unwrap().job().map(|job| job.kind), Some(crate::sim::JobKind::King));
+    let mut input = Input::new();
+    for process in ProcessId::ALL {
+        input.set_process(king, process, false);
+    }
+    process_game_state(&mut state, DT, &input);
+    crate::sim::testing::skip_to(&mut state, 1, 8.6);
+    let mut ticks = 0;
+    while state.entities().get(king).unwrap().position().0 < 5.0 {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 600, "the king never set off");
+    }
+    let walker = |state: &GameState| state.entities().get(king).unwrap().walker().unwrap().current_speed();
+    assert_eq!(walker(&state), state.entities().get(king).unwrap().walker().unwrap().speed() * crate::sim::job::KING_GAIT);
+    let copy = side_by_side(&mut state, 300, |_, _| Input::new());
+    assert_eq!(walker(&copy), walker(&state));
+}
+
 /// A district — houses, beds and keys, fridges, toilets, doors, street
 /// lights — with its residents, and things done to it: somebody frozen, a
 /// process switched off, a box and a light switch off, things given and
@@ -757,9 +811,14 @@ fn a_format_1_save_still_loads_and_still_runs() {
 const STEEL_WORKS: &[u8] = include_bytes!("testdata/steel_works.savegame");
 
 /// The world in that fixture: [`crate::sim::testing::steel_works`] run until
-/// the steelworker is at its furnace with scrap the courier brought.
+/// the steelworker is at its furnace with scrap the courier brought — at
+/// the one pace everybody walked at when it was written, before each person
+/// had a pace of their own.
 fn steel_works_fixture() -> GameState {
     let (mut state, smelter, _) = crate::sim::testing::steel_works(12, 9);
+    for uid in state.entities().uids().collect::<Vec<_>>() {
+        state.entity_mut(uid).unwrap().walker_mut().unwrap().set_speed(crate::sim::kinds::HUMAN_SPEED);
+    }
     while state.bins().stored(Point::new(16, 2)) == 0 || state.entities().get(smelter).unwrap().interacting_with() != Some(Point::new(21, 5)) {
         run(&mut state, 10);
     }

@@ -127,6 +127,9 @@ pub const PALETTE: &[PaletteItem] = &[
     // its screens lit while somebody stands at it.
     PaletteItem::animated("generator", "generator.png", 2),
     PaletteItem::animated("control panel", "control_panel_idle.png", 2).used("control_panel.png", 2),
+    // The palace's throne, where the king holds court: gilt and red velvet,
+    // drawn by `tools/palace_art.py`.
+    PaletteItem::upscaled("throne", "throne.png"),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

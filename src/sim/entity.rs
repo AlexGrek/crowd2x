@@ -317,15 +317,17 @@ pub trait GameEntity: Send + Sync {
     }
 
     /// What it has on at `clock`: its job's uniform while the job is due
-    /// (`Job::is_due` — from setting off for the shift until it ends), its own
-    /// [`clothing`](GameEntity::clothing) otherwise. Worked out, never
-    /// stored, so nothing about it needs saving and a loaded world dresses
-    /// the same; the clothing menu changes the own clothes, which a worker
-    /// is back in after the shift. `None` for a kind that wears nothing.
+    /// (`Job::is_due` — from setting off for the shift until it ends), or
+    /// always for a job whose [`Bearing`](super::job::Bearing) says so (the
+    /// king's robes and crown); its own [`clothing`](GameEntity::clothing)
+    /// otherwise. Worked out, never stored, so nothing about it needs saving
+    /// and a loaded world dresses the same; the clothing menu changes the own
+    /// clothes, which a worker is back in after the shift, and a king when
+    /// it is let go. `None` for a kind that wears nothing.
     fn worn(&self, clock: super::clock::Clock) -> Option<super::clothing::Clothing> {
         let own = self.clothing()?;
         Some(match self.job() {
-            Some(job) if job.is_due(clock) => job.kind.uniform(),
+            Some(job) if job.kind.bearing().always_in_uniform || job.is_due(clock) => job.kind.uniform(),
             _ => own,
         })
     }

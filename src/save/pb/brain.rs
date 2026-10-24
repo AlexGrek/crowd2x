@@ -184,6 +184,10 @@ pub struct GoalSlot {
     pub cooldown: u32,
     #[prost(uint32, tag = "4")]
     pub strikes: u32,
+    /// How urgent, 0 to 1 (`Goals::urgency`); absent = 0, no hurry, which is
+    /// all there was before.
+    #[prost(float, tag = "5")]
+    pub urgency: f32,
 }
 
 /// One goal executor's state.

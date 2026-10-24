@@ -84,8 +84,10 @@ Verify with `tools/check_pixel_grid.py` after touching this file, window setup i
   `game/actors.rs` is what turns it into sprites. It used to scatter a demo crowd on
   `Startup`, which left 28 characters off the edge of every map, in every screen, for the
   life of the process.
-- **Humans** (`human.rs`): a layered paperdoll — a base body with eyes, clothes, hair as
-  child sprites, each a separate PNG in `assets/human/`. Add a look by dropping a 16x16
+- **Humans** (`human.rs`): a layered paperdoll — a base body with eyes, clothes, hair and a
+  hat (`SLOTS` = 4, the hat over the hair: only a uniform that comes with one has it, the
+  king's crown, `hat_path`) as child sprites, each a separate PNG in `assets/human/`; an empty
+  slot is a hidden child, so every paperdoll is the same five entities. Add a look by dropping a 16x16
   PNG in `assets/human/` and adding its path to the matching array (`CLOTHES`, `EYES`,
   `HAIR`); `Look::random` and `spawn` handle the rest. Hair and outfits are generated
   from masks and palettes by `tools/human_art.py` — the `pixel-artist` skill. The scale lives on the root, so

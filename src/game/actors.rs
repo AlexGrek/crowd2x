@@ -816,12 +816,14 @@ pub fn look_from(entity: &dyn GameEntity, clock: crate::sim::clock::Clock) -> hu
     let mut look = human::Look::random(&mut SmallRng::seed_from_u64(entity.appearance_seed()));
     if let Some(clothing) = entity.worn(clock) {
         look.clothes = human::clothing_path(clothing);
+        look.hat = human::hat_path(clothing);
     }
     look
 }
 
-/// Change only the worn layer of visible humans — a change of clothes, or a
-/// uniform going on or coming off with a shift. Offscreen humans get their
+/// Change only the worn layers of visible humans — the outfit and any hat
+/// that comes with it: a change of clothes, or a uniform going on or coming
+/// off with a shift. Offscreen humans get their
 /// current outfit through `look_from` when spawned or taken from the pool.
 fn sync_clothing(
     mut commands: Commands,
@@ -834,18 +836,21 @@ fn sync_clothing(
         let Some(clothing) = sim.0.entities().get(actor.0).and_then(|entity| entity.worn(clock)) else {
             continue;
         };
-        let path = human::clothing_path(clothing);
-        if look.clothes == path {
+        let (path, hat) = (human::clothing_path(clothing), human::hat_path(clothing));
+        if look.clothes == path && look.hat == hat {
             continue;
         }
         look.clothes = path;
-        let mut layer = commands.entity(doll.layers[1]);
-        match path {
-            Some(path) => {
-                layer.insert((Sprite::from_image(assets.load(path)), Visibility::Inherited));
-            }
-            None => {
-                layer.insert(Visibility::Hidden);
+        look.hat = hat;
+        for (slot, path) in [(human::CLOTHES_SLOT, path), (human::HAT_SLOT, hat)] {
+            let mut layer = commands.entity(doll.layers[slot]);
+            match path {
+                Some(path) => {
+                    layer.insert((Sprite::from_image(assets.load(path)), Visibility::Inherited));
+                }
+                None => {
+                    layer.insert(Visibility::Hidden);
+                }
             }
         }
     }

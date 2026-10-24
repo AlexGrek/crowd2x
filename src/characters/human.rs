@@ -44,6 +44,27 @@ pub fn clothing_path(clothing: Clothing) -> Option<&'static str> {
     });
     paths.iter().find(|(outfit, _)| *outfit == clothing).map(|&(_, path)| path)
 }
+
+/// Art for what is worn on the head with an outfit, over the hair:
+/// `human/hat_<hat>.png` for a uniform whose job's
+/// [`Bearing`](crate::sim::job::Bearing) names a hat — the king's crown —
+/// and `None` for everything else. Worked out once per job and kept, like
+/// [`clothing_path`]; `every_uniform_has_art_of_its_own` checks the files.
+pub fn hat_path(clothing: Clothing) -> Option<&'static str> {
+    use crate::sim::job::JobKind;
+    static PATHS: std::sync::OnceLock<Vec<(JobKind, &'static str)>> = std::sync::OnceLock::new();
+    let Clothing::Uniform(job) = clothing else {
+        return None;
+    };
+    let paths = PATHS.get_or_init(|| {
+        JobKind::ALL
+            .into_iter()
+            .filter_map(|kind| kind.bearing().hat.map(|hat| (kind, hat)))
+            .map(|(kind, hat)| (kind, &*Box::leak(format!("human/hat_{}.png", hat.replace(' ', "_")).into_boxed_str())))
+            .collect()
+    });
+    paths.iter().find(|(kind, _)| *kind == job).map(|&(_, path)| path)
+}
 // The swimsuits are imported art; the rest are drawn by `tools/human_art.py`.
 #[cfg(test)]
 pub(super) const CLOTHES: [&str; 24] = [
@@ -145,10 +166,11 @@ pub(super) const HAIR: [&str; 66] = [
 
 /// Depth offsets within a single character, applied on top of `depth_for`.
 /// Ordering matches the source art: eyes sit on the face, clothes over the
-/// body, hair over both.
+/// body, hair over both, and a hat — a crown — on top of the hair.
 const LAYER_EYES: f32 = 0.001;
 const LAYER_CLOTHES: f32 = 0.002;
 const LAYER_HAIR: f32 = 0.003;
+const LAYER_HAT: f32 = 0.004;
 
 /// The randomised appearance of one human.
 #[derive(Component, Debug, Clone)]
@@ -156,6 +178,9 @@ pub struct Look {
     pub clothes: Option<&'static str>,
     pub eyes: &'static str,
     pub hair: &'static str,
+    /// What is on its head over the hair: nothing but with a uniform that
+    /// comes with a hat ([`hat_path`]). Never rolled.
+    pub hat: Option<&'static str>,
 }
 
 impl Look {
@@ -165,6 +190,7 @@ impl Look {
             clothes: clothing_path(Clothing::random(rng)),
             eyes: EYES.choose(rng).copied().expect("no eye assets listed"),
             hair: HAIR.choose(rng).copied().expect("no hair assets listed"),
+            hat: None,
         }
     }
 }
@@ -174,22 +200,27 @@ impl Look {
 pub struct LookLayer;
 
 /// How many layers are drawn over the base body.
-pub const SLOTS: usize = 3;
+pub const SLOTS: usize = 4;
 
 /// The layer slots over the base body, in draw order. `None` is a slot this
 /// look does not wear.
 ///
 /// A fixed array and not a list of what is worn, which is what makes a body
-/// **recyclable**: 15% of looks have no outfit, and if that meant a human were
-/// three entities instead of four, one could not be dressed as another without
-/// being rebuilt. An empty slot is a hidden child, so every paperdoll in the
-/// world is the same four entities in the same order.
+/// **recyclable**: 15% of looks have no outfit and nearly none a hat, and if
+/// that meant a human were fewer entities than another, one could not be
+/// dressed as another without being rebuilt. An empty slot is a hidden child,
+/// so every paperdoll in the world is the same five entities in the same order.
 fn slot_paths(look: &Look) -> [Option<&'static str>; SLOTS] {
-    [Some(look.eyes), look.clothes, Some(look.hair)]
+    [Some(look.eyes), look.clothes, Some(look.hair), look.hat]
 }
 
+/// Which slot is the outfit, and which the hat: what a change of clothes
+/// redraws.
+pub const CLOTHES_SLOT: usize = 1;
+pub const HAT_SLOT: usize = 3;
+
 /// Depth offsets per slot, in the same order.
-const SLOT_DEPTHS: [f32; SLOTS] = [LAYER_EYES, LAYER_CLOTHES, LAYER_HAIR];
+const SLOT_DEPTHS: [f32; SLOTS] = [LAYER_EYES, LAYER_CLOTHES, LAYER_HAIR, LAYER_HAT];
 
 /// The layer entities of one paperdoll, in slot order.
 ///
@@ -311,11 +342,25 @@ mod tests {
     fn every_uniform_has_art_of_its_own() {
         let paths: Vec<_> = Clothing::uniforms().filter_map(clothing_path).collect();
         assert_eq!(paths.len(), Clothing::uniforms().count());
-        for path in paths {
-            assert!(!CLOTHES.contains(&path), "{path} is not in the wardrobe");
+        let hats: Vec<_> = Clothing::uniforms().filter_map(hat_path).collect();
+        for path in paths.iter().chain(&hats) {
+            assert!(!CLOTHES.contains(path), "{path} is not in the wardrobe");
             let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(path);
             assert!(file.exists(), "{}", file.display());
         }
+    }
+
+    /// The king's robes come with a crown, worn over the hair; no other
+    /// uniform, and nothing in the wardrobe, has a hat.
+    #[test]
+    fn the_kings_robes_come_with_a_crown_on_top_of_the_hair() {
+        use crate::sim::job::JobKind;
+        assert_eq!(hat_path(Clothing::Uniform(JobKind::King)), Some("human/hat_crown.png"));
+        assert_eq!(Clothing::uniforms().filter_map(hat_path).count(), 1);
+        assert!(Clothing::ALL.into_iter().all(|outfit| hat_path(outfit).is_none()));
+        let king = Look { clothes: clothing_path(Clothing::Uniform(JobKind::King)), hat: hat_path(Clothing::Uniform(JobKind::King)), ..Look::random(&mut SmallRng::seed_from_u64(3)) };
+        assert_eq!(portrait_layers(&king).last(), Some(&"human/hat_crown.png"), "drawn last, over the hair");
+        assert!(SLOT_DEPTHS[HAT_SLOT] > SLOT_DEPTHS[2], "over the hair in the world too");
     }
 
     #[test]
@@ -339,11 +384,12 @@ mod tests {
     /// what makes one body recyclable into another: a look with no outfit has
     /// an empty slot, never a missing one.
     #[test]
-    fn every_human_has_the_same_three_layer_slots() {
+    fn every_human_has_the_same_four_layer_slots() {
         let dressed = Look {
             clothes: Some(CLOTHES[0]),
             eyes: EYES[0],
             hair: HAIR[0],
+            hat: None,
         };
         let bare = Look {
             clothes: None,
@@ -363,6 +409,7 @@ mod tests {
             clothes: Some(CLOTHES[1]),
             eyes: EYES[0],
             hair: HAIR[2],
+            hat: None,
         };
         assert_eq!(
             portrait_layers(&dressed),

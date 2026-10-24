@@ -2,6 +2,7 @@
 
 use crate::save::{invalid, Invalid};
 use crate::sim::biology::{Biology, ProcessId, Stats};
+use crate::sim::clock::HOUR;
 use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 use crate::sim::job::{is_bedtime, JobKind};
@@ -55,6 +56,17 @@ pub const AMUSED: f32 = 20.0;
 /// urgent hunger is and how urgent thirst is can be compared at all.
 const NEED_PER_PRIORITY: f32 = 50.0;
 
+/// A need worse than this is **urgent**: its unit hurries to see to it,
+/// more the worse it gets, flat out at 100 — starving, parched, about to
+/// wet itself. The line where a need takes a worker off its work
+/// ([`CALLED_AWAY`]), and for the same reason: past it, the need is what
+/// matters.
+pub const URGENT: f32 = CALLED_AWAY;
+
+/// What [`Need::urgent_at`] says of a need that is never worth hurrying for:
+/// boredom, which does a body no harm.
+pub const NEVER_URGENT: f32 = f32::INFINITY;
+
 /// A need a [`NeedRoutine`] keeps met: which stat it watches, the process
 /// that drives that stat, which goal meets it, and where it commits and lets
 /// go.
@@ -73,6 +85,9 @@ pub struct Need {
     pub commit_at: f32,
     /// ...and the stat it has to be brought down to before letting go.
     pub release_at: f32,
+    /// The stat past which seeing to it is urgent, and its unit hurries:
+    /// [`URGENT`], or [`NEVER_URGENT`].
+    pub urgent_at: f32,
 }
 
 /// Keep fed: hunger, met by eating.
@@ -84,6 +99,7 @@ pub const HUNGER: Need = Need {
     goal: GoalId::Eat,
     commit_at: PECKISH,
     release_at: SATED,
+    urgent_at: URGENT,
 };
 
 /// Keep hydrated: thirst, met by drinking.
@@ -95,6 +111,7 @@ pub const THIRST: Need = Need {
     goal: GoalId::Drink,
     commit_at: THIRSTY,
     release_at: QUENCHED,
+    urgent_at: URGENT,
 };
 
 /// Stay comfortable: bladder, met by using the toilet.
@@ -106,6 +123,7 @@ pub const BLADDER: Need = Need {
     goal: GoalId::Relieve,
     commit_at: BURSTING,
     release_at: RELIEVED,
+    urgent_at: URGENT,
 };
 
 /// Keep entertained: boredom, met by having a go at something.
@@ -121,6 +139,7 @@ pub const BOREDOM: Need = Need {
     goal: GoalId::Play,
     commit_at: BORED,
     release_at: AMUSED,
+    urgent_at: NEVER_URGENT,
 };
 
 /// Maps a need onto how badly the goal that meets it is wanted.
@@ -193,12 +212,23 @@ impl RoutineExecutor for NeedRoutine {
                 priority = priority.min(BORED_AT_WORK);
             }
             goals.raise_to(self.need.goal, priority);
+            goals.hurry(self.need.goal, urgency(level, self.need.urgent_at));
         }
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
         vec![(self.need.feeling, if self.committed { "yes" } else { "no" }.to_string())]
     }
+}
+
+/// How urgent a need at `level` is, 0 to 1: nothing up to `urgent_at`, then
+/// rising in a straight line to all there is at 100.
+fn urgency(level: f32, urgent_at: f32) -> f32 {
+    // First, or `NEVER_URGENT` would be infinity over infinity.
+    if level <= urgent_at {
+        return 0.0;
+    }
+    ((level - urgent_at) / (100.0 - urgent_at)).min(1.0)
 }
 
 /// The most a go at something is wanted while its worker's shift is due:
@@ -357,6 +387,18 @@ impl RoutineExecutor for OrdersRoutine {
 /// go to the lower [`GoalId`], and work is the last.
 pub const WORKING: f32 = 1.5;
 
+/// How urgent getting to work is the moment a shift starts with its worker
+/// not there yet ([`WorkRoutine`]): half a hurry, rising to a run
+/// [`LATE_BY`] later.
+pub const LATE: f32 = 0.5;
+
+/// How late, in world seconds, a worker has to be to run to work flat out.
+pub const LATE_BY: f32 = HOUR;
+
+/// How near its workplace, in cells either way, a worker has to stand to be
+/// there: beside it, where a desk is worked from.
+const AT_WORK: i32 = 1;
+
 /// Go to work: want the job's goal ([`JobKind::goal`](crate::sim::job::JobKind::goal)
 /// — [`GoalId::Work`] at a desk, [`GoalId::Collect`] for a scrap collector)
 /// at [`WORKING`] for as long as the shift is due
@@ -366,6 +408,15 @@ pub const WORKING: f32 = 1.5;
 /// It reads the clock and the job and no stat, so it needs no hysteresis:
 /// nothing the goal does moves when the shift is. What it remembers is only
 /// what it decided last tick, for the brains menu and a save.
+///
+/// **Late is urgent.** A worker whose job is kept in one place — a desk, a
+/// guard post, a control panel: the jobs done by [`GoalId::Work`] — and who
+/// is not beside it once the shift's hours have begun ([`Shift::is_working_hours`](crate::sim::job::Shift::is_working_hours))
+/// hurries there, [`LATE`] at first and flat out [`LATE_BY`] later; and so
+/// does one coming back from a need that took it away. Nothing here
+/// remembers whether it got there today, so a job worked on the move — a
+/// scrap collector's, a courier's — is never late: its worker is away from
+/// its workplace for most of the shift by design.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct WorkRoutine {
     on_shift: bool,
@@ -397,6 +448,11 @@ impl RoutineExecutor for WorkRoutine {
         self.on_shift = due.is_some();
         if let Some(job) = due {
             goals.raise_to(job.kind.goal(), WORKING);
+            let away = ctx.body.center_position().chebyshev_distance(job.workplace) > AT_WORK;
+            if job.kind.goal() == GoalId::Work && away && job.shift.is_working_hours(ctx.think.clock) {
+                let late = ctx.think.clock.hours() - job.shift.start() as f32;
+                goals.hurry(GoalId::Work, LATE + (1.0 - LATE) * late * HOUR / LATE_BY);
+            }
         }
         // An undertaker with a body in hand sees it to the fire, shift over
         // or not: it is not taken home, and nothing else may be done with
@@ -743,6 +799,45 @@ mod tests {
         assert_eq!(bladder(&mut routine, BURSTING - 1.0), 0.0);
     }
 
+    /// How urgent `routine` makes its goal for a human whose `stats` these are.
+    fn urgency_of(routine: &mut NeedRoutine, stats: Stats) -> f32 {
+        let map = Map::new(Size::new(2, 2), FLOOR);
+        let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+        let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, Clock::after_watching(0.0));
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), Point::new(0, 0));
+        let mut goals = Goals::new();
+        routine.arrange(
+            &RoutineCtx {
+                think: &think,
+                body: &body,
+                biology: Some(&Biology::new(stats)),
+                memory: &crate::sim::brain::memory::Memory::new(),
+                job: None,
+                inventory: None,
+            },
+            &mut goals,
+        );
+        goals.urgency(routine.need.goal)
+    }
+
+    #[test]
+    fn a_need_is_urgent_only_past_seventy_five_and_most_urgent_at_its_worst() {
+        let needs: [(&'static Need, fn(f32) -> Stats); 3] = [
+            (&HUNGER, |level| Stats::calm().with_hunger(level)),
+            (&THIRST, |level| Stats::calm().with_thirst(level)),
+            (&BLADDER, |level| Stats::calm().with_bladder(level)),
+        ];
+        for (need, at) in needs {
+            let mut routine = NeedRoutine::new(need);
+            assert_eq!(urgency_of(&mut routine, at(URGENT)), 0.0, "{}: committed, in no hurry", need.routine);
+            assert!((urgency_of(&mut routine, at(87.5)) - 0.5).abs() < 1e-4, "{}: half way to its worst", need.routine);
+            assert_eq!(urgency_of(&mut routine, at(100.0)), 1.0, "{}: at its worst", need.routine);
+        }
+        let bored = Stats::calm().with_fun(0.0);
+        assert!(priority(&mut NeedRoutine::new(&BOREDOM), bored) > 0.0);
+        assert_eq!(urgency_of(&mut NeedRoutine::new(&BOREDOM), bored), 0.0, "nobody runs for the TV");
+    }
+
     #[test]
     fn a_need_whose_process_is_switched_off_is_not_wanted_and_lets_go_of_a_commitment() {
         let mut biology = Biology::new(Stats::calm().with_hunger(90.0));
@@ -985,6 +1080,60 @@ mod tests {
         assert_eq!(work_priority(&mut routine, Some(&job), on(7, 10.0)), 0.0, "Sunday");
         assert_eq!(routine.debug_fields(), [("on shift", "no".to_string())]);
         assert_eq!(work_priority(&mut routine, None, on(1, 10.0)), 0.0, "no job, nothing to go to");
+    }
+
+    /// The list a [`WorkRoutine`] arranges for somebody with `job` standing
+    /// in `cell` at `clock`.
+    fn work_goals(job: &crate::sim::job::Job, cell: Point, clock: Clock) -> Goals {
+        let map = Map::new(Size::new(8, 8), FLOOR);
+        let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
+        let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, clock);
+        let body = Body::at_cell(Uid::new(EntityType::Human, 1), cell);
+        let mut goals = Goals::new();
+        WorkRoutine::new().arrange(
+            &RoutineCtx {
+                think: &think,
+                body: &body,
+                biology: Some(&Biology::new(Stats::calm())),
+                memory: &crate::sim::brain::memory::Memory::new(),
+                job: Some(job),
+                inventory: None,
+            },
+            &mut goals,
+        );
+        goals
+    }
+
+    #[test]
+    fn a_worker_late_for_its_desk_hurries_there_and_the_later_the_faster() {
+        let job = crate::sim::job::Job::office(Point::new(5, 5));
+        let away = Point::new(0, 0);
+        let urgency = |clock: Clock| work_goals(&job, away, clock).urgency(GoalId::Work);
+        assert_eq!(urgency(on(1, 8.75)), 0.0, "on the way in good time");
+        assert!((urgency(on(1, 9.0)) - LATE).abs() < 1e-3, "late from nine: {}", urgency(on(1, 9.0)));
+        assert!((urgency(on(1, 9.5)) - 0.75).abs() < 1e-3, "half an hour late: {}", urgency(on(1, 9.5)));
+        assert_eq!(urgency(on(1, 10.0)), 1.0, "an hour late, flat out");
+        assert_eq!(urgency(on(1, 16.0)), 1.0, "and no more than that");
+        assert_eq!(urgency(on(1, 17.5)), 0.0, "home time");
+
+        // Beside the desk, it is at work; a cell further, it is not.
+        assert_eq!(work_goals(&job, Point::new(4, 5), on(1, 10.0)).urgency(GoalId::Work), 0.0);
+        assert_eq!(work_goals(&job, Point::new(6, 6), on(1, 10.0)).urgency(GoalId::Work), 0.0);
+        assert!(work_goals(&job, Point::new(3, 5), on(1, 10.0)).urgency(GoalId::Work) > 0.0);
+    }
+
+    #[test]
+    fn a_guard_late_for_its_watch_hurries_and_a_job_worked_on_the_move_never_does() {
+        let watch = crate::sim::job::WATCHES[1];
+        let guard = crate::sim::job::Job::guard(Point::new(5, 5), watch);
+        let start = watch.start() as f32;
+        assert_eq!(work_goals(&guard, Point::new(0, 0), on(2, start - 1.0)).urgency(GoalId::Work), 0.0);
+        assert!(work_goals(&guard, Point::new(0, 0), on(2, start + 0.25)).urgency(GoalId::Work) > LATE);
+
+        let collector = crate::sim::job::Job::collector(Point::new(5, 5));
+        let goals = work_goals(&collector, Point::new(0, 0), on(2, 11.0));
+        assert_eq!(goals.priority(GoalId::Collect), WORKING);
+        assert_eq!((goals.urgency(GoalId::Collect), goals.urgency(GoalId::Work)), (0.0, 0.0));
     }
 
     /// A scrap collector's shift is the collect goal, at the same priority

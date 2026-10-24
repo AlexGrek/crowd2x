@@ -38,6 +38,7 @@
 //! 5.   ...which manages the task queue
 //! 6. the current task's executor runs (the front of the queue, if none is
 //!      current), and writes the task's result
+//! 7. the walker is told how urgent the goal on top is, and hurries that much
 //! ```
 //!
 //! **A goal hears how a task went on the tick after it ended.** The task ends
@@ -377,6 +378,10 @@ impl Brain {
                 walk.halt();
             }
         }
+
+        // 7. As much of a hurry as the goal in charge is urgent — last, so a
+        // walk this tick's task started or ended is the one hurried, or not.
+        walk.hurry(goals.urgency(goals.top()), ctx.dt);
         effect
     }
 
@@ -597,6 +602,14 @@ impl Brain {
             .collect();
         if !held.is_empty() {
             fields.push(("held off", held.join(", ")));
+        }
+        let urgent: Vec<String> = GoalId::ALL
+            .iter()
+            .filter(|&&goal| self.goals.urgency(goal) > 0.0)
+            .map(|&goal| format!("{} {:.2}", goal.name(), self.goals.urgency(goal)))
+            .collect();
+        if !urgent.is_empty() {
+            fields.push(("urgent", urgent.join(", ")));
         }
         fields.extend([
             (

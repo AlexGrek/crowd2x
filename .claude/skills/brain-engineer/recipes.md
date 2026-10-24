@@ -412,11 +412,14 @@ pub const BLADDER: Need = Need {
     goal: GoalId::Relieve,
     commit_at: BURSTING,
     release_at: RELIEVED,
+    urgent_at: URGENT,             // hurried for past 75; NEVER_URGENT for one nobody runs for
 };
 ```
 
 Priority is `stat / 50`, the same scale for every need. Hysteresis (commit high, release low)
 is built in. Test it like `bladder_hovering_at_the_threshold_does_not_flip_the_decision`.
+Urgency (how much of a hurry its unit walks in) is 0 up to `urgent_at`, 1 at 100; test it in
+`a_need_is_urgent_only_past_seventy_five_and_most_urgent_at_its_worst`.
 
 Write a new routine type only for something that is not a stat with thresholds (a time of day,
 a threat). A routine type is:

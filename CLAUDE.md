@@ -20,7 +20,9 @@ main menu), and a scripted QA harness that drives all of it. The simulation is o
 actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
 energy, satisfaction, health). A need left at its worst — starving, parched, spent — drains
 health, and at none a unit dies: it lies where it fell (drawn turned 90°), thinks and moves no
-more. Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
+more. Each walks at a pace of its own, a little faster or slower than the next, and breaks
+into a run when what it is after is urgent — a need past 75, or late for its desk or post.
+Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
 the heaps in the wasteland and stores it in its own bin in the district's warehouse, and
 before every trip out gets ready — eats, drinks, plays and uses the toilet until every need is
@@ -38,7 +40,9 @@ plot, tends every crop once a day for quality, and six days and four growth stag
 harvests it ripe and stores the wheat in its own grain bin. A power plant on the edge powers
 the whole district — its two generators are the only source of power — and its control panel
 is kept round the clock by three power plant workers on the guards' watches, who just stand
-by it for now. A crop is in the way like a heap of
+by it for now. A palace in the middle seats the district's one king, who holds court at its
+throne ten to four but Sundays, in purple robes and a crown always, walking at a stately pace;
+the major decisions are to be the king's. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
 the dead.
@@ -86,9 +90,9 @@ to `screenshots/`.
 | The endless world past a map's edge: the wasteland generator, chunks, streaming and reclaiming, routes, occupancy and the camera off the site, its tiles | `wasteland` (+ `map`) |
 | `GameState`, passes, movement, entities, the census, the route budget, Commands, items, inventory, clock | `simulation` |
 | **Adding a kind of thing**: a job, a building every district has, an item, a feature or store, a goal, a task, an effect, a new part of the world's state — the touch list | `add-content` (+ the owning skill) |
-| What a unit wants or does: goals, tasks, actions, features, stats, processes | `brain-engineer` |
+| What a unit wants or does: goals, tasks, actions, features, stats, processes; how fast it walks (its pace, urgency, hurrying) | `brain-engineer` |
 | Adding or changing a routine, a need's thresholds | `add-routine` (+ `brain-engineer`) |
-| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), the power plant's workers and control panel, hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
+| Jobs: who works where and when, shifts, watches, weekdays, commutes, getting ready before a trip out, sleeping by one's shift, desks, scrap bins, guard posts and crematoria (`Workplaces`, `Bins`), the steel factory (steelworkers, couriers, stores of scrap and steel), the farm (farmers, fields of wheat, sowing, tending, harvesting, grain bins), the power plant's workers and control panel, the king and the palace's throne (a job's `Bearing`: gait, robes always, a crown), hiring order, hire/dismiss, the work routine, collecting scrap, undertakers and the dead (`Corpses`), the job menu | `jobs` (+ `brain-engineer`) |
 | Health and death: the `Health` process, dying, the dead (`Body::dead`, `Effect::Died`) | `brain-engineer` (+ `simulation`, `jobs`) |
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
@@ -173,6 +177,7 @@ tools/tv_art.py         draws the TV, dark and showing a picture               [
 tools/steel_factory_art.py draws the furnace, scrap hopper, steel pallet and rack [pixel-artist]
 tools/farm_art.py       draws the grain bin and the wheat at its four stages     [pixel-artist]
 tools/power_plant_art.py draws the generator and the control panel              [pixel-artist]
+tools/palace_art.py     draws the palace's throne                               [pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```
