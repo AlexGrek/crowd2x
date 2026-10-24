@@ -320,7 +320,7 @@ fn start_saving(state: &GameState, name: &str, quick: bool, current: &CurrentMap
     };
     let files = save::snapshot(state, &meta, Some(&view));
     let encoding = started.elapsed();
-    state.log.push(format!("saving {name:?}..."));
+    state.log.important(format!("saving {name:?}..."));
     let thread = std::thread::Builder::new()
         .name("save writer".to_string())
         .spawn(move || {
@@ -361,7 +361,7 @@ fn report_written(mut writing: ResMut<Writing>, sim: Option<Res<Sim>>) {
         };
         info!("{line}");
         if let Some(sim) = sim.as_deref() {
-            sim.0.log.push(line);
+            sim.0.log.important(line);
         }
     }
 }

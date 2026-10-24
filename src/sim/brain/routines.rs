@@ -662,7 +662,7 @@ impl RoutineExecutor for ReadyRoutine {
         }
         if self.pending == 0 {
             self.ready = true;
-            ctx.think.log.push(format!("{} is ready to go out for {}", ctx.body.uid(), item.name()));
+            ctx.think.log.unit(ctx.body.uid(), format!("{} is ready to go out for {}", ctx.body.uid(), item.name()));
             return;
         }
         for (i, ready) in READY_NEEDS.iter().enumerate() {

@@ -89,7 +89,7 @@ impl WorkGoal {
     fn worked(&mut self, ctx: &GoalCtx<'_>, task: Work) {
         let (uid, at) = (ctx.body.uid(), task.desk);
         let done = task.words().1;
-        ctx.think.log.push(format!("{uid} {done} an hour at the {} at {}, {}", task.place.prop(), at.x, at.y));
+        ctx.think.log.unit(uid, format!("{uid} {done} an hour at the {} at {}, {}", task.place.prop(), at.x, at.y));
         self.forget();
     }
 }

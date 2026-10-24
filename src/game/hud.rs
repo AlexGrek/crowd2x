@@ -620,7 +620,7 @@ fn spawn_menu_actions(
             .unwrap_or(Point::ORIGIN);
         let points = spawn_points(&sim.0.map, near, count.get());
         if points.is_empty() {
-            sim.0.log.push(format!("nowhere to stand for a {}", kind.name()));
+            sim.0.log.important(format!("nowhere to stand for a {}", kind.name()));
         } else {
             for at in points {
                 sim_input.0.spawn(kind, at);

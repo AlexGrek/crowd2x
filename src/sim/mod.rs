@@ -985,7 +985,7 @@ impl GameState {
         // The census has everybody, a second in one cell included.
         self.census.file(slot, at);
 
-        self.log.push(format!("spawned {uid} at {},{}", at.x, at.y));
+        self.log.unit(uid, format!("spawned {uid} at {},{}", at.x, at.y));
         self.give_a_bed(uid, at);
         // After the bed: the key that comes with it says which desks are
         // somewhere it may go.
@@ -1015,7 +1015,7 @@ impl GameState {
                     self.spawn(kind, at);
                     arrived += 1;
                 }
-                None => self.log.push(format!("no such kind {name:?} to spawn at {},{}", at.x, at.y)),
+                None => self.log.important(format!("no such kind {name:?} to spawn at {},{}", at.x, at.y)),
             }
         }
         if arrived > 0 {
@@ -1050,7 +1050,7 @@ impl GameState {
         let property = self.facilities.properties.of(bed);
         if entity.set_home(bed, property) {
             self.facilities.homes.claim(bed, uid);
-            self.log.push(match property {
+            self.log.unit(uid, match property {
                 Some(property) => format!("{uid} was given the bed at {}, {} and the key to {property}", bed.x, bed.y),
                 None => format!("{uid} was given the bed at {}, {}", bed.x, bed.y),
             });
@@ -1089,7 +1089,7 @@ impl GameState {
         }
         let at = job.workplace;
         self.facilities.workplaces.claim(at, job.shift, uid);
-        self.log.push(format!(
+        self.log.unit(uid, format!(
             "{uid} was hired as {} at the {} at {}, {}, {}",
             job.kind.with_article(),
             job.kind.workplace_name(),
@@ -1106,20 +1106,20 @@ impl GameState {
     /// employed, a kind that cannot work, or no workplace free.
     pub fn hire(&mut self, uid: Uid) -> bool {
         let Some(entity) = self.entities.get(uid) else {
-            self.log.push(format!("hire: no such entity {uid}"));
+            self.log.unit(uid, format!("hire: no such entity {uid}"));
             return false;
         };
         if entity.is_dead() {
-            self.log.push(format!("hire: {uid} is dead"));
+            self.log.unit(uid, format!("hire: {uid} is dead"));
             return false;
         }
         if let Some(job) = entity.job() {
-            self.log.push(format!("hire: {uid} is already {}", job.kind.with_article()));
+            self.log.unit(uid, format!("hire: {uid} is already {}", job.kind.with_article()));
             return false;
         }
         let here = entity.center_position();
         if !self.give_a_job(uid, here) {
-            self.log.push(format!("hire: no workplace free for {uid}"));
+            self.log.unit(uid, format!("hire: no workplace free for {uid}"));
             return false;
         }
         true
@@ -1130,15 +1130,15 @@ impl GameState {
     /// somebody with no job.
     pub fn dismiss(&mut self, uid: Uid) -> bool {
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("dismiss: no such entity {uid}"));
+            self.log.unit(uid, format!("dismiss: no such entity {uid}"));
             return false;
         };
         let Some(job) = entity.dismiss() else {
-            self.log.push(format!("dismiss: {uid} has no job"));
+            self.log.unit(uid, format!("dismiss: {uid} has no job"));
             return false;
         };
         self.facilities.workplaces.release(uid);
-        self.log.push(format!(
+        self.log.unit(uid, format!(
             "{uid} was let go from the {} at {}, {}",
             job.kind.workplace_name(),
             job.workplace.x,
@@ -1162,7 +1162,7 @@ impl GameState {
                 // desk.
                 self.facilities.homes.release(uid);
                 self.facilities.workplaces.release(uid);
-                self.log.push(format!("despawned {uid}"));
+                self.log.unit(uid, format!("despawned {uid}"));
                 true
             }
             None => false,
@@ -1180,7 +1180,7 @@ impl GameState {
             Some(entity) => {
                 entity.set_frozen(frozen);
                 let verb = if frozen { "froze" } else { "unfroze" };
-                self.log.push(format!("{verb} {uid}"));
+                self.log.unit(uid, format!("{verb} {uid}"));
                 true
             }
             None => false,
@@ -1193,16 +1193,16 @@ impl GameState {
     pub fn set_process(&mut self, uid: Uid, process: ProcessId, running: bool) -> bool {
         let name = process.name();
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("{name}: no such entity {uid}"));
+            self.log.unit(uid, format!("{name}: no such entity {uid}"));
             return false;
         };
         let Some(biology) = entity.biology_mut() else {
-            self.log.push(format!("{name}: {uid} has no biology"));
+            self.log.unit(uid, format!("{name}: {uid} has no biology"));
             return false;
         };
         biology.set_running(process, running);
         let state = if running { "on" } else { "off" };
-        self.log.push(format!("switched {name} {state} for {uid}"));
+        self.log.unit(uid, format!("switched {name} {state} for {uid}"));
         true
     }
 
@@ -1216,19 +1216,19 @@ impl GameState {
     pub fn give_item(&mut self, uid: Uid, item: ItemKind) -> bool {
         let name = item.name();
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("give {name}: no such entity {uid}"));
+            self.log.unit(uid, format!("give {name}: no such entity {uid}"));
             return false;
         };
         let Some(inventory) = entity.inventory_mut() else {
-            self.log.push(format!("give {name}: {uid} carries nothing"));
+            self.log.unit(uid, format!("give {name}: {uid} carries nothing"));
             return false;
         };
         if !inventory.stow(item) {
             let load = inventory.describe_load();
-            self.log.push(format!("{uid} has no room for {name}: {load}"));
+            self.log.unit(uid, format!("{uid} has no room for {name}: {load}"));
             return false;
         }
-        self.log.push(format!("gave {name} to {uid}"));
+        self.log.unit(uid, format!("gave {name} to {uid}"));
         true
     }
 
@@ -1236,15 +1236,15 @@ impl GameState {
     /// the log saying why, for an entity that is not there or has no hands.
     pub fn hold_item(&mut self, uid: Uid, item: Option<ItemKind>) -> bool {
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("hold: no such entity {uid}"));
+            self.log.unit(uid, format!("hold: no such entity {uid}"));
             return false;
         };
         let Some(inventory) = entity.inventory_mut() else {
-            self.log.push(format!("hold: {uid} carries nothing"));
+            self.log.unit(uid, format!("hold: {uid} carries nothing"));
             return false;
         };
         let _ = inventory.set_hand(item);
-        self.log.push(match item {
+        self.log.unit(uid, match item {
             Some(item) => format!("{uid} is holding {}", item.name()),
             None => format!("{uid} is holding nothing"),
         });
@@ -1260,18 +1260,18 @@ impl GameState {
     /// there.
     pub fn order_salvage(&mut self, uid: Uid, at: Point) -> bool {
         let Some(heap) = self.map.scrap(at) else {
-            self.log.push(format!("salvage: no scrap at {}, {}", at.x, at.y));
+            self.log.unit(uid, format!("salvage: no scrap at {}, {}", at.x, at.y));
             return false;
         };
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("salvage: no such entity {uid}"));
+            self.log.unit(uid, format!("salvage: no such entity {uid}"));
             return false;
         };
         if !entity.order_salvage(at) {
-            self.log.push(format!("salvage: {uid} cannot salvage anything"));
+            self.log.unit(uid, format!("salvage: {uid} cannot salvage anything"));
             return false;
         }
-        self.log.push(format!(
+        self.log.unit(uid, format!(
             "{uid} was told to salvage the scrap at {}, {}: {} left",
             at.x, at.y, heap.pieces
         ));
@@ -1282,15 +1282,15 @@ impl GameState {
     /// false for a missing entity or a kind without talents.
     pub fn set_talent(&mut self, uid: Uid, talent: Talent, value: i32) -> bool {
         let Some(entity) = self.entities.get_mut(uid) else {
-            self.log.push(format!("set talent: no such entity {uid}"));
+            self.log.unit(uid, format!("set talent: no such entity {uid}"));
             return false;
         };
         let Some(talents) = entity.talents_mut() else {
-            self.log.push(format!("set talent: {uid} has no talents"));
+            self.log.unit(uid, format!("set talent: {uid} has no talents"));
             return false;
         };
         talents.set(talent, value);
-        self.log.push(format!("{uid} {} talent set to {}", talent.name(), talents.get(talent)));
+        self.log.unit(uid, format!("{uid} {} talent set to {}", talent.name(), talents.get(talent)));
         true
     }
 
@@ -1298,11 +1298,11 @@ impl GameState {
     /// and ids that have left the world refuse the request.
     pub fn set_clothing(&mut self, uid: Uid, clothing: clothing::Clothing) -> bool {
         let Some(worn) = self.entities.get_mut(uid).and_then(|entity| entity.clothing_mut()) else {
-            self.log.push(format!("set clothing: {uid} has no clothing"));
+            self.log.unit(uid, format!("set clothing: {uid} has no clothing"));
             return false;
         };
         *worn = clothing;
-        self.log.push(format!("{uid} clothing set to {}", clothing.name()));
+        self.log.unit(uid, format!("{uid} clothing set to {}", clothing.name()));
         true
     }
 
@@ -1394,22 +1394,22 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::Despawn(uid) => {
                 if !state.despawn(*uid) {
-                    state.log.push(format!("despawn: no such entity {uid}"));
+                    state.log.unit(*uid, format!("despawn: no such entity {uid}"));
                 }
             }
             Command::SwitchBox { at, on } => {
                 if !state.switch_box(*at, *on) {
-                    state.log.push(format!("switch: no distribution box at {}, {}", at.x, at.y));
+                    state.log.important(format!("switch: no distribution box at {}, {}", at.x, at.y));
                 }
             }
             Command::SwitchLight { at, on } => {
                 if !state.switch_light(*at, *on) {
-                    state.log.push(format!("switch: no light switch at {}, {}", at.x, at.y));
+                    state.log.important(format!("switch: no light switch at {}, {}", at.x, at.y));
                 }
             }
             Command::Freeze { uid, frozen } => {
                 if !state.set_frozen(*uid, *frozen) {
-                    state.log.push(format!("freeze: no such entity {uid}"));
+                    state.log.unit(*uid, format!("freeze: no such entity {uid}"));
                 }
             }
             Command::SetProcess { uid, process, running } => {

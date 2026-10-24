@@ -501,6 +501,7 @@ struct Checks<'w, 's> {
     state: Res<'w, State<AppState>>,
     maps: Res<'w, Maps>,
     labels: Query<'w, 's, &'static Text>,
+    names: Query<'w, 's, &'static Name>,
     children: Query<'w, 's, &'static Children>,
     focusables: Query<'w, 's, (Entity, &'static Focusable)>,
     /// Buttons the focus system knows nothing about.
@@ -514,6 +515,8 @@ struct Checks<'w, 's> {
     scope: Res<'w, Scope>,
     zoom: Res<'w, PixelZoom>,
     cameras: Query<'w, 's, &'static crate::render::CameraPan, With<crate::render::WorldCamera>>,
+    following: Res<'w, crate::game::follow::CameraFollow>,
+    target_cells: Query<'w, 's, (&'static Transform, &'static Visibility), With<crate::game::follow::TargetCell>>,
     speed: Res<'w, GameSpeed>,
     /// The sprites themselves, not the map that tracks them: a count taken
     /// from the bookkeeping would pass while nothing had actually reached the
@@ -1353,6 +1356,38 @@ fn perform(
                 .ok_or(format!("expected camera x in {x:?}, y in {y:?}, found {camera:?}"))
         }
 
+        Step::ExpectFollowing(wanted) => {
+            let target = checks.following.target;
+            if !wanted {
+                return target.is_none().then_some(Next::Now)
+                    .ok_or_else(|| format!("camera still follows {target:?}"));
+            }
+            let uid = intents.selected.get().ok_or("no selected unit to follow")?;
+            if target != Some(uid) {
+                return Err(format!("expected camera to follow {uid:?}, found {target:?}"));
+            }
+            let position = intents.sim.as_ref().and_then(|sim| sim.0.position_of(uid))
+                .ok_or("followed unit is absent")?;
+            let camera = checks.cameras.single().map_err(|error| error.to_string())?.0;
+            let position = Vec2::new(position.0, position.1) * background::TILE;
+            (camera.distance(position) <= crate::characters::ART_SCALE)
+                .then_some(Next::Now)
+                .ok_or_else(|| format!("camera at {camera:?} did not track unit at {position:?}"))
+        }
+
+        Step::ExpectTargetCell(wanted) => {
+            let visible: Vec<_> = checks.target_cells.iter()
+                .filter(|(_, visibility)| **visibility == Visibility::Visible)
+                .map(|(transform, _)| background::point_of(background::cell_of(transform.translation.truncate())))
+                .collect();
+            let matches = match wanted {
+                Some(cell) => visible.len() == 5 && visible.iter().all(|at| at == cell),
+                None => visible.is_empty(),
+            };
+            matches.then_some(Next::Now)
+                .ok_or_else(|| format!("expected target cell {wanted:?}, visible marker cells: {visible:?}"))
+        }
+
         Step::ExpectMap(name) => checks
             .maps
             .0
@@ -1653,12 +1688,20 @@ fn perform(
 
         Step::ExpectLog(needle) => checks
             .log
-            .contains(needle)
+            .recent().any(|line| line.contains(needle))
             .then_some(Next::Now)
             .ok_or(format!(
                 "nothing in the log contains {needle:?}; it holds: {:?}",
-                checks.log.lines()
+                checks.log.recent().collect::<Vec<_>>()
             )),
+
+        Step::ExpectVisibleLog(needle) => checks.log.contains(needle)
+            .then_some(Next::Now)
+            .ok_or(format!("nothing in the visible log contains {needle:?}; it holds: {:?}", checks.log.lines())),
+
+        Step::ExpectNoVisibleLog(needle) => (!checks.log.contains(needle))
+            .then_some(Next::Now)
+            .ok_or(format!("the visible log contains {needle:?}; it holds: {:?}", checks.log.lines())),
     }
 }
 
@@ -2151,6 +2194,7 @@ fn label_of(entity: Entity, checks: &Checks) -> Option<String> {
     }
 
     text_under(entity, checks, 2)
+        .or_else(|| checks.names.get(entity).ok().map(|name| name.as_str().to_owned()))
 }
 
 #[cfg(test)]

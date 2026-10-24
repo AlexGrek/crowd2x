@@ -118,12 +118,12 @@ pub(crate) fn apply(
         Effect::TakeBody { at } => take_body(entity, facilities, log, at),
         Effect::Cremate { at } => {
             facilities.tally.cremated += 1;
-            log.push(format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
+            log.unit(entity.uid(), format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
         }
         Effect::Sow { at, when } => sow(entity, map, facilities, occupancy, log, at, when),
         Effect::Tend { at, when } => match facilities.fields.tend(at, when) {
-            Some(quality) => log.push(format!("{} tended the wheat at {}, {}: kept at {quality}%", entity.uid(), at.x, at.y)),
-            None => log.push(format!("{} found nothing to tend at {}, {}", entity.uid(), at.x, at.y)),
+            Some(quality) => log.unit(entity.uid(), format!("{} tended the wheat at {}, {}: kept at {quality}%", entity.uid(), at.x, at.y)),
+            None => log.unit(entity.uid(), format!("{} found nothing to tend at {}, {}", entity.uid(), at.x, at.y)),
         },
         Effect::Harvest { at, when } => harvest(entity, map, facilities, log, at, when),
     }
@@ -138,20 +138,20 @@ fn sow(entity: &dyn GameEntity, map: &mut Map, facilities: &mut Facilities, occu
         return;
     };
     if let Some(other) = occupancy.occupant(at) {
-        log.push(format!("{uid} could not sow at {}, {}: {other} is standing there", at.x, at.y));
+        log.related(uid, other, format!("{uid} could not sow at {}, {}: {other} is standing there", at.x, at.y));
         return;
     }
     // The dead let their cell go (`died`), so the occupancy does not say so:
     // a body is not sown over.
     if let Some(dead) = facilities.corpses.at(at) {
-        log.push(format!("{uid} could not sow at {}, {}: the body of {dead} lies there", at.x, at.y));
+        log.related(uid, dead, format!("{uid} could not sow at {}, {}: the body of {dead} lies there", at.x, at.y));
         return;
     }
     if facilities.fields.sow(map, at, farm, when) {
         let sown = facilities.fields.of(farm).count();
-        log.push(format!("{uid} sowed wheat at {}, {}: {sown} of {PLOTS} sown", at.x, at.y));
+        log.unit(uid, format!("{uid} sowed wheat at {}, {}: {sown} of {PLOTS} sown", at.x, at.y));
     } else {
-        log.push(format!("{uid} could not sow at {}, {}", at.x, at.y));
+        log.unit(uid, format!("{uid} could not sow at {}, {}", at.x, at.y));
     }
 }
 
@@ -164,11 +164,11 @@ fn harvest(entity: &mut dyn GameEntity, map: &mut Map, facilities: &mut Faciliti
         return;
     };
     let Some(crop) = facilities.fields.at(at).copied() else {
-        log.push(format!("{uid} found nothing to harvest at {}, {}", at.x, at.y));
+        log.unit(uid, format!("{uid} found nothing to harvest at {}, {}", at.x, at.y));
         return;
     };
     if !inventory.room_for_many(ItemKind::Wheat, crop.harvest()) {
-        log.push(format!("{uid} has no room for the wheat at {}, {}: {}", at.x, at.y, inventory.describe_load()));
+        log.unit(uid, format!("{uid} has no room for the wheat at {}, {}: {}", at.x, at.y, inventory.describe_load()));
         return;
     }
     match facilities.fields.harvest(map, at, when) {
@@ -176,9 +176,9 @@ fn harvest(entity: &mut dyn GameEntity, map: &mut Map, facilities: &mut Faciliti
             for _ in 0..crop.harvest() {
                 let _ = inventory.stow(ItemKind::Wheat);
             }
-            log.push(format!("{uid} harvested {} wheat at {}, {}, kept at {}%", crop.harvest(), at.x, at.y, crop.quality));
+            log.unit(uid, format!("{uid} harvested {} wheat at {}, {}, kept at {}%", crop.harvest(), at.x, at.y, crop.quality));
         }
-        None => log.push(format!("{uid} found nothing ripe at {}, {}", at.x, at.y)),
+        None => log.unit(uid, format!("{uid} found nothing ripe at {}, {}", at.x, at.y)),
     }
 }
 
@@ -191,17 +191,17 @@ fn take_body(entity: &mut dyn GameEntity, facilities: &mut Facilities, log: &Log
         return;
     };
     let Some(dead) = facilities.corpses.at(at) else {
-        log.push(format!("{uid} found no body at {}, {}", at.x, at.y));
+        log.unit(uid, format!("{uid} found no body at {}, {}", at.x, at.y));
         return;
     };
     if inventory.hand().is_some() {
-        log.push(format!("{uid} has no hand free for the body at {}, {}", at.x, at.y));
+        log.unit(uid, format!("{uid} has no hand free for the body at {}, {}", at.x, at.y));
         return;
     }
     let _ = inventory.set_hand(Some(ItemKind::Body));
     facilities.corpses.remove(dead);
     facilities.burials.push(dead);
-    log.push(format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
+    log.related(uid, dead, format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
 }
 
 /// [`Effect::Salvage`]: a piece off the heap and into the unit's pack, if
@@ -213,19 +213,19 @@ fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
         return;
     };
     if !inventory.room_for(ItemKind::Scrap) {
-        log.push(format!("{uid} has no room for scrap metal: {}", inventory.describe_load()));
+        log.unit(uid, format!("{uid} has no room for scrap metal: {}", inventory.describe_load()));
         return;
     }
     match map.take_scrap(at) {
         Some(left) => {
             let _ = inventory.stow(ItemKind::Scrap);
-            log.push(if left == 0 {
+            log.unit(uid, if left == 0 {
                 format!("{uid} salvaged scrap metal at {}, {}: the heap is gone", at.x, at.y)
             } else {
                 format!("{uid} salvaged scrap metal at {}, {}: {left} left", at.x, at.y)
             });
         }
-        None => log.push(format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
+        None => log.unit(uid, format!("{uid} found no scrap left at {}, {}", at.x, at.y)),
     }
 }
 
@@ -243,7 +243,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
     let _ = entity.dismiss();
-    log.push(format!("{uid} died of {cause}"));
+    log.important(format!("{uid} died of {cause}"));
 }
 
 /// [`Effect::Deposit`], for the unit `uid`: its pieces into the store at
@@ -252,11 +252,11 @@ pub(crate) fn deposit(uid: Uid, bins: &mut Bins, log: &Log, at: Point, pieces: u
     let store = bins.store(at).and_then(FeatureKind::store);
     let (item, word) = store.map_or(("scrap metal", "bin"), |store| (store.holds.name(), store.called));
     match bins.add(at, pieces as u32) {
-        Some(stored) => log.push(format!(
+        Some(stored) => log.unit(uid, format!(
             "{uid} stored {pieces} {item} in the {word} at {}, {}: {stored} stored",
             at.x, at.y
         )),
-        None => log.push(format!("{uid} found no store at {}, {}", at.x, at.y)),
+        None => log.unit(uid, format!("{uid} found no store at {}, {}", at.x, at.y)),
     }
 }
 
@@ -268,7 +268,7 @@ pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut B
         return;
     };
     let Some(store) = bins.store(at).and_then(FeatureKind::store) else {
-        log.push(format!("{uid} found no store at {}, {}", at.x, at.y));
+        log.unit(uid, format!("{uid} found no store at {}, {}", at.x, at.y));
         return;
     };
     let (item, word) = (store.holds, store.called);
@@ -278,7 +278,7 @@ pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut B
         pieces += 1;
     }
     let left = bins.stored(at);
-    log.push(if pieces == 0 {
+    log.unit(uid, if pieces == 0 {
         format!("{uid} took no {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)
     } else {
         format!("{uid} took {pieces} {} from the {word} at {}, {}: {left} left", item.name(), at.x, at.y)

@@ -222,7 +222,7 @@ impl Seek {
         ctx.memory.out_of_reach_mut().remember(place, now);
         ctx.think
             .log
-            .push(format!("{} gave up on reaching {}, {}", ctx.body.uid(), place.x, place.y));
+            .unit(ctx.body.uid(), format!("{} gave up on reaching {}, {}", ctx.body.uid(), place.x, place.y));
         if self.reroutes >= MAX_REROUTES {
             return false;
         }

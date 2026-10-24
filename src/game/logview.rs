@@ -1,4 +1,4 @@
-//! The log panel: what the simulation has been saying.
+//! The log panel: the highlighted unit's activity and important world notices.
 //!
 //! The simulation writes lines from any thread into a bounded lock-free queue
 //! ([`crate::sim::Log`]) and never reads them back. This is the reader — the
@@ -7,16 +7,20 @@
 //! Draining rather than peeking is what makes the queue bounded work: a line
 //! delivered here is gone from the queue, so the queue only ever holds what
 //! has happened since the last frame. The ring below is the part that
-//! remembers, and it is deliberately short, because a panel over a game is for
-//! the last thing that happened and not for the history.
+//! remembers recent tagged messages so changing selection can refilter them,
+//! even while paused. Only the last six matching messages appear on screen.
 
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
+use crate::sim::Uid;
+use crate::sim::log::{CAPACITY, Entry};
 use crate::state::AppState;
 use crate::ui::{FONT_BODY, PANEL, TEXT_DIM};
 
 use super::actors::Sim;
 use super::hud;
+use super::selection::Selected;
 
 /// How many lines are kept and shown.
 ///
@@ -31,6 +35,8 @@ pub const SHOWN: usize = 6;
 #[derive(Resource, Default)]
 pub struct LogView {
     lines: Vec<String>,
+    history: VecDeque<Entry>,
+    selected: Option<Uid>,
 }
 
 impl LogView {
@@ -43,13 +49,41 @@ impl LogView {
         self.lines.iter().any(|line| line.contains(needle))
     }
 
-    /// Add a line, dropping the oldest once there are more than [`SHOWN`].
-    fn push(&mut self, line: String) {
-        self.lines.push(line);
-        if self.lines.len() > SHOWN {
-            let excess = self.lines.len() - SHOWN;
-            self.lines.drain(..excess);
+    /// Recent simulation output, including messages hidden by the HUD filter.
+    /// QA's simulation assertions must not depend on who the player selected.
+    pub fn recent(&self) -> impl Iterator<Item = &str> {
+        self.history
+            .iter()
+            .rev()
+            .take(SHOWN)
+            .map(|entry| entry.message.as_str())
+    }
+
+    fn update(&mut self, fresh: Vec<Entry>, selected: Option<Uid>) -> bool {
+        if fresh.is_empty() && self.selected == selected {
+            return false;
         }
+        self.selected = selected;
+        for entry in fresh {
+            self.history.push_back(entry);
+            if self.history.len() > CAPACITY {
+                self.history.pop_front();
+            }
+        }
+        let mut lines: Vec<_> = self
+            .history
+            .iter()
+            .rev()
+            .filter(|entry| entry.visible_for(selected))
+            .take(SHOWN)
+            .map(|entry| entry.message.clone())
+            .collect();
+        lines.reverse();
+        if self.lines == lines {
+            return false;
+        }
+        self.lines = lines;
+        true
     }
 }
 
@@ -63,7 +97,9 @@ impl Plugin for LogViewPlugin {
         app.init_resource::<LogView>()
             .add_systems(OnExit(AppState::Game), clear)
             .add_systems(
-                Update,
+                // Selection and panel actions settle in Update, including a
+                // deselection with no new messages while the game is paused.
+                PostUpdate,
                 drain_log.run_if(in_state(AppState::Game).and_then(resource_exists::<Sim>)),
             );
     }
@@ -102,16 +138,17 @@ pub fn panel() -> impl Bundle {
 /// seed each time the screen opens, so lines from the last visit would be
 /// describing a world that no longer exists.
 fn clear(mut view: ResMut<LogView>) {
-    view.lines.clear();
+    *view = LogView::default();
 }
 
-fn drain_log(sim: Res<Sim>, mut view: ResMut<LogView>, mut panels: Query<&mut Text, With<LogPanel>>) {
-    let fresh = sim.0.log.drain();
-    if fresh.is_empty() {
+fn drain_log(
+    sim: Res<Sim>,
+    selected: Res<Selected>,
+    mut view: ResMut<LogView>,
+    mut panels: Query<&mut Text, With<LogPanel>>,
+) {
+    if !view.update(sim.0.log.drain_entries(), selected.get()) {
         return;
-    }
-    for line in fresh {
-        view.push(line);
     }
 
     let text = view.lines.join("\n");
@@ -127,9 +164,11 @@ mod tests {
     #[test]
     fn the_view_keeps_the_most_recent_lines() {
         let mut view = LogView::default();
+        let log = crate::sim::Log::new();
         for i in 0..SHOWN + 3 {
-            view.push(format!("line {i}"));
+            log.important(format!("line {i}"));
         }
+        view.update(log.drain_entries(), None);
         assert_eq!(view.lines().len(), SHOWN);
         // The end of a log is the part worth showing.
         assert_eq!(view.lines()[0], format!("line {}", 3));
@@ -139,9 +178,64 @@ mod tests {
     #[test]
     fn a_short_log_is_kept_whole() {
         let mut view = LogView::default();
-        view.push("only".into());
+        let log = crate::sim::Log::new();
+        log.important("only");
+        view.update(log.drain_entries(), None);
         assert_eq!(view.lines(), ["only"]);
         assert!(view.contains("onl"));
         assert!(!view.contains("nothing"));
+    }
+
+    #[test]
+    fn only_the_selected_units_activity_and_important_notices_are_visible() {
+        use crate::sim::{EntityType, Log, Uid};
+        let a = Uid::new(EntityType::Human, 1);
+        let b = Uid::new(EntityType::Human, 2);
+        let log = Log::new();
+        log.unit(a, "a ate");
+        log.unit(b, "b drank");
+        log.push("street lights changed");
+        log.important("saved the world");
+        log.related(a, b, "a met b");
+
+        let mut view = LogView::default();
+        view.update(log.drain_entries(), Some(a));
+        assert_eq!(view.lines(), ["a ate", "saved the world", "a met b"]);
+        assert!(view.recent().any(|line| line == "b drank"));
+
+        // No fresh log messages: a paused selection still changes the panel.
+        assert!(view.update(vec![], Some(b)));
+        assert_eq!(view.lines(), ["b drank", "saved the world", "a met b"]);
+        assert!(view.update(vec![], None));
+        assert_eq!(view.lines(), ["saved the world"]);
+        assert!(!view.update(vec![], None));
+    }
+
+    #[test]
+    fn hidden_crowd_activity_does_not_fill_the_visible_six_lines() {
+        use crate::sim::{EntityType, Log, Uid};
+        let a = Uid::new(EntityType::Human, 1);
+        let b = Uid::new(EntityType::Human, 2);
+        let log = Log::new();
+        log.important("a world notice");
+        log.unit(a, "a ate");
+        for _ in 0..SHOWN * 3 {
+            log.unit(b, "b drank");
+        }
+        let mut view = LogView::default();
+        view.update(log.drain_entries(), Some(a));
+        assert_eq!(view.lines(), ["a world notice", "a ate"]);
+    }
+
+    #[test]
+    fn recent_history_stays_bounded_across_frames() {
+        let mut view = LogView::default();
+        let log = crate::sim::Log::new();
+        for _ in 0..CAPACITY + 10 {
+            log.push("routine chatter");
+            view.update(log.drain_entries(), None);
+        }
+        assert_eq!(view.history.len(), CAPACITY);
+        assert!(view.lines().is_empty());
     }
 }

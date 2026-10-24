@@ -140,7 +140,7 @@ impl SleepGoal {
     fn slept(&mut self, ctx: &GoalCtx<'_>, bed: Point) {
         ctx.think
             .log
-            .push(format!("{} slept in the bed at {}, {}", ctx.body.uid(), bed.x, bed.y));
+            .unit(ctx.body.uid(), format!("{} slept in the bed at {}, {}", ctx.body.uid(), bed.x, bed.y));
         self.forget();
     }
 }

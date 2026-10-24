@@ -61,6 +61,7 @@ use crate::ui::{
 
 use super::actors::{facing_of, look_from, world_pos, Sim, SimInput};
 use super::hud;
+use super::follow::{self, CameraFollow};
 use super::selection::Selected;
 
 /// Size of the portrait, in canvas pixels. Two pixels to a source texel, so
@@ -120,6 +121,7 @@ impl Menu {
 /// A button on the bar or in a menu, and what pressing it asks for.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Action {
+    ToggleFollow,
     /// Open this menu, or close it if it is the one already open.
     Open(Menu),
     /// Stop looking at this unit.
@@ -178,10 +180,12 @@ impl Plugin for UnitPanelPlugin {
                     rebuild,
                     update_readouts,
                     hover_highlight::<Action>,
+                    follow::highlight_button,
                     draw_path,
                 )
                     .chain()
                     .after(NavSystems)
+                    .before(super::move_camera)
                     .run_if(in_state(AppState::Game)),
             );
     }
@@ -204,6 +208,8 @@ fn press_actions(
     sim: Option<Res<Sim>>,
     mut input: ResMut<SimInput>,
     mut menu: ResMut<OpenMenu>,
+    mut follow: ResMut<CameraFollow>,
+    time: Res<Time<Real>>,
 ) {
     let mut pressed: Vec<Action> = clicked
         .iter()
@@ -224,6 +230,11 @@ fn press_actions(
 
     for action in pressed {
         match action {
+            Action::ToggleFollow => {
+                if let Some(entity) = sim.as_ref().and_then(|sim| sim.0.entities().get(uid)) {
+                    follow.toggle(uid, entity.center_position(), time.elapsed_secs_f64());
+                }
+            }
             // Pressing the open menu's own button closes it: the button is
             // the way in, so it is the obvious way back out.
             Action::Open(wanted) => {
@@ -367,7 +378,18 @@ fn rebuild(
                         ..default()
                     },
                     children![
-                        (Readout::Title, label(title(entity), FONT_BODY, TEXT_ACCENT)),
+                        (
+                            Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: px(3),
+                                ..default()
+                            },
+                            children![
+                                (Readout::Title, label(title(entity), FONT_BODY, TEXT_ACCENT)),
+                                (Action::ToggleFollow, follow::button()),
+                            ],
+                        ),
                         (
                             Node {
                                 flex_direction: FlexDirection::Row,

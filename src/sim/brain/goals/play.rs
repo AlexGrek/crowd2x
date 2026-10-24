@@ -154,7 +154,7 @@ impl PlayGoal {
 
     /// The go is over: say so, and start the next one from scratch.
     fn played(&mut self, ctx: &GoalCtx<'_>, computer: Point) {
-        ctx.think.log.push(format!(
+        ctx.think.log.unit(ctx.body.uid(), format!(
             "{} had a go on the computer at {}, {}",
             ctx.body.uid(),
             computer.x,
@@ -165,7 +165,7 @@ impl PlayGoal {
 
     /// The programme is over: say so, and start the next one from scratch.
     fn watched(&mut self, ctx: &GoalCtx<'_>, tv: Point) {
-        ctx.think.log.push(format!("{} watched the TV at {}, {}", ctx.body.uid(), tv.x, tv.y));
+        ctx.think.log.unit(ctx.body.uid(), format!("{} watched the TV at {}, {}", ctx.body.uid(), tv.x, tv.y));
         self.forget();
     }
 }

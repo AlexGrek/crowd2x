@@ -53,6 +53,7 @@
 //! for a cancel it would otherwise fire on every zoom.
 
 pub mod actors;
+pub mod follow;
 pub mod croppanel;
 pub mod crops;
 pub mod held;
@@ -111,6 +112,7 @@ impl Plugin for GamePlugin {
             hud::HudPlugin,
             logview::LogViewPlugin,
             selection::SelectionPlugin,
+            follow::FollowPlugin,
             unitpanel::UnitPanelPlugin,
             boxpanel::BoxPanelPlugin,
             crops::CropsPlugin,
@@ -129,6 +131,7 @@ impl Plugin for GamePlugin {
                 (move_camera, change_zoom, leave)
                     .chain()
                     .after(NavSystems)
+                    .before(crate::render::PixelSystems)
                     .run_if(in_state(AppState::Game).and_then(not_typing)),
             );
     }
@@ -213,6 +216,9 @@ fn move_camera(
     settings: Res<crate::settings::Settings>,
     scope: Res<Scope>,
     interactions: Query<&Interaction>,
+    sim: Option<Res<actors::Sim>>,
+    selected: Res<selection::Selected>,
+    mut follow: ResMut<follow::CameraFollow>,
     mut cameras: Query<&mut CameraPan, With<WorldCamera>>,
 ) {
     let Ok(window) = windows.single() else {
@@ -264,11 +270,23 @@ fn move_camera(
 
     let endless = current.map.is_endless();
 
+    if let Some(uid) = follow.target {
+        if selected.get() != Some(uid) || dir != Vec2::ZERO
+            || !sim.as_ref().is_some_and(|sim| sim.0.entities().contains(uid))
+        {
+            follow.target = None;
+        }
+    }
+    let tracking = follow.target.and_then(|uid| {
+        sim.as_ref()?.0.position_of(uid).map(actors::world_pos)
+    });
+
     for mut pan in &mut cameras {
+        let centre = tracking.unwrap_or(pan.0 + velocity);
         let wanted = if endless {
-            clamp_to_reach(pan.0 + velocity)
+            clamp_to_reach(centre)
         } else {
-            clamp_to_map(pan.0 + velocity, half, extent)
+            clamp_to_map(centre, half, extent)
         };
         if wanted != pan.0 {
             pan.0 = wanted;

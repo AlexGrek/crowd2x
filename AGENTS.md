@@ -760,9 +760,13 @@ clone. Determinism follows from it plus a per-entity per-tick seeded RNG: same s
 same input, same world after a thousand ticks, and there is a test that says so.
 
 **Lock-free means there is nothing to lock**, not that there are clever atomics. The one
-thing many threads genuinely write is the `log` — a bounded `ArrayQueue<String>` whose
+thing many threads genuinely write is the `log` — a bounded `ArrayQueue<log::Entry>` whose
 `push` takes `&self`, evicts the oldest when full rather than growing, and counts what it
-dropped. The renderer (`game/logview.rs`) is the only reader and it drains.
+dropped. The renderer (`game/logview.rs`) is the only reader and it drains. Messages carry
+an audience: `Log::unit` / `related` for person activity, `important` for world
+notices such as saves, errors and deaths, and `push` for routine global chatter.
+The visible log shows only the selected unit's activity and important notices;
+changing or clearing selection refilters bounded recent history, even while paused.
 
 The store is a **dict over a dense arena**: `get(uid)`, `insert`, `remove`, `iter`, backed
 by a `Vec` of slots plus a `HashMap` index. Callers look entities up by id; the tick walks

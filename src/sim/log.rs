@@ -1,4 +1,4 @@
-//! The simulation's log: a bounded, lock-free queue of strings.
+//! The simulation's log: a bounded, lock-free queue of tagged messages.
 //!
 //! Any thread may write to it, and it is written from the think phase, which
 //! is the one part of a tick that is meant to run in parallel. So every method
@@ -20,6 +20,34 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crossbeam_queue::ArrayQueue;
 
+use super::Uid;
+
+/// Who a message concerns. Routine global chatter stays out of the HUD.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    Routine,
+    Important,
+    Unit(Uid),
+    Related(Uid, Uid),
+}
+
+#[derive(Debug)]
+pub struct Entry {
+    pub audience: Audience,
+    pub message: String,
+}
+
+impl Entry {
+    pub fn visible_for(&self, selected: Option<Uid>) -> bool {
+        match self.audience {
+            Audience::Important => true,
+            Audience::Routine => false,
+            Audience::Unit(uid) => selected == Some(uid),
+            Audience::Related(a, b) => selected == Some(a) || selected == Some(b),
+        }
+    }
+}
+
 /// How many lines are held before the oldest starts falling off.
 ///
 /// The panel shows a handful and a QA assertion looks at a few hundred at
@@ -28,7 +56,7 @@ use crossbeam_queue::ArrayQueue;
 pub const CAPACITY: usize = 1024;
 
 pub struct Log {
-    lines: ArrayQueue<String>,
+    lines: ArrayQueue<Entry>,
     dropped: AtomicU64,
 }
 
@@ -51,7 +79,30 @@ impl Log {
     ///
     /// `&self`, so a thinking agent on any thread can call it.
     pub fn push(&self, line: impl Into<String>) {
-        if self.lines.force_push(line.into()).is_some() {
+        self.write(Audience::Routine, line);
+    }
+
+    /// An important world notice, shown regardless of selection.
+    pub fn important(&self, line: impl Into<String>) {
+        self.write(Audience::Important, line);
+    }
+
+    /// Activity concerning one person (or dog).
+    pub fn unit(&self, uid: Uid, line: impl Into<String>) {
+        self.write(Audience::Unit(uid), line);
+    }
+
+    /// An interaction concerning either participant.
+    pub fn related(&self, a: Uid, b: Uid, line: impl Into<String>) {
+        self.write(Audience::Related(a, b), line);
+    }
+
+    fn write(&self, audience: Audience, line: impl Into<String>) {
+        let entry = Entry {
+            audience,
+            message: line.into(),
+        };
+        if self.lines.force_push(entry).is_some() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -62,6 +113,14 @@ impl Log {
     /// Bounded by the length at entry, so a writer racing the reader cannot
     /// keep this spinning.
     pub fn drain(&self) -> Vec<String> {
+        self.drain_entries()
+            .into_iter()
+            .map(|entry| entry.message)
+            .collect()
+    }
+
+    /// The renderer reads the tags; simulation tests can still read plain text.
+    pub fn drain_entries(&self) -> Vec<Entry> {
         let mut out = Vec::with_capacity(self.lines.len());
         while let Some(line) = self.lines.pop() {
             out.push(line);

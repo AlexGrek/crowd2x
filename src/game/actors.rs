@@ -259,12 +259,12 @@ fn build_world(
     // map's own, fresh.
     let state = match pending.0.take() {
         Some(state) => {
-            state.log.push(format!("loaded {}: {} units, {}", current.title(), state.len(), state.clock().time()));
+            state.log.important(format!("loaded {}: {} units, {}", current.title(), state.len(), state.clock().time()));
             state
         }
         None => {
             let mut state = GameState::new(current.map.clone(), DEFAULT_SEED);
-            state.log.push(format!("opened {} ({}x{})", current.title(), size.width, size.height));
+            state.log.important(format!("opened {} ({}x{})", current.title(), size.width, size.height));
             // Whoever the map says lives here. Straight into the world
             // rather than through `SimInput`, so they are there on the first
             // frame drawn.

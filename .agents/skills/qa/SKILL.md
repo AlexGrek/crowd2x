@@ -190,7 +190,9 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
-| `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
+| `{"expect_log": "spawned dog"}` | Recent simulation output contains this, including messages hidden by selection. |
+| `{"expect_visible_log": "froze human"}` | The filtered HUD log contains this. |
+| `{"expect_no_visible_log": "spawned dog"}` | The filtered HUD log does not contain this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |
 | `{"expect_scaling": {"from": "100 humans", "to": "1000 humans", "slack": 1.5}}` | Cost per entity did not grow with the crowd. |
@@ -219,9 +221,10 @@ between a script's steps, so a world is always a little further along than the t
 script asked for. The floor still says everything it needs to — a build that had lost the
 time scale would be an hour short of it, not a minute.
 
-`expect_log` reads the log *panel*'s lines, not the queue. The queue is drained as it is
-displayed, so asking it directly would be a race with the system emptying it — and the
-panel only keeps the last handful, so assert on something recent.
+`expect_log` reads the last six drained simulation messages, including those hidden by
+the HUD filter. Use `expect_visible_log` and `expect_no_visible_log` to test the panel
+itself: it shows only the selected unit's activity and important world notices. The
+queue is drained once into bounded history, so assertions do not race the reader.
 
 `give` and `expect_carrying` are both about the **selected** unit, so a `select` (or a real
 click) comes first. `give` goes on the same command queue `spawn` does, so it lands on the

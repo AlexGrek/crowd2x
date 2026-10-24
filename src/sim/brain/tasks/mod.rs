@@ -83,7 +83,7 @@ tasks! {
 /// [`Biology::handle`]: crate::sim::biology::Biology::handle
 pub(super) fn report_recalled(ctx: &TaskCtx<'_>, recalled: Option<(Experience, f32)>) {
     if let Some((experience, novelty)) = recalled {
-        ctx.think.log.push(format!(
+        ctx.think.log.unit(ctx.walk.body().uid(), format!(
             "{} had {} in recent memory: {:.0}% as good as fresh",
             ctx.walk.body().uid(),
             experience.name(),

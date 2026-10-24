@@ -184,7 +184,7 @@ impl GoalExecutor for HaulGoal {
             if place.is_none() {
                 // Nothing to carry: held off, and the hold doubling is what
                 // spaces these lines out.
-                ctx.think.log.push(format!("{} found nothing to carry", ctx.body.uid()));
+                ctx.think.log.unit(ctx.body.uid(), format!("{} found nothing to carry", ctx.body.uid()));
             }
             place
         };

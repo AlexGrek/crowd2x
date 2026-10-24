@@ -102,7 +102,7 @@ impl WanderGoal {
         if ctx.think.tick.is_multiple_of(STUCK_LOG_TICKS) {
             ctx.think
                 .log
-                .push(format!("{} has nowhere to go", ctx.body.uid()));
+                .unit(ctx.body.uid(), format!("{} has nowhere to go", ctx.body.uid()));
         }
     }
 

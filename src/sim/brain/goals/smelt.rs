@@ -174,7 +174,7 @@ impl GoalExecutor for SmeltGoal {
             if hopper.is_none() {
                 // Nothing to smelt: held off, and the hold doubling is what
                 // spaces these lines out.
-                ctx.think.log.push(format!("{} found no scrap to smelt", ctx.body.uid()));
+                ctx.think.log.unit(ctx.body.uid(), format!("{} found no scrap to smelt", ctx.body.uid()));
             }
             hopper
         };

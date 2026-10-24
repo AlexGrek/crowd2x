@@ -72,7 +72,7 @@ impl RelieveGoal {
     fn relieved(&mut self, ctx: &GoalCtx<'_>, toilet: Point) {
         ctx.think
             .log
-            .push(format!("{} used the toilet at {}, {}", ctx.body.uid(), toilet.x, toilet.y));
+            .unit(ctx.body.uid(), format!("{} used the toilet at {}, {}", ctx.body.uid(), toilet.x, toilet.y));
         self.forget();
     }
 }

@@ -62,7 +62,7 @@ pub const DEFAULT_SEED: u64 = 0;
 /// this whenever [`Wasteland::tile`] or [`Wasteland::scrap_on`] give a
 /// different answer for any seed and cell, so a save made before can be
 /// told apart.
-pub const GENERATION: u32 = 1;
+pub const GENERATION: u32 = 2;
 
 /// No water within this many cells of the site.
 pub const CLEARING: i32 = 12;
@@ -100,12 +100,11 @@ pub const MAX_SCRAP: u8 = 3;
 
 // Scrapyards: heaps where the junk field is above `JUNK_ABOVE`, thickening
 // to `DENSEST` of the two-by-two blocks holding one where it reaches
-// `JUNK_FULL`. Set, like the ground's thresholds, from the field's measured
-// quantiles: yards where it is above its 94th percentile, at their thickest
-// above the 98th, and a heap in about one cell of two hundred overall.
+// `JUNK_FULL`. Lower thresholds make yards broader and more plentiful,
+// while keeping the same peak density and room to walk between heaps.
 // `scrap_lies_in_yards_and_most_of_the_wasteland_has_none` holds them to it.
-const JUNK_ABOVE: f32 = 0.775;
-const JUNK_FULL: f32 = 0.84;
+const JUNK_ABOVE: f32 = 0.74;
+const JUNK_FULL: f32 = 0.805;
 const DENSEST: f32 = 0.8;
 
 /// What a heap may stand on: dry ground, bare or scrubby. Not meadow, not
@@ -429,7 +428,7 @@ mod tests {
                 .count();
         }
         let share = found as f32 / (patch.area() * 4) as f32;
-        assert!((0.002..0.015).contains(&share), "a heap in {share} of the cells");
+        assert!((0.006..0.025).contains(&share), "a heap in {share} of the cells");
         assert!(crowded as f32 > found as f32 * 0.8, "only {crowded} of {found} heaps have a neighbour");
     }
 

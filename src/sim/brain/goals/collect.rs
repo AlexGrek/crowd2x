@@ -270,7 +270,7 @@ impl GoalExecutor for CollectGoal {
                 // Every heap in reach is empty: nothing to collect. Held off,
                 // and the hold doubling is what spaces these lines out.
                 self.forget();
-                ctx.think.log.push(format!("{} found no scrap left to collect", ctx.body.uid()));
+                ctx.think.log.unit(ctx.body.uid(), format!("{} found no scrap left to collect", ctx.body.uid()));
                 return GoalProgress::Blocked;
             }
         }

@@ -75,7 +75,7 @@ impl SalvageGoal {
     fn stop(&mut self, ctx: &mut GoalCtx<'_>, heap: Point, why: &str) {
         let _ = ctx.memory.forget(SALVAGE_ORDER);
         self.seek.forget();
-        ctx.think.log.push(format!(
+        ctx.think.log.unit(ctx.body.uid(), format!(
             "{} stopped salvaging at {}, {}: {why}",
             ctx.body.uid(),
             heap.x,

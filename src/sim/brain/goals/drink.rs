@@ -154,7 +154,7 @@ impl DrinkGoal {
             Some(fridge) => format!("{} drank at the fridge at {}, {}", ctx.body.uid(), fridge.x, fridge.y),
             None => format!("{} drank what it was carrying", ctx.body.uid()),
         };
-        ctx.think.log.push(line);
+        ctx.think.log.unit(ctx.body.uid(), line);
         self.forget();
     }
 }

@@ -447,6 +447,11 @@ pub enum Step {
     ExpectZoom(f32),
     /// Camera position in cell units, bounded to allow for real-time panning.
     ExpectCamera { x: [f32; 2], y: [f32; 2] },
+    /// Whether the camera follows the selected unit. True also checks that
+    /// the camera reaches it; use a target away from the map's clamp.
+    ExpectFollowing(bool),
+    /// The transient target-cell marker, or null after it has faded.
+    ExpectTargetCell(Option<crate::map::Point>),
     /// The focused widget's label, which is how a test says "the highlight is
     /// where I think it is" without knowing about entities.
     ExpectFocus(String),
@@ -555,10 +560,12 @@ pub enum Step {
     },
     /// That the simulation has said something containing this text.
     ///
-    /// Reads the log panel's own lines rather than the queue: the queue is
-    /// drained as it is displayed, so asking it would be a race with the
-    /// system that empties it.
+    /// Reads recent drained messages, including those hidden by selection.
     ExpectLog(String),
+    /// The filtered log panel contains this text.
+    ExpectVisibleLog(String),
+    /// The filtered log panel does not contain this text.
+    ExpectNoVisibleLog(String),
     /// A UI text node on the current screen contains this text.
     ExpectText(String),
     /// Select the unit that arrived at this index: `0` is the oldest thing in

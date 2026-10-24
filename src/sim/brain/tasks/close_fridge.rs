@@ -38,7 +38,7 @@ impl TaskExecutor for CloseFridge {
             ActionState::Finished => {
                 let at = self.fridge;
                 *ctx.effect = Effect::Fridge { at, open: false };
-                ctx.think.log.push(format!(
+                ctx.think.log.unit(ctx.walk.body().uid(), format!(
                     "{} closed the fridge at {}, {} ({:.1}°C)",
                     ctx.walk.body().uid(),
                     at.x,
