@@ -1022,6 +1022,24 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::ExpectBoxDamaged { x, y, damaged } => {
+            let world = &intents.sim.as_deref().ok_or("there is no simulation")?.0;
+            let at = crate::map::Point::new(*x, *y);
+            if !world.has_box(at) { return Err(format!("no distribution box at {x}, {y}")); }
+            let actual = world.box_is_damaged(at);
+            (actual == *damaged).then_some(Next::Now)
+                .ok_or(format!("box at {x}, {y}: damaged {actual}, expected {damaged}"))
+        }
+
+        Step::SwitchBoxUntilDamaged { x, y } => {
+            let world = &intents.sim.as_deref().ok_or("there is no simulation")?.0;
+            let at = crate::map::Point::new(*x, *y);
+            if !world.has_box(at) { return Err(format!("no distribution box at {x}, {y}")); }
+            if world.box_is_damaged(at) { return Ok(Next::Now); }
+            intents.sim_input.0.switch_box(at, !world.box_is_on(at));
+            Ok(Next::Again)
+        }
+
         Step::SwitchLight { x, y, on } => {
             intents.sim_input.0.switch_light(crate::map::Point::new(*x, *y), *on);
             Ok(Next::Now)

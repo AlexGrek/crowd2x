@@ -20,6 +20,8 @@ pub mod sleep;
 pub mod smelt;
 pub mod wander;
 pub mod work;
+pub mod repair;
+pub use repair::RepairGoal;
 
 pub use bury::BuryGoal;
 pub use collect::CollectGoal;

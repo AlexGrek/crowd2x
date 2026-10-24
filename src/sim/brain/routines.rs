@@ -444,7 +444,8 @@ impl RoutineExecutor for WorkRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock));
+        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
+            .filter(|job| job.kind != JobKind::Electrician || !ctx.think.electrical.damaged().is_empty());
         self.on_shift = due.is_some();
         if let Some(job) = due {
             goals.raise_to(job.kind.goal(), WORKING);

@@ -67,6 +67,7 @@ pub mod speed;
 pub mod statistics;
 pub mod unitpanel;
 pub mod boxpanel;
+pub mod electrical;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -115,6 +116,7 @@ impl Plugin for GamePlugin {
             follow::FollowPlugin,
             unitpanel::UnitPanelPlugin,
             boxpanel::BoxPanelPlugin,
+            electrical::ElectricalPlugin,
             crops::CropsPlugin,
             croppanel::CropPanelPlugin,
             saving::SavingPlugin,

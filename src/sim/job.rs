@@ -157,7 +157,7 @@ catalogue! {
     /// arrival** (`GameState::give_a_job`): the bank's desks first, then the
     /// bins, then the gates, then the crematoria, then the steel factory's
     /// furnaces and hoppers, then the farm's grain bins, then the power
-    /// plant's control panel, then the palace's throne. A new job goes on the
+    /// plant's control panel, then the palace's throne, then the electrician crew's box. A new job goes on the
     /// end, and so is hired last.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum JobKind: JobDef {
@@ -305,6 +305,20 @@ catalogue! {
             now: |at_work, _| if at_work { "holding court" } else { "on the way to the palace" },
             goes_out_for: None,
             bearing: ROYAL,
+        },
+        /// Repairs failed boxes across the map, one worker per watch at
+        /// the public service box indexed by Features.
+        Electrician = 9 => JobDef {
+            name: "electrician",
+            article: "an electrician",
+            workplace: FeatureKind::DistributionBox,
+            goal: GoalId::Repair,
+            commute: COMMUTE,
+            shifts: &WATCHES,
+            uniform: "uniform electrician",
+            now: |_, _| "checking for damaged boxes",
+            goes_out_for: None,
+            bearing: WORKER,
         },
     }
 }
@@ -776,9 +790,10 @@ mod tests {
                 JobKind::Courier,
                 JobKind::Farmer,
                 JobKind::PowerPlantWorker,
-                JobKind::King
+                JobKind::King,
+                JobKind::Electrician
             ],
-            "the office first, the king last"
+            "the office first, the electrician last"
         );
         let job = Job::collector(Point::new(-4, 9));
         assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
@@ -888,7 +903,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ControlPanel, "control panel"));
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a post");
         assert_eq!(kind.shifts(), WATCHES);
-        assert_eq!(JobKind::ALL[JobKind::COUNT - 2], kind);
+        assert_eq!(JobKind::ALL[JobKind::COUNT - 3], kind);
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("on duty", "on the way to the power plant"));
         assert_eq!(kind.uniform().name(), "uniform power plant worker");
 
@@ -913,7 +928,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::Throne, "throne"));
         assert_eq!(kind.goal(), GoalId::Work, "stood at like a post, until there are decisions to make");
         assert_eq!(kind.shifts(), [COURT_HOURS]);
-        assert_eq!(JobKind::ALL.last(), Some(&kind));
+        assert_eq!(JobKind::ALL[JobKind::COUNT - 2], kind);
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("holding court", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform king");
         assert_eq!(kind.bearing(), ROYAL);

@@ -26,6 +26,35 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn a_damaged_box_and_an_electrician_mid_repair_resume_identically_after_loading() {
+    let at = Point::new(3, 3);
+    let mut map = Map::new(Size::new(8, 7), FLOOR);
+    map.set_grid(GridLayer::Power, at, power::BOX);
+    let mut state = GameState::new(map, 42);
+    for _ in 0..200 {
+        state.switch_box(at, !state.box_is_on(at));
+        if state.box_is_damaged(at) { break; }
+    }
+    assert!(state.box_is_damaged(at));
+    let uid = state.spawn(EntityType::Human, Point::new(3, 2));
+    let mut input = Input::new();
+    for process in ProcessId::ALL { input.set_process(uid, process, false); }
+    process_game_state(&mut state, DT, &input);
+    for _ in 0..60 { process_game_state(&mut state, DT, &Input::new()); }
+    assert!(state.box_is_damaged(at));
+    assert_eq!(state.entities().get(uid).unwrap().current_goal(), Some(crate::sim::brain::GoalId::Repair));
+    let mut copy = round_trip(&state);
+    assert!(copy.box_is_damaged(at));
+    for _ in 0..600 {
+        process_game_state(&mut state, DT, &Input::new());
+        process_game_state(&mut copy, DT, &Input::new());
+        assert_eq!(state.save_world(), copy.save_world());
+    }
+    assert!(!state.box_is_damaged(at));
+    assert!(!copy.box_is_damaged(at));
+}
+
+#[test]
 fn every_worn_outfit_including_none_survives_a_save_and_can_change_after_loading() {
     use crate::sim::clothing::Clothing;
     let mut state = GameState::new(Map::new(Size::new(8, 8), FLOOR), 7);

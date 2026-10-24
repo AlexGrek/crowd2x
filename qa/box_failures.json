@@ -1,0 +1,207 @@
+{
+  "name": "switch failures produce sparks and damage that an electrician repairs",
+  "state": "game",
+  "open": "fault",
+  "gap": 0.01,
+  "shot_delay": 0.08,
+  "given": {
+    "maps": [
+      {
+        "name": "fault",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 8,
+            "height": 5
+          },
+          "terrain": {
+            "palette": [
+              "tiles blue"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "........",
+            "........",
+            ".===B--.",
+            "........",
+            "........"
+          ],
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 72,
+                  "y": 120
+                },
+                "kind": "transformer"
+              },
+              {
+                "at": {
+                  "x": 312,
+                  "y": 120
+                },
+                "kind": "fridge"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_box_damaged": {
+        "x": 4,
+        "y": 2,
+        "damaged": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 6,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select_box": {
+        "x": 4,
+        "y": 2
+      }
+    },
+    {
+      "xray": "power"
+    },
+    {
+      "switch_box_until_damaged": {
+        "x": 4,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_box_damaged": {
+        "x": 4,
+        "y": 2,
+        "damaged": true
+      }
+    },
+    {
+      "expect_text": "damaged: waiting for an electrician"
+    },
+    {
+      "expect_connected": {
+        "utility": "power",
+        "served": 0,
+        "of": 1
+      }
+    },
+    {
+      "shot": "sparks and damaged box"
+    },
+    {
+      "press": "damaged"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_box_damaged": {
+        "x": 4,
+        "y": 2,
+        "damaged": true
+      }
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "unfreeze"
+    },
+    {
+      "tick": 1800
+    },
+    {
+      "expect_box_damaged": {
+        "x": 4,
+        "y": 2,
+        "damaged": false
+      }
+    },
+    {
+      "select_box": {
+        "x": 4,
+        "y": 2
+      }
+    },
+    {
+      "shot": "repaired box"
+    }
+  ],
+  "timeout": 300
+}

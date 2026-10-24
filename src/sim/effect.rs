@@ -38,6 +38,7 @@ pub enum Effect {
     None,
     /// Open or close the fridge at `at`.
     Fridge { at: Point, open: bool },
+    RepairBox { at: Point },
     /// Open the door at `at`, or keep it open: somebody holding `key` is
     /// about to go through it. Refused for a door locked to another key —
     /// see [`super::door`].
@@ -99,6 +100,14 @@ pub(crate) fn apply(
     log: &Log,
 ) {
     match effect {
+        Effect::RepairBox { at } => {
+            if entity.job().is_some_and(|job| job.kind == super::job::JobKind::Electrician)
+                && entity.center_position().manhattan_distance(at) <= 1
+                && facilities.electrical.repair(at)
+            {
+                log.important(format!("{} repaired the distribution box at {}, {}", entity.uid(), at.x, at.y));
+            }
+        }
         Effect::None => {}
         Effect::Fridge { at, open } => {
             let _ = facilities.fridges.set_open(at, open);

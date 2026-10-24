@@ -153,6 +153,7 @@ catalogue! {
         /// Where a king holds court: seated on the palace's throne, one king
         /// at a time. The king's workplace; needs no power.
         Throne = 16 => FeatureDef { props: &["throne"], access: Access::Entered, ..BESIDE },
+        DistributionBox = 17 => FeatureDef { props: &[], ..BESIDE },
     }
 }
 
@@ -242,7 +243,7 @@ impl FeatureKind {
 
     /// The prop that is one: the first its row names.
     pub const fn prop(self) -> &'static str {
-        self.def().props[0]
+        if matches!(self, Self::DistributionBox) { "distribution box" } else { self.def().props[0] }
     }
 }
 
@@ -330,6 +331,17 @@ impl Features {
                 if kind.access() == Access::Entered && !features.entered.contains(&cell) {
                     features.entered.push(cell);
                 }
+            }
+        }
+        for cell in map.size().points() {
+            // One public, accessible service box is the crew's base: three
+            // electricians (one per watch), rather than three at every house.
+            if map.grid(crate::map::GridLayer::Power, cell) == crate::map::grid::power::BOX
+                && map.is_passable(cell) && properties.of(cell).is_none()
+                && cell.cardinal_neighbours().iter().any(|&side| map.is_passable(side))
+            {
+                features.cells[FeatureKind::DistributionBox as usize].push(cell);
+                break;
             }
         }
         // Sorted, so nothing that picks among them depends on the order the

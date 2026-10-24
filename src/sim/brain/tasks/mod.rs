@@ -27,6 +27,8 @@ pub mod wait;
 pub mod watch_tv;
 pub mod withdraw;
 pub mod work;
+pub mod repair_box;
+pub use repair_box::RepairBox;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
 pub use consume_item::ConsumeItem;
@@ -74,6 +76,7 @@ tasks! {
     Sow,
     Tend,
     Harvest,
+    RepairBox,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

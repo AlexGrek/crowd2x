@@ -419,6 +419,16 @@ def outfit_layers():
             )
 
 
+# The electrical trade's boiler suit in high-visibility yellow, with a
+# dark lightning patch, so a repair crew reads separately from plant staff.
+UNIFORMS["electrician"] = (
+    UNIFORMS["power_plant_worker"][0],
+    {**UNIFORMS["power_plant_worker"][1],
+     "d": CLOTH["yellow"][0], "m": CLOTH["yellow"][1],
+     "l": CLOTH["yellow"][2], "y": (30, 30, 34)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

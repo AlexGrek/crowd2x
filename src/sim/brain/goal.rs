@@ -83,6 +83,7 @@ catalogue! {
         /// own grain bin ([`FarmGoal`](super::goals::FarmGoal)): a farmer's
         /// shift.
         Farm = 13 => GoalDef { name: "farm", emoji: "🌱", executor: Some(|| Box::new(goals::FarmGoal::new())) },
+        Repair = 14 => GoalDef { name: "repair", emoji: "🔧", executor: Some(|| Box::new(goals::RepairGoal::new())) },
     }
 }
 
@@ -601,7 +602,8 @@ mod tests {
                 (GoalId::Bury, 0.0),
                 (GoalId::Smelt, 0.0),
                 (GoalId::Haul, 0.0),
-                (GoalId::Farm, 0.0)
+                (GoalId::Farm, 0.0),
+                (GoalId::Repair, 0.0)
             ]
         );
     }

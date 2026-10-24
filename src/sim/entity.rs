@@ -543,6 +543,8 @@ pub struct Think<'a> {
     /// only by [`super::world_step`]. What a courier or a steelworker looks
     /// through for somewhere with something to take.
     pub bins: &'a super::bins::Bins,
+    /// Distribution box faults, changed by manual switches and repairs.
+    pub electrical: &'a super::electrical::Electrical,
     /// Every crop in the fields, as of the start of this tick, changed only
     /// by [`super::world_step`]: what a farmer looks through for what wants
     /// doing in its field ([`super::fields`]).
@@ -591,6 +593,7 @@ impl<'a> Think<'a> {
             corpses: &facilities.corpses,
             bins: &facilities.bins,
             fields: &facilities.fields,
+            electrical: &facilities.electrical,
             dt,
             tick,
             clock,

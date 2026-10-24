@@ -581,6 +581,17 @@ world watched faster.
 
 #### The brain (`sim/brain/`)
 
+Distribution boxes can fail on a real manual on/off transition (10% for testing;
+`sim::electrical::BOX_FAILURE_CHANCE`, set to `0.01` for normal play). Damage
+disconnects their output, locks their switch and survives saving. Repair retains
+the requested switch position. One public, passable distribution box serves as
+the electrician crew's base, with one electrician per eight-hour watch; home
+boxes and boxes under blocking props are not workplaces. On shift, electricians
+use `RepairGoal`, `Task::RepairBox` and `Effect::RepairBox` to walk to a fault and
+repair it over fifteen world minutes. Repairs invalidate the supply; the next
+spawn pass rebuilds it and both daylight caches. `game/electrical.rs` draws the
+failure sparks and persistent red fault crosses on the world pixel grid.
+
 What an entity does with all this is decided by a `Brain`, which runs entirely in
 `GameEntity::react` — the only `&mut self` hook, after the whole crowd has moved — while
 `think` stays what it was: walk the current route, arithmetic, parallel. Six layers, each

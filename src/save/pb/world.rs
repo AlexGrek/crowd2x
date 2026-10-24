@@ -50,6 +50,9 @@ pub struct World {
     /// Empty in a save from before there were farmers, which is nothing sown.
     #[prost(message, repeated, tag = "14")]
     pub crops: Vec<Crop>,
+    /// Damaged distribution boxes, packed x, y. Older saves have none.
+    #[prost(sint32, repeated, tag = "15")]
+    pub boxes_damaged: Vec<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

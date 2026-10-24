@@ -62,6 +62,7 @@ impl GameState {
             elapsed: self.elapsed,
             rng: rng::state_of(&self.rng).to_vec(),
             boxes_off: pb::pack(self.boxes_off.iter().copied()),
+            boxes_damaged: pb::pack(self.electrical().damaged().iter().copied()),
             street_lights_on: self.street_lights_on,
             switches_off: pb::pack(self.light_switches.cells().filter(|&cell| !self.light_switches.is_on(cell))),
             fridges: self.facilities.fridges.save(),
@@ -138,6 +139,12 @@ impl GameState {
             return invalid(format!("no distribution box at {}, {} to be off", cell.x, cell.y));
         }
         state.boxes_off = boxes_off;
+        for cell in pb::unpack(&world.boxes_damaged, "damaged boxes")? {
+            if !state.has_box(cell) {
+                return invalid(format!("no distribution box at {}, {} to be damaged", cell.x, cell.y));
+            }
+            state.facilities.electrical.damage(cell);
+        }
         state.street_lights_on = world.street_lights_on;
         for cell in pb::unpack(&world.switches_off, "switches off")? {
             if state.light_switches.switch(cell, false).is_none() {

@@ -86,7 +86,9 @@ fn press(
     for action in pressed {
         match action {
             BoxAction::Toggle => {
-                input.0.switch_box(at, !sim.0.box_is_on(at));
+                if !sim.0.box_is_damaged(at) {
+                    input.0.switch_box(at, !sim.0.box_is_on(at));
+                }
             }
             BoxAction::Close => {
                 selected.clear();
@@ -191,6 +193,7 @@ fn update_readouts(
     let fed = world.supply().is_live(crate::map::utilities::Network::Line, at);
     for (readout, mut text) in &mut texts {
         let wanted = match readout {
+            BoxReadout::State if world.box_is_damaged(at) => "damaged: waiting for an electrician".to_string(),
             BoxReadout::State => match (on, fed) {
                 (true, false) => "on, but no power line reaches it".to_string(),
                 (true, true) if world.is_controlled(at) => if world.street_lights_on() {
@@ -202,6 +205,7 @@ fn update_readouts(
                 (true, true) => "on".to_string(),
                 (false, _) => "off".to_string(),
             },
+            BoxReadout::Toggle if world.box_is_damaged(at) => "damaged".to_string(),
             BoxReadout::Toggle => if on { "switch off" } else { "switch on" }.to_string(),
         };
         if **text != wanted {

@@ -139,6 +139,7 @@ pub mod clothing;
 pub mod corpses;
 pub mod door;
 pub mod effect;
+pub mod electrical;
 pub mod entities;
 pub mod entity;
 pub(crate) mod facilities;
@@ -694,7 +695,16 @@ impl GameState {
         self.map.grid(crate::map::GridLayer::Power, at) == crate::map::grid::power::BOX
     }
 
-    /// Whether the box in `at` is switched on. `false` where there is none.
+    /// Distribution box faults, read by brains and the renderer.
+    pub fn electrical(&self) -> &electrical::Electrical {
+        &self.facilities.electrical
+    }
+
+    pub fn box_is_damaged(&self, at: Point) -> bool {
+        self.facilities.electrical.is_damaged(at)
+    }
+
+    /// The switch position, independently of damage. `false` with no box.
     pub fn box_is_on(&self, at: Point) -> bool {
         self.has_box(at) && self.boxes_off.binary_search(&at).is_err()
     }
@@ -712,6 +722,10 @@ impl GameState {
         if !self.has_box(at) {
             return false;
         }
+        if self.box_is_damaged(at) {
+            self.log.important(format!("the distribution box at {}, {} is damaged: waiting for an electrician", at.x, at.y));
+            return true;
+        }
         match (self.boxes_off.binary_search(&at), on) {
             (Ok(index), true) => {
                 self.boxes_off.remove(index);
@@ -719,6 +733,10 @@ impl GameState {
             (Err(index), false) => self.boxes_off.insert(index, at),
             // Already the way it was asked to be.
             _ => return true,
+        }
+        if self.rng.random_bool(electrical::BOX_FAILURE_CHANCE) {
+            self.facilities.electrical.damage(at);
+            self.log.important(format!("the distribution box at {}, {} broke while switching {}: damaged", at.x, at.y, if on { "on" } else { "off" }));
         }
         self.refresh_supply();
         self.log.push(format!(
@@ -820,8 +838,12 @@ impl GameState {
     /// supply with the street lights the other way is flooded too, for
     /// [`GameState::follow_daylight`] to swap in at dusk or dawn.
     fn refresh_supply(&mut self) {
+        let mut disconnected = self.boxes_off.clone();
+        disconnected.extend_from_slice(self.electrical().damaged());
+        disconnected.sort_unstable();
+        disconnected.dedup();
         let flood = |lights_on: bool| {
-            flood_supply(&self.map, &self.boxes_off, &self.controlled, lights_on, self.light_switches.dark_cells())
+            flood_supply(&self.map, &disconnected, &self.controlled, lights_on, self.light_switches.dark_cells())
         };
         self.supply = flood(self.street_lights_on);
         self.facilities.features = Features::with_properties(&self.map, &self.supply, &self.facilities.properties);
@@ -832,6 +854,7 @@ impl GameState {
         }
         self.facilities.fridges.set_power(&self.supply);
         self.supply_generation += 1;
+        self.facilities.electrical.supply_dirty = false;
     }
 
     pub fn fridges(&self) -> &Fridges {
@@ -1384,6 +1407,9 @@ fn bury(state: &mut GameState) {
 /// buffer sized to the arena as it goes, which is what lets
 /// [`process_pass`] index it without a bounds concern and without touching it.
 pub fn spawn_pass(state: &mut GameState, input: &Input) {
+    if state.facilities.electrical.supply_dirty {
+        state.refresh_supply();
+    }
     for command in &input.commands {
         match command {
             Command::SetClothing { uid, clothing } => {
@@ -3781,7 +3807,8 @@ mod tests {
             assert_eq!(operators, 3);
             let kings = crate::map::district::palace::THRONES;
             assert_eq!(kings, 1, "one king");
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings;
+            let electricians = state.features().count(feature::FeatureKind::DistributionBox) * job::WATCHES.len();
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -3830,6 +3857,9 @@ mod tests {
                             "seed {seed}: a control panel outside the power plant"
                         );
                         panels.entry(job.workplace).or_default().push(job.shift.start());
+                    }
+                    JobKind::Electrician => {
+                        assert!(state.has_box(job.workplace));
                     }
                     JobKind::King => {
                         reigning += 1;
@@ -4061,7 +4091,7 @@ mod tests {
     fn switching_a_box_off_takes_its_fridges_away_and_switching_it_on_gives_them_back() {
         let district = crate::map::district::generate(7);
         let house = &district.houses[0];
-        let mut state = GameState::new(district.map.clone(), 7);
+        let mut state = GameState::new(district.map.clone(), 42);
         let fridge = state
             .map
             .objects(ObjectLayer::Props)

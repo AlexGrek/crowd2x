@@ -31,6 +31,7 @@ pub struct Facilities {
     /// whenever the power changes (`GameState::refresh_supply`): a fridge or
     /// computer on a dead box is not somewhere to go.
     pub features: Features,
+    pub electrical: super::electrical::Electrical,
     /// Every fridge's door and temperature. Derived from the map once; what
     /// is stored here changes every tick a door is open, through
     /// `Effect::Fridge`.
@@ -73,6 +74,7 @@ impl Facilities {
     pub fn new(map: &Map, supply: &Supply) -> Facilities {
         let properties = Properties::from_map(map);
         Facilities {
+            electrical: Default::default(),
             features: Features::with_properties(map, supply, &properties),
             fridges: Fridges::from_map(map, supply),
             bins: Bins::from_map(map),
