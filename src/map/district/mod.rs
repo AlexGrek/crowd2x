@@ -1,9 +1,10 @@
 //! A district made from a seed: [`generate`].
 //!
-//! Ninety-two houses with one or two people living in each, a bank laid out
-//! like an office, three empty shops, a warehouse where the scrap collectors
-//! store what they bring in from the wasteland, a power plant that powers all
-//! of it, and streets to walk between them. The same seed always gives the same district — every choice is
+//! A hundred and twenty-four houses with one or two people living in each, a
+//! palace in the middle for the king, a bank laid out like an office, three
+//! empty shops, a warehouse where the scrap collectors store what they bring
+//! in from the wasteland, a power plant that powers all of it, and streets to
+//! walk between them, the main street wider than the rest. The same seed always gives the same district — every choice is
 //! drawn from one [`SmallRng`] in a fixed order — so a district somebody
 //! liked can be made again from its number.
 //!
@@ -18,11 +19,17 @@
 //! [`PAVEMENT`] each side of three cells of [`ROAD`]; the pavement wraps
 //! round every block, corners included, and runs along the edge of the map,
 //! so the crowd — whose routes are cheapest by the ground's walk cost
-//! (`sim::path`) — walks the pavement and crosses the road straight over. A
-//! block is 2x2 **lots**, and anything in a block that is not a building is
-//! pavement too, so the yards and the gaps between houses are as walkable as
-//! the street. Which blocks are what is the seed's choice:
+//! (`sim::path`) — walks the pavement and crosses the road straight over.
+//! One street is wider: the **main street** ([`MAIN_STREET`]), two cells of
+//! pavement each side of five of road, running across the district from a
+//! gate in one side wall to a gate in the other, along the front of the
+//! palace. A block is 2x2 **lots**, and anything in a block that is not a
+//! building is pavement too, so the yards and the gaps between houses are as
+//! walkable as the street. The block in the middle is always the palace's;
+//! which of the rest are what is the seed's choice:
 //!
+//! * **the [`palace`]** — the whole of the middle block, its door onto the
+//!   main street, the king's throne across the hall from it;
 //! * **the bank** — two neighbouring blocks merged across the street between
 //!   them: two opposite exits joined by a clear aisle, a lobby lined with
 //!   fridges, an office of computers in desk rows, and two restrooms walled
@@ -34,12 +41,13 @@
 //!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
 //!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
 //!   the warehouse, the [`farm`] on the edge lot nearest the good soil, the
-//!   [`power_plant`] on the edge, the [`palace`] nearest the middle. **A new one is a module with a [`LotBuilding`] in it and
+//!   [`power_plant`] on the edge. **A new one is a module with a [`LotBuilding`] in it and
 //!   a line in that list**; everything else — the lot it takes from the
 //!   houses, its roof, lamp, windows, power, its place in
 //!   [`District::buildings`] — follows from the list;
 //! * **the houses** — every lot of every other block, less [`EMPTY_LOTS`]
-//!   left as parks, which leaves [`HOUSES`].
+//!   left as parks — room for lot buildings to come — which leaves
+//!   [`HOUSES`].
 //!
 //! **A wall round the whole of it** ([`PERIMETER_WALL`]) takes the place of
 //! the pavement along the map's edge, so the street round the edge reads
@@ -63,9 +71,10 @@
 //!
 //! Every building is roofed over, walls and all, and the streets and yards
 //! are open sky — so the sun lights the street and comes in by the doors
-//! (`crate::lighting`). A house, a shop and the warehouse each get one warm
+//! (`crate::lighting`). A house, a shop and a lot building each get one warm
 //! [`HOUSE_LAMP`] in the middle of the room; the bank gets [`OFFICE_LAMP`]s in a grid every
-//! [`OFFICE_LAMP_SPACING`] cells. Both are laid out from the buildings once
+//! [`OFFICE_LAMP_SPACING`] cells, and the palace's hall a grid of warm ones.
+//! All are laid out from the buildings once
 //! they are built, drawing nothing from the seed, so adding them changed no
 //! district: a seed is still the same streets, houses and people.
 //!
@@ -122,9 +131,10 @@ use super::grid::{power, water};
 use super::utilities::{self, Utility};
 use super::{is_plot, Bounds, GridLayer, Map, Object, ObjectKind, ObjectLayer, Point, Size, TerrainId, Wasteland, NAV_MARGIN, PIXELS_PER_CELL};
 
-/// How many houses a district has: about 86% of the residential lots left
-/// once the mandatory buildings have theirs.
-pub const HOUSES: usize = 92;
+/// How many houses a district has: four in five of the residential lots
+/// left once the lot buildings have theirs. The rest are parks — and room for
+/// lot buildings still to come.
+pub const HOUSES: usize = 124;
 /// How many shops.
 pub const SHOPS: usize = 3;
 /// How many people can live in one house.
@@ -132,25 +142,90 @@ pub const RESIDENTS: std::ops::RangeInclusive<u8> = 1..=2;
 
 /// Cells across a street: a pavement each side of three cells of road.
 pub const STREET: i32 = 5;
-/// Cells from a street's edge to the lane its lamps and their wiring stand
-/// in: the road's outer lane, just off the pavement, so a post never stands
-/// in the one cell of pavement a walker has.
-const CURB: i32 = 1;
+/// Cells across the **main street**, the one street wider than the rest:
+/// two cells of pavement each side of five of road. It runs across the
+/// district from gate to gate along the front of the palace ([`MAIN`]).
+pub const MAIN_STREET: i32 = 9;
+/// Cells of pavement each side of the main street.
+const MAIN_PAVEMENT: i32 = 2;
 const LOT_W: i32 = 8;
 const LOT_H: i32 = 7;
 const BLOCK_W: i32 = 2 * LOT_W;
 const BLOCK_H: i32 = 2 * LOT_H;
-const BLOCKS_X: i32 = 6;
+const BLOCKS_X: i32 = 9;
 const BLOCKS_Y: i32 = 5;
-/// Lots in the blocks that are neither the bank's (two) nor the shops' (one):
-/// four to a block.
-const RESIDENTIAL_LOTS: usize = 4 * (BLOCKS_X * BLOCKS_Y - 3) as usize;
+/// Which of the streets running across is the main street, counted from the
+/// bottom (the street round the bottom edge is 0): the one below the middle
+/// row of blocks, which the palace's door opens onto.
+const MAIN: i32 = BLOCKS_Y / 2;
+const _: () = assert!(BLOCKS_X % 2 == 1 && BLOCKS_Y % 2 == 1, "a district has a block in its middle, for the palace");
+/// Lots in the blocks that are neither the bank's (two), the shops' (one)
+/// nor the palace's (one): four to a block.
+const RESIDENTIAL_LOTS: usize = 4 * (BLOCKS_X * BLOCKS_Y - 4) as usize;
 /// The residential lots left as parks: what neither a lot building nor a
 /// house took.
 const EMPTY_LOTS: usize = RESIDENTIAL_LOTS - lots_built() - HOUSES;
 
-pub const WIDTH: i32 = BLOCKS_X * BLOCK_W + (BLOCKS_X + 1) * STREET;
-pub const HEIGHT: i32 = BLOCKS_Y * BLOCK_H + (BLOCKS_Y + 1) * STREET;
+pub const WIDTH: i32 = up(BLOCKS_X).end();
+pub const HEIGHT: i32 = across(BLOCKS_Y).end();
+
+/// A street, across its width: where it starts, how wide it is, and how much
+/// of that is pavement each side — the rest is road.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Street {
+    start: i32,
+    width: i32,
+    pavement: i32,
+}
+
+impl Street {
+    /// The first cell past it.
+    const fn end(self) -> i32 {
+        self.start + self.width
+    }
+
+    /// Whether `at`, counted across it, is in it.
+    const fn contains(self, at: i32) -> bool {
+        at >= self.start && at < self.end()
+    }
+
+    /// Cells of road across it.
+    const fn road(self) -> i32 {
+        self.width - 2 * self.pavement
+    }
+
+    /// Its middle cell, which its mains run under.
+    const fn middle(self) -> i32 {
+        self.start + self.width / 2
+    }
+
+    /// Its two **sides**, where its lamps and their wiring stand: the road's
+    /// outer lanes, just off the pavement, so a post never stands in the
+    /// pavement a walker has.
+    const fn sides(self) -> (i32, i32) {
+        (self.start + self.pavement, self.end() - 1 - self.pavement)
+    }
+}
+
+/// The `k`th street running across, from the bottom: 0 is the street round
+/// the bottom edge, [`BLOCKS_Y`] the one round the top, [`MAIN`] the main
+/// street.
+const fn across(k: i32) -> Street {
+    let past_the_main = if k > MAIN { MAIN_STREET - STREET } else { 0 };
+    let (width, pavement) = if k == MAIN { (MAIN_STREET, MAIN_PAVEMENT) } else { (STREET, 1) };
+    Street { start: k * (BLOCK_H + STREET) + past_the_main, width, pavement }
+}
+
+/// The `k`th street running up, from the left: 0 is the street round the
+/// left edge, [`BLOCKS_X`] the one round the right.
+const fn up(k: i32) -> Street {
+    Street { start: k * (BLOCK_W + STREET), width: STREET, pavement: 1 }
+}
+
+/// The street running across that `y` is in, if it is in one.
+fn across_at(y: i32) -> Option<Street> {
+    (0..=BLOCKS_Y).map(across).find(|street| street.contains(y))
+}
 
 /// Everything outside a building that is not road or park: both sides of
 /// every street, and the yards.
@@ -298,7 +373,7 @@ impl Siting<'_> {
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
 pub const LOT_BUILDINGS: &[&LotBuilding] =
-    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC, &palace::SPEC];
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -399,6 +474,8 @@ pub struct District {
     pub houses: Vec<House>,
     pub bank: Rect,
     pub shops: Vec<Rect>,
+    /// The [`palace`]: the whole of the block in the middle.
+    pub palace: Rect,
     /// Every lot building ([`LOT_BUILDINGS`]) by name, in the order they were
     /// built: the warehouse, the restaurants, the crematorium, the steel
     /// factory, the farm, the power plant. Ask for one with [`District::the`]
@@ -418,14 +495,14 @@ impl District {
     }
 
     /// The outside of every building's walls: the houses, the shops, every
-    /// lot building and the bank.
+    /// lot building, the bank and the palace.
     pub fn buildings(&self) -> Vec<Rect> {
         self.houses
             .iter()
             .map(|house| house.walls)
             .chain(self.shops.iter().copied())
             .chain(self.lot_buildings.iter().map(|&(_, walls)| walls))
-            .chain([self.bank])
+            .chain([self.bank, self.palace])
             .collect()
     }
 
@@ -477,10 +554,10 @@ impl Lot {
     /// with only the wasteland beyond it.
     const fn faces_the_edge(self, side: Side) -> bool {
         match side {
-            Side::West => self.origin.x == STREET,
-            Side::East => self.origin.x + LOT_W == WIDTH - STREET,
-            Side::South => self.origin.y == STREET,
-            Side::North => self.origin.y + LOT_H == HEIGHT - STREET,
+            Side::West => self.origin.x == up(0).end(),
+            Side::East => self.origin.x + LOT_W == up(BLOCKS_X).start,
+            Side::South => self.origin.y == across(0).end(),
+            Side::North => self.origin.y + LOT_H == across(BLOCKS_Y).start,
         }
     }
 
@@ -491,11 +568,16 @@ impl Lot {
     }
 }
 
-fn block_origin(bx: i32, by: i32) -> Point {
-    Point::new(
-        STREET + bx * (BLOCK_W + STREET),
-        STREET + by * (BLOCK_H + STREET),
-    )
+/// The lowest corner of block `bx`, `by`: just past the streets left of it
+/// and below it.
+const fn block_origin(bx: i32, by: i32) -> Point {
+    Point::new(up(bx).end(), across(by).end())
+}
+
+/// The whole of block `bx`, `by`.
+const fn block(bx: i32, by: i32) -> Rect {
+    let origin = block_origin(bx, by);
+    Rect::new(origin.x, origin.y, BLOCK_W, BLOCK_H)
 }
 
 fn lots_of(bx: i32, by: i32) -> [Lot; 4] {
@@ -573,12 +655,17 @@ pub fn generate(seed: u64) -> District {
     let mut props: Vec<Object> = Vec::new();
     let mut spawners: Vec<Object> = Vec::new();
 
-    // Which blocks are what.
-    let bank_x = rng.random_range(0..BLOCKS_X - 1);
-    let bank_y = rng.random_range(0..BLOCKS_Y);
+    // Which blocks are what: the palace's is the one in the middle, always;
+    // the bank's two, side by side, and the shops' one are the seed's.
+    let (palace_x, palace_y) = palace::BLOCK;
+    let banks: Vec<(i32, i32)> = (0..BLOCKS_Y)
+        .flat_map(|by| (0..BLOCKS_X - 1).map(move |bx| (bx, by)))
+        .filter(|&(bx, by)| !(by == palace_y && (bx == palace_x || bx + 1 == palace_x)))
+        .collect();
+    let (bank_x, bank_y) = banks[rng.random_range(0..banks.len())];
     let mut blocks: Vec<(i32, i32)> = (0..BLOCKS_Y)
         .flat_map(|by| (0..BLOCKS_X).map(move |bx| (bx, by)))
-        .filter(|&(bx, by)| !(by == bank_y && (bx == bank_x || bx == bank_x + 1)))
+        .filter(|&(bx, by)| !(by == bank_y && (bx == bank_x || bx == bank_x + 1)) && (bx, by) != palace::BLOCK)
         .collect();
     let (shop_x, shop_y) = blocks.remove(rng.random_range(0..blocks.len()));
 
@@ -589,15 +676,13 @@ pub fn generate(seed: u64) -> District {
     };
     let block_areas: Vec<Rect> = blocks
         .iter()
-        .chain([(shop_x, shop_y)].iter())
-        .map(|&(bx, by)| {
-            let origin = block_origin(bx, by);
-            Rect::new(origin.x, origin.y, BLOCK_W, BLOCK_H)
-        })
+        .chain([(shop_x, shop_y), palace::BLOCK].iter())
+        .map(|&(bx, by)| block(bx, by))
         .chain([bank_area])
         .collect();
     pave(&mut map, &block_areas);
 
+    let palace = palace::palace(&mut map, &mut props);
     let bank = bank(&mut rng, &mut map, &mut props, bank_x, bank_y);
     let (shops, spare) = shops(&mut rng, &mut map, &mut props, shop_x, shop_y);
 
@@ -647,8 +732,9 @@ pub fn generate(seed: u64) -> District {
         .chain(shops.iter().copied())
         .chain(lot_buildings.iter().map(|&(_, walls)| walls))
         .collect();
-    roof_and_light(&mut map, &rooms, bank);
-    let buildings: Vec<Rect> = rooms.iter().copied().chain([bank]).collect();
+    let halls = [(bank, OFFICE_LAMP, OFFICE_LAMP_SPACING), (palace, HOUSE_LAMP, palace::LAMP_SPACING)];
+    roof_and_light(&mut map, &rooms, &halls);
+    let buildings: Vec<Rect> = rooms.iter().copied().chain([bank, palace]).collect();
     for &walls in &buildings {
         glaze(&mut map, walls);
     }
@@ -665,6 +751,7 @@ pub fn generate(seed: u64) -> District {
         houses,
         bank,
         shops,
+        palace,
         lot_buildings,
         parks,
         gates,
@@ -721,17 +808,23 @@ fn soil_round(seed: u64) -> Vec<Point> {
 }
 
 /// The ground before anything is built on it: [`PAVEMENT`] over every block
-/// and one cell round it, the [`PERIMETER_WALL`] along the map's edge, and
-/// [`ROAD`] — what the map starts as — everywhere else. So each street reads
-/// pavement, three cells of road, pavement — the street round the edge
-/// wall, road, pavement — and where two meet the pavements wrap round the
+/// and round it as far as the street beside it has pavement — a cell, or the
+/// main street's [`MAIN_PAVEMENT`] — the [`PERIMETER_WALL`] along the map's
+/// edge, and [`ROAD`] — what the map starts as — everywhere else. So each
+/// street reads pavement, three cells of road, pavement — the street round
+/// the edge wall, road, pavement; the main street two of pavement, five of
+/// road, two of pavement — and where two meet the pavements wrap round the
 /// corners and the road runs on through. `blocks` counts the bank's two
 /// blocks as one, street between and all, since the bank stands across it.
 fn pave(map: &mut Map, blocks: &[Rect]) {
     let (pavement, wall) = (tile(PAVEMENT), tile(PERIMETER_WALL));
+    let reach = |y: i32| across_at(y).map_or(1, |street| street.pavement);
     let near_a_block = |cell: Point| {
         blocks.iter().any(|block| {
-            cell.x >= block.x - 1 && cell.x <= block.right() + 1 && cell.y >= block.y - 1 && cell.y <= block.top() + 1
+            cell.x >= block.x - 1
+                && cell.x <= block.right() + 1
+                && cell.y >= block.y - reach(block.y - 1)
+                && cell.y <= block.top() + reach(block.top() + 1)
         })
     };
     for cell in map.size().points().collect::<Vec<_>>() {
@@ -761,41 +854,49 @@ fn gates(map: &mut Map, props: &mut Vec<Object>) -> Vec<Gate> {
 
 /// Where the gates in the perimeter wall go: [`GATES_PER_SIDE`] a side,
 /// each where one of the streets running out to that side meets the wall —
-/// the ones that split the side most evenly — opening straight off its
-/// road. Two leaves in the first two of its three lanes, and a guard post in
-/// the wall on the far side of the street's pavement, two cells from the
-/// nearer leaf with a cell of wall between: a guard stands at it on the road
-/// inside, out of the gateway, and could only get round to the outside of it
-/// through the gate. From the geometry alone, drawing nothing from the seed
-/// — which is what lets the lot buildings be sited by the way out
-/// ([`Siting::walk_out`]) before the wall is built.
+/// the ones that split the side most evenly, and on the two sides the main
+/// street runs out to, the main street in place of the nearest of them, so
+/// it runs gate to gate — opening straight off its road. Two leaves in the
+/// first two lanes of its road, and a guard post in the wall two cells short
+/// of the nearer leaf, a cell of wall between (on the far side of the
+/// street's pavement; of the main street's two cells of it, on the first): a
+/// guard stands at it on the road inside, out of the gateway, and could only
+/// get round to the outside of it through the gate. From the geometry alone,
+/// drawing nothing from the seed — which is what lets the lot buildings be
+/// sited by the way out ([`Siting::walk_out`]) before the wall is built.
 fn gate_layout() -> Vec<Gate> {
     // The streets that split `blocks` blocks most evenly, by number.
     let streets = |blocks: i32| (1..=GATES_PER_SIDE).map(move |i| i * (blocks + 1) / (GATES_PER_SIDE + 1));
     let mut gates = Vec::new();
     for k in streets(BLOCKS_X) {
-        let x0 = k * (BLOCK_W + STREET);
+        let x = up(k).sides().0;
         for (y, outward) in [(0, Point::new(0, -1)), (HEIGHT - 1, Point::new(0, 1))] {
-            let leaves = [Point::new(x0 + 1, y), Point::new(x0 + 2, y)];
-            gates.push(Gate { leaves, post: Point::new(x0 - 1, y), outward });
+            let leaves = [Point::new(x, y), Point::new(x + 1, y)];
+            gates.push(Gate { leaves, post: Point::new(x - 2, y), outward });
         }
     }
-    for k in streets(BLOCKS_Y) {
-        let y0 = k * (BLOCK_H + STREET);
+    let mut across_streets: Vec<i32> = streets(BLOCKS_Y).collect();
+    if let Some(nearest) = across_streets.iter_mut().min_by_key(|k| (**k - MAIN).abs()) {
+        *nearest = MAIN;
+    }
+    for k in across_streets {
+        let y = across(k).sides().0;
         for (x, outward) in [(0, Point::new(-1, 0)), (WIDTH - 1, Point::new(1, 0))] {
-            let leaves = [Point::new(x, y0 + 1), Point::new(x, y0 + 2)];
-            gates.push(Gate { leaves, post: Point::new(x, y0 - 1), outward });
+            let leaves = [Point::new(x, y), Point::new(x, y + 1)];
+            gates.push(Gate { leaves, post: Point::new(x, y - 2), outward });
         }
     }
     gates
 }
 
 /// A roof over every building, and the lamps under them: one in the middle
-/// of each of the `rooms` (the houses, the shops, the warehouse) and a grid
-/// in the bank. Last, from the buildings as built, and without the seed —
-/// see the module docs.
-fn roof_and_light(map: &mut Map, rooms: &[Rect], bank: Rect) {
-    for &walls in rooms.iter().chain([&bank]) {
+/// of each of the `rooms` (the houses, the shops, the lot buildings) and a
+/// grid in each of the `halls`, too big for one — the bank's tube lamps, the
+/// palace's ceiling lamps — of the lamp given, every so many cells each way.
+/// Last, from the buildings as built, and without the seed — see the module
+/// docs.
+fn roof_and_light(map: &mut Map, rooms: &[Rect], halls: &[(Rect, &str, i32)]) {
+    for &walls in rooms.iter().chain(halls.iter().map(|(walls, _, _)| walls)) {
         for cell in walls.cells() {
             map.set_ceiling(cell, true);
         }
@@ -810,14 +911,13 @@ fn roof_and_light(map: &mut Map, rooms: &[Rect], bank: Rect) {
         let inside = walls.interior();
         hang(map, HOUSE_LAMP, Point::new(inside.x + inside.w / 2, inside.y + inside.h / 2));
     }
-    let inside = bank.interior();
-    let offset = Point::new(
-        (inside.w - 1) % OFFICE_LAMP_SPACING / 2,
-        (inside.h - 1) % OFFICE_LAMP_SPACING / 2,
-    );
-    for y in (inside.y + offset.y..=inside.top()).step_by(OFFICE_LAMP_SPACING as usize) {
-        for x in (inside.x + offset.x..=inside.right()).step_by(OFFICE_LAMP_SPACING as usize) {
-            hang(map, OFFICE_LAMP, Point::new(x, y));
+    for &(walls, lamp, spacing) in halls {
+        let inside = walls.interior();
+        let offset = Point::new((inside.w - 1) % spacing / 2, (inside.h - 1) % spacing / 2);
+        for y in (inside.y + offset.y..=inside.top()).step_by(spacing as usize) {
+            for x in (inside.x + offset.x..=inside.right()).step_by(spacing as usize) {
+                hang(map, lamp, Point::new(x, y));
+            }
         }
     }
 }
@@ -873,12 +973,12 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
     // walked round.
     let mains: Vec<Point> = (0..=BLOCKS_Y)
         .flat_map(|k| {
-            let y = k * (BLOCK_H + STREET) + STREET / 2;
-            (STREET / 2..WIDTH - STREET / 2).map(move |x| Point::new(x, y))
+            let y = across(k).middle();
+            (up(0).middle()..=up(BLOCKS_X).middle()).map(move |x| Point::new(x, y))
         })
         .chain((0..=BLOCKS_X).flat_map(|k| {
-            let x = k * (BLOCK_W + STREET) + STREET / 2;
-            (STREET / 2..HEIGHT - STREET / 2).map(move |y| Point::new(x, y))
+            let x = up(k).middle();
+            (across(0).middle()..=across(BLOCKS_Y).middle()).map(move |y| Point::new(x, y))
         }))
         .filter(|&cell| !inside_any(cell))
         .collect();
@@ -892,7 +992,7 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
     // plant, which is joined to it like any building, below.
     let sewer = Point::new(1, HEIGHT - 2);
     map.add_object(ObjectLayer::Props, object(SEWER, sewer));
-    utilities::lay(map, GridLayer::Water, water::PIPE, sewer, Point::new(STREET / 2, HEIGHT - 1 - STREET / 2));
+    utilities::lay(map, GridLayer::Water, water::PIPE, sewer, Point::new(up(0).middle(), across(BLOCKS_Y).middle()));
 
     for &walls in buildings {
         let others = |cell: Point| buildings.iter().any(|&other| other != walls && other.contains(cell));
@@ -938,11 +1038,11 @@ fn connect(map: &mut Map, buildings: &[Rect]) {
 /// building's spur, from the map as built and without the seed — see the
 /// module docs.
 ///
-/// A street is a pavement, three cells of road and a pavement, with the
-/// main under the middle of the road, so its two **sides** — the road's
-/// outer lanes, [`CURB`] in from either edge, either side of the main — are
-/// where lamps go: off the pavement, which is one cell wide and the crowd's
-/// ([`can_stand`] keeps every post and cabinet off it).
+/// A street is a pavement, three cells of road and a pavement — the main
+/// street two, five and two — with the main under the middle of the road, so
+/// its two **sides** ([`Street::sides`]) — the road's outer lanes, either
+/// side of the main — are where lamps go: off the pavement, which is the
+/// crowd's ([`can_stand`] keeps every post and cabinet off it).
 ///
 /// * **Rows** (the sides of the streets running across) are wired end to
 ///   end. Where a power line crosses one — a main at a crossroads, a
@@ -969,25 +1069,23 @@ fn light_streets(map: &mut Map, buildings: &[Rect]) {
         .filter(|prop| [DOOR, HOUSE_DOOR, GUARD_POST].contains(&prop.kind.as_str()))
         .map(Object::cell)
         .collect();
-    let streets_x: Vec<i32> = (0..=BLOCKS_X).map(|k| k * (BLOCK_W + STREET)).collect();
-    let streets_y: Vec<i32> = (0..=BLOCKS_Y).map(|k| k * (BLOCK_H + STREET)).collect();
-
     // Each stretch with the offset its lamps are spaced from: the far side of
     // a street is staggered half a spacing against the near one, so two
     // lamps never face each other across it.
     let mut stretches: Vec<(Vec<Point>, i32)> = Vec::new();
-    let (near, far) = (CURB, STREET - 1 - CURB);
-    for &y0 in &streets_y {
-        for (y, stagger) in [(y0 + near, 0), (y0 + far, STREET_LAMP_SPACING / 2)] {
+    for k in 0..=BLOCKS_Y {
+        let (near, far) = across(k).sides();
+        for (y, stagger) in [(near, 0), (far, STREET_LAMP_SPACING / 2)] {
             stretches.push(((0..WIDTH).map(|x| Point::new(x, y)).collect(), stagger));
         }
     }
-    for &x0 in &streets_x {
-        for (x, stagger) in [(x0 + near, 0), (x0 + far, STREET_LAMP_SPACING / 2)] {
+    for k in 0..=BLOCKS_X {
+        let (near, far) = up(k).sides();
+        for (x, stagger) in [(near, 0), (far, STREET_LAMP_SPACING / 2)] {
             // A block's height at a time, from beside the far row of the
             // street below to one short of the near row of the street above.
-            for &y0 in &streets_y[..streets_y.len() - 1] {
-                let (from, to) = (y0 + far + 1, y0 + STREET + BLOCK_H + near - 1);
+            for by in 0..BLOCKS_Y {
+                let (from, to) = (across(by).sides().1 + 1, across(by + 1).sides().0 - 1);
                 stretches.push(((from..to).map(|y| Point::new(x, y)).collect(), stagger));
             }
         }
@@ -1659,6 +1757,7 @@ mod tests {
                 assert_eq!(in_room(walls, HOUSE_LAMP), 1, "seed {seed}: the {name} at {walls:?}");
             }
             assert!(in_room(district.bank, OFFICE_LAMP) >= 12, "seed {seed}: {}", in_room(district.bank, OFFICE_LAMP));
+            assert!(in_room(district.palace, HOUSE_LAMP) >= 9, "seed {seed}: {}", in_room(district.palace, HOUSE_LAMP));
             for lamp in lamps {
                 assert!(district.map.sight().is_passable(lamp.cell()), "seed {seed}: a lamp in a wall");
                 assert!(crate::lighting::scene::emission(lamp.kind.as_str()).is_some());
@@ -1668,12 +1767,13 @@ mod tests {
 
     #[test]
     fn every_tile_and_prop_the_generator_uses_exists() {
-        for name in TILES.iter().chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.tiles)) {
+        for name in TILES.iter().chain(palace::TILES).chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.tiles)) {
             assert!(TerrainId::from_name(name).is_some(), "{name}");
         }
         for name in BEDS
             .iter()
             .chain(&[FRIDGE, TOILET, COMPUTER, TV, GUARD_POST, SEWER, DOOR, HOUSE_DOOR, STREET_LAMP, utilities::CONTROLLER])
+            .chain(palace::PROPS)
             .chain(LOT_BUILDINGS.iter().flat_map(|spec| spec.props))
         {
             assert!(ObjectKind::new(*name).prop().is_some(), "{name}");
@@ -1988,7 +2088,7 @@ mod tests {
                 .map(|house| (house.walls, HOUSE_DOOR))
                 .chain(district.shops.iter().map(|&shop| (shop, DOOR)))
                 .chain(district.lot_buildings.iter().map(|&(_, walls)| (walls, DOOR)))
-                .chain([(district.bank, DOOR)])
+                .chain([(district.bank, DOOR), (district.palace, DOOR)])
                 .collect();
             for &(walls, kind) in &buildings {
                 // Every way through an outer wall has a door in it, of the
@@ -2065,51 +2165,81 @@ mod tests {
     fn the_tvs_draw_nothing_from_the_district_so_a_seed_builds_the_same_houses() {
         // Seed 7's resident count, read before there were any TVs — and
         // again once the farm, then the power plant, then the palace took a
-        // lot of its own, which moved the houses.
-        assert_eq!(generate(7).residents(), 140);
+        // lot of its own, which moved the houses, and once the district grew
+        // to 9x5 blocks with a main street and the palace in the middle.
+        assert_eq!(generate(7).residents(), 184);
     }
 
     // --- the ground ---
 
-    /// The tiles across a street at `along`, from one edge to the other.
-    fn cross_section(map: &Map, start: Point, across: Point) -> Vec<TerrainId> {
-        (0..STREET).map(|i| map.terrain(start.offset(across.x * i, across.y * i)).unwrap()).collect()
+    /// The tiles across `street`, from one edge to the other, starting at
+    /// `start` and stepping `across`.
+    fn cross_section(map: &Map, street: Street, start: Point, across: Point) -> Vec<TerrainId> {
+        (0..street.width).map(|i| map.terrain(start.offset(across.x * i, across.y * i)).unwrap()).collect()
     }
 
     #[test]
-    fn every_street_is_a_pavement_each_side_of_three_cells_of_road() {
+    fn every_street_is_a_pavement_each_side_of_its_road() {
         let (pavement, road, wall) = (tile(PAVEMENT), tile(ROAD), tile(PERIMETER_WALL));
-        // The street round the edge has the perimeter wall for its outer
-        // pavement.
-        let street_at = |k: i32, last: i32| match k {
-            0 => [wall, road, road, road, pavement],
-            k if k == last => [pavement, road, road, road, wall],
-            _ => [pavement, road, road, road, pavement],
+        // Pavement, road, pavement — three cells of road and one of pavement
+        // but on the main street — and the street round the edge has the
+        // perimeter wall for its outer pavement.
+        let reads = |street: Street, k: i32, last: i32| {
+            let mut cells = vec![pavement; street.pavement as usize];
+            cells.extend(vec![road; street.road() as usize]);
+            cells.extend(vec![pavement; street.pavement as usize]);
+            if k == 0 {
+                cells[0] = wall;
+            }
+            if k == last {
+                cells[street.width as usize - 1] = wall;
+            }
+            cells
         };
+        assert_eq!(reads(across(1), 1, BLOCKS_Y), [pavement, road, road, road, pavement]);
         for seed in SEEDS {
             let district = generate(seed);
             let map = &district.map;
             // Across each street halfway along every block beside it, away
             // from the crossroads — except where the bank stands across one.
             for k in 0..=BLOCKS_Y {
-                let y0 = k * (BLOCK_H + STREET);
+                let street = across(k);
                 for bx in 0..BLOCKS_X {
                     let x = block_origin(bx, 0).x + BLOCK_W / 2;
-                    let street = street_at(k, BLOCKS_Y);
-                    assert_eq!(cross_section(map, Point::new(x, y0), Point::new(0, 1)), street, "seed {seed}: across at x {x}");
+                    let cells = cross_section(map, street, Point::new(x, street.start), Point::new(0, 1));
+                    assert_eq!(cells, reads(street, k, BLOCKS_Y), "seed {seed}: across at x {x}");
                 }
             }
             for k in 0..=BLOCKS_X {
-                let x0 = k * (BLOCK_W + STREET);
+                let street = up(k);
                 for by in 0..BLOCKS_Y {
                     let y = block_origin(0, by).y + BLOCK_H / 2;
-                    if district.bank.contains(Point::new(x0 + STREET / 2, y)) {
+                    if district.bank.contains(Point::new(street.middle(), y)) {
                         continue;
                     }
-                    let street = street_at(k, BLOCKS_X);
-                    assert_eq!(cross_section(map, Point::new(x0, y), Point::new(1, 0)), street, "seed {seed}: across at y {y}");
+                    let cells = cross_section(map, street, Point::new(street.start, y), Point::new(1, 0));
+                    assert_eq!(cells, reads(street, k, BLOCKS_X), "seed {seed}: across at y {y}");
                 }
             }
+        }
+    }
+
+    /// The main street is wider than any other, road and pavement both, and
+    /// runs across the district from a gate in the west wall to one in the
+    /// east, along the front of the palace.
+    #[test]
+    fn the_main_street_is_the_widest_and_runs_gate_to_gate_along_the_palace() {
+        let main = across(MAIN);
+        for street in (0..=BLOCKS_Y).filter(|&k| k != MAIN).map(across).chain((0..=BLOCKS_X).map(up)) {
+            assert!(main.road() > street.road() && main.pavement > street.pavement, "{main:?} against {street:?}");
+        }
+        for seed in 0..8 {
+            let district = generate(seed);
+            for outward in [Point::new(-1, 0), Point::new(1, 0)] {
+                let at_its_end = |gate: &Gate| gate.outward == outward && gate.leaves.iter().all(|leaf| main.contains(leaf.y));
+                assert!(district.gates.iter().any(at_its_end), "seed {seed}: the main street has no gate facing {outward:?}");
+            }
+            assert_eq!(district.palace.y, main.end(), "seed {seed}: the palace is not along the main street");
         }
     }
 
@@ -2187,7 +2317,10 @@ mod tests {
                     if ground == Some(road) {
                         on_road += 1;
                         run += 1;
-                        assert!(run <= STREET - 2, "seed {seed}: walked down the road at {cell:?}, {from:?} to {to:?}");
+                        // Straight over is three cells of road, five over the
+                        // main street.
+                        let crossing = across_at(cell.y).map_or(STREET - 2, |street| street.road());
+                        assert!(run <= crossing, "seed {seed}: walked down the road at {cell:?}, {from:?} to {to:?}");
                     } else {
                         run = 0;
                         on_pavement += usize::from(ground == Some(pavement));

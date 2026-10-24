@@ -150,9 +150,9 @@ catalogue! {
         /// Where a power plant is run from: its control panel, stood at from
         /// beside it. A power plant worker's workplace; needs no power.
         ControlPanel = 15 => FeatureDef { props: &["control panel"], ..BESIDE },
-        /// Where a king holds court: the palace's throne, stood at from beside
-        /// it. The king's workplace, and there is one; needs no power.
-        Throne = 16 => FeatureDef { props: &["throne"], ..BESIDE },
+        /// Where a king holds court: seated on the palace's throne, one king
+        /// at a time. The king's workplace; needs no power.
+        Throne = 16 => FeatureDef { props: &["throne"], access: Access::Entered, ..BESIDE },
     }
 }
 
@@ -459,7 +459,7 @@ mod tests {
     fn entering_a_feature_bypasses_only_its_own_prop() {
         use crate::map::{WALL, VOID};
         let cell = Point::new(2, 2);
-        for (name, kind) in [("bed 1", FeatureKind::Bed), ("toilet", FeatureKind::Toilet)] {
+        for (name, kind) in [("bed 1", FeatureKind::Bed), ("toilet", FeatureKind::Toilet), ("throne", FeatureKind::Throne)] {
             for terrain in [WALL, VOID] {
                 let mut map = Map::new(Size::new(5, 5), FLOOR);
                 map.set_terrain(cell, terrain);

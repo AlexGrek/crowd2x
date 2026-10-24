@@ -335,7 +335,7 @@ now it is the job's frame: where, when, and how a king carries itself.
 | bearing | robes and crown on at every hour of every day (`always_in_uniform`), its own clothes back when let go; walks at `KING_GAIT` of its own pace, its hurry too — a starving king walks briskly at best | `job.rs`, `entity.rs`, `kinds.rs` |
 | drawn | the crown is the paperdoll's **hat** slot, drawn over the hair (`characters::human`, `SLOTS` = 4, `HAT_SLOT`), in the world and the portrait; `actors::sync_clothing` redraws it with the outfit | `characters/human.rs`, `game/actors.rs`, `game/unitpanel.rs` |
 | menu | `now`: `holding court` at the throne, `on the way to the palace` | `job.rs` |
-| where | the **palace** (`map/district/palace.rs`), a lot building on the lot nearest the district's middle: the whole lot, `wall red` and `floor white`, the throne in the middle of the far wall facing the door (`map-generator`) | |
+| where | the **palace** (`map/district/palace.rs`), **the whole of the block in the middle of the district** (`palace::BLOCK`; `District::palace`, not a lot building), `wall red` and `floor white`, its door onto the main street, a red carpet from it to the throne in the middle of the far wall (`map-generator`) | |
 
 **The decisions, next**: a goal of the king's own in place of `GoalId::Work` (a new `GoalId` row
 and the job row's `goal`), or a routine only a king's brain raises (`WorkRoutine` reads the job;

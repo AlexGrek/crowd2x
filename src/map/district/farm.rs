@@ -146,8 +146,8 @@ mod tests {
         for seed in SEEDS {
             let district = generate(seed);
             let soil = soil_round(seed);
-            // 282 to 2243 over the seeds.
-            assert!(soil.len() >= 3 * FIELDS, "seed {seed}: {} plots of good soil", soil.len());
+            // 219 to 2195 over the seeds, a median of 1011.
+            assert!(soil.len() >= 2 * FIELDS, "seed {seed}: {} plots of good soil", soil.len());
             let gates = gate_layout();
             assert_eq!(gates, district.gates, "seed {seed}: the gates are where they were sited by");
             let siting = Siting { heaps: &[], soil: &soil, gates: &gates, built: &[] };
@@ -169,8 +169,10 @@ mod tests {
         }
         // Measured over the 64 seeds, the walk from the middle of the farm's
         // lot out by a gate to a plot of its fields, on average: a median of
-        // 39 cells, 80 at most. Sited as the crow flies it was 55 and 149.
+        // 41 cells, 77 at most (39 and 80 in the 6x5 district, whose long
+        // sides were shorter between their two gates). Sited as the crow
+        // flies it was 55 and 149.
         walks.sort_unstable();
-        assert!(walks[walks.len() / 2] <= 40 && walks[walks.len() - 1] <= 80, "from the farm out to its fields: {walks:?}");
+        assert!(walks[walks.len() / 2] <= 42 && walks[walks.len() - 1] <= 80, "from the farm out to its fields: {walks:?}");
     }
 }

@@ -36,7 +36,7 @@ the binary directly produces a window full of nothing and a wall of `Path not fo
 | `CROWD2X_LOAD` | Open this saved game — a `.savegame` path, or `newest` — in the game screen, camera and zoom as saved. Wins over `CROWD2X_MAP`/`CROWD2X_DISTRICT`. | off |
 | `CROWD2X_SAVES` | Read and write saved games here instead of `.saves/`. | `.saves` |
 | `CROWD2X_ZOOM` | Start at this zoom, 1-8 screen pixels per canvas pixel. | `4` |
-| `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
+| `CROWD2X_HIDE_UI` | Hide all `bevy_ui` and the game screen's vignette, leaving only the canvas. | off |
 | `CROWD2X_SPAWN` | Scatter N actors on the map when the game screen opens. | none |
 
 The app starts on the main menu, so **a capture of the editor or the game needs
@@ -89,7 +89,9 @@ build failure.
 
 **Is the upscale still exact?** Capture with the UI hidden first — `bevy_ui` is drawn at
 window resolution *on top of* the finished upscale, so any text on screen makes the check
-report non-uniform blocks that have nothing to do with the pipeline:
+report non-uniform blocks that have nothing to do with the pipeline. The game screen's
+vignette is per screen pixel for the same reason, and `CROWD2X_HIDE_UI` drops it too —
+so a capture *of* the vignette must leave that variable unset:
 ```sh
 CROWD2X_SHOT=<scratchpad>/frame.png CROWD2X_HIDE_UI=1 cargo run
 uv run tools/check_pixel_grid.py <scratchpad>/frame.png 4
@@ -172,7 +174,8 @@ CROWD2X_LIGHT_CHECK=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run   # GPU li
 CROWD2X_LIGHT_STRESS=1 CROWD2X_STATE=game CROWD2X_MAP=office cargo run --release  # full re-bake every frame, GPU time logged
 
 # check_pixel_grid needs a UI-free frame — bevy_ui draws over the upscale at
-# window resolution, so on-screen text is legitimately not on the pixel grid.
+# window resolution, so on-screen text is legitimately not on the pixel grid
+# (nor is the game screen's vignette, which CROWD2X_HIDE_UI also drops).
 # Its second argument is the zoom, and must match CROWD2X_ZOOM.
 CROWD2X_SHOT=/tmp/bare.png CROWD2X_HIDE_UI=1 cargo run
 uv run tools/check_pixel_grid.py /tmp/bare.png 4

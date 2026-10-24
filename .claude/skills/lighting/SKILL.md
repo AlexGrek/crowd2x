@@ -48,7 +48,8 @@ parts, each a step further from the simulation:
   light reaches past its picture and the lightmap must not depend on the camera — and
   hands each frame's dirty chunks over in a `LightUpload` that the extract system *takes*,
   so each change crosses to the render world once. A frame with no change uploads and
-  dispatches nothing.
+  dispatches nothing. `light_the_canvas` also sets the game screen's vignette
+  (`VIGNETTE`), which is drawn per screen pixel, not from the lightmap (`renderer`).
 - **`gpu.rs` — the render world.** Buffers, the sky's propagation passes (once per scene,
   below), and one bake dispatch of `(5, 5, dirty chunks)` workgroups, all in one compute
   pass in `RenderGraph`'s `Render` set **before `camera_driver`** — so a frame is

@@ -5,8 +5,14 @@
 // sampled at that texel's centre. So every screen pixel of one texel gets
 // the same colour, and the upscale stays an exact integer one however smooth
 // the light is between texels.
+//
+// The one exception is the vignette, decided per *screen pixel*: it belongs
+// to the camera's view rather than to the world, so it is smooth across the
+// window at any zoom and deliberately not on the pixel grid.
 
 #import bevy_sprite::mesh2d_vertex_output::VertexOutput
+#import bevy_sprite::mesh2d_view_bindings::view
+#import bevy_render::view::frag_coord_to_uv
 
 struct CanvasParams {
     // World position of the canvas centre: the snapped world camera.
@@ -26,7 +32,14 @@ struct CanvasParams {
     subtiles_per_unit: f32,
     // 0: draw the canvas as it is (the editor), 1: light it.
     lit: f32,
+    // How much of the light the corners lose: 0 is no vignette.
+    vignette: f32,
 }
+
+// Where the vignette starts and ends, as a distance from the middle of the
+// view in half-views: 1 is the middle of an edge, sqrt(2) a corner.
+const VIGNETTE_INNER: f32 = 0.5;
+const VIGNETTE_OUTER: f32 = 1.45;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> params: CanvasParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var canvas: texture_2d<f32>;
@@ -49,13 +62,24 @@ fn light_at(subtile: vec2<f32>) -> vec4<f32> {
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// How much of the light reaches a screen pixel: 1 in the middle of the
+// view, 1 - vignette in its corners. Measured across the camera's whole
+// viewport, so an ellipse the shape of the window, the same wherever the
+// camera is and however the canvas quad is scaled mid-zoom.
+fn vignette_at(frag_coord: vec2<f32>) -> f32 {
+    let from_middle = frag_coord_to_uv(frag_coord, view.viewport) * 2.0 - 1.0;
+    return 1.0 - params.vignette * smoothstep(VIGNETTE_INNER, VIGNETTE_OUTER, length(from_middle));
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let size = params.canvas_size;
     let texel = min(floor(in.uv * size), size - 1.0);
     let albedo = textureLoad(canvas, vec2<i32>(texel), 0);
+    // Exactly 1 with no vignette, so an unlit canvas is drawn as rendered.
+    let vignette = vignette_at(in.position.xy);
     if (params.lit == 0.0) {
-        return albedo;
+        return vec4<f32>(albedo.rgb * vignette, albedo.a);
     }
 
     // uv runs down the canvas; world Y runs up.
@@ -71,6 +95,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // rest, and the lamps on top.
     let light = mix(params.indoor.rgb, params.ambient.rgb, baked.a) + baked.rgb;
     // Capped at full brightness: daylight is the canvas exactly as drawn,
-    // and a lamp lights the dark rather than bleaching the day.
-    return vec4<f32>(albedo.rgb * min(light, vec3<f32>(1.0)), albedo.a);
+    // and a lamp lights the dark rather than bleaching the day. The vignette
+    // after the cap, so a lamp at the edge of the view is darkened with it.
+    return vec4<f32>(albedo.rgb * min(light, vec3<f32>(1.0)) * vignette, albedo.a);
 }

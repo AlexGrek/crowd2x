@@ -3833,7 +3833,7 @@ mod tests {
                     }
                     JobKind::King => {
                         reigning += 1;
-                        assert!(district.the(crate::map::district::palace::NAME).contains(job.workplace), "seed {seed}: a throne outside the palace");
+                        assert!(district.palace.contains(job.workplace), "seed {seed}: a throne outside the palace");
                     }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");

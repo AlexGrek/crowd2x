@@ -113,9 +113,11 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
   not wired to this format yet and still spawns its own tile entities.
 
 **The district generator** (`map/district/`, plain Rust like the rest of `map/`):
-`district::generate(seed)` builds a 131x100 district — a 6x5 grid of 2x2-lot blocks with
+`district::generate(seed)` builds a 194x104 district — a 9x5 grid of 2x2-lot blocks with
 5-cell streets between and around them (pavement, three cells of road, pavement; yards
-paved, the empty lots grass parks) — holding 92
+paved, the empty lots grass parks) and one 9-cell **main street** (two of pavement, five of
+road, two of pavement) running gate to gate along the front of the **palace**, which is the
+whole of the middle block — holding 124
 houses of 1-2 residents (a bed each, a fridge, a toilet, and a `"human"` spawner beside
 each bed), a bank across two merged blocks (a lobby lined with fridges, desk rows of
 computers, two restrooms at each end), three empty shops, and the mandatory lot buildings —

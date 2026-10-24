@@ -40,7 +40,8 @@ plot, tends every crop once a day for quality, and six days and four growth stag
 harvests it ripe and stores the wheat in its own grain bin. A power plant on the edge powers
 the whole district — its two generators are the only source of power — and its control panel
 is kept round the clock by three power plant workers on the guards' watches, who just stand
-by it for now. A palace in the middle seats the district's one king, who holds court at its
+by it for now. A palace filling the middle block, on the wide main street that runs gate to
+gate, seats the district's one king, who holds court at its
 throne ten to four but Sundays, in purple robes and a crown always, walking at a stately pace;
 the major decisions are to be the king's. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
@@ -75,7 +76,7 @@ to `screenshots/`.
 
 | The task touches... | Load |
 | --- | --- |
-| Bevy APIs, assets, animations, performance, architecture decisions | `dev` |
+| Bevy APIs, assets, animations, performance, architecture decisions, rust-analyzer and the `LSP` tool | `dev` |
 | `src/render.rs`, window setup, zoom, sprites, art files, `src/characters/`, pixel grid | `renderer` (+ `debugger` to look) |
 | `src/lighting/`, shaders, lamps, day/night, the sun (`src/sim/sun.rs`), something lit wrong | `lighting` |
 | Screens, menus, buttons, focus/navigation, text entry, the map browser | `interface` |
@@ -121,6 +122,16 @@ to `screenshots/`.
   (`~/.cargo/registry/src/*/bevy_*-0.19.1/src/`), not memory (`dev` has the gotchas). Features
   are `default-features = false, ["2d", "ui", "png", "jpeg"]` — find the right feature rather
   than switching to defaults. `bevy/dynamic_linking` does not work on this version.
+- **Find Rust code with the `LSP` tool, not text search.** rust-analyzer runs behind it (the
+  `rust-analyzer-lsp` plugin in `.claude/settings.json`): a symbol's definition, its
+  references and implementations, the type under a position, a file's symbols, a symbol by
+  name across the workspace, who calls a function. Use it before Grep or reading a file whole
+  — this is how to read only what a skill points to. Go-to-definition on a Bevy item lands in
+  the vendored 0.19.1 source, which is how to verify an API. Grep stays the tool for what is
+  not a Rust symbol: strings, comments, art and prop names, JSON, skills. After every `.rs`
+  edit read the diagnostics it reports and fix what the edit caused before moving on; they
+  are a hint and `cargo build` / `cargo test` is still the check. If the tool errors (no
+  server, as in a cloud session), fall back to Grep and say so (`dev`).
 - **`main` returns `AppExit`**, or a failing QA test exits 0; check a new test fails when it
   should (`qa`).
 - **New state is saved state.** A field added to the simulation, an entity kind, a brain part,

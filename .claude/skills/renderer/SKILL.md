@@ -1,6 +1,6 @@
 ---
 name: renderer
-description: The crowd2x pixel-perfect render pipeline and how characters, props and items are drawn - the world camera and off-screen canvas, the integer upscale, PixelZoom, camera snapping, the lit canvas material, WORLD_LAYER, the 16x16 art rule and ART_SCALE, depth_for painter's order, the human paperdoll, dog atlases, item art (textures and emoji) and centring_nudge. Use when touching src/render.rs, window setup in main.rs, src/characters/, src/animation.rs, a sprite Transform, art files, zoom, or anything that could land off the pixel grid.
+description: The crowd2x pixel-perfect render pipeline and how characters, props and items are drawn - the world camera and off-screen canvas, the integer upscale, PixelZoom, camera snapping, the lit canvas material and the game screen's vignette, WORLD_LAYER, the 16x16 art rule and ART_SCALE, depth_for painter's order, the human paperdoll, dog atlases, item art (textures and emoji) and centring_nudge. Use when touching src/render.rs, window setup in main.rs, src/characters/, src/animation.rs, a sprite Transform, art files, zoom, or anything that could land off the pixel grid.
 ---
 
 # Rendering and characters
@@ -44,6 +44,18 @@ and the upscale stays exact (checked at 3x and 6x). What lights it is `CanvasLig
 resource `src/lighting/` writes on the game screen; its default is unlit, which is every
 other screen, drawn exactly as rendered. `light_canvas` runs after the camera is snapped,
 since the shader derives world positions from it.
+
+**The vignette is the one thing on the quad that is *not* per texel.** The game screen
+darkens the edges of the view (`CanvasLight::vignette`, strength `lighting::VIGNETTE`,
+0.4: the corners keep about four fifths of their brightness; its shape is
+`VIGNETTE_INNER`/`OUTER` in the shader). It is worked out per *screen pixel* across the upscale camera's
+whole viewport (`view.viewport`, `frag_coord_to_uv`), on purpose: it belongs to the
+camera's view, not the world, so it is smooth at any zoom, an ellipse the shape of the
+window, still as the camera pans, and fixed to the window while the quad's scale eases.
+It is applied after the light's cap, and the HUD is drawn over it untouched. Being off
+the grid, it would fail `tools/check_pixel_grid.py`; `CROWD2X_HIDE_UI` therefore drops it
+along with the UI (`ShowVignette(false)`, `crate::debug`). A vignette of 0 multiplies by
+exactly 1, so the editor and the menus are still drawn as rendered.
 
 **Anything new that should render must carry `WORLD_LAYER`**, or it won't appear.
 Verify with `tools/check_pixel_grid.py` after touching this file, window setup in

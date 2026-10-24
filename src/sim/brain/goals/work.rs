@@ -24,6 +24,7 @@
 use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, HOUR};
+use crate::sim::feature::Access;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
@@ -143,7 +144,9 @@ impl GoalExecutor for WorkGoal {
         }
 
         match (last, ctx.finished) {
-            (TaskResult::Failed, Some(Task::MoveTo(_))) => {
+            (TaskResult::Failed, Some(task))
+                if matches!(task, Task::MoveTo(_))
+                    || matches!(task, Task::Work(work) if work.place.access() == Access::Entered) => {
                 ctx.tasks.clear();
                 // A body in the way: wait and try again. No way there: there
                 // is no other desk that is this one's, so give up on the
@@ -353,10 +356,10 @@ mod tests {
     }
 
     /// The king sets off for court at half past eight, slowly, and holds it
-    /// at its throne from ten: an hour's stretch beside the throne, logged as
+    /// on its throne from ten: an hour's stretch seated on the throne, logged as
     /// court held.
     #[test]
-    fn the_king_holds_court_beside_its_throne() {
+    fn the_king_holds_court_on_its_throne() {
         use crate::sim::feature::FeatureKind;
         use crate::sim::job::{JobKind, COURT_HOURS};
         let throne = Point::new(11, 7);
@@ -385,7 +388,38 @@ mod tests {
         assert!(holding_court, "never held court; brain {:?}", human.brain_fields());
         assert!(world.log_contains("held court an hour at the throne at 11, 7"), "{:?}", world.lines());
         assert_eq!(world.works(), 0, "not an hour at a computer");
-        assert_eq!(human.center_position().manhattan_distance(throne), 1, "beside the throne, not on it");
+        assert_eq!(human.position(), (11.5, 7.5), "seated in the middle of the throne");
+    }
+
+    #[test]
+    fn a_king_waits_for_an_occupied_throne_and_sits_when_it_is_free() {
+        use crate::sim::job::{JobKind, COURT_HOURS};
+        let throne = Point::new(6, 5);
+        let mut map = Map::new(Size::new(14, 10), FLOOR);
+        prop_at(&mut map, "throne", throne);
+        let mut world = World::new(map);
+        world.clock = at(1, 10.0);
+        let occupant = Uid::new(EntityType::Human, 1234);
+        world.occupancy.claim(throne, occupant).unwrap();
+        let mut human = worker(Point::new(5, 5), throne);
+        human.dismiss();
+        assert!(human.hire(Job::new(JobKind::King, throne, COURT_HOURS)));
+
+        for _ in 0..ticks(&world, 0.2) {
+            step(&mut world, &mut human);
+            assert_ne!(human.center_position(), throne, "the seat belongs to its occupant");
+            assert_ne!(human.interacting_with(), Some(throne), "court cannot start beside an occupied throne");
+        }
+        assert!(!world.log_contains("held court an hour"));
+        assert!(world.occupancy.release(throne, occupant));
+        for _ in 0..ticks(&world, 0.5) {
+            step(&mut world, &mut human);
+            if human.interacting_with() == Some(throne) {
+                break;
+            }
+        }
+        assert_eq!(human.interacting_with(), Some(throne));
+        assert_eq!(human.position(), (6.5, 5.5));
     }
 
     #[test]

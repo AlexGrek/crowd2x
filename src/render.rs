@@ -26,8 +26,11 @@
 //! texel's world position — the ambient light of the time of day plus the
 //! lightmap `crate::lighting` bakes, sampled bilinearly. Both are worked out
 //! per *canvas texel*, so every screen pixel of a texel still gets one colour
-//! and the upscale stays exact. With no [`CanvasLight`] lightmap (the editor,
-//! the menus) the canvas is drawn exactly as it was rendered.
+//! and the upscale stays exact. The one exception is the vignette that
+//! darkens the edges of the view on the game screen: it belongs to the
+//! camera's view, not to the world, so it is worked out per screen pixel and
+//! is smooth at any zoom. With no [`CanvasLight`] lightmap (the editor, the
+//! menus) the canvas is drawn exactly as it was rendered.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -75,6 +78,7 @@ impl Plugin for PixelRenderPlugin {
             .init_resource::<PixelZoom>()
             .init_resource::<CameraTarget>()
             .init_resource::<CanvasLight>()
+            .init_resource::<ShowVignette>()
             .add_systems(Startup, setup_pipeline)
             // Chained: a camera moved this frame should be snapped this frame,
             // not photographed one frame off the pixel grid first.
@@ -179,6 +183,12 @@ pub struct CanvasLight {
     /// Linear RGB light under a ceiling the sky does not reach, before any
     /// lamp. Mixed toward `ambient` by the lightmap's sky factor.
     pub indoor: Vec3,
+    /// How much of the light the corners of the view lose: 0 is no
+    /// vignette, 1 black corners. Worked out per *screen pixel* over the
+    /// camera's whole view, not per canvas texel, so it is smooth at any zoom
+    /// and stays put as the camera pans — and it is the one thing on the
+    /// canvas quad that is not on the pixel grid ([`ShowVignette`]).
+    pub vignette: f32,
 }
 
 impl Default for CanvasLight {
@@ -190,7 +200,22 @@ impl Default for CanvasLight {
             subtiles_per_unit: 0.0,
             ambient: Vec3::ONE,
             indoor: Vec3::ONE,
+            vignette: 0.0,
         }
+    }
+}
+
+/// Whether the vignette is drawn at all, whatever [`CanvasLight`] asks for.
+///
+/// Off only under `CROWD2X_HIDE_UI` (`crate::debug`): the vignette is worked
+/// out per screen pixel, so like the interface it is deliberately not on the
+/// pixel grid, and `tools/check_pixel_grid.py` needs the canvas alone.
+#[derive(Resource)]
+pub struct ShowVignette(pub bool);
+
+impl Default for ShowVignette {
+    fn default() -> Self {
+        Self(true)
     }
 }
 
@@ -217,6 +242,7 @@ struct CanvasParams {
     lightmap_origin: Vec2,
     subtiles_per_unit: f32,
     lit: f32,
+    vignette: f32,
 }
 
 impl Material2d for CanvasMaterial {
@@ -539,6 +565,7 @@ fn snap_camera_to_pixels(
 /// says has changed, since writing a material re-uploads it.
 fn light_canvas(
     light: Res<CanvasLight>,
+    show_vignette: Res<ShowVignette>,
     canvas: Res<PixelCanvas>,
     cameras: Query<&Transform, With<WorldCamera>>,
     quads: Query<&MeshMaterial2d<CanvasMaterial>, With<CanvasQuad>>,
@@ -554,6 +581,7 @@ fn light_canvas(
         lightmap_origin: light.lightmap_origin,
         subtiles_per_unit: light.subtiles_per_unit,
         lit: if light.lightmap.is_some() { 1.0 } else { 0.0 },
+        vignette: if show_vignette.0 { light.vignette } else { 0.0 },
     };
     for quad in &quads {
         let Some(current) = materials.get(&quad.0) else { continue };

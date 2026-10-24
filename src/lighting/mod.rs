@@ -43,6 +43,12 @@ const ENV_CHECK: &str = "CROWD2X_LIGHT_CHECK";
 /// timing needs to see the cost of one full bake.
 const ENV_STRESS: &str = "CROWD2X_LIGHT_STRESS";
 
+/// How much of the light the corners of the view lose on the game screen.
+/// The canvas is linear, so this is gentler than it reads: 0.4 leaves the
+/// corners about four fifths as bright as drawn. Its shape is in
+/// `assets/shaders/lit_canvas.wgsl`.
+pub const VIGNETTE: f32 = 0.4;
+
 /// A read-back of the lightmap, compared with the CPU reference: asked for
 /// by generation, and answered only once that generation has been baked.
 /// The QA harness's `expect_lighting` and `CROWD2X_LIGHT_CHECK` both use it.
@@ -304,6 +310,7 @@ fn light_the_canvas(sim: Res<Sim>, lighting: Option<Res<Lighting>>, mut canvas: 
         subtiles_per_unit: scene::SUBTILES as f32 / PIXELS_PER_CELL as f32,
         ambient: Vec3::from(ambient),
         indoor: Vec3::from(scene::indoor(ambient)),
+        vignette: VIGNETTE,
     };
     // Only on a change: `CanvasLight` is change-detected downstream, and the
     // ambient moves once a world minute, not every frame.

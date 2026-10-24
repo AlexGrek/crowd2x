@@ -810,14 +810,19 @@ fn a_format_1_save_still_loads_and_still_runs() {
 /// fresh does.
 const STEEL_WORKS: &[u8] = include_bytes!("testdata/steel_works.savegame");
 
+/// The one pace everybody walked at when [`STEEL_WORKS`] was written, before
+/// each person had a pace of their own: two cells a second. A number and not
+/// `kinds::HUMAN_SPEED`, which has been doubled since — and the save keeps
+/// each walker's pace, so the world loads at this one whatever the constant.
+const STEEL_WORKS_PACE: f32 = 2.0;
+
 /// The world in that fixture: [`crate::sim::testing::steel_works`] run until
-/// the steelworker is at its furnace with scrap the courier brought — at
-/// the one pace everybody walked at when it was written, before each person
-/// had a pace of their own.
+/// the steelworker is at its furnace with scrap the courier brought, at
+/// [`STEEL_WORKS_PACE`].
 fn steel_works_fixture() -> GameState {
     let (mut state, smelter, _) = crate::sim::testing::steel_works(12, 9);
     for uid in state.entities().uids().collect::<Vec<_>>() {
-        state.entity_mut(uid).unwrap().walker_mut().unwrap().set_speed(crate::sim::kinds::HUMAN_SPEED);
+        state.entity_mut(uid).unwrap().walker_mut().unwrap().set_speed(STEEL_WORKS_PACE);
     }
     while state.bins().stored(Point::new(16, 2)) == 0 || state.entities().get(smelter).unwrap().interacting_with() != Some(Point::new(21, 5)) {
         run(&mut state, 10);

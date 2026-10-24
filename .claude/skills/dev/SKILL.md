@@ -19,6 +19,18 @@ A 2D pixel-art crowd simulation. The art was imported from an earlier prototype
 - `bevy/dynamic_linking` is **not usable**: `bevy_dylib` 0.19.1 was never published.
   Do not re-add a `dev` feature for it.
 
+### Diagnostics after edits: rust-analyzer
+
+The `rust-analyzer-lsp` plugin is enabled for this repo (`.claude/settings.json`), so an
+edit to a `.rs` file comes back with rust-analyzer's errors and warnings, and the `LSP` tool
+finds definitions and references by symbol. It runs the rustup `rust-analyzer` with no
+settings of its own, so its `cargo check` goes to `target/` — the same directory and the
+same flags as Zed's rust-analyzer, so the two share one warm check cache. Keep it that way:
+a `cargo.targetDir` in a `rust-analyzer.toml` would move both to a cold multi-GB check on a
+nearly full disk. The diagnostics are a hint, not a build — `cargo build` / `cargo test`
+(into `CARGO_TARGET_DIR`, a different directory, so no lock is shared) is still the check.
+A cloud session starts no language server, and every `LSP` call there errors: use Grep.
+
 ### Verify APIs against the source, not memory
 
 Bevy 0.19 is newer than most training data and moved a lot of things. The vendored source

@@ -25,7 +25,7 @@
 //! | `CROWD2X_LOAD` | Open this saved game — a `.savegame` path, or `newest` — in the game (wins over both). | off |
 //! | `CROWD2X_SAVES` | Keep saved games here instead of `.saves/`. | `.saves` |
 //! | `CROWD2X_ZOOM` | Start at this zoom (screen pixels per canvas pixel). | `4` |
-//! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui`, leaving only the canvas. | off |
+//! | `CROWD2X_HIDE_UI` | Hide all `bevy_ui` and the vignette, leaving only the canvas. | off |
 //! | `CROWD2X_SPAWN` | Scatter this many actors on the map when the game screen opens. | none |
 //!
 //! ```sh
@@ -55,7 +55,7 @@ use crate::browser::maps_dir;
 use crate::editor::CurrentMap;
 use crate::game::actors::{SimInput, DEFAULT_SEED};
 use crate::map::{MapStore, Point};
-use crate::render::PixelZoom;
+use crate::render::{PixelZoom, ShowVignette};
 use crate::sim::EntityType;
 use crate::state::AppState;
 
@@ -95,8 +95,9 @@ impl Plugin for DebugPlugin {
         spawn_actors_from_env(app);
 
         if std::env::var(ENV_HIDE_UI).is_ok() {
-            info!("debug: {ENV_HIDE_UI} set, hiding all UI");
-            app.add_systems(Update, hide_ui);
+            info!("debug: {ENV_HIDE_UI} set, hiding all UI and the vignette");
+            app.insert_resource(ShowVignette(false))
+                .add_systems(Update, hide_ui);
         }
     }
 }
@@ -105,7 +106,9 @@ impl Plugin for DebugPlugin {
 ///
 /// `bevy_ui` draws at window resolution on top of the finished upscale, so any
 /// text on screen makes `tools/check_pixel_grid.py` report non-uniform blocks.
-/// Turning the UI off is what makes that check meaningful again.
+/// Turning the UI off is what makes that check meaningful again. The game
+/// screen's vignette goes with it, for the same reason: it is worked out per
+/// screen pixel, not per canvas texel.
 fn hide_ui(mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
     for mut visibility in &mut roots {
         if *visibility != Visibility::Hidden {

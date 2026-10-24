@@ -1,9 +1,9 @@
 //! [`Work`]: sit at one's own desk and work it for a while — or stand at
 //! one's own guard post and keep watch, or by the power plant's control
-//! panel, which is the same task at another workplace ([`Work::place`],
-//! [`STRETCHES`]).
+//! panel, or sit on the throne to hold court ([`Work::place`], [`STRETCHES`]).
 //!
-//! [`UseComputer`](super::UseComputer)'s shape — a prop used from beside it,
+//! [`UseComputer`](super::UseComputer)'s shape — a prop used from beside it
+//! (or entered when it is a throne),
 //! time passing and nothing changing hands — with what the body gets out of it
 //! the other way round: not [`Event::Entertained`] but [`Event::Worked`],
 //! which tires and is no fun.
@@ -19,16 +19,15 @@ use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::biology::{Biology, Event};
 use crate::sim::clock::TIME_SCALE;
-use crate::sim::feature::FeatureKind;
+use crate::sim::feature::{Access, FeatureKind};
 
 use super::super::action::{Action, ActionState};
 use super::super::task::{self, SavedTask, Task, TaskCtx, TaskExecutor, TaskResult};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Work {
-    /// The desk's cell — the computer, used from **beside** it like any
-    /// [`Access::Beside`](crate::sim::feature::Access::Beside) feature, so
-    /// this is what the worker is turned towards, never where it walks to.
+    /// The workplace's cell. Most are used from beside it; a throne is
+    /// entered so the king holds court seated on it.
     pub desk: Point,
     /// How long this stretch lasts, in **watched** seconds. The body is told
     /// it in world seconds ([`TIME_SCALE`] more).
@@ -40,7 +39,7 @@ pub struct Work {
     pub place: FeatureKind,
 }
 
-/// Every workplace a job is worked at by standing at it — its job's goal is
+/// Every workplace a job is worked at — its job's goal is
 /// `WorkGoal` — and how a stretch there reads: what it is, which is also the
 /// name it is saved under (`"keep watch"`), and what it was, for the log
 /// (`"kept watch"`). A new job of the kind needs its workplace here; a test
@@ -65,10 +64,12 @@ impl Work {
 
 impl TaskExecutor for Work {
     /// **Checked every tick**, as [`UseComputer`](super::UseComputer) checks:
-    /// within one step of the desk, a body to tire, and a desk that still
+    /// within one step of the workplace, a body to tire, and a workplace that still
     /// works — a box switched off mid-shift turns the screen off and the
     /// stretch is over.
     ///
+    /// Entered workplaces start with the last step onto their seat, as a
+    /// bed does. Once seated, leaving the cell ends the stretch.
     /// The body hears [`Event::Worked`] once the action is over, or for as
     /// much as was done of it if it is cut short.
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
@@ -79,12 +80,26 @@ impl TaskExecutor for Work {
             return TaskResult::Failed;
         }
 
+        let entered = self.place.access() == Access::Entered;
+        if entered && matches!(ctx.action, Action::Interact { .. }) && ctx.here() != self.desk {
+            return TaskResult::Failed;
+        }
+
         if ctx.action.is_none() {
-            *ctx.action = Action::interact(self.desk, self.seconds);
+            *ctx.action = if entered && ctx.here() != self.desk {
+                Action::enter(ctx.walk, self.desk)
+            } else {
+                Action::interact(self.desk, self.seconds)
+            };
             return TaskResult::Executing;
         }
 
+        let entering = entered && matches!(ctx.action, Action::Move { .. });
         match ctx.advance_action() {
+            ActionState::Finished if entering => {
+                *ctx.action = Action::interact(self.desk, self.seconds);
+                TaskResult::Executing
+            }
             ActionState::Finished => {
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Worked {
@@ -127,7 +142,7 @@ impl Task {
     }
 
     /// A stretch at the workplace in `desk`, which is a `place` — one of
-    /// [`STRETCHES`] — from a cell beside it, for `seconds`.
+    /// [`STRETCHES`] — for `seconds`, entering it first when its access requires it.
     pub const fn work_at(place: FeatureKind, desk: Point, seconds: f32) -> Task {
         Task::Work(Work { desk, seconds, place })
     }
@@ -161,6 +176,54 @@ mod tests {
     use crate::sim::clock::{watched, HOUR};
 
     const DESK: Point = Point::new(6, 6);
+
+    fn throne_rig(cell: Point) -> Rig {
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "throne", DESK);
+        Rig::new(map, cell)
+    }
+
+    #[test]
+    fn holding_court_enters_the_throne_before_starting_the_stretch() {
+        let mut rig = throne_rig(Point::new(5, 6));
+        let stamina = rig.biology.stats().stamina();
+        let mut task = Task::work_at(FeatureKind::Throne, DESK, 0.5);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert!(matches!(rig.action, Action::Move { .. }));
+        task.interrupted(&rig.action, Some(&mut rig.biology));
+        assert_eq!(rig.biology.stats().stamina(), stamina, "entry is not court held");
+        for _ in 0..200 {
+            assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+            if matches!(rig.action, Action::Interact { .. }) {
+                break;
+            }
+        }
+        assert!(matches!(rig.action, Action::Interact { .. }));
+        assert_eq!(rig.walk.body().position(), (6.5, 6.5));
+        assert_eq!(rig.biology.stats().stamina(), stamina, "only sat down so far");
+        assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
+        assert_eq!(rig.walk.body().position(), (6.5, 6.5));
+        assert!(rig.biology.stats().stamina() < stamina);
+    }
+
+    #[test]
+    fn a_king_already_on_the_throne_starts_the_next_stretch_without_moving() {
+        let mut rig = throne_rig(DESK);
+        let mut task = Task::work_at(FeatureKind::Throne, DESK, 0.5);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert!(matches!(rig.action, Action::Interact { .. }));
+    }
+
+    #[test]
+    fn leaving_the_throne_even_for_the_next_cell_ends_court() {
+        let mut rig = throne_rig(DESK);
+        let stamina = rig.biology.stats().stamina();
+        let mut task = Task::work_at(FeatureKind::Throne, DESK, 0.5);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        rig.walk.body_mut().set_position((5.5, 6.5));
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert_eq!(rig.biology.stats().stamina(), stamina);
+    }
 
     /// A unit in `cell` of a room with a working computer at [`DESK`], every
     /// process's level held where it is: the rig's biology moves only with

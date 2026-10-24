@@ -123,7 +123,7 @@ mod tests {
                 let origin = block_origin(bx, by);
                 let block = Rect::new(origin.x, origin.y, BLOCK_W, BLOCK_H);
                 let bank = district.bank;
-                [Point::new(bank.x, bank.y), Point::new(bank.right(), bank.top()), Point::new(district.shops[0].x, district.shops[0].y)]
+                [Point::new(bank.x, bank.y), Point::new(bank.right(), bank.top()), Point::new(district.shops[0].x, district.shops[0].y), Point::new(district.palace.x, district.palace.y)]
                     .into_iter()
                     .any(|cell| block.contains(cell))
             };
