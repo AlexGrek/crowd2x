@@ -55,34 +55,51 @@
       "note": "a lamp is one press, like a prop, and only a lamp is erased on the lamps layer"
     },
     {
+      "note": "Each pointing gesture names its cell so native mouse movement between scripted steps cannot move the brush."
+    },
+    {
       "tool": "ceiling lamp"
     },
     {
-      "cursor_cell": {
-        "x": 3,
-        "y": 3
+      "drag": {
+        "from": {
+          "x": 3,
+          "y": 3
+        },
+        "to": {
+          "x": 3,
+          "y": 3
+        }
       }
-    },
-    {
-      "click": {}
     },
     {
       "tool": "tube lamp"
     },
     {
-      "cursor_cell": {
-        "x": 8,
-        "y": 3
+      "drag": {
+        "from": {
+          "x": 6,
+          "y": 3
+        },
+        "to": {
+          "x": 6,
+          "y": 3
+        }
       }
-    },
-    {
-      "click": {}
     },
     {
       "wait": 0.2
     },
     {
-      "click": {
+      "drag": {
+        "from": {
+          "x": 6,
+          "y": 3
+        },
+        "to": {
+          "x": 6,
+          "y": 3
+        },
         "button": "right"
       }
     },
@@ -92,14 +109,42 @@
     {
       "note": "a lamp with no power lights nothing: a transformer in the corner, a box under it, wiring to the lamp"
     },
-    { "tool": "transformer" },
-    { "cursor_cell": { "x": 0, "y": 0 } },
-    { "click": {} },
-    { "tool": "distribution box" },
-    { "click": {} },
-    { "tool": "wiring" },
-    { "drag": { "from": { "x": 1, "y": 0 }, "to": { "x": 3, "y": 3 } } },
-    { "wait": 0.2 },
+    {
+      "tool": "transformer"
+    },
+    {
+      "cursor_cell": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "click": {}
+    },
+    {
+      "tool": "distribution box"
+    },
+    {
+      "click": {}
+    },
+    {
+      "tool": "wiring"
+    },
+    {
+      "drag": {
+        "from": {
+          "x": 1,
+          "y": 0
+        },
+        "to": {
+          "x": 3,
+          "y": 3
+        }
+      }
+    },
+    {
+      "wait": 0.2
+    },
     {
       "tool": "floor"
     },

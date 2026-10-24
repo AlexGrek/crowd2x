@@ -253,3 +253,12 @@ and the top executor's `debug_fields`.
 | `result` flickers `in progress`, no task | `process` returns `Working` with nothing queued, every tick |
 | Frame rate drops only on some maps | a failure path returns `Working` instead of `Blocked`, re-routing every tick; check `ROUTES_ASKED` |
 | An effect happens twice or never | it is applied in the goal instead of the task, or lost on handover (use `deprioritized`) |
+
+## Economy timesheets
+
+Brain step 4b records shifts after goal selection, including the commute and
+on-call watches. Unemployed days accrue at midnight. Step 6c emits Record only
+when tasks and playzone operation leave the effect slot free; pending entries
+remain on the saved Timesheet (Brain tag 15) until then. Payroll and CloseBooks
+reuse Work's guards and fatigue, and request ledger changes through effects.
+See [the economy contract](../../../.claude/skills/economy/SKILL.md).
