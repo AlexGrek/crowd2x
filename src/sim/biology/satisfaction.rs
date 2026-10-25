@@ -73,7 +73,8 @@ impl Process for Satisfaction {
             Event::Met => stats.change_satisfaction(GLAD_TO_SEE * novelty),
             // A shift is no treat: work does nothing for contentment either
             // way, beyond leaving less of the day for what does.
-            Event::Relieved | Event::Slept { .. } | Event::Worked { .. } => {}
+            Event::Relieved | Event::Slept { .. } | Event::Worked { .. } | Event::Treated { .. } => {}
+            Event::Bitten { .. } => {}
         }
     }
 }

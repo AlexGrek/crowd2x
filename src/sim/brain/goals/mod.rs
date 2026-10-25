@@ -7,6 +7,8 @@
 //! What they genuinely share — where to stand to use something, how long to
 //! wait for a gap — is here.
 
+pub mod hospital;
+pub use hospital::{RecoverGoal, CareGoal};
 pub mod bury;
 pub mod collect;
 pub mod cook;
@@ -38,6 +40,15 @@ pub use sleep::SleepGoal;
 pub use smelt::SmeltGoal;
 pub use wander::WanderGoal;
 pub use work::WorkGoal;
+
+pub mod depart;
+pub mod flee;
+pub mod hunt;
+pub mod prowl;
+pub use depart::DepartGoal;
+pub use flee::FleeGoal;
+pub use hunt::HuntGoal;
+pub use prowl::ProwlGoal;
 
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};

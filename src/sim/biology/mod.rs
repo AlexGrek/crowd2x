@@ -164,6 +164,7 @@ impl Default for Switches {
 pub enum Event {
     /// Something was eaten or drunk and is gone.
     Ingested(ItemKind),
+    Treated { hp: f32 },
     /// A toilet was used.
     Relieved,
     /// Something entertaining was done — a go on a computer.
@@ -180,6 +181,11 @@ pub enum Event {
     /// seconds; what that costs the body is [`Energy`]'s to say, and what it
     /// does *not* give — any fun — is [`Fun`]'s, by having no arm for it.
     Worked { world_seconds: f32 },
+    /// A deathdog's teeth: `damage` health gone at once
+    /// ([`Health`](health::Health)'s to take, so a body with it switched off
+    /// shrugs a bite off). Felt by the one bitten in its own react
+    /// (`sim::wounds`).
+    Bitten { damage: u8 },
 }
 
 /// One thing a body does by itself.
@@ -291,22 +297,30 @@ impl Biology {
     /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's
     /// own `dt`.
     pub fn advance(&mut self, dt: f32) {
-        self.advance_while(dt, false);
+        self.advance_while(dt, false, false);
     }
 
     /// Time passing for a body that is **asleep**: every running process at
     /// its [`Process::asleep_pace`] — hunger, thirst and the bladder slower,
     /// boredom not at all.
     pub fn advance_asleep(&mut self, dt: f32) {
-        self.advance_while(dt, true);
+        self.advance_while(dt, true, false);
     }
 
-    fn advance_while(&mut self, dt: f32, asleep: bool) {
+    pub fn advance_hospital(&mut self, dt: f32, asleep: bool) {
+        self.advance_while(dt, asleep, true);
+    }
+
+    fn advance_while(&mut self, dt: f32, asleep: bool, hospital: bool) {
         let (stats, switches, processes) = self.parts();
         for process in processes {
             if switches.is_on(process.id()) {
                 let pace = if asleep { process.asleep_pace() } else { 1.0 };
-                process.advance(stats, dt * pace);
+                if hospital && process.id() == ProcessId::Health {
+                    Health::advance_hospital(stats, dt);
+                } else {
+                    process.advance(stats, dt * pace);
+                }
             }
         }
     }

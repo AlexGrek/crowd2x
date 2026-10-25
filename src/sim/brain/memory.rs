@@ -42,10 +42,33 @@ pub const OUT_OF_REACH_SLOTS: usize = 8;
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Memory {
     keyed: BTreeMap<String, Recall>,
+    pub medical: crate::sim::hospital::Medical,
     /// Boxed, out of line: allocated once with the brain in the spawn pass,
     /// and two hundred bytes a `Human` would otherwise carry inline against
     /// the size wall (`a_human_stays_small_enough_to_be_worth_a_thousand_of`).
     out_of_reach: Box<OutOfReach>,
+    /// The last thing that scared it — a deathdog, somebody running from
+    /// one, a bite — or, for a deathdog, the last person outside it saw:
+    /// who, where and when ([`Spotted`]). Inline, not a keyed [`Recall`]: a
+    /// look writes it, and a keyed entry allocates its key on every write.
+    spotted: Option<Spotted>,
+}
+
+/// Somebody seen, where, and when — in **world** seconds
+/// ([`Clock::elapsed`](crate::sim::clock::Clock::elapsed)), so how long ago
+/// is a subtraction.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Spotted {
+    pub who: Uid,
+    pub at: Point,
+    pub when: f64,
+}
+
+impl Spotted {
+    /// World seconds since it was spotted, at `now`.
+    pub fn age(&self, now: f64) -> f64 {
+        now - self.when
+    }
 }
 
 /// Places — a toilet, a fridge, a bed — this unit tried to get to and could
@@ -184,12 +207,29 @@ impl Memory {
         &mut self.out_of_reach
     }
 
+    /// The last thing it spotted that mattered ([`Memory::spotted`]'s field).
+    pub fn spotted(&self) -> Option<Spotted> {
+        self.spotted
+    }
+
+    /// Remember `spotted`, over whatever was spotted before.
+    pub fn spot(&mut self, spotted: Spotted) {
+        self.spotted = Some(spotted);
+    }
+
+    /// Forget what was spotted: a quarry got away.
+    pub fn forget_spotted(&mut self) {
+        self.spotted = None;
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach } = self;
+        let Memory { keyed, out_of_reach, medical, spotted } = self;
         let OutOfReach { places } = **out_of_reach;
         pb::Memory {
+            spotted: spotted.map(|Spotted { who, at, when }| pb::Spotted { who: who.raw(), at: Some(at.into()), when }),
+            medical: Some(medical.save()),
             keyed: keyed
                 .iter()
                 .map(|(key, recall)| pb::Remembered {
@@ -217,6 +257,16 @@ impl Memory {
 
     pub(crate) fn restore(saved: &pb::Memory) -> Result<Memory, Invalid> {
         let mut memory = Memory::new();
+        memory.medical = crate::sim::hospital::Medical::restore(saved.medical.as_ref());
+        if let Some(spotted) = &saved.spotted {
+            let Some(who) = Uid::from_raw(spotted.who) else {
+                return invalid("memory: spotted nobody");
+            };
+            if !spotted.when.is_finite() {
+                return invalid(format!("memory: spotted {who} at {} seconds", spotted.when));
+            }
+            memory.spotted = Some(Spotted { who, at: pb::cell(spotted.at, "spotted")?, when: spotted.when });
+        }
         for entry in &saved.keyed {
             let recall = match &entry.recall {
                 Some(pb::Recall::Cell(cell)) => Recall::Cell((*cell).into()),

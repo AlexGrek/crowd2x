@@ -37,6 +37,10 @@ pub enum Effect {
     /// Nothing. What every entity that never touches a fridge returns.
     #[default]
     None,
+    Admit { at: Point },
+    ReleaseBed { at: Point },
+    Discharge,
+    Care { at: Point, patient: Uid },
     /// Open or close the fridge at `at`.
     Fridge { at: Point, open: bool },
     RepairBox { at: Point },
@@ -106,6 +110,15 @@ pub enum Effect {
     /// The accountant has closed the books for `day`
     /// (`brain::tasks::CloseBooks`, which has said how they stand).
     CloseBooks { day: u32 },
+    /// A deathdog bites whoever stands at `at`, for `damage` health
+    /// (`brain::tasks::Bite`). Granted only to a person outside the site,
+    /// within the biter's reach: the wound is filed ([`super::wounds`]) for
+    /// the one bitten to feel in its own react next tick — the world step may
+    /// not reach into its body.
+    Bite { at: Point, damage: u8 },
+    /// A deathdog has gone back into the wasteland (`kinds::Deathdog`): it
+    /// leaves the world at the end of the tick, as a body taken up does.
+    Depart,
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -127,6 +140,33 @@ pub(crate) fn apply(
                 && facilities.electrical.repair(at)
             {
                 log.important(format!("{} repaired the distribution box at {}, {}", entity.uid(), at.x, at.y));
+            }
+        }
+        Effect::Admit { at } => {
+            if entity.biology().is_some_and(|b| b.stats().health() < 100.0)
+                && facilities.features.has(FeatureKind::HospitalBed, at)
+                && occupancy.is_free_for(at, entity.uid())
+                && facilities.hospital.admit(at, entity.uid()) {
+                log.unit(entity.uid(), format!("{} admitted to hospital", entity.uid()));
+            }
+        }
+        Effect::ReleaseBed { at } => {
+            if facilities.hospital.bed_for(entity.uid()).is_some_and(|b| b.cell == at) {
+                facilities.hospital.release(entity.uid());
+            }
+        }
+        Effect::Discharge => {
+            if entity.biology().is_some_and(|b| b.stats().health() >= 100.0) {
+                facilities.hospital.release(entity.uid());
+                log.unit(entity.uid(), format!("{} discharged from hospital; sick leave today", entity.uid()));
+            }
+        }
+        Effect::Care { at, patient } => {
+            if entity.job().is_some_and(|j| j.kind == JobKind::Nurse)
+                && entity.center_position().manhattan_distance(at) == 1
+                && occupancy.occupant(at) == Some(patient)
+                && facilities.hospital.care(at, patient) {
+                log.related(entity.uid(), patient, format!("{} took care of {patient}: +1% health", entity.uid()));
             }
         }
         Effect::None => {}
@@ -176,6 +216,12 @@ pub(crate) fn apply(
             }
         }
         Effect::CloseBooks { day } => facilities.economy.close_books(day),
+        Effect::Bite { at, damage } => bite(entity, map, facilities, occupancy, log, at, damage),
+        Effect::Depart => {
+            let uid = entity.uid();
+            facilities.leaving.push(uid);
+            log.unit(uid, format!("{uid} went back into the wasteland"));
+        }
     }
 }
 
@@ -250,8 +296,24 @@ fn take_body(entity: &mut dyn GameEntity, facilities: &mut Facilities, log: &Log
     }
     let _ = inventory.set_hand(Some(ItemKind::Body));
     facilities.corpses.remove(dead);
-    facilities.burials.push(dead);
+    facilities.leaving.push(dead);
     log.related(uid, dead, format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
+}
+
+/// [`Effect::Bite`]: a wound for whoever stands at `at`, if that is a person
+/// outside the site and within the biter's reach — never anybody inside.
+/// Logged once a bite, a watched second apart at the most.
+fn bite(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, occupancy: &Occupancy, log: &Log, at: Point, damage: u8) {
+    let dog = entity.uid();
+    let from = entity.center_position();
+    let Some(target) = occupancy.occupant(at) else {
+        return;
+    };
+    if target.kind() != Some(super::uid::EntityType::Human) || map.site().contains(at) || from.chebyshev_distance(at) > 1 {
+        return;
+    }
+    facilities.wounds.inflict(super::wounds::Wound { target, by: dog, from, damage });
+    log.related(dog, target, format!("{dog} bit {target} for {damage}"));
 }
 
 /// [`Effect::Salvage`]: a piece off the heap and into the unit's pack, if
@@ -285,6 +347,7 @@ fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
 /// despawn's do. The body stays where it fell, filed with the
 /// [`Corpses`](super::Corpses) for an undertaker to find, and is counted.
 fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mut Occupancy, log: &Log, cause: &'static str) {
+    facilities.hospital.release(entity.uid());
     let uid = entity.uid();
     let cell = entity.center_position();
     occupancy.release(cell, uid);

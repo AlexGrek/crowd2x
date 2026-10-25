@@ -87,6 +87,8 @@ impl GameState {
             tally: Some(self.facilities.tally.save()),
             crops: self.facilities.fields.save(),
             playzones_run: self.facilities.playzones.save(),
+            hospital: self.facilities.hospital.save(),
+            wounds: self.facilities.wounds.save(),
         }
     }
 
@@ -177,6 +179,8 @@ impl GameState {
         // Which playzones were being run as the tick ended: derived from the
         // map but for that, which only the tick that ended it knew.
         state.facilities.playzones.restore(&world.playzones_run)?;
+        // The bites dealt as the saved tick ended, still to be felt.
+        state.facilities.wounds = super::wounds::Wounds::restore(&world.wounds)?;
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
@@ -242,6 +246,7 @@ impl GameState {
                 return invalid(format!("a desk belongs to {:#x}, who does not work there", place.worker));
             }
         }
+        state.facilities.hospital.restore(&world.hospital, &state.entities)?;
         Ok(state)
     }
 }

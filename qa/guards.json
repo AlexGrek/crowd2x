@@ -8,6 +8,7 @@
         "name": "gatehouse",
         "map": {
           "version": 1,
+          "wasteland": false,
           "size": { "width": 12, "height": 7 },
           "terrain": {
             "palette": ["void", "floor", "wall brown big"],
@@ -42,6 +43,7 @@
   },
   "open": "gatehouse",
   "steps": [
+    { "note": "a bounded fixture keeps nightly wasteland threats out of this test of jobs and shifts" },
     { "note": "a gatehouse laid out like a district's gate: two door leaves in the west wall at (0, 3) and (0, 4), the guard post set into the wall at (0, 1) with a cell of wall between, so its guard stands at (1, 1). Three beds by the east wall. A world opens at 08:00 on day 1, a Monday" },
     { "key": "q" },
     { "key": "q" },

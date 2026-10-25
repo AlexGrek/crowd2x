@@ -454,6 +454,12 @@ catalogue! {
             paperwork: Some(Paperwork::Books),
             on_call: false,
         },
+        Nurse = 14 => JobDef {
+            name: "nurse", article: "a nurse", workplace: FeatureKind::NurseStation,
+            goal: GoalId::Care, commute: COMMUTE, shifts: &NURSE_SHIFTS,
+            uniform: "uniform nurse", now: |_, _| "taking care of patients",
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
+        },
     }
 }
 
@@ -587,6 +593,11 @@ pub const PLAYZONE_SHIFTS: [Shift; 4] = [
 
 /// A guard post's three watches, every day: the day, the evening and the
 /// night, in the order they are handed out. Between them, round the clock.
+pub const NURSE_SHIFTS: [Shift; 2] = [
+    Shift { start: 0, end: 12, days: EVERY_DAY },
+    Shift { start: 12, end: 24, days: EVERY_DAY },
+];
+
 pub const WATCHES: [Shift; 3] = [
     Shift { start: 8, end: 16, days: EVERY_DAY },
     Shift { start: 16, end: 24, days: EVERY_DAY },
@@ -1005,7 +1016,8 @@ mod tests {
                 JobKind::FoodFactoryWorker,
                 JobKind::FoodCourier,
                 JobKind::PlayzoneAdministrator,
-                JobKind::Accountant
+                JobKind::Accountant,
+                JobKind::Nurse
             ],
             "the office first, new professions last"
         );
@@ -1143,13 +1155,13 @@ mod tests {
     /// its paperwork, hired last; the office's paperwork the payroll; and the
     /// electrician the one job paid on call.
     #[test]
-    fn the_accountant_keeps_the_books_in_the_palace_and_is_hired_last() {
+    fn the_accountant_keeps_the_books_in_the_palace() {
         let kind = JobKind::Accountant;
         assert_eq!((kind.name(), kind.with_article()), ("accountant", "the accountant"));
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::AccountantComputer, "accountant computer"));
         assert_eq!(kind.goal(), GoalId::Work);
         assert_eq!(kind.shifts(), [OFFICE_HOURS]);
-        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::Nurse, "new jobs keep existing stable numbers");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("keeping the books", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform accountant");
         assert_eq!(kind.paperwork(), Some(Paperwork::Books));

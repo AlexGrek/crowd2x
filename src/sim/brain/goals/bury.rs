@@ -293,7 +293,7 @@ mod tests {
         assert!(world.log_contains("took up the body of"), "{:?}", world.lines());
         assert!(world.log_contains("cremated a body in the crematorium at 2, 2"), "{:?}", world.lines());
         assert!(world.corpses.is_empty());
-        assert_eq!(world.burials.len(), 1, "and the body leaves the world");
+        assert_eq!(world.leaving.len(), 1, "and the body leaves the world");
         assert_eq!(human.carried(), None);
     }
 

@@ -451,7 +451,7 @@ fn sync_sprites(
                     None => human::spawn(&mut commands, &assets, pos, look),
                 }
             }
-            Some(EntityType::Dog) => {
+            Some(kind @ (EntityType::Dog | EntityType::Deathdog)) => {
                 let Some(sheets) = sheets.as_deref() else {
                     // The atlas is inserted alongside the world, so this only
                     // happens if the two land in different frames. Leaving the
@@ -460,12 +460,15 @@ fn sync_sprites(
                     continue;
                 };
                 let facing = facing_of(entity);
+                let breed = breed_of(kind);
+                // A deathdog is a dog's body in other colours: the two share
+                // the pool.
                 match pool.take_dog() {
                     Some(body) => {
-                        dog::redress(&mut commands, sheets, body, pos, facing);
+                        dog::redress(&mut commands, sheets, body, pos, breed, facing);
                         body
                     }
-                    None => dog::spawn(&mut commands, sheets, pos, facing),
+                    None => dog::spawn(&mut commands, sheets, pos, breed, facing),
                 }
             }
             // An id tagged with a type this build has no art for. Refusing to
@@ -554,7 +557,7 @@ fn park_or_despawn(
 ) {
     let parked = match kind {
         Some(EntityType::Human) => pool.park_human(body, budget),
-        Some(EntityType::Dog) => pool.park_dog(body, budget),
+        Some(EntityType::Dog | EntityType::Deathdog) => pool.park_dog(body, budget),
         None => false,
     };
     if parked {
@@ -866,6 +869,14 @@ fn sync_clothing(
 ///
 /// An entity with no facing of its own is drawn right-facing; only dogs have
 /// two sheets, so there is nothing else the answer could be.
+/// Which sheets a dog-shaped kind is drawn from.
+pub fn breed_of(kind: EntityType) -> dog::Breed {
+    match kind {
+        EntityType::Deathdog => dog::Breed::Deathdog,
+        _ => dog::Breed::Dog,
+    }
+}
+
 pub fn facing_of(entity: &dyn GameEntity) -> dog::Facing {
     match entity.facing() {
         Some(sim::Facing::Left) => dog::Facing::Left,

@@ -120,6 +120,7 @@ use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};
 
 pub mod crematorium;
+pub mod hospital;
 pub mod farm;
 pub mod food_factory;
 pub mod playzone;
@@ -375,7 +376,7 @@ impl Siting<'_> {
 /// every seed's bank, shops and lot buildings as they were, and moves only its
 /// houses and parks — and moving one changes every district.
 pub const LOT_BUILDINGS: &[&LotBuilding] =
-    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC, &food_factory::SPEC, &playzone::SPEC];
+    &[&warehouse::SPEC, &restaurant::SPEC, &crematorium::SPEC, &steel_factory::SPEC, &farm::SPEC, &power_plant::SPEC, &food_factory::SPEC, &playzone::SPEC, &hospital::SPEC];
 
 /// How many lots the lot buildings take.
 const fn lots_built() -> usize {
@@ -2170,7 +2171,8 @@ mod tests {
         // lot of its own, which moved the houses, and once the district grew
         // to 9x5 blocks with a main street and the palace in the middle.
         // The food factory takes one more lot before houses are laid out.
-        assert_eq!(generate(7).residents(), 177);
+        // The hospital takes another lot before the houses are laid out.
+        assert_eq!(generate(7).residents(), 178);
     }
 
     // --- the ground ---

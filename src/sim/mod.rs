@@ -137,6 +137,7 @@ pub mod census;
 pub mod clock;
 pub mod clothing;
 pub mod corpses;
+pub mod deathdogs;
 pub mod door;
 pub mod economy;
 pub mod effect;
@@ -148,6 +149,7 @@ pub mod feature;
 pub mod fields;
 pub mod fridge;
 pub mod homes;
+pub mod hospital;
 pub mod identity;
 pub mod inventory;
 pub mod item;
@@ -156,9 +158,11 @@ pub mod kinds;
 pub mod light_switch;
 pub mod log;
 pub mod occupancy;
+pub mod panics;
 pub mod path;
 pub mod playzone;
 pub mod property;
+pub mod refuge;
 pub(crate) mod rng;
 mod saving;
 pub mod statistics;
@@ -168,6 +172,7 @@ pub mod talents;
 pub(crate) mod testing;
 pub mod uid;
 pub mod walker;
+pub mod wounds;
 
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
@@ -194,7 +199,7 @@ pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
 pub use job::{Job, JobKind, Workplaces};
-pub use kinds::{Dog, Facing, Human};
+pub use kinds::{Deathdog, Dog, Facing, Human};
 pub use light_switch::LightSwitches;
 pub use log::Log;
 pub use occupancy::Occupancy;
@@ -1220,6 +1225,7 @@ impl GameState {
 
     /// Remove an entity. Returns whether there was one.
     pub fn despawn(&mut self, uid: Uid) -> bool {
+        self.facilities.hospital.release(uid);
         if let Some(slot) = self.entities.slot_of(uid) {
             self.census.strike(slot);
         }
@@ -1424,19 +1430,32 @@ fn flood_supply(
 pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
     spawn_pass(state, input);
     process_pass(state, dt);
-    bury(state);
 }
 
-/// The bodies undertakers took up this tick ([`Effect::TakeBody`]) leave the
-/// world: they are in a hand now, as an item. After the processing pass,
-/// which may remove nobody, and before the tick is over, so nothing is left
-/// waiting between ticks.
-fn bury(state: &mut GameState) {
-    let mut burials = std::mem::take(&mut state.facilities.burials);
-    for uid in burials.drain(..) {
+/// **Who leaves the world and who comes into it, at the end of a processing
+/// pass** — after its four steps, which add and remove nobody, once the
+/// frozen table is let go, so nothing is left waiting between ticks and
+/// nothing new is saved.
+///
+/// 1. Everybody leaving goes ([`Facilities::leaving`]): the bodies
+///    undertakers took up this tick ([`Effect::TakeBody`], in a hand now as
+///    an item) and the deathdogs gone back into the wasteland
+///    ([`Effect::Depart`]).
+/// 2. On the tick it gets dark (`before` light, `now` dark), the night's
+///    deathdogs come out of the wasteland ([`deathdogs::arrive`]).
+///
+/// Inside [`process_pass`] and not round it: the game and the QA harness
+/// drive the two passes apart, and what happens on a tick has to happen on
+/// that tick, however the ticks fall into frames.
+fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
+    let mut leaving = std::mem::take(&mut state.facilities.leaving);
+    for uid in leaving.drain(..) {
         state.despawn(uid);
     }
-    state.facilities.burials = burials;
+    state.facilities.leaving = leaving;
+    if deathdogs::is_dusk(before, now) {
+        deathdogs::arrive(state);
+    }
 }
 
 /// **The spawn pass: the only thing that changes which entities exist.**
@@ -1467,7 +1486,13 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
                 state.set_clothing(*uid, *clothing);
             }
             Command::Spawn { kind, at } => {
-                state.spawn(*kind, *at);
+                if kind.keeps_off_the_site() && state.map.site().contains(*at) {
+                    // It could never step off it again, nor be routed
+                    // anywhere: a route for one goes round the site.
+                    state.log.important(format!("a {kind} keeps off the site: none spawned at {}, {}", at.x, at.y));
+                } else {
+                    state.spawn(*kind, *at);
+                }
             }
             Command::Despawn(uid) => {
                 if !state.despawn(*uid) {
@@ -1523,7 +1548,10 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
 /// Four steps — [`think_step`], [`move_step`], [`react_step`], [`world_step`]
 /// — over a table whose membership is frozen: it is handed a
 /// [`FrozenEntities`], which has no `insert` and no `remove`, so this is a
-/// guarantee the compiler holds rather than a rule to remember.
+/// guarantee the compiler holds rather than a rule to remember. The four add
+/// and remove nobody; once they are done and the table is let go, the
+/// comings and goings of the tick follow ([`comings_and_goings`]): whoever
+/// is leaving goes, and at dusk the night's deathdogs come.
 ///
 /// Two things follow from the table's shape being fixed here, and both are the
 /// reason for the split:
@@ -1538,6 +1566,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
 ///   parallelise; the move step is sequential on purpose, and the module docs
 ///   say why.
 pub fn process_pass(state: &mut GameState, dt: f32) {
+    // What time it was as the last tick ended: what tells the tick it gets
+    // dark from the ticks after it.
+    let before = state.clock();
     state.tick += 1;
     state.elapsed += dt as f64;
     // Read once, and shared by both rounds: the clock does not move inside a
@@ -1564,7 +1595,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         effects,
         route_work,
         ..
-    } = state;
+    } = &mut *state;
 
     let mut table = entities.freeze();
 
@@ -1586,7 +1617,17 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
     );
 
-    move_step(&mut table, map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
+    move_step(
+        &mut table,
+        map,
+        occupancy,
+        census,
+        &facilities.features,
+        &facilities.doors,
+        &mut facilities.panics,
+        intents,
+        moves,
+    );
 
     // ...and as it ends this one, which is the layer a detour is worth
     // planning against. Same struct, deliberately different moment.
@@ -1604,6 +1645,10 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // temperature is on the world's clock, like everything biological, and a
     // door's leaf on the watched one, like a walk — see `clock`.
     world_step(&mut table, map, log, facilities, occupancy, effects, dt, clock);
+
+    // The table is let go: whoever is leaving goes, and at dusk the night's
+    // deathdogs come.
+    comings_and_goings(state, before, clock);
 }
 
 /// Live entities below which the rounds that could run in parallel do not
@@ -1689,9 +1734,11 @@ fn move_step(
     census: &mut Census,
     features: &Features,
     doors: &Doors,
+    panics: &mut panics::Panics,
     intents: &[Intent],
     moves: &mut [MoveOutcome],
 ) {
+    panics.clear();
     for (slot, entity) in table.iter_slots_mut() {
         let slot = slot as usize;
         let intent = intents[slot];
@@ -1703,11 +1750,21 @@ fn move_step(
         let uid = entity.uid();
         let from = entity.center_position();
         let into = cell_of(to);
+        // Seen running for its life, whether or not the world lets it
+        // through: one bool off a body already in cache ([`panics`]).
+        if entity.body().is_panicking() {
+            panics.push(uid);
+        }
 
         moves[slot] = if into == from {
             // Still in its own cell: it already holds this one.
             entity.apply(&intent);
             MoveOutcome::Moved
+        } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && map.site().contains(into) {
+            // A deathdog never sets foot on the site. Its routes go round it
+            // (`Think::step_cost_with`), so this is the guarantee rather than
+            // the mechanism.
+            MoveOutcome::Blocked { by: None }
         } else if !map.is_passable(into) && !features.is_enterable(into) {
             // The terrain first — a wall is cheaper to hit than a crowd, and
             // off the map is impassable, so this is the bounds check too.
@@ -1735,6 +1792,7 @@ fn move_step(
             MoveOutcome::Moved
         };
     }
+    panics.finish();
 }
 
 /// **Step 3: everybody reacts, now that the whole crowd has moved.**
@@ -1943,6 +2001,8 @@ fn world_step(
     facilities.economy.roll(clock.day());
     // Who runs a playzone is said afresh every tick (`Effect::Operate`).
     facilities.playzones.begin_tick();
+    // Last tick's bites have been felt, in the reactions just run.
+    facilities.wounds.begin_tick();
     for (slot, effect) in effects.iter_mut().enumerate() {
         let asked = std::mem::take(effect);
         if asked != Effect::None
@@ -3169,7 +3229,7 @@ mod tests {
 
         // Gone from the world, and still counted.
         let stats = state.statistics();
-        assert_eq!(stats.alive, vec![(EntityType::Human, 1), (EntityType::Dog, 0)]);
+        assert_eq!(stats.alive, vec![(EntityType::Human, 1), (EntityType::Dog, 0), (EntityType::Deathdog, 0)]);
         assert_eq!((stats.died, stats.lying, stats.carried, stats.cremated), (1, 0, 0, 1));
         let undertakers = stats.jobs.iter().find(|job| job.kind == JobKind::Undertaker).unwrap();
         assert_eq!((undertakers.workers, undertakers.posts), (1, 3), "one crematorium, three watches");
@@ -3385,7 +3445,9 @@ mod tests {
         let brain = std::mem::size_of::<Brain>();
         // Raised from 960 to 1024 for the cook goal slot/executor and meal
         // inventory count; a Human is now 984 bytes.
-        assert!(human <= 1024, "a Human is {human} bytes, {brain} of them brain");
+        // Hospital recovery/care and threats add goal slots, medical and
+        // sighting memory, and larger pursuit tasks. Measured together: 1232 bytes.
+        assert!(human <= 1280, "a Human is {human} bytes, {brain} of them brain");
     }
 
     #[test]
@@ -3591,7 +3653,7 @@ mod tests {
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -3637,7 +3699,7 @@ mod tests {
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
 
         assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
         assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
@@ -3660,7 +3722,7 @@ mod tests {
             let slot = state.entities.slot_of(uid).unwrap() as usize;
             state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
             let GameState { map, entities, occupancy, census, facilities, intents, moves, .. } = &mut state;
-            move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, intents, moves);
+            move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
             assert_eq!(state.last_move(uid), Some(MoveOutcome::Blocked { by: None }));
             assert_eq!(state.entities().get(uid).unwrap().center_position(), Point::new(2, 0));
             assert_eq!(state.occupancy().occupant(bed), None);
@@ -3879,7 +3941,10 @@ mod tests {
             assert_eq!(administrators, 4);
             // The accountant's one computer, beside the throne.
             let accountants = 1;
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants;
+            let nurses = crate::map::district::hospital::STATIONS * job::NURSE_SHIFTS.len();
+            assert_eq!(nurses, 4);
+            let mut nursing = 0;
+            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -3947,6 +4012,10 @@ mod tests {
                         reigning += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: a throne outside the palace");
                     }
+                    JobKind::Nurse => {
+                        nursing += 1;
+                        assert!(district.the(crate::map::district::hospital::NAME).contains(job.workplace));
+                    }
                     JobKind::Accountant => {
                         accounting += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: the accountant outside the palace");
@@ -3954,13 +4023,14 @@ mod tests {
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
+            assert_eq!(nursing, nurses);
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
             assert_eq!(reigning, kings, "seed {seed}: the palace's");
             assert_eq!(accounting, accountants, "seed {seed}: the palace's accountant");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::Accountant), "seed {seed}: the accountant hired last");
+            assert_eq!(last, Some(JobKind::Nurse), "seed {seed}: the hospital staff hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");

@@ -184,6 +184,8 @@ catalogue! {
         /// the palace, worked from beside it. **Needs power**, and is nothing
         /// to play on.
         AccountantComputer = 24 => FeatureDef { props: &["accountant computer"], ..BESIDE },
+        HospitalBed = 25 => FeatureDef { props: &["hospital bed"], access: Access::Entered, ..BESIDE },
+        NurseStation = 26 => FeatureDef { props: &["nurse station"], ..BESIDE },
     }
 }
 

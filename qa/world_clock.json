@@ -2,7 +2,7 @@
   "name": "the world's clock runs at two minutes to the watched second",
   "state": "game",
   "given": {
-    "maps": [{ "name": "yard", "file": "qa/fixtures/yard.json" }]
+    "maps": [{ "name": "yard", "file": "qa/fixtures/yard_bounded.json" }]
   },
   "open": "yard",
   "steps": [

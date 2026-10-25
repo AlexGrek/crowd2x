@@ -31,8 +31,8 @@ use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 
 use super::background::{Due, Schedule};
-use super::biology::{health, Biology, Stats};
-use super::brain::{Brain, GoalId};
+use super::biology::{health, Biology, Event, Stats};
+use super::brain::{Brain, GoalId, Spotted};
 use super::clothing::Clothing;
 use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
@@ -49,6 +49,13 @@ use super::{Effect, Intent, MoveOutcome};
 /// the pace of an average one ([`own_pace`]).
 pub const HUMAN_SPEED: f32 = 4.0;
 const DOG_SPEED: f32 = 7.0;
+
+/// A deathdog's own pace, cells a watched second: a prowl. Hunting, it is in
+/// as much of a hurry as there is ([`walker::HURRY`](super::walker::HURRY)),
+/// which makes it exactly as fast as anybody running for their life
+/// ([`PANIC_SPEED`](super::walker::PANIC_SPEED)) — so who gets away is who
+/// had the head start.
+pub const DEATHDOG_SPEED: f32 = super::walker::PANIC_SPEED / (1.0 + super::walker::HURRY);
 
 /// How far a person's own pace is from the average one, as a fraction of it:
 /// the standard deviation it is rolled with ([`own_pace`])...
@@ -248,9 +255,19 @@ impl GameEntity for Human {
     /// world is told ([`Effect::Died`]) so it can take back the cell, the bed
     /// and the job.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        // Bitten last tick: the teeth first, before time passes, and what
+        // bit it is what scared it now (`sim::wounds`).
+        let mut bitten = false;
+        for wound in ctx.wounds.on(self.walk.body().uid()) {
+            let _ = self.biology.handle(Event::Bitten { damage: wound.damage });
+            self.brain.spot(Spotted { who: wound.by, at: wound.from, when: ctx.clock.elapsed() });
+            bitten = true;
+        }
         // Asleep as of last tick's brain: a body lying in bed ages at the
         // pace of a sleeper (`Process::asleep_pace`).
-        if self.brain.is_asleep() {
+        if self.brain.is_hospital_patient() || self.biology.stats().health() < super::hospital::ADMISSION_HEALTH {
+            self.biology.advance_hospital(ctx.game_dt(), self.brain.is_asleep());
+        } else if self.brain.is_asleep() {
             self.biology.advance_asleep(ctx.game_dt());
         } else {
             self.biology.advance(ctx.game_dt());
@@ -258,7 +275,8 @@ impl GameEntity for Human {
         if self.biology.stats().health() <= 0.0 {
             self.walk.halt();
             self.walk.body_mut().set_dead();
-            return Effect::Died { cause: health::cause_of_death(self.biology.stats()) };
+            let cause = if bitten { DEATHDOG_BITES } else { health::cause_of_death(self.biology.stats()) };
+            return Effect::Died { cause };
         }
         let due = self.schedule.tick(ctx.game_dt());
         self.biology.background(&due);
@@ -297,6 +315,10 @@ impl GameEntity for Human {
     }
 
     /// None for the dead: nobody is after anything any more.
+    fn is_on_sick_leave(&self, clock: super::clock::Clock) -> bool {
+        self.brain.memory().medical.on_leave(clock.day())
+    }
+
     fn current_goal(&self) -> Option<GoalId> {
         (!self.is_dead()).then(|| self.brain.top_goal())
     }
@@ -576,6 +598,149 @@ impl Dog {
     }
 }
 
+/// What a person bitten to death died of.
+pub const DEATHDOG_BITES: &str = "deathdog bites";
+
+/// A deathdog: a beast of the wasteland, out at night ([`super::deathdogs`]).
+///
+/// A body and a mind and nothing else — no needs, nothing carried, no name.
+/// It has a [`Schedule`] so it looks round on the same beat a person does:
+/// that is how it sees who is outside to hunt.
+pub struct Deathdog {
+    walk: Walker,
+    brain: Brain,
+    facing: Facing,
+    schedule: Schedule,
+}
+
+impl Deathdog {
+    pub fn new(uid: Uid, cell: Point, facing: Facing, rng: &mut SmallRng) -> Deathdog {
+        Deathdog {
+            walk: Walker::new(uid, cell, DEATHDOG_SPEED),
+            brain: Brain::deathdog(),
+            facing,
+            schedule: Schedule::new(rng.random()),
+        }
+    }
+
+    pub fn brain(&self) -> &Brain {
+        &self.brain
+    }
+
+    #[cfg(test)]
+    pub(crate) fn brain_mut(&mut self) -> &mut Brain {
+        &mut self.brain
+    }
+}
+
+impl GameEntity for Deathdog {
+    fn body(&self) -> &Body {
+        self.walk.body()
+    }
+
+    fn body_mut(&mut self) -> &mut Body {
+        self.walk.body_mut()
+    }
+
+    fn think(&self, ctx: &Think<'_>) -> Intent {
+        self.walk.think(ctx)
+    }
+
+    fn walker(&self) -> Option<&Walker> {
+        Some(&self.walk)
+    }
+
+    fn walker_mut(&mut self) -> Option<&mut Walker> {
+        Some(&mut self.walk)
+    }
+
+    fn facing(&self) -> Option<Facing> {
+        Some(self.facing)
+    }
+
+    /// **By day, far enough out, it is gone**: it stops and tells the world
+    /// ([`Effect::Depart`]), which takes it out of the world at the end of
+    /// the tick. Otherwise it looks round when its schedule says so, and
+    /// its brain runs: hunt, prowl, or walk off (`Brain::deathdog`).
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        let here = self.walk.body().center_position();
+        if !ctx.clock.sun().is_dark() && super::deathdogs::distance_from_site(ctx.map, here) >= super::deathdogs::DEPART_DISTANCE {
+            self.walk.halt();
+            return Effect::Depart;
+        }
+        let due = self.schedule.tick(ctx.game_dt());
+        self.brain.react(ctx, &due, outcome, &mut self.walk, None, None)
+    }
+
+    /// Turns to face the way it is walking, as a dog does.
+    fn apply(&mut self, intent: &Intent) {
+        let was = self.walk.body().position().0;
+        self.walk.apply(intent);
+        let now = self.walk.body().position().0;
+        if now < was {
+            self.facing = Facing::Left;
+        } else if now > was {
+            self.facing = Facing::Right;
+        }
+    }
+
+    fn current_goal(&self) -> Option<GoalId> {
+        Some(self.brain.top_goal())
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        let mut fields = vec![("goal", self.brain.top_goal().name().to_string())];
+        fields.extend(self.walk.debug_fields());
+        fields.push(self.schedule.debug_field());
+        fields
+    }
+
+    fn brain_fields(&self) -> Vec<(&'static str, String)> {
+        self.brain.debug_fields()
+    }
+
+    fn planned_path(&self) -> Vec<Point> {
+        self.walk.path_cells()
+    }
+
+    fn action_progress(&self) -> Option<f32> {
+        self.brain.action().progress()
+    }
+
+    fn interacting_with(&self) -> Option<Point> {
+        self.brain.action().interacting_with()
+    }
+
+    fn save(&self) -> pb::Kind {
+        let Deathdog { walk, brain, facing, schedule } = self;
+        pb::Kind::Deathdog(pb::Deathdog {
+            walker: Some(walk.save()),
+            brain: Some(brain.save()),
+            facing: match facing {
+                Facing::Left => pb::Facing::Left,
+                Facing::Right => pb::Facing::Right,
+            } as i32,
+            schedule: Some(schedule.save()),
+        })
+    }
+}
+
+impl Deathdog {
+    fn restore(saved: &pb::Deathdog, revision: u64) -> Result<Deathdog, Invalid> {
+        let mut brain = Brain::deathdog();
+        brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        Ok(Deathdog {
+            walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
+            brain,
+            facing: match pb::known::<pb::Facing>(saved.facing, "facing")? {
+                pb::Facing::Left => Facing::Left,
+                pb::Facing::Right => Facing::Right,
+            },
+            schedule: Schedule::restore(pb::required(&saved.schedule, "schedule")?)?,
+        })
+    }
+}
+
 /// Build an entity of a kind, at a cell.
 ///
 /// The one place a `Uid`'s type tag and the concrete type behind it are tied
@@ -594,6 +759,12 @@ pub(super) fn build(
             if rng.random() { Facing::Left } else { Facing::Right },
             rng,
         )),
+        EntityType::Deathdog => Box::new(Deathdog::new(
+            uid,
+            cell,
+            if rng.random() { Facing::Left } else { Facing::Right },
+            rng,
+        )),
     }
 }
 
@@ -606,10 +777,12 @@ pub(super) fn restore(saved: &pb::Kind, revision: u64) -> Result<Box<dyn GameEnt
     let entity: Box<dyn GameEntity> = match saved {
         pb::Kind::Human(human) => Box::new(Human::restore(human, revision)?),
         pb::Kind::Dog(dog) => Box::new(Dog::restore(dog, revision)?),
+        pb::Kind::Deathdog(deathdog) => Box::new(Deathdog::restore(deathdog, revision)?),
     };
     let saved_as = match saved {
         pb::Kind::Human(_) => EntityType::Human,
         pb::Kind::Dog(_) => EntityType::Dog,
+        pb::Kind::Deathdog(_) => EntityType::Deathdog,
     };
     if entity.kind() != Some(saved_as) {
         let uid = entity.uid();

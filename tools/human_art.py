@@ -460,6 +460,15 @@ UNIFORMS["accountant"] = (
 )
 
 
+# White clinical tunic over teal trousers, a red cross on the chest.
+UNIFORMS["nurse"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....wwwwww.....", "....wwwwrrww....", ".....wwwrrw.....",
+     ".....pppppp.....", "......pqqp......", "......pqqp......"],
+    {"w": (235, 244, 240), "r": (202, 55, 66), "p": (35, 109, 116), "q": (66, 155, 160)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

@@ -92,7 +92,9 @@ impl Experience {
             Event::Ingested(item) if item.taste() > 0.0 => Some(Experience::Taste(item)),
             Event::Entertained => Some(Experience::Entertainment),
             Event::Met => Some(Experience::Company),
-            Event::Ingested(_) | Event::Relieved | Event::Slept { .. } | Event::Worked { .. } => None,
+            Event::Ingested(_) | Event::Relieved | Event::Slept { .. } | Event::Worked { .. } | Event::Treated { .. } => None,
+            // A bite is nothing a body gets used to.
+            Event::Bitten { .. } => None,
         }
     }
 

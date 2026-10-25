@@ -1064,3 +1064,24 @@ The current economy is documented in [.claude/skills/economy/SKILL.md](.claude/s
 integer-cent cash and budget, worked shifts, office payroll, unemployment care,
 tax, fridge prices, accountant reports, economy.yaml defaults, a live economy
 menu and optional economy.pb saves. New jobs/items require named YAML entries.
+
+### Hospital
+
+Every generated district has one hospital (`map/district/hospital.rs`), with
+four `hospital bed` props, two `nurse station` props, a fridge and a toilet.
+Hospital beds are separate from home beds and cannot be assigned as homes.
+Each station employs two nurses on daily 00:00–12:00 and 12:00–24:00 shifts:
+four employed, two on duty. Nurses make rounds (`CareGoal`, `CarePatient`);
+a completed ten-world-minute interaction credits its patient 1 HP exactly once.
+
+Health below 90 starts recovery; it ends only at 100. The `get well` routine
+keeps a patient from work, entertainment and wandering, allowing food, water
+and toilet breaks. `Hospital` reserves a bed across these breaks. `HospitalRest`
+heals continuously at a deterministic 2–5 HP per world hour actually in bed,
+and provides rest. Natural healing is suspended during recovery, including
+travel and breaks. Biology remains the only writer of health (`Event::Treated`).
+Sick leave covers every recovery day and the discharge day; work resumes on
+the following day. Medical memory, reservations and outstanding nurse care
+are saved. Death and despawning return reserved beds. New arrivals start at
+full health. Regression coverage: `sim/hospital.rs`, `save/tests.rs`, and
+`qa/hospital.json`.

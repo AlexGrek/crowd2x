@@ -96,7 +96,8 @@ impl Process for Bladder {
             // Nor does company.
             Event::Met => {}
             // Nor does a day at the desk.
-            Event::Worked { .. } => {}
+            Event::Worked { .. } | Event::Treated { .. } => {}
+            Event::Bitten { .. } => {}
         }
     }
 

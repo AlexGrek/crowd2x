@@ -50,7 +50,12 @@ impl Timesheet {
 
     /// Bring it up to date at `clock`, with the unit's `job` and the goal
     /// `top` in charge after the routines and the goal have had their say.
+    #[cfg(test)]
     pub fn tick(&mut self, job: Option<&Job>, clock: Clock, top: GoalId) {
+        self.tick_with_leave(job, clock, top, false);
+    }
+
+    pub fn tick_with_leave(&mut self, job: Option<&Job>, clock: Clock, top: GoalId, sick: bool) {
         // A shift over — no longer due, or the job changed or went: it was on
         // duty for it, so the whole of it is owed. Two shifts as two jobs
         // waiting at once (a record held off while the unit was let go and
@@ -65,6 +70,7 @@ impl Timesheet {
         if self.clocked.is_none()
             && let Some(job) = job
             && job.is_due(clock)
+            && !sick
             && (top == job.kind.goal() || job.kind.is_on_call())
         {
             self.clocked = Some(job.kind);

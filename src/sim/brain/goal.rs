@@ -85,6 +85,22 @@ catalogue! {
         Farm = 13 => GoalDef { name: "farm", emoji: "🌱", executor: Some(|| Box::new(goals::FarmGoal::new())) },
         Repair = 14 => GoalDef { name: "repair", emoji: "🔧", executor: Some(|| Box::new(goals::RepairGoal::new())) },
         Cook = 15 => GoalDef { name: "cook", emoji: "??", executor: Some(|| Box::new(goals::CookGoal::new())) },
+        Recover = 16 => GoalDef { name: "recover", emoji: "\u{1f3e5}", executor: Some(|| Box::new(goals::RecoverGoal::new())) },
+        Care = 17 => GoalDef { name: "care", emoji: "\u{1fa7a}", executor: Some(|| Box::new(goals::CareGoal::new())) },
+        /// Run for the nearest way in, and shelter inside until the fright is
+        /// over ([`FleeGoal`](super::goals::FleeGoal)): over everything else
+        /// while a deathdog, or somebody running from one, scared it lately.
+        Flee = 18 => GoalDef { name: "flee", emoji: "😱", executor: Some(|| Box::new(goals::FleeGoal::new())) },
+        /// A deathdog's: run down somebody outside the walls and bite
+        /// ([`HuntGoal`](super::goals::HuntGoal)). No executor here, so no
+        /// person carries one: `Brain::deathdog` builds it.
+        Hunt = 19 => GoalDef { name: "hunt", emoji: "🐺", executor: None },
+        /// A deathdog's: circle the walls, waiting
+        /// ([`ProwlGoal`](super::goals::ProwlGoal)).
+        Prowl = 20 => GoalDef { name: "prowl", emoji: "🐾", executor: None },
+        /// A deathdog's: by day, walk off into the wasteland
+        /// ([`DepartGoal`](super::goals::DepartGoal)).
+        Depart = 21 => GoalDef { name: "depart", emoji: "🌅", executor: None },
     }
 }
 
@@ -261,6 +277,11 @@ impl Goals {
             goals.strikes[goal.index()] = strikes;
         }
         Ok(goals)
+    }
+
+    pub(crate) fn suppress(&mut self, goal: GoalId) {
+        self.priority[goal.index()] = 0.0;
+        self.urgency[goal.index()] = 0.0;
     }
 
     /// Zero every priority and urgency, ready for the routines to arrange
@@ -605,7 +626,13 @@ mod tests {
                 (GoalId::Haul, 0.0),
                 (GoalId::Farm, 0.0),
                 (GoalId::Repair, 0.0),
-                (GoalId::Cook, 0.0)
+                (GoalId::Cook, 0.0),
+                (GoalId::Recover, 0.0),
+                (GoalId::Care, 0.0),
+                (GoalId::Flee, 0.0),
+                (GoalId::Hunt, 0.0),
+                (GoalId::Prowl, 0.0),
+                (GoalId::Depart, 0.0)
             ]
         );
     }

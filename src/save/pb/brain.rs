@@ -135,6 +135,25 @@ pub struct Memory {
     /// Places out of reach, slot for slot; empty slots left out.
     #[prost(message, repeated, tag = "2")]
     pub out_of_reach: Vec<OutOfReach>,
+    #[prost(message, optional, tag = "3")]
+    pub medical: Option<Medical>,
+    /// The last thing that scared it, or the last somebody it hunted
+    /// (`crate::sim::brain::memory::Spotted`). Absent — every save from
+    /// before there were deathdogs — is nothing seen.
+    #[prost(message, optional, tag = "4")]
+    pub spotted: Option<Spotted>,
+}
+
+/// Who was spotted, where, and when.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Spotted {
+    #[prost(fixed64, tag = "1")]
+    pub who: u64,
+    #[prost(message, optional, tag = "2")]
+    pub at: Option<Cell>,
+    /// World seconds since the world began.
+    #[prost(double, tag = "3")]
+    pub when: f64,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -286,7 +305,7 @@ pub enum TaskResult {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Task {
-    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20")]
+    #[prost(oneof = "TaskKind", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21")]
     pub kind: Option<TaskKind>,
 }
 
@@ -348,6 +367,23 @@ pub enum TaskKind {
     /// is saved as now.
     #[prost(message, tag = "20")]
     Named(NamedTask),
+    /// A deathdog running somebody down: more than a place and a time.
+    #[prost(message, tag = "21")]
+    Chase(Chase),
+}
+
+/// A chase (`crate::sim::brain::tasks::Chase`): who, where it was last
+/// seen, and how many ticks before the next bite.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Chase {
+    /// The low 32 bits of the quarry's uid's random half: how a chase tells
+    /// it from whoever is beside it.
+    #[prost(fixed32, tag = "1")]
+    pub quarry: u32,
+    #[prost(message, optional, tag = "2")]
+    pub at: Option<Cell>,
+    #[prost(uint32, tag = "3")]
+    pub rest: u32,
 }
 
 /// A task that is a place (or none, for a wait) and a time, under the name
@@ -441,4 +477,14 @@ pub struct TimedAction {
     pub seconds: f32,
     #[prost(float, tag = "2")]
     pub elapsed: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Medical {
+    #[prost(bool, tag = "1")]
+    pub recovering: bool,
+    #[prost(uint32, optional, tag = "2")]
+    pub sick_day: Option<u32>,
+    #[prost(uint32, tag = "3")]
+    pub care_seen: u32,
 }

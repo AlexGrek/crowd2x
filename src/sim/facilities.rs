@@ -22,10 +22,13 @@ use super::fields::Fields;
 use super::fridge::Fridges;
 use super::homes::Homes;
 use super::job::Workplaces;
+use super::panics::Panics;
 use super::playzone::Playzones;
 use super::property::Properties;
+use super::refuge::WaysIn;
 use super::statistics::Tally;
 use super::uid::Uid;
+use super::wounds::Wounds;
 
 #[derive(Default)]
 pub struct Facilities {
@@ -54,6 +57,7 @@ pub struct Facilities {
     /// Which beds have been given to whom. Written by the spawn pass and read
     /// by nothing in a tick — a unit remembers its own bed ([`super::homes`]).
     pub homes: Homes,
+    pub hospital: super::hospital::Hospital,
     /// Which workplaces have been given to whom, the same way
     /// ([`super::job`]).
     pub workplaces: Workplaces,
@@ -72,10 +76,22 @@ pub struct Facilities {
     /// ([`super::economy`]). Changed by `Effect::Record`, `Payroll`, `Buy`
     /// and `CloseBooks`, and by the spawn pass as units come and go.
     pub economy: Economy,
-    /// The bodies taken up this tick, to leave the world when the processing
-    /// pass is over (`process_game_state`) — the one pass that may not remove
-    /// anybody. Empty between ticks, so never saved.
-    pub burials: Vec<Uid>,
+    /// Who was seen running in a panic this tick: written by the move step,
+    /// read by react ([`super::panics`]). Rebuilt every tick, never saved.
+    pub panics: Panics,
+    /// The bites the world step dealt, each felt by the one bitten in its
+    /// own react next tick ([`super::wounds`]). Saved: it is held between
+    /// ticks.
+    pub wounds: Wounds,
+    /// The ways in from the wasteland, and the refuge behind each: where
+    /// somebody panicking runs ([`super::refuge`]). Derived from the map.
+    pub ways_in: WaysIn,
+    /// Who leaves the world this tick: the bodies undertakers took up
+    /// (`Effect::TakeBody`) and the deathdogs gone back into the wasteland
+    /// (`Effect::Depart`). Despawned at the end of the processing pass
+    /// (`sim::comings_and_goings`), once the table it may not change is let
+    /// go. Empty between ticks, so never saved.
+    pub leaving: Vec<Uid>,
 }
 
 impl Facilities {
@@ -92,12 +108,16 @@ impl Facilities {
             properties,
             corpses: Corpses::new(),
             homes: Homes::new(),
+            hospital: super::hospital::Hospital::from_map(map),
             workplaces: Workplaces::new(),
             tally: Tally::default(),
             fields: Fields::new(),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
-            burials: Vec::new(),
+            panics: Panics::default(),
+            wounds: Wounds::default(),
+            ways_in: WaysIn::from_map(map),
+            leaving: Vec::new(),
         }
     }
 }

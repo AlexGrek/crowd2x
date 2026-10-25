@@ -63,6 +63,7 @@
 //! that says this is not that.
 
 pub mod action;
+pub mod alarm;
 pub mod attention;
 pub mod goal;
 pub mod goals;
@@ -77,7 +78,7 @@ pub mod timesheet;
 pub use action::{Action, ActionState};
 pub use attention::Attention;
 pub use goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress, Goals};
-pub use memory::{Memory, Recall};
+pub use memory::{Memory, Recall, Spotted};
 pub use perception::Perception;
 pub use routine::{Routine, RoutineCtx, RoutineExecutor};
 pub use task::{Task, TaskCtx, TaskExecutor, TaskResult, Tasks};
@@ -96,7 +97,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::WanderGoal;
+use goals::{DepartGoal, HuntGoal, ProwlGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -196,6 +197,8 @@ impl Brain {
                 Routine::stay_busy(),
                 Routine::work(),
                 Routine::ready(),
+                Routine::hospital(),
+                Routine::flee(),
             ],
             GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
@@ -206,6 +209,21 @@ impl Brain {
         Brain::new(
             [Routine::stay_busy()],
             [Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>],
+        )
+    }
+
+    /// A deathdog: hunts whoever it sees outside the walls, prowls round
+    /// them while it sees nobody, and leaves by day (`sim::deathdogs`). Its
+    /// goals have no executor in [`GoalId`]'s catalogue, so no person
+    /// carries them; they are built here.
+    pub fn deathdog() -> Brain {
+        Brain::new(
+            [Routine::hunt(), Routine::depart(), Routine::prowl()],
+            [
+                Box::new(HuntGoal::new()) as Box<dyn GoalExecutor>,
+                Box::new(ProwlGoal::new()),
+                Box::new(DepartGoal::new()),
+            ],
         )
     }
 
@@ -267,8 +285,12 @@ impl Brain {
                     }
                 });
                 attention.met_with(met);
+                // Danger, or prey, in what it saw (`alarm`).
+                alarm::take_in(ctx, &body, &sightings, memory);
             }
         }
+
+        memory.medical.update(ctx, body.uid(), biology.as_deref_mut());
 
         // 1, 2. Every routine arranges the list, from scratch.
         goals.clear_priorities();
@@ -365,7 +387,7 @@ impl Brain {
         // shift is due, a shift owed once it is over, a care day for each
         // day turned without a job. A person's only: nothing else is paid.
         if body.uid().kind() == Some(EntityType::Human) {
-            timesheet.tick(job, ctx.clock, goals.top());
+            timesheet.tick_with_leave(job, ctx.clock, goals.top(), memory.medical.on_leave(ctx.clock.day()));
         }
 
         // 6. The current task's executor, which writes the task's result and
@@ -397,6 +419,12 @@ impl Brain {
             }
         }
 
+        if effect == Effect::None && !memory.medical.recovering && ctx.hospital.bed_for(body.uid()).is_some() {
+            effect = if biology.as_deref().is_some_and(|b| !b.is_running(super::biology::ProcessId::Health)) {
+                Effect::ReleaseBed { at: ctx.hospital.bed_for(body.uid()).unwrap().cell }
+            } else { Effect::Discharge };
+        }
+
         // 6b. A playzone's administrator on duty and beside its computer runs
         // it, whatever the task: the cabinets work for as long as somebody
         // says so, every tick (`sim::playzone`).
@@ -418,6 +446,8 @@ impl Brain {
         // 7. As much of a hurry as the goal in charge is urgent — last, so a
         // walk this tick's task started or ended is the one hurried, or not.
         walk.hurry(goals.urgency(goals.top()), ctx.dt);
+        // ...and running for its life, flat out, while fleeing is in charge.
+        walk.panic(goals.top() == GoalId::Flee);
         effect
     }
 
@@ -436,6 +466,8 @@ impl Brain {
     /// Whether it is lying in a bed asleep — not walking to one, not getting
     /// in. What the body ages by (`Biology::advance_asleep`) and what shuts
     /// its eyes.
+    pub fn is_hospital_patient(&self) -> bool { self.memory.medical.recovering }
+
     pub fn is_asleep(&self) -> bool {
         is_asleep(&self.task, &self.action)
     }
@@ -476,6 +508,13 @@ impl Brain {
     /// pass, for a [`crate::sim::Command::Salvage`].
     pub fn order_salvage(&mut self, heap: Point) {
         self.memory.remember(memory::SALVAGE_ORDER, Recall::Cell(heap));
+    }
+
+    /// Remember what just scared it, or what it is after, over whatever did
+    /// before ([`Memory::spot`]): a person bitten remembers what bit it, from
+    /// its own react (`Human::react`, `sim::wounds`).
+    pub fn spot(&mut self, spotted: Spotted) {
+        self.memory.spot(spotted);
     }
 
     /// Take on `job`, replacing any job before it. From outside the world
@@ -629,6 +668,8 @@ impl Brain {
         let top = self.goals.top();
         let mut fields = vec![
             ("goal", top.name().to_string()),
+            ("hospital patient", self.memory.medical.recovering.to_string()),
+            ("last sick day", self.memory.medical.sick_day.map_or("none".into(), |d| d.to_string())),
             (
                 "priority",
                 self.goals
@@ -724,7 +765,7 @@ impl Brain {
 /// Asleep: the task is a stretch of sleep and its action is the lying in the
 /// bed, not the step into it.
 fn is_asleep(task: &Option<Task>, action: &Action) -> bool {
-    matches!(task, Some(Task::Sleep(_))) && matches!(action, Action::Interact { .. })
+    matches!(task, Some(Task::Sleep(_) | Task::HospitalRest(_))) && matches!(action, Action::Interact { .. })
 }
 
 #[cfg(test)]
@@ -1276,7 +1317,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
@@ -1292,7 +1333,7 @@ mod tests {
         saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
         let mut saved = saved.save();
         let added = saved.routines.pop().expect("a routine to leave out");
-        assert_eq!(added.name, "get ready to go out");
+        assert_eq!(added.name, "run for safety");
         saved.job = None;
 
         let mut brain = Brain::human();

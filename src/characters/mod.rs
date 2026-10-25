@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn dog_sheets_are_strips_of_art_sized_frames() {
-        for path in [dog::IDLE_RIGHT, dog::IDLE_LEFT] {
+        for path in [dog::IDLE_RIGHT, dog::IDLE_LEFT, dog::DEATHDOG_IDLE_RIGHT, dog::DEATHDOG_IDLE_LEFT] {
             assert_eq!(
                 png_size(&format!("assets/{path}")),
                 (ART * dog::IDLE_FRAMES, ART),

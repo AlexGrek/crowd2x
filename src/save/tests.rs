@@ -26,6 +26,35 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn hospital_reservations_rest_nurse_care_and_sick_leave_survive_a_save_exactly() {
+    let bed = Point::new(5, 4);
+    let mut map = Map::new(Size::new(12, 9), FLOOR);
+    prop_at(&mut map, "hospital bed", bed);
+    prop_at(&mut map, "nurse station", Point::new(1, 1));
+    let mut state = GameState::new(map, 9);
+    let nurse = state.spawn(EntityType::Human, Point::new(1, 2));
+    let patient = state.spawn(EntityType::Human, Point::new(4, 4));
+    set_stats(&mut state, patient, Stats::calm().with_health(30.0).with_hunger(0.0).with_thirst(0.0));
+    let mut input = Input::new();
+    for uid in [patient, nurse] {
+        for p in ProcessId::ALL { if p != ProcessId::Health { input.set_process(uid, p, false); } }
+    }
+    process_game_state(&mut state, DT, &input);
+    run(&mut state, 1200);
+    assert!(state.save_world().hospital.iter().any(|b| b.patient == patient.raw()));
+    assert!(state.entities().get(patient).unwrap().is_on_sick_leave(state.clock()));
+    let copy = side_by_side(&mut state, 5000, |_, _| Input::new());
+    assert_eq!(copy.save_world().hospital, state.save_world().hospital);
+    assert!(copy.save_world().hospital[0].care > 0);
+    // A fully recovered patient is discharged but remembers today's leave.
+    set_stats(&mut state, patient, Stats::calm().with_health(100.0));
+    run(&mut state, 2);
+    assert!(state.save_world().hospital.is_empty());
+    let copy = side_by_side(&mut state, 100, |_, _| Input::new());
+    assert!(copy.entities().get(patient).unwrap().is_on_sick_leave(copy.clock()));
+}
+
+#[test]
 fn an_economy_saved_mid_payroll_carries_on_exactly() {
     use crate::sim::economy::{Money, Tariff};
     let mut map = Map::new(Size::new(12, 9), FLOOR);
@@ -1021,6 +1050,10 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
     // reference through that same migration, while still comparing every
     // pre-existing brain, entity and world field with the golden archive.
     let reference = steel_works_fixture();
+    // This archive predates fully healthy arrivals. Preserve its original
+    // birth health in the reference, while checking every other saved field.
+    let birth_health: std::collections::BTreeMap<_, _> = loaded.entities().iter()
+        .filter_map(|e| e.biology().map(|b| (e.uid().raw(), b.stats().health()))).collect();
     let mut files = snapshot(&reference, &meta(), None);
     files.files.retain(|(name, _)| name != ECONOMY);
     for (name, bytes) in &mut files.files {
@@ -1029,6 +1062,8 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
         for slot in &mut shard.slots {
             if let Some(pb::Kind::Human(human)) = &mut slot.kind {
                 human.brain.as_mut().unwrap().timesheet = None;
+                let uid = human.walker.as_ref().unwrap().body.as_ref().unwrap().uid;
+                human.biology.as_mut().unwrap().stats.as_mut().unwrap().health = birth_health[&uid];
             }
         }
         *bytes = shard.encode_to_vec();

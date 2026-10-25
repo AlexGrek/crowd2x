@@ -8,19 +8,24 @@
         "name": "meadow",
         "map": {
           "version": 1,
-          "size": { "width": 9, "height": 7 },
+          "wasteland": false,
+          "size": { "width": 15, "height": 11 },
           "terrain": {
             "palette": ["meadow"],
             "layers": [
               {
                 "rows": [
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0",
-                  "0,0,0,0,0,0,0,0,0"
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
                 ]
               }
             ]
@@ -37,6 +42,7 @@
   },
   "open": "meadow",
   "steps": [
+    { "note": "a bounded fixture keeps nightly wasteland threats out of this test of jobs and shifts" },
     { "note": "a site of good soil with a grain bin in cell (4, 3), and nothing else to be hired to. The first plot sown is the nearest the bin with the ground open all round it, (2, 2): the two beside the bin have it in their ring" },
     { "key": "q" },
     { "key": "q" },

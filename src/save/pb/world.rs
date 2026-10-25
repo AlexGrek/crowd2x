@@ -58,6 +58,27 @@ pub struct World {
     /// which is every playzone unattended until the next tick.
     #[prost(message, repeated, tag = "16")]
     pub playzones_run: Vec<Cell>,
+    #[prost(message, repeated, tag = "17")]
+    pub hospital: Vec<HospitalBed>,
+    /// The bites dealt as the tick ended, for whoever was bitten to feel
+    /// next tick (`crate::sim::wounds::Wounds`). Older saves have none,
+    /// which is nobody bitten.
+    #[prost(message, repeated, tag = "18")]
+    pub wounds: Vec<Wound>,
+}
+
+/// One bite (`crate::sim::wounds::Wound`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Wound {
+    #[prost(fixed64, tag = "1")]
+    pub target: u64,
+    #[prost(fixed64, tag = "2")]
+    pub by: u64,
+    /// Where the biter stood.
+    #[prost(message, optional, tag = "3")]
+    pub from: Option<Cell>,
+    #[prost(uint32, tag = "4")]
+    pub damage: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -157,4 +178,14 @@ pub struct Arena {
     /// The free list, bottom of the stack first.
     #[prost(uint32, repeated, tag = "3")]
     pub free: Vec<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct HospitalBed {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    #[prost(fixed64, tag = "2")]
+    pub patient: u64,
+    #[prost(uint32, tag = "3")]
+    pub care: u32,
 }

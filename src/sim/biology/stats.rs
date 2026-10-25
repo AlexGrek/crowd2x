@@ -55,8 +55,8 @@ pub const BORN_AT_LEAST_SATISFIED: f32 = 70.0;
 
 impl Stats {
     /// A new body: every need 70 to 100 percent satisfied
-    /// ([`BORN_AT_LEAST_SATISFIED`]), as content with life and as healthy, everything else
-    /// anywhere in its range.
+    /// ([`BORN_AT_LEAST_SATISFIED`]), as content with life, and fully healthy.
+    /// Mental health and attention start anywhere in their ranges.
     ///
     /// Satisfaction is what is rolled, and each need turns it the way up it
     /// reads: hunger, thirst and the bladder *rise* towards the thing that has
@@ -66,8 +66,10 @@ impl Stats {
         let mut satisfied = || rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0);
         let (stamina, fun) = (satisfied(), satisfied());
         let (hunger, thirst, bladder) = (100.0 - satisfied(), 100.0 - satisfied(), 100.0 - satisfied());
+        // Preserve the seeded sequence for every other trait and later arrival.
+        let _ = rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0);
         Stats {
-            health: rng.random_range(BORN_AT_LEAST_SATISFIED..=100.0),
+            health: 100.0,
             stamina,
             fun,
             hunger,
@@ -125,12 +127,12 @@ impl Stats {
         Ok(stats)
     }
 
-    /// Every stat at the middle of its range — a person with nothing unusual
-    /// about them, for a test that wants to set one stat and know the rest.
+    /// A healthy person with other stats at the middle of their ranges, for
+    /// a test that wants to set one stat and know the rest.
     #[cfg(test)]
     pub(crate) fn calm() -> Stats {
         Stats {
-            health: 50.0,
+            health: 100.0,
             stamina: 50.0,
             fun: 50.0,
             hunger: 50.0,

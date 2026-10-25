@@ -444,6 +444,7 @@ impl RoutineExecutor for WorkRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.medical.on_leave(ctx.think.clock.day()) { self.on_shift = false; return; }
         let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
             .filter(|job| !job.kind.is_on_call() || !ctx.think.electrical.damaged().is_empty());
         self.on_shift = due.is_some();
@@ -622,7 +623,8 @@ impl RoutineExecutor for ReadyRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock));
+        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
+            .filter(|_| !ctx.memory.medical.on_leave(ctx.think.clock.day()));
         let (Some(job), Some(biology)) = (due, ctx.biology) else {
             *self = ReadyRoutine::new();
             return;
@@ -684,6 +686,99 @@ impl RoutineExecutor for ReadyRoutine {
             ("ready to go out", if self.ready { "yes" } else { "no" }.to_string()),
             ("seeing to", if seeing_to.is_empty() { "nothing".to_string() } else { seeing_to.join(", ") }),
         ]
+    }
+}
+
+/// How much [`FleeRoutine`] wants a frightened person running for a way in:
+/// over everything — any need at its worst is 2, a shift 1.5. Nothing is
+/// worth stopping for with a deathdog at your heels.
+pub const FLEEING: f32 = 3.0;
+
+/// How long a fright lasts, in **world** seconds: half an hour after the
+/// last thing that scared it, somebody who ran in stays sheltering inside
+/// rather than walk straight back out to whatever waits at the gate.
+pub const FEAR: f32 = 30.0 * crate::sim::clock::MINUTE;
+
+/// Run for safety while frightened ([`GoalId::Flee`], at [`FLEEING`] and
+/// flat out): for [`FEAR`] after whatever scared it last
+/// ([`Memory::spotted`](super::memory::Memory::spotted): a deathdog seen, or
+/// somebody running from one, or a bite). Reads memory and the clock, no
+/// stat, so no hysteresis: the fright simply runs out.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct FleeRoutine;
+
+impl RoutineExecutor for FleeRoutine {
+    fn name(&self) -> &'static str {
+        "run for safety"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        let now = ctx.think.clock.elapsed();
+        if ctx.memory.spotted().is_some_and(|spotted| spotted.age(now) < FEAR as f64) {
+            goals.raise_to(GoalId::Flee, FLEEING);
+            goals.hurry(GoalId::Flee, 1.0);
+        }
+    }
+}
+
+/// How much [`HuntRoutine`] wants a deathdog after somebody it saw.
+pub const HUNTING: f32 = 1.0;
+
+/// How long a deathdog keeps after somebody it has lost sight of, in world
+/// seconds.
+pub const SCENT: f32 = 10.0 * crate::sim::clock::MINUTE;
+
+/// A deathdog's: hunt the person it spotted outside the site
+/// ([`GoalId::Hunt`], flat out) for [`SCENT`] after it last saw them there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct HuntRoutine;
+
+impl RoutineExecutor for HuntRoutine {
+    fn name(&self) -> &'static str {
+        "hunt"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        let now = ctx.think.clock.elapsed();
+        let site = ctx.think.map.site();
+        if ctx.memory.spotted().is_some_and(|spotted| spotted.age(now) < SCENT as f64 && !site.contains(spotted.at)) {
+            goals.raise_to(GoalId::Hunt, HUNTING);
+            goals.hurry(GoalId::Hunt, 1.0);
+        }
+    }
+}
+
+/// How much [`DepartRoutine`] wants a deathdog gone by day: over hunting.
+pub const DEPARTING: f32 = 2.0;
+
+/// A deathdog's: by day, go back into the wasteland ([`GoalId::Depart`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct DepartRoutine;
+
+impl RoutineExecutor for DepartRoutine {
+    fn name(&self) -> &'static str {
+        "leave by day"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if !ctx.think.clock.sun().is_dark() {
+            goals.raise_to(GoalId::Depart, DEPARTING);
+        }
+    }
+}
+
+/// A deathdog's floor: prowl round the walls ([`GoalId::Prowl`]), always,
+/// at [`BUSY`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ProwlRoutine;
+
+impl RoutineExecutor for ProwlRoutine {
+    fn name(&self) -> &'static str {
+        "prowl"
+    }
+
+    fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        goals.raise_to(GoalId::Prowl, BUSY);
     }
 }
 

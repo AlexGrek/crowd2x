@@ -7,6 +7,12 @@
 //! for why they are not boxed, and for adding one: a file here, and its name
 //! in the [`tasks!`](super::task::tasks) list below.
 
+pub mod hospital;
+pub use hospital::{Admission, ReleaseBed, HospitalRest, CarePatient};
+pub mod bite;
+pub mod chase;
+pub use bite::Bite;
+pub use chase::Chase;
 pub mod close_books;
 pub mod payroll;
 pub use close_books::{CloseBooks, BOOKS_SECONDS};
@@ -89,6 +95,12 @@ tasks! {
     UseArcade,
     Payroll,
     CloseBooks,
+    Admission,
+    ReleaseBed,
+    HospitalRest,
+    CarePatient,
+    Chase,
+    Bite,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

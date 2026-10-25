@@ -52,6 +52,12 @@ pub struct Body {
     /// health runs out (`Human::react`), and settled with the world by
     /// [`super::Effect::Died`].
     dead: bool,
+    /// Running for its life, flat out (`walker::PANIC_SPEED`): set by its own
+    /// brain while it flees (`Walker::panic`), and only while it has
+    /// somewhere to run. On the body, beside the position the move step
+    /// already has in cache, because that step reads it of every mover to
+    /// say who is seen panicking ([`super::panics`]).
+    panicking: bool,
 }
 
 impl Body {
@@ -62,6 +68,7 @@ impl Body {
             frozen: false,
             home: None,
             dead: false,
+            panicking: false,
         }
     }
 
@@ -110,6 +117,16 @@ impl Body {
 
     pub fn set_dead(&mut self) {
         self.dead = true;
+        self.panicking = false;
+    }
+
+    /// Whether it is running for its life — see [`Body`].
+    pub fn is_panicking(&self) -> bool {
+        self.panicking
+    }
+
+    pub fn set_panicking(&mut self, panicking: bool) {
+        self.panicking = panicking;
     }
 
     /// The property it holds the key to, if any.
@@ -124,8 +141,8 @@ impl Body {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home, dead } = *self;
-        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32), dead }
+        let Body { uid, position: (x, y), frozen, home, dead, panicking } = *self;
+        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32), dead, panicking }
     }
 
     pub(crate) fn restore(saved: &pb::Body) -> Result<Body, Invalid> {
@@ -142,7 +159,14 @@ impl Body {
                 None => return invalid(format!("{uid}'s home is property {home}")),
             },
         };
-        Ok(Body { uid, position: (saved.x, saved.y), frozen: saved.frozen, home, dead: saved.dead })
+        Ok(Body {
+            uid,
+            position: (saved.x, saved.y),
+            frozen: saved.frozen,
+            home,
+            dead: saved.dead,
+            panicking: saved.panicking,
+        })
     }
 }
 
@@ -449,6 +473,10 @@ pub trait GameEntity: Send + Sync {
 
     /// Whether it is seeing to its needs before a trip out for its job — for
     /// the job menu, which says so rather than calling it a break.
+    fn is_on_sick_leave(&self, clock: super::clock::Clock) -> bool {
+        let _ = clock; false
+    }
+
     fn is_getting_ready(&self) -> bool {
         false
     }
@@ -521,6 +549,7 @@ pub struct Think<'a> {
     /// Where the props a brain can use are — fridges, so far. Built once with
     /// the world, so reading it is a scan of a handful of cells.
     pub features: &'a super::feature::Features,
+    pub hospital: &'a super::hospital::Hospital,
     /// Every fridge's door and temperature, as of the *start* of this tick —
     /// unlike `features`, this changes tick to tick, through [`Effect`] and
     /// [`super::world_step`]. A task reads it to decide whether a door is
@@ -557,6 +586,16 @@ pub struct Think<'a> {
     /// [`super::world_step`]: whether anybody is owed, which day's books
     /// want closing, and what is in them ([`super::economy`]).
     pub economy: &'a super::economy::Economy,
+    /// Who was seen running in a panic this tick, sorted: rebuilt by the
+    /// move step before react reads it ([`super::panics`]). What lets panic
+    /// spread by sight with no scan of the crowd.
+    pub panics: &'a super::panics::Panics,
+    /// The bites dealt at the end of the last tick, each read only by the
+    /// unit bitten, in its own react ([`super::wounds`]).
+    pub wounds: &'a super::wounds::Wounds,
+    /// Where on the site's edge there is a way in, and how far in from it
+    /// is safe: where somebody fleeing runs to ([`super::refuge`]).
+    pub ways_in: &'a super::refuge::WaysIn,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -595,6 +634,7 @@ impl<'a> Think<'a> {
             occupancy,
             log,
             features: &facilities.features,
+            hospital: &facilities.hospital,
             fridges: &facilities.fridges,
             doors: &facilities.doors,
             properties: &facilities.properties,
@@ -603,6 +643,9 @@ impl<'a> Think<'a> {
             fields: &facilities.fields,
             playzones: &facilities.playzones,
             economy: &facilities.economy,
+            panics: &facilities.panics,
+            wounds: &facilities.wounds,
+            ways_in: &facilities.ways_in,
             electrical: &facilities.electrical,
             dt,
             tick,
@@ -650,11 +693,16 @@ impl Think<'_> {
         self.is_passable(cell) && self.doors.lets_through(cell, key)
     }
 
-    /// What stepping into `cell` costs a body holding `key`, or `None` where
-    /// [`Think::is_passable_with`] says it cannot go: the terrain's walk cost,
-    /// so a route keeps to the pavement and crosses the road
-    /// ([`crate::sim::path`]).
-    pub fn step_cost_with(&self, cell: Point, key: Option<PropertyId>) -> Option<u32> {
+    /// What stepping into `cell` costs a body of `kind` holding `key`, or
+    /// `None` where it cannot go — where [`Think::is_passable_with`] says so,
+    /// and anywhere on the site for a kind that keeps off it
+    /// ([`EntityType::keeps_off_the_site`]: a deathdog's route goes round the
+    /// walls). The terrain's walk cost, so a route keeps to the pavement and
+    /// crosses the road ([`crate::sim::path`]).
+    pub fn step_cost_with(&self, cell: Point, key: Option<PropertyId>, kind: Option<EntityType>) -> Option<u32> {
+        if kind.is_some_and(EntityType::keeps_off_the_site) && self.map.site().contains(cell) {
+            return None;
+        }
         self.is_passable_with(cell, key).then(|| self.map.walk_cost(cell) as u32)
     }
 

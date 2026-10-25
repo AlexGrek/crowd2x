@@ -1,0 +1,210 @@
+{
+  "name": "four hospital beds and four nurses on two daily shifts",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "hospital",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 13,
+            "height": 8
+          },
+          "terrain": {
+            "palette": [
+              "floor white",
+              "wall purple"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 24,
+                  "y": 24
+                },
+                "kind": "transformer"
+              },
+              {
+                "at": {
+                  "x": 600,
+                  "y": 360
+                },
+                "kind": "sewer"
+              },
+              {
+                "at": {
+                  "x": 120,
+                  "y": 168
+                },
+                "kind": "hospital bed"
+              },
+              {
+                "at": {
+                  "x": 216,
+                  "y": 168
+                },
+                "kind": "hospital bed"
+              },
+              {
+                "at": {
+                  "x": 312,
+                  "y": 168
+                },
+                "kind": "hospital bed"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 168
+                },
+                "kind": "hospital bed"
+              },
+              {
+                "at": {
+                  "x": 120,
+                  "y": 72
+                },
+                "kind": "nurse station"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 72
+                },
+                "kind": "nurse station"
+              },
+              {
+                "at": {
+                  "x": 504,
+                  "y": 264
+                },
+                "kind": "fridge"
+              },
+              {
+                "at": {
+                  "x": 504,
+                  "y": 120
+                },
+                "kind": "toilet"
+              }
+            ],
+            "spawners": []
+          },
+          "power": [
+            "B----------..",
+            "..........-..",
+            "..........-..",
+            "..........-..",
+            "..........-..",
+            "..........-..",
+            ".............",
+            "............."
+          ],
+          "water": [
+            ".............",
+            ".............",
+            "..........o..",
+            "..........o..",
+            "..........o..",
+            "..........o..",
+            "..........o..",
+            "..........ooo"
+          ]
+        }
+      }
+    ]
+  },
+  "open": "hospital",
+  "steps": [
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 2
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 3,
+        "y": 2
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 8,
+        "y": 2
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 7,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 4
+    },
+    {
+      "expect_log": "hired as a nurse"
+    },
+    {
+      "tick": 600
+    },
+    {
+      "shot": "four hospital beds and nurse stations"
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "nurse rounds and four hospital beds"
+    },
+    {
+      "press": "job"
+    },
+    {
+      "shot": "nurse twelve hour shift"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "maps"
+    }
+  ],
+  "timeout": 300
+}

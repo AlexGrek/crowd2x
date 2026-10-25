@@ -39,6 +39,7 @@ use crate::sim::job::Job;
 use super::goal::Goals;
 use super::memory::Memory;
 use super::routines::{Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
+use super::routines::{DepartRoutine, FleeRoutine, HuntRoutine, ProwlRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -90,6 +91,15 @@ pub enum Routine {
     Orders(OrdersRoutine),
     Work(WorkRoutine),
     Ready(ReadyRoutine),
+    Hospital,
+    /// Run for safety while frightened (a person's).
+    Flee(FleeRoutine),
+    /// Hunt whoever it saw outside (a deathdog's).
+    Hunt(HuntRoutine),
+    /// Leave by day (a deathdog's).
+    Depart(DepartRoutine),
+    /// Prowl round the walls (a deathdog's).
+    Prowl(ProwlRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -126,6 +136,28 @@ impl Routine {
         Routine::Ready(ReadyRoutine::new())
     }
 
+    pub const fn hospital() -> Routine { Routine::Hospital }
+
+    /// Run for a way in while something scared it lately.
+    pub const fn flee() -> Routine {
+        Routine::Flee(FleeRoutine)
+    }
+
+    /// Hunt the person last seen outside the walls.
+    pub const fn hunt() -> Routine {
+        Routine::Hunt(HuntRoutine)
+    }
+
+    /// Go back into the wasteland by day.
+    pub const fn depart() -> Routine {
+        Routine::Depart(DepartRoutine)
+    }
+
+    /// Circle the walls, always.
+    pub const fn prowl() -> Routine {
+        Routine::Prowl(ProwlRoutine)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
@@ -134,6 +166,11 @@ impl Routine {
             Routine::Orders(routine) => routine.name(),
             Routine::Work(routine) => routine.name(),
             Routine::Ready(routine) => routine.name(),
+            Routine::Hospital => "get well",
+            Routine::Flee(routine) => routine.name(),
+            Routine::Hunt(routine) => routine.name(),
+            Routine::Depart(routine) => routine.name(),
+            Routine::Prowl(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -148,6 +185,11 @@ impl Routine {
             Routine::Orders(routine) => routine.arrange(ctx, goals),
             Routine::Work(routine) => routine.arrange(ctx, goals),
             Routine::Ready(routine) => routine.arrange(ctx, goals),
+            Routine::Hospital => ctx.memory.medical.arrange(ctx.think.clock.day(), goals),
+            Routine::Flee(routine) => routine.arrange(ctx, goals),
+            Routine::Hunt(routine) => routine.arrange(ctx, goals),
+            Routine::Depart(routine) => routine.arrange(ctx, goals),
+            Routine::Prowl(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -161,6 +203,11 @@ impl Routine {
             Routine::Orders(routine) => routine.debug_fields(),
             Routine::Work(routine) => routine.debug_fields(),
             Routine::Ready(routine) => routine.debug_fields(),
+            Routine::Hospital => Vec::new(),
+            Routine::Flee(routine) => routine.debug_fields(),
+            Routine::Hunt(routine) => routine.debug_fields(),
+            Routine::Depart(routine) => routine.debug_fields(),
+            Routine::Prowl(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -175,8 +222,14 @@ impl Routine {
         let (committed, pending) = match self {
             Routine::Need(routine) => (routine.is_committed(), 0),
             Routine::Sleep(routine) => (routine.is_committed(), 0),
-            Routine::StayBusy(StayBusyRoutine) => (false, 0),
+            Routine::StayBusy(StayBusyRoutine) | Routine::Hospital => (false, 0),
             Routine::Orders(OrdersRoutine) => (false, 0),
+            // Nothing to keep: what scared a person, or what a deathdog is
+            // after, is in its memory.
+            Routine::Flee(FleeRoutine)
+            | Routine::Hunt(HuntRoutine)
+            | Routine::Depart(DepartRoutine)
+            | Routine::Prowl(ProwlRoutine) => (false, 0),
             Routine::Work(routine) => (routine.is_on_shift(), 0),
             Routine::Ready(routine) => {
                 let (ready, pending) = routine.state();
@@ -203,7 +256,8 @@ impl Routine {
             Routine::Sleep(routine) => routine.set_committed(saved.committed),
             Routine::Work(routine) => routine.set_on_shift(saved.committed),
             Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
-            Routine::StayBusy(_) | Routine::Orders(_) => {}
+            Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital => {}
+            Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) => {}
             #[cfg(test)]
             Routine::Dial(_) => {}
         }

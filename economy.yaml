@@ -35,6 +35,7 @@ wages:
   food factory worker: 40     # low
   food courier: 40            # low
   playzone administrator: 40  # low
+  nurse: 40
   accountant: 60              # mid
 
 # What a thing costs taken from a fridge, every item by name

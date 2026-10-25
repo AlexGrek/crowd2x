@@ -26,7 +26,7 @@ pub struct SlotRecord {
     #[prost(bool, tag = "3")]
     pub holds_cell: bool,
     /// What it is. Must agree with the kind its uid says.
-    #[prost(oneof = "Kind", tags = "4, 5")]
+    #[prost(oneof = "Kind", tags = "4, 5, 6")]
     pub kind: Option<Kind>,
 }
 
@@ -36,6 +36,8 @@ pub enum Kind {
     Human(Human),
     #[prost(message, tag = "5")]
     Dog(Dog),
+    #[prost(message, tag = "6")]
+    Deathdog(Deathdog),
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -71,6 +73,20 @@ pub struct Dog {
     pub identity: Option<Identity>,
 }
 
+/// A deathdog: a body, a mind, which way it faces and its background
+/// timers. No name, no needs, nothing carried.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Deathdog {
+    #[prost(message, optional, tag = "1")]
+    pub walker: Option<Walker>,
+    #[prost(message, optional, tag = "2")]
+    pub brain: Option<Brain>,
+    #[prost(enumeration = "Facing", tag = "3")]
+    pub facing: i32,
+    #[prost(message, optional, tag = "4")]
+    pub schedule: Option<Schedule>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Facing {
@@ -95,6 +111,10 @@ pub struct Body {
     /// Dead: it thinks and moves no more. Absent, alive.
     #[prost(bool, tag = "6")]
     pub dead: bool,
+    /// Running for its life (`Body::is_panicking`). Absent, calm — all
+    /// anybody was before there were deathdogs.
+    #[prost(bool, tag = "7")]
+    pub panicking: bool,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

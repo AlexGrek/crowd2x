@@ -115,6 +115,12 @@ pub const HURRY: f32 = 0.75;
 /// breaking into a run. Watched, not world time — this is something seen.
 pub const SECONDS_TO_HURRY: f32 = 1.0;
 
+/// How fast anybody running for its life goes, in cells a watched second:
+/// flat out at once, whatever its own pace, its hurry or its gait — a king
+/// flees as fast as anyone. Exactly a hunting deathdog's top speed
+/// (`kinds::DEATHDOG_SPEED` flat out), so a chase is won by the head start.
+pub const PANIC_SPEED: f32 = 7.0;
+
 /// The part of an entity that walks: shared by every kind, because "has a
 /// position, a route, and somewhere that route ends" is not specific to any of
 /// them.
@@ -206,9 +212,23 @@ impl Walker {
     }
 
     /// How fast it is going right now: its own pace, and as much faster as
-    /// the hurry it is in, at the gait it keeps.
+    /// the hurry it is in, at the gait it keeps — or [`PANIC_SPEED`],
+    /// running for its life ([`Walker::panic`]).
     pub fn current_speed(&self) -> f32 {
+        if self.body.is_panicking() {
+            return PANIC_SPEED;
+        }
         self.speed * self.gait * (1.0 + HURRY * self.hurry)
+    }
+
+    /// **Run for its life, or stop.** Told by the brain once a tick, after
+    /// [`Walker::hurry`], whether the goal in charge is fleeing; on only
+    /// while there is a route to run, so a body standing still is not seen
+    /// panicking. Kept on the body ([`Body::is_panicking`]), which the move
+    /// step reads.
+    pub fn panic(&mut self, on: bool) {
+        let on = on && self.is_walking();
+        self.body.set_panicking(on);
     }
 
     /// Walk at `gait` of its own pace from now on ([`Walker::gait`]'s
@@ -374,13 +394,14 @@ impl Walker {
             None => Allowance::new(FAR_LIMIT),
         };
         let given = allowance.cells;
+        let kind = self.body.uid().kind();
         let status = path::search(
             &mut self.route.pending,
             ctx.map,
             request.start,
             request.goals,
             &mut allowance,
-            |c| ctx.step_cost_with(c, request.key),
+            |c| ctx.step_cost_with(c, request.key, kind),
             self.route.path.output(),
         );
         if let Some(meter) = &mut self.meter {
@@ -509,6 +530,7 @@ impl Walker {
         let final_target = Some(target) == self.route.path.destination();
         let uid = self.body.uid();
         let key = self.body.home();
+        let kind = uid.kind();
         let here = self.body.center_position();
         // A local crowd snapshot is valid only for this tick. An exhausted
         // repair fails back to the goal's bounded wait/retry, retaining the
@@ -520,7 +542,7 @@ impl Walker {
             target,
             DETOUR_LIMIT,
             |cell| {
-                ctx.step_cost_with(cell, key).filter(|_| {
+                ctx.step_cost_with(cell, key, kind).filter(|_| {
                     (!final_target && cell == target) || ctx.occupancy.is_free_for(cell, uid)
                 })
             },

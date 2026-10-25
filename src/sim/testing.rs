@@ -103,6 +103,10 @@ impl World {
                 if into == from {
                     entity.apply(&intent);
                     MoveOutcome::Moved
+                } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && self.map.site().contains(into) {
+                    // `sim::move_step`'s refusal of a deathdog's step onto
+                    // the site, kept in step with it.
+                    MoveOutcome::Blocked { by: None }
                 } else if !self.map.is_passable(into) && !self.features.is_enterable(into) {
                     // Kept in step with `sim::move_step`'s own exception for
                     // an `Access::Entered` feature — see that function's
@@ -120,9 +124,14 @@ impl World {
                 }
             }
         };
+        // Seen panicking or not, as the move step would write it for a
+        // crowd; anybody else a test says is panicking stays so.
+        let (uid, panicking) = (entity.uid(), entity.body().is_panicking());
+        self.facilities.panics.set(uid, panicking && intent != Intent::Idle);
         let effect = entity.react(&self.ctx(), outcome);
         self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();
+        self.facilities.wounds.begin_tick();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         self.facilities.doors.advance(self.dt, &self.occupancy);
         self.facilities.fridges.advance(self.dt * super::clock::TIME_SCALE);

@@ -46,17 +46,28 @@ pub(crate) const RANDOM_MASK: u64 = (1 << RANDOM_BITS) - 1;
 pub enum EntityType {
     Human = 1,
     Dog = 2,
+    /// A beast of the wasteland, out at night to hunt whoever is outside
+    /// the walls (`sim::deathdogs`).
+    Deathdog = 3,
 }
 
 impl EntityType {
-    pub const ALL: [EntityType; 2] = [EntityType::Human, EntityType::Dog];
+    pub const ALL: [EntityType; 3] = [EntityType::Human, EntityType::Dog, EntityType::Deathdog];
 
     /// The name used in logs and in a QA script's `spawn` step.
     pub const fn name(self) -> &'static str {
         match self {
             EntityType::Human => "human",
             EntityType::Dog => "dog",
+            EntityType::Deathdog => "deathdog",
         }
+    }
+
+    /// Whether a body of this kind never sets foot on the map's site: a
+    /// route for one goes round it, and the move step refuses it a step in
+    /// (`sim::deathdogs`).
+    pub const fn keeps_off_the_site(self) -> bool {
+        matches!(self, EntityType::Deathdog)
     }
 
     pub fn from_name(name: &str) -> Option<EntityType> {
@@ -72,6 +83,7 @@ impl EntityType {
         match tag {
             1 => Some(EntityType::Human),
             2 => Some(EntityType::Dog),
+            3 => Some(EntityType::Deathdog),
             _ => None,
         }
     }

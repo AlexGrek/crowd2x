@@ -547,11 +547,11 @@ fn portrait(
                 }
             });
         }
-        Some(EntityType::Dog) => {
+        Some(kind @ (EntityType::Dog | EntityType::Deathdog)) => {
             let Some(sheets) = sheets else {
                 return;
             };
-            let (image, atlas) = sheets.portrait(facing_of(entity));
+            let (image, atlas) = sheets.portrait(super::actors::breed_of(kind), facing_of(entity));
             portrait.with_children(|stack| {
                 stack.spawn((layer_node(), ImageNode::from_atlas_image(image, atlas)));
             });
@@ -747,7 +747,9 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     };
     let shift = job.shift;
     let at_work = entity.interacting_with() == Some(job.workplace);
-    let now = if job.is_due(clock) {
+    let now = if entity.is_on_sick_leave(clock) {
+        "sick leave".to_string()
+    } else if job.is_due(clock) {
         match entity.current_goal() {
             Some(goal) if goal == job.kind.goal() => job.kind.now(at_work, entity.inventory()).to_string(),
             Some(goal) if entity.is_getting_ready() && READY_NEEDS.iter().any(|ready| ready.need.goal == goal) => {

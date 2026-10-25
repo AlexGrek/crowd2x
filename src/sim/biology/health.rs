@@ -13,7 +13,7 @@
 
 use crate::sim::clock::HOUR;
 
-use super::{Process, ProcessId, Stats};
+use super::{Event, Process, ProcessId, Stats};
 
 /// Hunger at which a body starves, and starving hurts: the top of its range.
 pub const STARVING: f32 = 100.0;
@@ -80,9 +80,22 @@ pub fn cause_of_death(stats: &Stats) -> &'static str {
     }
 }
 
+impl Health {
+    pub(super) fn advance_hospital(stats: &mut Stats, dt: f32) {
+        stats.change_health(-harm(stats) * dt);
+    }
+}
+
 impl Process for Health {
     fn id(&self) -> ProcessId {
         ProcessId::Health
+    }
+
+    fn handle(&mut self, event: Event, _novelty: f32, stats: &mut Stats) {
+        if let Event::Treated { hp } = event { stats.change_health(hp.max(0.0)); }
+        if let Event::Bitten { damage } = event {
+            stats.change_health(-(damage as f32));
+        }
     }
 
     fn advance(&mut self, stats: &mut Stats, dt: f32) {

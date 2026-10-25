@@ -127,6 +127,8 @@ pub const PALETTE: &[PaletteItem] = &[
     // somebody plays (`sim::playzone`).
     PaletteItem::animated("playzone computer", "playzone_computer_idle.png", 2).used("playzone_computer.png", 2),
     // The accountant's, in the palace: an office computer to look at.
+    PaletteItem::upscaled("hospital bed", "hospital_bed.png"),
+    PaletteItem::animated("nurse station", "computer_idle.png", 10).used("computer.png", 11),
     PaletteItem::animated("accountant computer", "computer_idle.png", 10).used("computer.png", 11),
     PaletteItem::animated("arcade cabinet", "arcade_cabinet_idle.png", 2).used("arcade_cabinet.png", 4),
     // The farm's wooden grain bin, a farmer's workplace and store of wheat
