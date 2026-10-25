@@ -246,15 +246,17 @@ side-by-side tests.
 
 `pb::Memory.chat` (tag 5, `pb::Chat { with, phase: ChatPhase, leads, since }`, absent = in no
 chat), `pb::Memory.relations` (6, `pb::Relation { who, points, chatted? }`, empty = nobody known)
-and `pb::Memory.night` (7, 0 = not yet noted); `pb::Body.family` (8, the spawn house's property,
+and `pb::Memory.night` (7, 0 = not yet noted), `pb::Memory.smalltalk` (8, `pb::Smalltalk { with,
+since, answered }`, absent = none) and `pb::Memory.smalltalked` (9, optional, when it last started
+one); `pb::Body.family` (8, the spawn house's property,
 absent = no family); `pb::World.relationship_rules` (20, `pb::RelationshipRule { name, value }`,
 a rule not named is its default, an unknown name refused). `GoalId::Chat` = 23 (a
 `pb::Executor::Seek`, its retries), the task `"talk"` by name, the routine "keep company" on the
-end of a person's list (older saves load without it). **Not saved**: `Chats` (gathered by every
-think step) and `Society`'s people (rebuilt by `Society::of` from each body's family and each
+end of a person's list (older saves load without it). **Not saved**: `Chats` and `Smalltalks`
+(gathered by every think step) and `Society`'s people (rebuilt by `Society::of` from each body's family and each
 job, with the saved rules). The side-by-side fingerprint includes `GameState::society()`. Test:
-`a_crowd_saved_mid_chat_carries_on_exactly` (seen failing with the chat not restored, and with
-the society not rebuilt). The `relationships` skill.
+`a_crowd_saved_mid_chat_carries_on_exactly` (seen failing with the chat not restored, with
+the society not rebuilt, and with the small talk not restored). The `relationships` skill.
 
 ## Economy state
 

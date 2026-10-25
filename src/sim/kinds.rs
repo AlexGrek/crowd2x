@@ -38,7 +38,7 @@ use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
 use super::job::Job;
-use super::relationships::{Chat, Chatter, Relations};
+use super::relationships::{Chat, Chatter, Relations, Smalltalk, Smalltalker};
 use super::item::ItemKind;
 use super::property::PropertyId;
 use super::talents::Talents;
@@ -418,6 +418,24 @@ impl GameEntity for Human {
             return None;
         }
         self.brain.memory().chat()
+    }
+
+    /// Nobody talks once dead.
+    fn smalltalker(&self) -> Option<Smalltalker> {
+        let body = self.walk.body();
+        self.smalltalk().map(|smalltalk| Smalltalker {
+            who: body.uid(),
+            with: smalltalk.with,
+            answered: smalltalk.answered,
+            cell: body.center_position(),
+        })
+    }
+
+    fn smalltalk(&self) -> Option<Smalltalk> {
+        if self.is_dead() {
+            return None;
+        }
+        self.brain.memory().smalltalk()
     }
 
     fn display_name(&self) -> Option<String> {

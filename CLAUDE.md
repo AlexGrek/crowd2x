@@ -67,8 +67,9 @@ People get on: everybody who spawned in one house is a family (never under 30 po
 everybody with the same kind of job a colleague (never under 10), and a point is lost to
 everybody each night. Wanderers who see each other may ask for a chat (10% a stranger, 24% an
 acquaintance, 40% a friend), walk over and talk, each thinking 5-10 better of the other, and do
-not chat again for an hour. Every number is a rule in `relationships.yaml`; the unit panel's
-`relationship` tab lists who somebody knows.
+not chat again for an hour. Anybody awake with somebody close by — at work too — now and then
+makes small talk with them, half a point each, and sparks fly between the two. Every number is a
+rule in `relationships.yaml`; the unit panel's `relationship` tab lists who somebody knows.
 
 ## Commands
 
@@ -121,7 +122,7 @@ to `screenshots/`.
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
 | Money, budget, wages, taxes, care, fridge prices, timesheets, payroll, accountant, economy.yaml or economy menu | `economy` (+ `jobs`, `savegame` as needed) |
-| Relationships: families, colleagues, chats between wanderers, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
+| Relationships: families, colleagues, chats between wanderers, small talk and its sparks, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
@@ -200,6 +201,7 @@ src/game/economy.rs     live tariff menu and YAML loading                    [ec
 src/sim/relationships.rs  rules, relations, families and colleagues, chats  [relationships]
 src/sim/brain/social.rs, goals/chat.rs, tasks/talk.rs  asking, the walk, the talk  [relationships]
 src/game/relationships.rs  relationships.yaml for a new game                [relationships]
+src/game/smalltalk.rs   the sparks between two making small talk            [relationships, game-screen]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]

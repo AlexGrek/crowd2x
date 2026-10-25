@@ -28,18 +28,26 @@
 //!
 //! [`Rules`]: crate::sim::relationships::Rules
 //!
+//! **Small talk** is agreed the same way and is far less: a person awake with
+//! somebody close by starts one now and then on a look round ([`strike_up`]),
+//! whatever it is doing — at work too — the other answers through the crowd's
+//! `Smalltalks` ([`small_talk`]), and each thinks the smalltalk gain better of
+//! the other. No goal, no walk, no task: nothing is put down for it, and the
+//! game draws the sparks.
+//!
 //! A person's only: nobody else is ever asked, and nobody else asks.
 
 use rand::RngExt;
 
 use crate::sim::entity::{Body, Think};
 use crate::map::Point;
-use crate::sim::relationships::{Chat, Phase};
+use crate::sim::relationships::{Chat, Phase, Smalltalk};
 use crate::sim::rng::tick_rng;
 use crate::sim::uid::{EntityType, Uid};
 
 use super::goal::GoalId;
 use super::memory::Memory;
+use super::perception::Sightings;
 
 /// `other`, a person, has just come into view in `cell` — news to
 /// attention. If this unit is wandering, in no chat, and has not chatted with
@@ -136,12 +144,115 @@ pub(super) fn tend(ctx: &Think<'_>, body: &Body, memory: &mut Memory, top: GoalI
     }
 }
 
+/// The stream small talk's rolls are drawn from, mixed into the tick so they
+/// are not the draws a wander or a first look makes.
+const SMALLTALK_STREAM: u64 = 0x736d_616c_6c74_616c;
+
+/// On a look round, awake: with somebody awake close by — within the small
+/// talk reach, a person, in no chat or small talk of its own — a person in
+/// neither may start a small talk, at the smalltalks an hour spread over the
+/// looks ([`Rules::smalltalk_chance`]), and not within the minutes between
+/// smalltalks of the last it started. Whatever it is doing: at work, on its
+/// way, waiting. One roll a look, however many are near; the first of them
+/// seen is who it talks to.
+///
+/// [`Rules::smalltalk_chance`]: crate::sim::relationships::Rules::smalltalk_chance
+pub(super) fn strike_up(ctx: &Think<'_>, body: &Body, memory: &mut Memory, sightings: &Sightings, elapsed: f32) {
+    if memory.smalltalk().is_some() || memory.chat().is_some() {
+        return;
+    }
+    let me = body.uid();
+    let now = ctx.clock.elapsed();
+    let rules = ctx.society.rules();
+    if memory.smalltalked().is_some_and(|when| now - when < rules.smalltalk_again_after()) {
+        return;
+    }
+    let roll: f32 = tick_rng(me, ctx.tick ^ SMALLTALK_STREAM).random();
+    if roll >= rules.smalltalk_chance(elapsed) {
+        return;
+    }
+    let here = body.center_position();
+    let reach = rules.smalltalk_reach();
+    let near = sightings.iter().find(|seen| {
+        seen.uid != me
+            && seen.uid.kind() == Some(EntityType::Human)
+            && here.chebyshev_distance(seen.cell) <= reach
+            && ctx.chats.get(seen.uid).is_none()
+            && ctx.smalltalks.get(seen.uid).is_none()
+    });
+    if let Some(other) = near {
+        memory.set_smalltalk(Smalltalk { with: other.uid, since: now, answered: false });
+        memory.started_smalltalk(now);
+    }
+}
+
+/// Every tick: answer a small talk somebody close by has started with it,
+/// see whether one it started was answered, and end one that has gone on its
+/// minutes, whose other side has stopped, or whose other has walked off. Each side has its points — the
+/// smalltalk gain on the level — when both are in it. Asleep, or in a chat,
+/// it is in none.
+pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asleep: bool) {
+    let me = body.uid();
+    let busy = asleep || memory.chat().is_some();
+    let Some(smalltalk) = memory.smalltalk() else {
+        if busy || ctx.smalltalks.is_empty() {
+            return;
+        }
+        let here = body.center_position();
+        let reach = ctx.society.rules().smalltalk_reach();
+        let opener = ctx.smalltalks.openings(me).find(|opener| here.chebyshev_distance(opener.cell) <= reach).map(|opener| opener.who);
+        if let Some(opener) = opener {
+            let now = ctx.clock.elapsed();
+            memory.set_smalltalk(Smalltalk { with: opener, since: now, answered: true });
+            memory.started_smalltalk(now);
+            let (before, after) = gain(ctx, me, memory, opener);
+            ctx.log.related(me, opener, format!("{opener} made small talk with {me}: {before:.1} -> {after:.1}"));
+        }
+        return;
+    };
+    let now = ctx.clock.elapsed();
+    let rules = ctx.society.rules();
+    let other = ctx.smalltalks.get(smalltalk.with).filter(|other| other.with == me);
+    if busy {
+        memory.forget_smalltalk();
+    } else if !smalltalk.answered {
+        match other {
+            Some(_) => {
+                memory.set_smalltalk(Smalltalk { answered: true, ..smalltalk });
+                gain(ctx, me, memory, smalltalk.with);
+            }
+            None if now - smalltalk.since >= rules.invite_patience() => memory.forget_smalltalk(),
+            None => {}
+        }
+    } else if other.is_none_or(|other| drifted_apart(body, other.cell, rules.smalltalk_reach()))
+        || now - smalltalk.since >= rules.smalltalk_length()
+    {
+        memory.forget_smalltalk();
+    }
+}
+
+/// Whether the other, in `cell`, has gone too far off to talk to: a step past
+/// the reach — small talk walks on with whoever is having it, and one step's
+/// slack keeps two walking side by side from breaking off and starting again.
+fn drifted_apart(body: &Body, cell: Point, reach: i32) -> bool {
+    body.center_position().chebyshev_distance(cell) > reach + 1
+}
+
+/// A small talk with `with` is had: what `me` thinks of them goes up by the
+/// smalltalk gain, on the level, floor and all. What it was and came to.
+fn gain(ctx: &Think<'_>, me: Uid, memory: &mut Memory, with: Uid) -> (f32, f32) {
+    let rules = ctx.society.rules();
+    let before = ctx.society.level(me, with, memory.relations().points(with));
+    let after = memory.relations_mut().smalltalked(with, before, rules.smalltalk_gain, rules);
+    (before, after)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::map::{Map, Size, FLOOR};
     use crate::sim::clock::{Clock, MINUTE, TIME_SCALE};
-    use crate::sim::relationships::{Chatter, Rules};
+    use crate::sim::relationships::{Chatter, Rule, Rules, Smalltalker};
     use crate::sim::testing::World;
 
     const ME: Point = Point::new(3, 3);
@@ -286,5 +397,135 @@ mod tests {
         let mut memory = Memory::new();
         notice(&open.ctx(), &me(), &mut memory, GoalId::Eat, other(), OTHER);
         assert!(memory.chat().is_none());
+    }
+
+    // --- small talk ---
+
+    /// The other, seen in `cell`.
+    fn seen(cell: Point) -> Sightings {
+        use super::super::perception::{Range, Sighting};
+        Sightings::of(&[Sighting { uid: other(), cell, range: Range::Near }])
+    }
+
+    /// A world `minutes` in, the other in `talk` with [`me`], from [`OTHER`].
+    fn talking_world(minutes: f32, talk: Option<bool>) -> World {
+        let mut world = world(minutes, None);
+        let talker = talk.map(|answered| Smalltalker { who: other(), with: me().uid(), answered, cell: OTHER });
+        world.smalltalks.set(other(), talker);
+        world
+    }
+
+    /// Looks a few seconds apart — each its own roll — and how many of them
+    /// started a small talk with somebody seen in `cell`.
+    fn openings(world: &mut World, cell: Point, smalltalks_an_hour: f64) -> usize {
+        world.society.change_rule(Rule::SmalltalksAnHour, smalltalks_an_hour);
+        (0..400)
+            .filter(|_| {
+                world.tick += 1;
+                let mut memory = Memory::new();
+                strike_up(&world.ctx(), &me(), &mut memory, &seen(cell), 60.0);
+                memory.smalltalk().is_some()
+            })
+            .count()
+    }
+
+    #[test]
+    fn somebody_close_by_is_drawn_into_small_talk_now_and_then_and_nobody_further_off() {
+        // Ten an hour, a look a minute: one look in six.
+        let started = openings(&mut world(10.0, None), OTHER, 10.0);
+        assert!((40..100).contains(&started), "{started} of 400 at a sixth");
+        // Three cells off, past the reach of two.
+        assert_eq!(openings(&mut world(10.0, None), Point::new(6, 3), 1000.0), 0);
+        // None while it is in a chat, or a small talk already.
+        let mut world = world(10.0, None);
+        world.society.change_rule(Rule::SmalltalksAnHour, 1000.0);
+        let mut memory = chatting(Phase::Talking, 10.0);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        assert!(memory.smalltalk().is_none());
+    }
+
+    #[test]
+    fn nobody_starts_a_small_talk_within_the_minutes_between_smalltalks_of_the_last() {
+        let mut world = world(40.0, None);
+        world.society.change_rule(Rule::SmalltalksAnHour, 1000.0);
+        let mut memory = Memory::new();
+        memory.started_smalltalk((20.0 * MINUTE) as f64);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        assert!(memory.smalltalk().is_none(), "twenty minutes since the last");
+        world.clock = Clock::after_watching((51.0 * MINUTE / TIME_SCALE) as f64);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        assert_eq!(memory.smalltalk().map(|talk| (talk.with, talk.answered)), Some((other(), false)));
+    }
+
+    #[test]
+    fn a_small_talk_answered_is_half_a_point_to_each_and_over_in_its_minutes() {
+        // The other starts one; this side, awake and close by, answers...
+        let world_ = talking_world(10.0, Some(false));
+        let mut memory = Memory::new();
+        small_talk(&world_.ctx(), &me(), &mut memory, false);
+        assert_eq!(memory.smalltalk().map(|talk| (talk.with, talk.answered)), Some((other(), true)));
+        assert_eq!(memory.relations().points(other()), 0.5);
+        assert_eq!(memory.smalltalked(), Some((10.0 * MINUTE) as f64));
+        // ...and goes on while the other does, for four minutes.
+        small_talk(&talking_world(12.0, Some(true)).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_some());
+        small_talk(&talking_world(14.0, Some(true)).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_none());
+        assert_eq!(memory.relations().points(other()), 0.5, "the points stay");
+
+        // The side that started one has its half point once it sees the
+        // answer, on the level: colleagues' floor and all.
+        let mut world_ = talking_world(10.0, Some(true));
+        world_.society.join(me().uid(), None);
+        world_.society.join(other(), None);
+        world_.society.set_job(me().uid(), Some(crate::sim::job::JobKind::Guard));
+        world_.society.set_job(other(), Some(crate::sim::job::JobKind::Guard));
+        let mut memory = Memory::new();
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: false });
+        small_talk(&world_.ctx(), &me(), &mut memory, false);
+        assert_eq!(memory.smalltalk().map(|talk| talk.answered), Some(true));
+        assert_eq!(memory.relations().points(other()), 10.5);
+    }
+
+    #[test]
+    fn small_talk_is_never_answered_asleep_in_a_chat_or_from_too_far_and_ends_with_the_other() {
+        let world_ = talking_world(10.0, Some(false));
+        for (asleep, mut memory) in [(true, Memory::new()), (false, chatting(Phase::Talking, 10.0))] {
+            small_talk(&world_.ctx(), &me(), &mut memory, asleep);
+            assert!(memory.smalltalk().is_none());
+        }
+        let mut far = talking_world(10.0, None);
+        far.smalltalks.set(other(), Some(Smalltalker { who: other(), with: me().uid(), answered: false, cell: Point::new(6, 6) }));
+        let mut memory = Memory::new();
+        small_talk(&far.ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_none(), "three cells off");
+
+        // Answered, then the other stops: over this side too.
+        let mut memory = Memory::new();
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: true });
+        small_talk(&talking_world(11.0, None).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_none());
+        // Walked a step past the reach of each other: over; a step inside
+        // it, still on.
+        let walked = |cell| {
+            let mut world = talking_world(11.0, None);
+            world.smalltalks.set(other(), Some(Smalltalker { who: other(), with: me().uid(), answered: true, cell }));
+            world
+        };
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: true });
+        small_talk(&walked(Point::new(6, 3)).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_some(), "three cells off");
+        small_talk(&walked(Point::new(7, 3)).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_none(), "four");
+        // Falling asleep ends one, too.
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: true });
+        small_talk(&talking_world(11.0, Some(true)).ctx(), &me(), &mut memory, true);
+        assert!(memory.smalltalk().is_none());
+        // One nobody answers is given up on in the minutes to answer.
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: false });
+        small_talk(&talking_world(11.0, None).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_some(), "a minute");
+        small_talk(&talking_world(12.0, None).ctx(), &me(), &mut memory, false);
+        assert!(memory.smalltalk().is_none(), "two");
     }
 }

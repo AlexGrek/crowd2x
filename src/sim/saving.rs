@@ -88,6 +88,7 @@ impl GameState {
             tally: Some(self.facilities.tally.save()),
             crops: self.facilities.fields.save(),
             flowers: self.facilities.flowers.save(),
+            dirt: self.facilities.dirt.save(),
             playzones_run: self.facilities.playzones.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
@@ -187,6 +188,7 @@ impl GameState {
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
+        state.facilities.dirt = super::dirt::DirtLayer::restore(state.map.size(), &world.dirt)?;
         state.facilities.flowers = super::flowers::Flowers::restore(&world.flowers, &state.map, state.clock())?;
         if state.facilities.flowers.iter().any(|bed| state.facilities.properties.of(bed.cell).is_some()) {
             return invalid("a flower bed on private property");
@@ -212,6 +214,7 @@ impl GameState {
         state.moves = vec![MoveOutcome::Idle; capacity];
         state.effects = vec![Effect::None; capacity];
         state.chatters = vec![None; capacity];
+        state.smalltalkers = vec![None; capacity];
         for (slot, entity) in state.entities.iter_slots() {
             state.census.file(slot, entity.center_position());
         }

@@ -62,6 +62,8 @@ pub struct Body {
     /// same house is its family ([`super::relationships`]). Set once, by the
     /// spawn pass; unlike `home`, never handed over with a bed.
     family: Option<PropertyId>,
+    /// Surface contaminants carried by this unit, independent of its needs.
+    dirt: super::dirt::Dirt,
 }
 
 impl Body {
@@ -74,6 +76,7 @@ impl Body {
             dead: false,
             panicking: false,
             family: None,
+            dirt: super::dirt::Dirt::CLEAN,
         }
     }
 
@@ -152,10 +155,20 @@ impl Body {
         self.family = family;
     }
 
+    pub fn dirt(&self) -> super::dirt::Dirt { self.dirt }
+
+    pub fn set_dirt(&mut self, value: super::dirt::Dirt) -> bool {
+        if !value.is_valid() { return false; }
+        self.dirt = value;
+        true
+    }
+
+    pub(crate) fn dirt_mut(&mut self) -> &mut super::dirt::Dirt { &mut self.dirt }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home, dead, panicking, family } = *self;
+        let Body { uid, position: (x, y), frozen, home, dead, panicking, family, dirt } = *self;
         pb::Body {
             uid: uid.raw(),
             x,
@@ -165,6 +178,7 @@ impl Body {
             dead,
             panicking,
             family: family.map(|family| family.get() as u32),
+            dirt: Some(dirt.save()),
         }
     }
 
@@ -192,6 +206,7 @@ impl Body {
             dead: saved.dead,
             panicking: saved.panicking,
             family,
+            dirt: saved.dirt.as_ref().map(super::dirt::Dirt::restore).transpose()?.unwrap_or_default(),
         })
     }
 }
@@ -527,6 +542,20 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// The small talk it is in, as the rest of the crowd sees it this tick —
+    /// what the think step gathers into
+    /// [`Smalltalks`](super::relationships::Smalltalks), like
+    /// [`GameEntity::chatter`]. `None` for a kind that never talks.
+    fn smalltalker(&self) -> Option<super::relationships::Smalltalker> {
+        None
+    }
+
+    /// The small talk it is in, if any, as it remembers it: what the game
+    /// draws sparks for once answered.
+    fn smalltalk(&self) -> Option<super::relationships::Smalltalk> {
+        None
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,
@@ -625,6 +654,7 @@ pub struct Think<'a> {
     /// doing in its field ([`super::fields`]).
     pub fields: &'a super::fields::Fields,
     pub flowers: &'a super::flowers::Flowers,
+    pub dirt: &'a super::dirt::DirtLayer,
     /// Which arcade cabinets work, as of the start of this tick, changed only
     /// by [`super::world_step`]: whether a playzone has an administrator at
     /// its computer ([`super::playzone`]).
@@ -652,6 +682,9 @@ pub struct Think<'a> {
     /// asking somebody for a chat, and where a partner stands
     /// ([`super::relationships::Chats`]).
     pub chats: &'a super::relationships::Chats,
+    /// Who is making small talk with whom, gathered by this tick's think
+    /// step ([`super::relationships::Smalltalks`]).
+    pub smalltalks: &'a super::relationships::Smalltalks,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -698,6 +731,7 @@ impl<'a> Think<'a> {
             bins: &facilities.bins,
             fields: &facilities.fields,
             flowers: &facilities.flowers,
+            dirt: &facilities.dirt,
             playzones: &facilities.playzones,
             economy: &facilities.economy,
             panics: &facilities.panics,
@@ -705,6 +739,7 @@ impl<'a> Think<'a> {
             ways_in: &facilities.ways_in,
             society: &facilities.society,
             chats: &facilities.chats,
+            smalltalks: &facilities.smalltalks,
             electrical: &facilities.electrical,
             dt,
             tick,

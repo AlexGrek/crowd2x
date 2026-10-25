@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::HOUR;
-use crate::sim::relationships::{Chat, Relations};
+use crate::sim::relationships::{Chat, Relations, Smalltalk};
 use crate::sim::uid::Uid;
 
 /// The key a unit remembers its own bed under: a [`Recall::Cell`]. Written once,
@@ -60,6 +60,12 @@ pub struct Memory {
     /// line, like `out_of_reach`: read when somebody new is seen and written
     /// when a chat ends, never every tick.
     relations: Box<Relations>,
+    /// The small talk it is in, if any ([`Smalltalk`]): inline, read of
+    /// every unit every tick like the chat (`sim::relationships::Smalltalks`).
+    smalltalk: Option<Smalltalk>,
+    /// When it last started a small talk, in world seconds; `None` if it
+    /// never has.
+    smalltalked: Option<f64>,
 }
 
 /// Somebody seen, where, and when — in **world** seconds
@@ -254,16 +260,43 @@ impl Memory {
         &mut self.relations
     }
 
+    /// The small talk it is in, if any.
+    pub fn smalltalk(&self) -> Option<Smalltalk> {
+        self.smalltalk
+    }
+
+    /// Be in `smalltalk`, over whatever it was in.
+    pub fn set_smalltalk(&mut self, smalltalk: Smalltalk) {
+        self.smalltalk = Some(smalltalk);
+    }
+
+    /// The small talk is over.
+    pub fn forget_smalltalk(&mut self) {
+        self.smalltalk = None;
+    }
+
+    /// When it last started a small talk, in world seconds.
+    pub fn smalltalked(&self) -> Option<f64> {
+        self.smalltalked
+    }
+
+    /// It started a small talk at `now`.
+    pub fn started_smalltalk(&mut self, now: f64) {
+        self.smalltalked = Some(now);
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted, chat, relations } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked } = self;
         let OutOfReach { places } = **out_of_reach;
         let (relations, night) = relations.save();
         pb::Memory {
             chat: chat.map(|chat| chat.save()),
             relations,
             night,
+            smalltalk: smalltalk.map(|smalltalk| smalltalk.save()),
+            smalltalked: *smalltalked,
             spotted: spotted.map(|Spotted { who, at, when }| pb::Spotted { who: who.raw(), at: Some(at.into()), when }),
             medical: Some(medical.save()),
             keyed: keyed
@@ -296,6 +329,11 @@ impl Memory {
         memory.medical = crate::sim::hospital::Medical::restore(saved.medical.as_ref());
         memory.chat = saved.chat.as_ref().map(Chat::restore).transpose()?;
         *memory.relations = Relations::restore(&saved.relations, saved.night)?;
+        memory.smalltalk = saved.smalltalk.as_ref().map(Smalltalk::restore).transpose()?;
+        memory.smalltalked = match saved.smalltalked {
+            Some(when) if !when.is_finite() => return invalid(format!("memory: small talk started at {when}")),
+            when => when,
+        };
         if let Some(spotted) = &saved.spotted {
             let Some(who) = Uid::from_raw(spotted.who) else {
                 return invalid("memory: spotted nobody");

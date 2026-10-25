@@ -1,0 +1,231 @@
+{
+  "name": "CPU dirt dots show all four channels, refresh and clear, and a dog leaves a trail",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "room",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 9,
+            "height": 5
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor white",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "room",
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "dirt": {
+        "x": 2,
+        "y": 2,
+        "value": {
+          "dirt": 1.0
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 3,
+        "y": 2,
+        "value": {
+          "blood": 1.0
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 4,
+        "y": 2,
+        "value": {
+          "wet": 1.0
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 5,
+        "y": 2,
+        "value": {
+          "burns": 1.0
+        }
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_dirt_tiles": 4
+    },
+    {
+      "shot": "four contamination colors"
+    },
+    {
+      "dirt": {
+        "x": 2,
+        "y": 2,
+        "value": {
+          "dirt": 0.5,
+          "blood": 0.5,
+          "wet": 0.5,
+          "burns": 0.5
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 3,
+        "y": 2,
+        "value": {
+          "dirt": 0.5,
+          "blood": 0.5,
+          "wet": 0.5,
+          "burns": 0.5
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 4,
+        "y": 2,
+        "value": {
+          "dirt": 0.5,
+          "blood": 0.5,
+          "wet": 0.5,
+          "burns": 0.5
+        }
+      }
+    },
+    {
+      "dirt": {
+        "x": 5,
+        "y": 2,
+        "value": {
+          "dirt": 0.5,
+          "blood": 0.5,
+          "wet": 0.5,
+          "burns": 0.5
+        }
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_dirt_tiles": 4
+    },
+    {
+      "shot": "mixed contaminants"
+    },
+    {
+      "dirt": {
+        "x": 2,
+        "y": 2,
+        "value": {}
+      }
+    },
+    {
+      "dirt": {
+        "x": 3,
+        "y": 2,
+        "value": {}
+      }
+    },
+    {
+      "dirt": {
+        "x": 4,
+        "y": 2,
+        "value": {}
+      }
+    },
+    {
+      "dirt": {
+        "x": 5,
+        "y": 2,
+        "value": {}
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "expect_dirt": {
+        "x": 4,
+        "y": 2,
+        "value": {}
+      }
+    },
+    {
+      "expect_dirt_tiles": 0
+    },
+    {
+      "spawn": {
+        "kind": "dog",
+        "x": 4,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "unit_dirt": {
+        "dirt": 1,
+        "blood": 1,
+        "wet": 1,
+        "burns": 1
+      }
+    },
+    {
+      "tick": 250
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "a dog spreads its dirt"
+    }
+  ]
+}

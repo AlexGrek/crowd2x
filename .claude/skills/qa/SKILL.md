@@ -127,7 +127,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
-| `{"relationships": {"stranger chance": 1.0}}` | Set rules relationships are run by, each by its name in `relationships.yaml` (an unknown name fails the step); on the command queue, in force from the next tick, logged `relationships: <name> is <value>`. Every chance at 1 makes chats certain (`qa/relationships.json`). |
+| `{"relationships": {"stranger chance": 1.0}}` | Set rules relationships are run by, each by its name in `relationships.yaml` (an unknown name fails the step); on the command queue, in force from the next tick, logged `relationships: <name> is <value>`. Every chance at 1 makes chats certain (`qa/relationships.json`); `smalltalks an hour` at 10000 makes small talk certain for anybody close by (`qa/smalltalk.json`). |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
 | `{"select_box": {"x": 4, "y": 1}}` | Select the distribution box in a cell, opening its panel (`switch off`/`switch on`, `close`). Game screen. |
@@ -227,6 +227,7 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_world_sprites": {"min": 40, "max": 400}}` | How many sprites of any kind are on the world layer, as a range. The wasteland fills whatever the map does not: about 400 tiles at zoom 1. |
 | `{"expect_chunks": {"min": 4, "max": 30}}` | How many wasteland chunks the open map has loaded, and that the one under the camera is among them: `max` is what says chunks the camera left were dropped (`qa/wasteland.json`). |
 | `{"expect_held": {"item": "food", "count": 1}}` | How many sprites are drawing a held item of this kind, in anybody's hand. |
+| `{"expect_sparks": {"min": 3}}` | At least this many sparks of small talk in the air (`game::smalltalk::Spark`), anybody's. Pause first and `wait` a frame or two after the `tick`: sparks are thrown in real time. `qa/smalltalk.json`. |
 | `{"expect_selected": "human"}` / `{"expect_selected": null}` | What kind of unit is selected, or that nobody is. |
 | `{"expect_carrying": {"item": "food", "count": 3}}` | How many of an item the selected unit has **stowed**. |
 | `{"expect_scrap": {"x": -43, "y": 11, "pieces": 3}}` | How many pieces the heap of scrap in a cell has left (`0`: emptied, or never there), and that the screen agrees — a heap with anything left is drawn on the canvas, an emptied one is not. Give the scrap window a frame (`wait`) after a `tick`. `qa/scrap.json`. |

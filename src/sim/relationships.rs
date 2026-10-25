@@ -47,7 +47,8 @@ use rand::RngExt;
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 
-use super::clock::{watched, MINUTE};
+use super::brain::perception::FAR;
+use super::clock::{watched, HOUR, MINUTE};
 use super::entities::Entities;
 use super::job::JobKind;
 use super::property::PropertyId;
@@ -91,6 +92,19 @@ pub struct Rules {
     /// How long one side done waits for the other to finish, in world
     /// minutes.
     pub minutes_to_wait_for_the_other: f32,
+    /// How many small talks a person starts in an hour of company, on
+    /// average ([`Rules::smalltalk_chance`]).
+    pub smalltalks_an_hour: f32,
+    /// How close, in cells (any way, diagonals one), somebody has to be for
+    /// small talk.
+    pub smalltalk_reach: f32,
+    /// What one small talk adds to the level, each side.
+    pub smalltalk_gain: f32,
+    /// How long a small talk lasts, in world minutes.
+    pub minutes_of_smalltalk: f32,
+    /// How long after starting one a person starts no other, in world
+    /// minutes.
+    pub minutes_between_smalltalks: f32,
 }
 
 /// One number of the [`Rules`], for reading or setting it on its own — by
@@ -113,11 +127,16 @@ pub enum Rule {
     MinutesToAnswer,
     MinutesToMeet,
     MinutesToWaitForTheOther,
+    SmalltalksAnHour,
+    SmalltalkReach,
+    SmalltalkGain,
+    MinutesOfSmalltalk,
+    MinutesBetweenSmalltalks,
 }
 
 impl Rule {
     /// Every rule, in the order `relationships.yaml` lists them.
-    pub const ALL: [Rule; 16] = [
+    pub const ALL: [Rule; 21] = [
         Rule::Most,
         Rule::FamilyFloor,
         Rule::ColleagueFloor,
@@ -134,6 +153,11 @@ impl Rule {
         Rule::MinutesToAnswer,
         Rule::MinutesToMeet,
         Rule::MinutesToWaitForTheOther,
+        Rule::SmalltalksAnHour,
+        Rule::SmalltalkReach,
+        Rule::SmalltalkGain,
+        Rule::MinutesOfSmalltalk,
+        Rule::MinutesBetweenSmalltalks,
     ];
 
     /// Its name in `relationships.yaml`, in a save, and in a QA script.
@@ -155,6 +179,11 @@ impl Rule {
             Rule::MinutesToAnswer => "minutes to answer",
             Rule::MinutesToMeet => "minutes to meet",
             Rule::MinutesToWaitForTheOther => "minutes to wait for the other",
+            Rule::SmalltalksAnHour => "smalltalks an hour",
+            Rule::SmalltalkReach => "smalltalk reach",
+            Rule::SmalltalkGain => "smalltalk gain",
+            Rule::MinutesOfSmalltalk => "minutes of smalltalk",
+            Rule::MinutesBetweenSmalltalks => "minutes between smalltalks",
         }
     }
 
@@ -164,12 +193,14 @@ impl Rule {
     }
 
     /// What it may be: a chance is a share, everything else a number of
-    /// points or minutes, none below nothing and a minute's talk at least.
+    /// points or minutes, none below nothing and a minute's talk at least;
+    /// small talk reaches a cell at least and no further than a person sees.
     pub const fn range(self) -> RangeInclusive<f32> {
         match self {
             Rule::StrangerChance | Rule::AcquaintanceChance | Rule::FriendChance => 0.0..=1.0,
             Rule::Most => 1.0..=10_000.0,
-            Rule::MinutesOfTalk => 1.0..=24.0 * 60.0,
+            Rule::MinutesOfTalk | Rule::MinutesOfSmalltalk => 1.0..=24.0 * 60.0,
+            Rule::SmalltalkReach => 1.0..=FAR as f32,
             _ => 0.0..=10_000.0,
         }
     }
@@ -249,6 +280,11 @@ impl Rules {
             Rule::MinutesToAnswer => self.minutes_to_answer,
             Rule::MinutesToMeet => self.minutes_to_meet,
             Rule::MinutesToWaitForTheOther => self.minutes_to_wait_for_the_other,
+            Rule::SmalltalksAnHour => self.smalltalks_an_hour,
+            Rule::SmalltalkReach => self.smalltalk_reach,
+            Rule::SmalltalkGain => self.smalltalk_gain,
+            Rule::MinutesOfSmalltalk => self.minutes_of_smalltalk,
+            Rule::MinutesBetweenSmalltalks => self.minutes_between_smalltalks,
         }
     }
 
@@ -272,6 +308,11 @@ impl Rules {
             Rule::MinutesToAnswer => &mut self.minutes_to_answer,
             Rule::MinutesToMeet => &mut self.minutes_to_meet,
             Rule::MinutesToWaitForTheOther => &mut self.minutes_to_wait_for_the_other,
+            Rule::SmalltalksAnHour => &mut self.smalltalks_an_hour,
+            Rule::SmalltalkReach => &mut self.smalltalk_reach,
+            Rule::SmalltalkGain => &mut self.smalltalk_gain,
+            Rule::MinutesOfSmalltalk => &mut self.minutes_of_smalltalk,
+            Rule::MinutesBetweenSmalltalks => &mut self.minutes_between_smalltalks,
         };
         *field = value;
     }
@@ -345,6 +386,28 @@ impl Rules {
         (self.minutes_to_wait_for_the_other * MINUTE) as f64
     }
 
+    /// The chance of starting a small talk on one look round, `elapsed`
+    /// world seconds after the last: the smalltalks an hour spread over the
+    /// looks an hour of company holds, at most a certainty.
+    pub fn smalltalk_chance(&self, elapsed: f32) -> f32 {
+        (self.smalltalks_an_hour * elapsed / HOUR).min(1.0)
+    }
+
+    /// How close somebody has to be for small talk, in whole cells.
+    pub fn smalltalk_reach(&self) -> i32 {
+        self.smalltalk_reach as i32
+    }
+
+    /// [`Rules::minutes_of_smalltalk`], in world seconds.
+    pub fn smalltalk_length(&self) -> f64 {
+        (self.minutes_of_smalltalk * MINUTE) as f64
+    }
+
+    /// [`Rules::minutes_between_smalltalks`], in world seconds.
+    pub fn smalltalk_again_after(&self) -> f64 {
+        (self.minutes_between_smalltalks * MINUTE) as f64
+    }
+
     /// What somebody at `level` is to a person, in a word, if not family or
     /// a colleague: a friend, an acquaintance or a stranger.
     pub fn standing(&self, level: f32) -> &'static str {
@@ -400,6 +463,11 @@ const DEFAULT_SHAPE: Rules = Rules {
     minutes_to_answer: 0.0,
     minutes_to_meet: 0.0,
     minutes_to_wait_for_the_other: 0.0,
+    smalltalks_an_hour: 0.0,
+    smalltalk_reach: 0.0,
+    smalltalk_gain: 0.0,
+    minutes_of_smalltalk: 0.0,
+    minutes_between_smalltalks: 0.0,
 };
 
 /// What one person thinks of one other.
@@ -500,6 +568,19 @@ impl Relations {
 
     pub fn is_empty(&self) -> bool {
         self.known.is_empty()
+    }
+
+    /// A small talk with `who`, the relationship at `level`
+    /// ([`Society::level`]) before it: its points become `level` and `gain`
+    /// more, at most the most there is. Not a chat: the hour between chats
+    /// is not started by it. Returns the new points.
+    pub fn smalltalked(&mut self, who: Uid, level: f32, gain: f32, rules: &Rules) -> f32 {
+        let points = (level + gain).clamp(0.0, rules.most);
+        match self.known.binary_search_by_key(&who, |relation| relation.who) {
+            Ok(at) => self.known[at].points = points,
+            Err(at) => self.known.insert(at, Relation { who, points, chatted: f64::NEG_INFINITY }),
+        }
+        points
     }
 
     /// Set `who`'s points outright — for a test that starts two people as
@@ -845,6 +926,86 @@ impl Chats {
     }
 }
 
+/// A small talk one person is in, as it remembers it
+/// ([`Memory::smalltalk`](super::brain::Memory::smalltalk)): a word or two
+/// with somebody close by, had wherever the two are and whatever they are
+/// doing — no walk over, no goal, nothing put down for it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Smalltalk {
+    /// Who with.
+    pub with: Uid,
+    /// When it began, in world seconds: it lasts the minutes of smalltalk
+    /// from then.
+    pub since: f64,
+    /// Whether both are in it: the one who began it waits to see the other
+    /// answer, and each has its points once it has.
+    pub answered: bool,
+}
+
+/// One person in a small talk, as the rest of the crowd sees it this tick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Smalltalker {
+    pub who: Uid,
+    pub with: Uid,
+    pub answered: bool,
+    /// The cell it stood in as the last tick ended.
+    pub cell: Point,
+}
+
+/// **Who is making small talk with whom this tick** ([`Smalltalker`]): what
+/// [`Chats`] is for chats, gathered by the think step the same way and never
+/// saved. "Is the other still talking to me" and "is anybody starting one
+/// with me" are each a binary search.
+#[derive(Clone, Debug, Default)]
+pub struct Smalltalks {
+    by_who: Vec<Smalltalker>,
+    by_with: Vec<Smalltalker>,
+}
+
+impl Smalltalks {
+    /// Everybody in `slots` making small talk, ready to be asked.
+    pub fn rebuild(&mut self, slots: &[Option<Smalltalker>]) {
+        self.by_who.clear();
+        self.by_who.extend(slots.iter().flatten().copied());
+        self.finish();
+    }
+
+    fn finish(&mut self) {
+        self.by_who.sort_unstable_by_key(|talker| talker.who);
+        self.by_with.clear();
+        self.by_with.extend_from_slice(&self.by_who);
+        self.by_with.sort_unstable_by_key(|talker| (talker.with, talker.who));
+    }
+
+    /// `who`'s small talk, if it is making one.
+    pub fn get(&self, who: Uid) -> Option<&Smalltalker> {
+        self.by_who.binary_search_by_key(&who, |talker| talker.who).ok().map(|at| &self.by_who[at])
+    }
+
+    /// Everybody starting a small talk with `to` and not yet answered, lowest
+    /// uid first.
+    pub fn openings(&self, to: Uid) -> impl Iterator<Item = &Smalltalker> {
+        let start = self.by_with.partition_point(|talker| talker.with < to);
+        self.by_with[start..].iter().take_while(move |talker| talker.with == to).filter(|talker| !talker.answered)
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_who.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_who.is_empty()
+    }
+
+    /// Say `who` is making `talker`'s small talk, or none: for a world of one
+    /// (`testing::World`).
+    pub fn set(&mut self, who: Uid, talker: Option<Smalltalker>) {
+        self.by_who.retain(|other| other.who != who);
+        self.by_who.extend(talker);
+        self.finish();
+    }
+}
+
 // --- saving ---
 
 impl Phase {
@@ -862,6 +1023,23 @@ impl Phase {
             pb::ChatPhase::Talking => Phase::Talking,
             pb::ChatPhase::Done => Phase::Done,
         })
+    }
+}
+
+impl Smalltalk {
+    pub(crate) fn save(&self) -> pb::Smalltalk {
+        let Smalltalk { with, since, answered } = *self;
+        pb::Smalltalk { with: with.raw(), since, answered }
+    }
+
+    pub(crate) fn restore(saved: &pb::Smalltalk) -> Result<Smalltalk, Invalid> {
+        let Some(with) = Uid::from_raw(saved.with) else {
+            return invalid("small talk: with nobody");
+        };
+        if !saved.since.is_finite() {
+            return invalid(format!("small talk with {with}: since {}", saved.since));
+        }
+        Ok(Smalltalk { with, since: saved.since, answered: saved.answered })
     }
 }
 

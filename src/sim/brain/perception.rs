@@ -363,6 +363,16 @@ impl Sightings {
     fn is_full(&self) -> bool {
         self.len as usize == SIGHTINGS
     }
+
+    /// A look that saw `seen` — for a test of whoever reacts to one.
+    #[cfg(test)]
+    pub(crate) fn of(seen: &[Sighting]) -> Sightings {
+        let mut sightings = Sightings::NONE;
+        for &sighting in seen {
+            sightings.push(sighting);
+        }
+        sightings
+    }
 }
 
 /// What a unit can see: which way it faces, and how many it saw near and far
@@ -376,6 +386,12 @@ pub struct Perception {
 }
 
 impl Perception {
+    /// Read the current ground directly beneath the body, regardless of facing.
+    /// This is a local sense, independent of the throttled visual cone.
+    pub fn underfoot(&self, ctx: &Think<'_>, body: &Body) -> crate::sim::dirt::Dirt {
+        ctx.dirt.at(body.center_position())
+    }
+
     pub fn heading(&self) -> Heading {
         self.heading
     }

@@ -1127,10 +1127,37 @@ A wanderer that sees somebody new may ask them for a chat (10% a stranger, 24%
 an acquaintance over 1, 40% a friend over 45); a wanderer asked takes it up
 through the per-tick `Chats` index, the asker walks over (`ChatGoal`), both talk
 (`Talk`), each thinks 5-10 better of the other, and they do not chat again for
-an hour. Every number is a rule in `relationships.yaml` (embedded defaults,
+an hour. Anybody awake with somebody within two cells, whatever it is doing
+(at work too), now and then makes small talk (`social::strike_up`, answered
+through the per-tick `Smalltalks` index): half a point each, four minutes, none
+started within thirty of the last, and the game throws sparks between the two
+(`game/smalltalk.rs`; QA `expect_sparks`). Every number is a rule in
+`relationships.yaml` (embedded defaults,
 `CROWD2X_RELATIONSHIPS`, saved per game); QA sets rules with
 `{"relationships": {"stranger chance": 1.0}}`. The unit panel's `relationship`
 tab lists who somebody knows. The full contract is
 [.claude/skills/relationships/SKILL.md](.claude/skills/relationships/SKILL.md);
-coverage: `sim/relationships.rs`, `sim/brain/social.rs`, `save/tests.rs`,
-`qa/relationships.json`.
+coverage: `sim/relationships.rs`, `sim/brain/social.rs`, `game/smalltalk.rs`,
+`save/tests.rs`, `qa/relationships.json`, `qa/smalltalk.json`.
+
+
+### Dirt layer
+
+`sim/dirt.rs` keeps four independent fractions (0..=1): dirt, blood, wet,
+and burns. `Facilities::dirt` is dense on the site and chunked in the wasteland;
+`Body::dirt()` is carried contamination for every unit kind. New worlds and
+older saves start clean. `Input::set_dirt` and `set_unit_dirt` replace values
+through the spawn pass, refusing non-finite or out-of-range components.
+Each successful move into a different cell exchanges 25% of each difference
+between unit and destination, conserving each component. Idle, subcell and
+rejected moves do not exchange; spawning is placement rather than a footstep.
+`Perception::underfoot` reads the current ground directly, independent of vision.
+The sequential move step owns exchange; parallel thinking only reads the layer.
+Wasteland chunks are prepared alongside occupancy; clean distant chunks can be
+reclaimed, while stains persist. As with occupancy, ticks run without a spawn
+pass can grow unprepared wasteland storage. Saves keep nonzero cells in world
+Protobuf tag 21 and carried vectors in Body tag 9.
+`game/dirt.rs` generates stable 16x16 RGBA dot textures on the CPU only for visible
+stained cells, scales them 3x and draws above terrain and below props/actors.
+Colors are brown/red/blue/charcoal, with independent density per component.
+Coverage: `sim/dirt.rs`, `game/dirt.rs`, `save/tests.rs`, `qa/dirt.json`.

@@ -46,10 +46,12 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
 0. perception.turn, and on the unit's Priority::Med beat (every 7th tick):
    attention.age (first: it is the cold memory) -> perception.look ->
    attention.take_in -> Event::Met per new human face, and a wanderer may
-   ask that face for a chat (social::notice)
+   ask that face for a chat (social::notice); then, awake, a word with
+   somebody close by, perhaps (social::strike_up — small talk)
    (eyes shut instead while Task::Sleep is current)
    -> the nights' loss off what it thinks of everybody (Relations::pass_nights)
-   then every tick: social::tend (a chat taken up, agreed or let go)
+   then every tick: social::tend (a chat taken up, agreed or let go) and
+   social::small_talk (small talk answered, kept up or over — no goal, no task)
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
 3. top changed? old.deprioritized -> current task abandoned, walk halted
                 -> queue cleared -> new.prioritized
@@ -73,7 +75,7 @@ This order has consequences:
 | I want units to... | Add |
 | --- | --- |
 | care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
-| react to who or what it sees | a reaction in `Brain::react` step 0 (the `take_in` closure, as `social::notice` asks a new face for a chat); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()`; something about the one seen that only its own brain knows goes in a per-tick index the think or move step gathers (`Panics`, `Chats`), never a read of its entity |
+| react to who or what it sees | a reaction in `Brain::react` step 0 (the `take_in` closure, as `social::notice` asks a new face for a chat); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()`; something about the one seen that only its own brain knows goes in a per-tick index the think or move step gathers (`Panics`, `Chats`, `Smalltalks`), never a read of its entity |
 | care about a time of day, a threat | a **routine** (file map and test list: the `add-routine` skill) |
 | have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
 | do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |

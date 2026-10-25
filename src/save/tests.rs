@@ -395,16 +395,20 @@ fn a_crowd_saved_mid_chat_carries_on_exactly() {
             input.set_process(uid, process, false);
         }
     }
+    // Small talk often, so some is going on when it is saved.
+    state.set_relationship_rule(crate::sim::relationships::Rule::SmalltalksAnHour, 60.0);
     process_game_state(&mut state, DT, &input);
 
-    // On until two are at a chat and somebody already thinks better of
-    // somebody for one.
+    // On until two are at a chat, two more making small talk, and somebody
+    // already thinks better of somebody for one.
     let chatting = |state: &GameState| {
         state.entities().iter().filter(|entity| entity.chat().is_some_and(|chat| chat.phase == Phase::Talking)).count() >= 2
     };
+    let smalltalking =
+        |state: &GameState| state.entities().iter().any(|entity| entity.smalltalk().is_some_and(|talk| talk.answered));
     let known = |state: &GameState| state.entities().iter().any(|entity| entity.relations().is_some_and(|known| !known.is_empty()));
     let mut ticks = 0;
-    while !(chatting(&state) && known(&state)) {
+    while !(chatting(&state) && smalltalking(&state) && known(&state)) {
         run(&mut state, 1);
         ticks += 1;
         assert!(ticks < 4 * 1800, "nobody chatted in four hours");
@@ -1254,4 +1258,48 @@ fn a_chase_saved_at_night_with_a_bite_still_to_be_felt_carries_on_exactly() {
         input
     });
     assert_eq!(state.entities().get(human).and_then(|entity| entity.current_goal()), Some(crate::sim::GoalId::Flee));
+}
+
+#[test]
+fn dirt_on_units_and_tiles_survives_saves_and_parallel_continuation() {
+    use crate::sim::dirt::Dirt;
+    let mut state = GameState::new(Map::new(Size::new(20, 12), FLOOR), 81);
+    let stain = Dirt { dirt: 1.0, blood: 0.75, wet: 0.5, burns: 0.25 };
+    let mut input = Input::new();
+    for i in 0..80 {
+        let uid = state.spawn(EntityType::Dog, Point::new(i % 20, i / 20));
+        input.set_unit_dirt(uid, stain);
+    }
+    input.set_dirt(Point::new(9, 8), stain);
+    // Negative wasteland coordinates must also be saved, even if not loaded.
+    input.set_dirt(Point::new(-41, 77), stain);
+    crate::sim::spawn_pass(&mut state, &input);
+    run(&mut state, 70);
+    let before = state.save_world().dirt.len();
+    assert!(before > 2, "walkers must leave trails before the save");
+    let copy = side_by_side(&mut state, 200, |_, _| Input::new());
+    assert_eq!(copy.save_world().dirt, state.save_world().dirt);
+    for (a, b) in state.entities().iter().zip(copy.entities().iter()) {
+        assert_eq!(a.body().dirt(), b.body().dirt());
+    }
+    assert_eq!(copy.dirt().at(Point::new(-41, 77)), stain);
+}
+
+#[test]
+fn older_saves_default_to_clean_ground_and_clean_units() {
+    let mut state = fixture_world();
+    let mut input = Input::new();
+    input.set_dirt(Point::new(2, 2), crate::sim::dirt::Dirt { dirt: 1.0, ..Default::default() });
+    crate::sim::spawn_pass(&mut state, &input);
+    let mut files = snapshot(&state, &meta(), None);
+    let mut saved = state.save_world();
+    assert!(!saved.dirt.is_empty());
+    saved.dirt.clear();
+    replace(&mut files, WORLD, saved.encode_to_vec());
+    let loaded = restore(&files).unwrap().state;
+    assert_eq!(loaded.dirt().at(Point::new(2, 2)), crate::sim::dirt::Dirt::CLEAN);
+    let uid = state.entities().iter().next().unwrap().uid();
+    let body = state.entities().get(uid).unwrap().body();
+    let mut old = body.save(); old.dirt = None;
+    assert_eq!(crate::sim::entity::Body::restore(&old).unwrap().dirt(), crate::sim::dirt::Dirt::CLEAN);
 }

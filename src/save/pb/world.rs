@@ -73,6 +73,9 @@ pub struct World {
     /// a save from before there were relationships — is its default.
     #[prost(message, repeated, tag = "20")]
     pub relationship_rules: Vec<RelationshipRule>,
+    /// Ground contamination; older worlds start clean.
+    #[prost(message, repeated, tag = "21")]
+    pub dirt: Vec<DirtCell>,
 }
 
 /// One rule relationships are run by, under its name in `relationships.yaml`.
@@ -216,4 +219,25 @@ pub struct Flower {
     pub variety: String,
     #[prost(double, tag = "3")]
     pub sown: f64,
+}
+
+/// Four normalized surface contaminants, shared by ground and bodies.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Dirt {
+    #[prost(float, tag = "1")]
+    pub dirt: f32,
+    #[prost(float, tag = "2")]
+    pub blood: f32,
+    #[prost(float, tag = "3")]
+    pub wet: f32,
+    #[prost(float, tag = "4")]
+    pub burns: f32,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct DirtCell {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    #[prost(message, optional, tag = "2")]
+    pub value: Option<Dirt>,
 }

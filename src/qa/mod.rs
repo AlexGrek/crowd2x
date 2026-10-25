@@ -74,6 +74,7 @@ use crate::editor::props::{Prop, Usable};
 use crate::editor::scrap::Heap;
 use crate::game::actors::{world_pos, Actor, Sim, SimInput};
 use crate::game::held::HeldItem;
+use crate::game::smalltalk::Spark;
 use crate::game::logview::LogView;
 use crate::game::selection::{Selected, SelectedBox, SelectedCrop};
 use crate::game::speed::GameSpeed;
@@ -494,6 +495,7 @@ type DrawnInTheWorld = Or<(With<Sprite>, With<Text2d>)>;
 #[derive(SystemParam)]
 struct Checks<'w, 's> {
     assets: Res<'w, AssetServer>,
+    dirt_tiles: Query<'w, 's, &'static crate::game::dirt::DirtTile>,
     paperdolls: Query<'w, 's, (&'static Actor, &'static crate::characters::human::Paperdoll)>,
     clothing_sprites: Query<'w, 's, (&'static Sprite, &'static Visibility)>,
     clothing_portraits: Query<'w, 's, (&'static ImageNode, &'static Visibility), With<crate::game::unitpanel::ClothingPortrait>>,
@@ -538,6 +540,8 @@ struct Checks<'w, 's> {
     props: Query<'w, 's, (&'static Prop, &'static Usable)>,
     /// Likewise the pictures of what is held, counted off the world.
     held: Query<'w, 's, &'static HeldItem>,
+    /// And the sparks of small talk in the air, for [`Step::ExpectSparks`].
+    sparks: Query<'w, 's, &'static Spark>,
     /// And the heaps of scrap drawn, for [`Step::ExpectScrap`].
     heaps: Query<'w, 's, &'static Heap>,
     log: Res<'w, LogView>,
@@ -1103,6 +1107,26 @@ fn perform(
             ))
         }
 
+        Step::Dirt { x, y, value } => {
+            if !value.is_valid() { return Err("invalid dirt vector".into()); }
+            intents.sim_input.0.set_dirt(crate::map::Point::new(*x, *y), *value);
+            Ok(Next::Now)
+        }
+        Step::UnitDirt(value) => {
+            if !value.is_valid() { return Err("invalid dirt vector".into()); }
+            let uid = intents.selected.get().ok_or("nobody selected")?;
+            intents.sim_input.0.set_unit_dirt(uid, *value);
+            Ok(Next::Now)
+        }
+        Step::ExpectDirt { x, y, value } => {
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let actual = sim.0.dirt().at(crate::map::Point::new(*x, *y));
+            (actual == *value).then_some(Next::Now).ok_or(format!("expected dirt {value:?}, found {actual:?}"))
+        }
+        Step::ExpectDirtTiles(count) => {
+            let actual = checks.dirt_tiles.iter().count();
+            (actual == *count).then_some(Next::Now).ok_or(format!("expected {count} dirt tiles, found {actual}"))
+        }
         Step::Spawn { kind, x, y } => {
             let kind = entity_kind(kind)?;
             intents
@@ -1165,6 +1189,13 @@ fn perform(
                 "expected {count} sprites holding {}, found {actual}",
                 item.name()
             ))
+        }
+
+        Step::ExpectSparks { min } => {
+            let actual = checks.sparks.iter().count();
+            (actual >= *min)
+                .then_some(Next::Now)
+                .ok_or(format!("expected at least {min} sparks of small talk, found {actual}"))
         }
 
         Step::ExpectCarrying { item, count } => {

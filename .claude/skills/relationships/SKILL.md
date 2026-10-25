@@ -1,6 +1,6 @@
 ---
 name: relationships
-description: Relationships in crowd2x - what each person thinks of the people it knows (points per person in its own memory, a point lost to everybody each night), families (everybody who spawned in one house, floor 30) and colleagues (the same kind of job, floor 10) kept in sim::relationships::Society, chats started by wanderers who see each other (a chance by level, 10/24/40%), agreed with no brain reading another through the per-tick Chats index, walked to and talked by ChatGoal and the Talk task, never repeated within an hour, the relationships.yaml rules and the QA `relationships` step that changes them, saving it all, and the unit panel's relationship tab. Maps every concept to the file and function that owns it. Use when changing relationships, families, colleagues, chats, their chances or other rules, relationships.yaml, the relationship tab, or when people stop to talk (or never do).
+description: Relationships in crowd2x - what each person thinks of the people it knows (points per person in its own memory, a point lost to everybody each night), families (everybody who spawned in one house, floor 30) and colleagues (the same kind of job, floor 10) kept in sim::relationships::Society, chats started by wanderers who see each other (a chance by level, 10/24/40%), agreed with no brain reading another through the per-tick Chats index, walked to and talked by ChatGoal and the Talk task, never repeated within an hour, small talk (somebody awake close by, at work too, half a point each, no goal or walk, the Smalltalks index) and its sparks on screen (game::smalltalk), the relationships.yaml rules and the QA `relationships` / `expect_sparks` steps, saving it all, and the unit panel's relationship tab. Maps every concept to the file and function that owns it. Use when changing relationships, families, colleagues, chats, small talk or its sparks, their chances or other rules, relationships.yaml, the relationship tab, or when people stop to talk (or never do).
 ---
 
 # Relationships
@@ -8,8 +8,10 @@ description: Relationships in crowd2x - what each person thinks of the people it
 People get on. Each person keeps **points** for everybody it knows; the **level** of a
 relationship is those points or its **floor**, whichever is higher. Family never falls below
 30, colleagues below 10. **Wanderers who see each other may chat**, and each chat adds 5-10 to
-what each side thinks of the other. Every night takes a point off everybody's points. Every
-number is a **rule** in `relationships.yaml`.
+what each side thinks of the other. **Small talk** is much less: anybody awake with somebody
+close by now and then has a word with them, whatever it is doing — at work too — for half a
+point each, with sparks flying between the two on screen. Every night takes a point off
+everybody's points. Every number is a **rule** in `relationships.yaml`.
 
 Plain Rust in `src/sim/` like the rest of the simulation; the unit panel draws it.
 
@@ -29,6 +31,10 @@ Plain Rust in `src/sim/` like the rest of the simulation; the unit panel draws i
 | A new game's rules from the file | `game/relationships.rs`: `load_rules` (`CROWD2X_RELATIONSHIPS` or `relationships.yaml`), called in `actors::build_world` |
 | Changing a rule in play | `Command::SetRelationshipRule { rule, value }` → `GameState::set_relationship_rule` (clamped, logged `relationships: <name> is <value>`) |
 | The tab | `game/unitpanel.rs`: `Menu::Relationship`, `relationship_block`, from `GameState::acquaintances(uid)` → `relationships::acquaintances` |
+| The small talk a person is in; when it last started one | `relationships::Smalltalk { with, since, answered }`, inline in `Memory::smalltalk`; `Memory::smalltalked` |
+| Who is making small talk with whom this tick | `Smalltalks` (two sorted lists of `Smalltalker`), `Facilities::smalltalks`, `Think::smalltalks`, gathered beside `Chats` (`GameState::smalltalkers`) |
+| Starting one; answering, keeping up and ending one | `brain/social.rs`: `strike_up` (on a look, after `alarm`), `small_talk` (every tick, after `tend`) |
+| The sparks | `game/smalltalk.rs`: `SmalltalkPlugin`, `throw_sparks`, `fly_sparks`, `Spark` |
 
 ## The level, the floors, the nights
 
@@ -87,6 +93,37 @@ need, or the goal held off); no answer within `minutes to answer`; no end within
 meet`; the other not finishing within `minutes to wait for the other`; the leader finding no way
 over (`Blocked`).
 
+## Small talk
+
+No goal, no task, no walk: nothing a unit is doing is put down for it, which is why it happens at
+work. Agreed like a chat, through an index the think step gathers (`GameEntity::smalltalker`
+into `GameState::smalltalkers`, then `Smalltalks::rebuild`), never saved.
+
+1. **Starting** (`social::strike_up`, on the `Priority::Med` look, awake — eyes shut see nobody):
+   in no chat or small talk, not within `minutes between smalltalks` of the last it started
+   (`Memory::smalltalked`), one roll a look of `Rules::smalltalk_chance(elapsed)` —
+   `smalltalks an hour` spread over the look's world seconds, at most 1 — on
+   `tick_rng(me, tick ^ SMALLTALK_STREAM)`; then the first person seen within `smalltalk reach`
+   (Chebyshev) who is in no chat or small talk: `Smalltalk { answered: false }`.
+2. **Answering** (`social::small_talk`): a person awake, in no chat or small talk, with an opening
+   addressed to it (`Smalltalks::openings`, lowest uid first) from within the reach answers at
+   once: `answered: true`, its gain (`Relations::smalltalked`: the level, floor and all, plus
+   `smalltalk gain`; the chat hour untouched), and the log line
+   `"{opener} made small talk with {me}: before -> after"` (`log.related`).
+3. **Answered**: the opener sees the other in `Smalltalks` with it and has its gain too.
+4. **Over**: after `minutes of smalltalk` from its start, or when the other drops out of
+   `Smalltalks` (so both end within a tick), walks a step past the reach (`drifted_apart`), falls
+   asleep or goes into a chat; an opening nobody answers within `minutes to answer`.
+
+**The sparks** (`game/smalltalk.rs`, real time like the goal emoji, so they fly on while paused):
+everybody on the canvas (`VisibleCrowd`) in an *answered* small talk throws a spark every
+`SPARK_EVERY` (0.06 s) from its mouth (`MOUTH` over its cell) at the other's — a ballistic arc
+under `GRAVITY` that lands there at the end of its `SHORTEST_FLIGHT`..`LONGEST_FLIGHT`, with a
+`STRAY` — cooling white → yellow → orange → red (`COOLING`), shrinking 3 → 2 → 1 canvas pixels and
+fading. Plain-colour sprites placed by their corner (`Anchor::BOTTOM_LEFT`) on whole pixels,
+`WORLD_LAYER`, `SPARK_DEPTH` 0.008 over the thrower's depth, never more than `MOST_SPARKS` (400).
+The relationship tab says `making small talk with <name>`; the brains menu `smalltalk`.
+
 ## The rules (`relationships.yaml`)
 
 Flat, one number per rule, every rule named and nothing else (`Rules::from_yaml` refuses a
@@ -106,7 +143,10 @@ by name; a rule not named is its default, an unknown one refused).
 | `least chat gain` / `most chat gain` | 5 / 10 |
 | `minutes of talk` | 15 |
 | `minutes between chats` | 60 |
-| `minutes to answer` / `minutes to meet` / `minutes to wait for the other` | 2 / 60 / 5 |
+| `minutes to answer` / `minutes to meet` / `minutes to wait for the other` | 2 / 60 / 5 (`minutes to answer` is small talk's too) |
+| `smalltalks an hour` / `smalltalk reach` | 1 / 2 cells (1 to perception's `FAR`) |
+| `smalltalk gain` | 0.5 |
+| `minutes of smalltalk` / `minutes between smalltalks` | 4 / 30 |
 
 A new rule: a `Rules` field, a `Rule` variant with its name and range (and `get`/`set` arms),
 its line in `relationships.yaml` (the embedded-defaults test fails without it), and a reader.
@@ -114,14 +154,17 @@ its line in `relationships.yaml` (the embedded-defaults test fails without it), 
 **QA**: `{"relationships": {"stranger chance": 1.0}}` sends `Command::SetRelationshipRule` per
 name (an unknown name fails the step), in force from the next tick; the log says
 `relationships: stranger chance is 1`. `qa/relationships.json` sets every chance to 1 so
-strangers in a yard are sure to chat.
+strangers in a yard are sure to chat. `qa/smalltalk.json` sets `smalltalks an hour` to 10000
+and the chats' chances to 0, and checks the log, the sparks (`{"expect_sparks": {"min": 3}}`,
+counting `Spark` sprites) and the tab.
 
 ## Saving
 
-`pb::Memory.chat` (5), `.relations` (6, `pb::Relation { who, points, chatted? }`), `.night` (7);
+`pb::Memory.chat` (5), `.relations` (6, `pb::Relation { who, points, chatted? }`), `.night` (7),
+`.smalltalk` (8, `pb::Smalltalk { with, since, answered }`), `.smalltalked` (9, optional);
 `pb::Body.family` (8); `pb::World.relationship_rules` (20); `ChatGoal` is a `pb::Executor::Seek`
-(retries); `Talk` is a `TimedTask` named `"talk"`. Older saves: nobody known, no chat, no
-families, default rules. `Chats` and `Society` are rebuilt, not saved; the save tests'
+(retries); `Talk` is a `TimedTask` named `"talk"`. Older saves: nobody known, no chat or small
+talk, no families, default rules. `Chats`, `Smalltalks` and `Society` are rebuilt, not saved; the save tests'
 fingerprint includes `GameState::society()`.
 
 ## The tab
@@ -142,9 +185,15 @@ longer about. Live: rewritten every frame. The brains menu shows `chat` and `kno
   nightly loss through a brain.
 - `sim::brain::social::tests` — every way `tend` keeps or drops a chat, the hour, invitations
   never made to somebody out of reach.
-- `sim::brain::tasks::talk::tests`; `save::tests::a_crowd_saved_mid_chat_carries_on_exactly`;
-  `determinism_survives_brains_and_biology_in_the_parallel_rounds` requires chats.
+- `sim::brain::social::tests` (small talk) — starting at the rate and only within the reach,
+  never within the minutes between, half a point each (on the floor), over in its minutes, never
+  answered asleep, in a chat or from too far, ended with the other or a step past the reach.
+- `game::smalltalk::tests` — a spark cools, shrinks and fades; its arc lands on the other.
+- `sim::brain::tasks::talk::tests`; `save::tests::a_crowd_saved_mid_chat_carries_on_exactly`
+  (saved with small talk going on too);
+  `determinism_survives_brains_and_biology_in_the_parallel_rounds` requires chats and small talk.
 - `qa/relationships.json` — the tab: a family at 30, strangers who chatted.
+- `qa/smalltalk.json` — four close together make small talk; sparks; the tab.
 
 Mutation-checked when written: the hour rule, the despawn slot clear, restoring a chat and
-rebuilding the society each fail a test when broken.
+rebuilding the society each fail a test when broken; so does restoring a small talk.

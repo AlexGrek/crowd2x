@@ -130,8 +130,11 @@ impl World {
         self.facilities.panics.set(uid, panicking && intent != Intent::Idle);
         // In a chat or not, as the think step would gather it for a crowd;
         // anybody else a test says is chatting stays so.
-        let chatter = if entity.is_frozen() || entity.is_dead() { None } else { entity.chatter() };
+        let away = entity.is_frozen() || entity.is_dead();
+        let chatter = if away { None } else { entity.chatter() };
         self.facilities.chats.set(uid, chatter);
+        let smalltalker = if away { None } else { entity.smalltalker() };
+        self.facilities.smalltalks.set(uid, smalltalker);
         let effect = entity.react(&self.ctx(), outcome);
         self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();

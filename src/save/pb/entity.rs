@@ -120,6 +120,9 @@ pub struct Body {
     /// there were families — is nobody's.
     #[prost(uint32, optional, tag = "8")]
     pub family: Option<u32>,
+    /// Missing in older saves means clean.
+    #[prost(message, optional, tag = "9")]
+    pub dirt: Option<super::Dirt>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

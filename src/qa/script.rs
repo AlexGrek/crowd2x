@@ -207,6 +207,12 @@ fn default_vsync() -> bool {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Step {
+    /// Replace the four normalized ground components at one cell.
+    Dirt { x: i32, y: i32, value: crate::sim::dirt::Dirt },
+    UnitDirt(crate::sim::dirt::Dirt),
+    ExpectDirt { x: i32, y: i32, value: crate::sim::dirt::Dirt },
+    ExpectDirtTiles(usize),
+
     /// Do nothing for this many seconds.
     Wait(f32),
     /// Say what the next steps are for. Goes to the log, so a failing run
@@ -305,6 +311,10 @@ pub enum Step {
     /// or was drawn for the wrong item, fails here and not in a screenshot
     /// nobody looked at.
     ExpectHeld { item: String, count: usize },
+    /// At least this many sparks of small talk in the air
+    /// (`game::smalltalk::Spark`), anybody's: the screen showing a small talk
+    /// the simulation says is going on. Pause first, so the talk lasts.
+    ExpectSparks { min: usize },
 
     /// Advance the simulation by this many fixed steps, immediately.
     ///

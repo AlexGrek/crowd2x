@@ -139,6 +139,7 @@ pub mod clothing;
 pub mod corpses;
 pub mod deathdogs;
 pub mod door;
+pub mod dirt;
 pub mod economy;
 pub mod effect;
 pub mod electrical;
@@ -284,6 +285,9 @@ impl MoveOutcome {
 /// arrive by different routes and are applied in different phases.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
+    /// Replace ground or carried contamination; invalid fractions are refused.
+    SetDirt { cell: Point, value: dirt::Dirt },
+    SetUnitDirt { uid: Uid, value: dirt::Dirt },
     /// Change what a person wears, independently of their identity.
     SetClothing { uid: Uid, clothing: clothing::Clothing },
     Spawn { kind: EntityType, at: Point },
@@ -368,6 +372,14 @@ pub struct Input {
 }
 
 impl Input {
+    pub fn set_dirt(&mut self, cell: Point, value: dirt::Dirt) -> &mut Input {
+        self.commands.push(Command::SetDirt { cell, value }); self
+    }
+
+    pub fn set_unit_dirt(&mut self, uid: Uid, value: dirt::Dirt) -> &mut Input {
+        self.commands.push(Command::SetUnitDirt { uid, value }); self
+    }
+
     pub fn set_clothing(&mut self, uid: Uid, clothing: clothing::Clothing) -> &mut Input {
         self.commands.push(Command::SetClothing { uid, clothing });
         self
@@ -466,11 +478,12 @@ pub const RECLAIM_EACH_PASS: usize = 64;
 /// edge does not drop and load the same chunks over and over.
 pub const KEEP_CHUNKS: i32 = 2;
 
-/// Where each of [`GameState::follow_the_crowd`]'s three sweeps got to.
+/// Where each of [`GameState::follow_the_crowd`]'s chunk sweeps got to.
 #[derive(Clone, Copy, Debug)]
 struct Reclaim {
     ground: usize,
     occupancy: usize,
+    dirt: usize,
     census: usize,
     /// Off only in a test, to compare with a world that keeps everything.
     on: bool,
@@ -478,7 +491,7 @@ struct Reclaim {
 
 impl Default for Reclaim {
     fn default() -> Self {
-        Reclaim { ground: 0, occupancy: 0, census: 0, on: true }
+        Reclaim { ground: 0, occupancy: 0, dirt: 0, census: 0, on: true }
     }
 }
 
@@ -561,6 +574,9 @@ pub struct GameState {
     /// and sized alongside [`GameState::intents`]; overwritten every tick, so
     /// never saved.
     chatters: Vec<Option<relationships::Chatter>>,
+    /// Who is making small talk, slot for slot, as the think step found
+    /// them: gathered into [`relationships::Smalltalks`] like `chatters`.
+    smalltalkers: Vec<Option<relationships::Smalltalker>>,
     /// Cells the far route searches expanded last tick, all of them — what
     /// the route budget bounds ([`react_step`]).
     route_work: usize,
@@ -614,6 +630,7 @@ impl GameState {
             moves: Vec::new(),
             effects: Vec::new(),
             chatters: Vec::new(),
+            smalltalkers: Vec::new(),
             route_work: 0,
         }
     }
@@ -624,6 +641,8 @@ impl GameState {
     pub fn route_work(&self) -> usize {
         self.route_work
     }
+
+    pub fn dirt(&self) -> &dirt::DirtLayer { &self.facilities.dirt }
 
     pub fn entities(&self) -> &Entities {
         &self.entities
@@ -673,12 +692,13 @@ impl GameState {
                     self.map.load_chunk(near);
                 }
                 self.occupancy.prepare(pos);
+                self.facilities.dirt.prepare(pos);
             }
         }
         self.crowded = crowded;
 
         if self.reclaim.on {
-            let GameState { map, occupancy, census, reclaim, .. } = self;
+            let GameState { map, occupancy, census, facilities, reclaim, .. } = self;
             let pinned = map.navigation_area();
             map.sweep_chunks(&mut reclaim.ground, RECLAIM_EACH_PASS, |pos| {
                 pos.bounds().overlaps(pinned) || census.anyone_within(pos, KEEP_CHUNKS)
@@ -686,6 +706,7 @@ impl GameState {
             occupancy.sweep(&mut reclaim.occupancy, RECLAIM_EACH_PASS, |pos| {
                 census.anyone_within(pos, KEEP_CHUNKS)
             });
+            facilities.dirt.sweep(&mut reclaim.dirt, RECLAIM_EACH_PASS, |pos| census.anyone_within(pos, KEEP_CHUNKS));
             census.sweep(&mut reclaim.census, RECLAIM_EACH_PASS, KEEP_CHUNKS);
         }
     }
@@ -1096,11 +1117,13 @@ impl GameState {
             self.moves.resize(slot as usize + 1, MoveOutcome::Idle);
             self.effects.resize(slot as usize + 1, Effect::None);
             self.chatters.resize(slot as usize + 1, None);
+            self.smalltalkers.resize(slot as usize + 1, None);
         }
         self.intents[slot as usize] = Intent::Idle;
         self.moves[slot as usize] = MoveOutcome::Idle;
         self.effects[slot as usize] = Effect::None;
         self.chatters[slot as usize] = None;
+        self.smalltalkers[slot as usize] = None;
 
         // Takes the cell if it is free, and leaves whoever is already there in
         // possession if it is not — an entity is placed where it was asked
@@ -1298,6 +1321,9 @@ impl GameState {
             // gathered from every one: a hole must say nobody is chatting.
             if let Some(chatter) = self.chatters.get_mut(slot as usize) {
                 *chatter = None;
+            }
+            if let Some(smalltalker) = self.smalltalkers.get_mut(slot as usize) {
+                *smalltalker = None;
             }
         }
         match self.entities.remove(uid) {
@@ -1554,6 +1580,14 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
     }
     for command in &input.commands {
         match command {
+            Command::SetDirt { cell, value } => {
+                if !state.facilities.dirt.set(*cell, *value) { state.log.important("invalid ground dirt vector"); }
+            }
+            Command::SetUnitDirt { uid, value } => {
+                if let Some(entity) = state.entities.get_mut(*uid) {
+                    if !entity.body_mut().set_dirt(*value) { state.log.important("invalid unit dirt vector"); }
+                }
+            }
             Command::SetClothing { uid, clothing } => {
                 state.set_clothing(*uid, *clothing);
             }
@@ -1669,6 +1703,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         moves,
         effects,
         chatters,
+        smalltalkers,
         route_work,
         ..
     } = &mut *state;
@@ -1681,12 +1716,14 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents.len() >= table.capacity()
             && moves.len() >= table.capacity()
             && effects.len() >= table.capacity()
-            && chatters.len() >= table.capacity(),
-        "the slot buffers ({}, {}, {}, {}) are shorter than the entity table ({})",
+            && chatters.len() >= table.capacity()
+            && smalltalkers.len() >= table.capacity(),
+        "the slot buffers ({}, {}, {}, {}, {}) are shorter than the entity table ({})",
         intents.len(),
         moves.len(),
         effects.len(),
         chatters.len(),
+        smalltalkers.len(),
         table.capacity()
     );
 
@@ -1696,10 +1733,13 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         &Think::new(map, occupancy, log, facilities, dt, *tick, clock),
         intents,
         chatters,
+        smalltalkers,
     );
     // Who is chatting with whom, as the think step found everybody: what
     // react asks to know who is asking it for a chat and where a partner is.
+    // Small talk the same way.
     facilities.chats.rebuild(&chatters[..table.capacity()]);
+    facilities.smalltalks.rebuild(&smalltalkers[..table.capacity()]);
 
     move_step(
         &mut table,
@@ -1709,6 +1749,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         &facilities.features,
         &facilities.doors,
         &mut facilities.panics,
+        &mut facilities.dirt,
         intents,
         moves,
     );
@@ -1755,31 +1796,36 @@ const PARALLEL_AT: usize = 64;
 /// what another entity decided this tick is asking for the one thing this
 /// shape cannot give.
 ///
-/// Each entity also says what chat it is in, if any, into `chatters` —
-/// asked here because this is the one walk of the whole crowd that already
-/// has every unit in cache ([`relationships::Chats`]).
+/// Each entity also says what chat and what small talk it is in, if any,
+/// into `chatters` and `smalltalkers` — asked here because this is the one
+/// walk of the whole crowd that already has every unit in cache
+/// ([`relationships::Chats`], [`relationships::Smalltalks`]).
 fn think_step(
     table: &FrozenEntities<'_>,
     ctx: &Think<'_>,
     intents: &mut [Intent],
     chatters: &mut [Option<relationships::Chatter>],
+    smalltalkers: &mut [Option<relationships::Smalltalker>],
 ) {
     let intents = &mut intents[..table.capacity()];
     let chatters = &mut chatters[..table.capacity()];
+    let smalltalkers = &mut smalltalkers[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots() {
-            (intents[slot as usize], chatters[slot as usize]) = think_for(entity, ctx);
+            let slot = slot as usize;
+            (intents[slot], chatters[slot], smalltalkers[slot]) = think_for(entity, ctx);
         }
         return;
     }
     intents
         .par_iter_mut()
         .zip(chatters.par_iter_mut())
+        .zip(smalltalkers.par_iter_mut())
         .zip(table.par_iter_slots())
-        .for_each(|((intent, chatter), entity)| match entity {
-            Some(entity) => (*intent, *chatter) = think_for(entity, ctx),
-            // A hole chats with nobody, whoever left it.
-            None => *chatter = None,
+        .for_each(|(((intent, chatter), smalltalker), entity)| match entity {
+            Some(entity) => (*intent, *chatter, *smalltalker) = think_for(entity, ctx),
+            // A hole talks with nobody, whoever left it.
+            None => (*chatter, *smalltalker) = (None, None),
         });
 }
 
@@ -1790,13 +1836,17 @@ fn think_step(
 /// is the [`Intent::Idle`] the move step wants anyway — so the freeze costs a
 /// bool per entity here rather than a decision per entity everywhere else.
 ///
-/// And the chat it is in: none for the frozen and the dead, who are in no
-/// state to talk, so whoever they were chatting with gives up on them.
-fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> (Intent, Option<relationships::Chatter>) {
+/// And the chat and small talk it is in: none for the frozen and the dead,
+/// who are in no state to talk, so whoever they were talking with gives up on
+/// them.
+fn think_for(
+    entity: &dyn GameEntity,
+    ctx: &Think<'_>,
+) -> (Intent, Option<relationships::Chatter>, Option<relationships::Smalltalker>) {
     if entity.is_frozen() || entity.is_dead() {
-        (Intent::Idle, None)
+        (Intent::Idle, None, None)
     } else {
-        (entity.think(ctx), entity.chatter())
+        (entity.think(ctx), entity.chatter(), entity.smalltalker())
     }
 }
 
@@ -1833,6 +1883,7 @@ fn move_step(
     features: &Features,
     doors: &Doors,
     panics: &mut panics::Panics,
+    dirt: &mut dirt::DirtLayer,
     intents: &[Intent],
     moves: &mut [MoveOutcome],
 ) {
@@ -1885,6 +1936,7 @@ fn move_step(
             // old cell open for a moment, which matters the day this runs
             // anywhere but here.
             occupancy.release(from, uid);
+            dirt.enter(into, entity.body_mut().dirt_mut());
             entity.apply(&intent);
             census.moved(slot as Slot, into);
             MoveOutcome::Moved
@@ -2939,9 +2991,10 @@ mod tests {
                 count(lines, "opened the fridge"),
                 count(lines, "worked an hour at the computer"),
                 count(lines, " chatted with "),
+                count(lines, " made small talk with "),
             ]
         };
-        let (mut done_a, mut done_b) = ([0; 7], [0; 7]);
+        let (mut done_a, mut done_b) = ([0; 8], [0; 8]);
         // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
         // parched, bursting or bored for hours: the slowest need to come round
         // is boredom, ten world hours from a great time to bored. `run` ticks
@@ -2964,7 +3017,7 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        let [meals, drinks, reliefs, plays, opened, worked, chats] = done_a;
+        let [meals, drinks, reliefs, plays, opened, worked, chats, smalltalks] = done_a;
         assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
         assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
@@ -2975,6 +3028,7 @@ mod tests {
         assert!(worked > 0, "nobody worked a shift, so the work part of the brain never ran");
         // Wanderers who met, all family under one roof, and chatted.
         assert!(chats > 0, "nobody chatted, so the chat part of the brain never ran");
+        assert!(smalltalks > 0, "nobody made small talk, so that part of the brain never ran");
         assert_eq!(a.workplaces().len(), 2);
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
@@ -3699,7 +3753,7 @@ mod tests {
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, &mut facilities.dirt, intents, moves);
 
         // The earlier slot gets the cell; the later one is told who took it
         // and has not moved at all.
@@ -3745,7 +3799,7 @@ mod tests {
             moves,
             ..
         } = &mut state;
-        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
+        move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, &mut facilities.dirt, intents, moves);
 
         assert_eq!(state.last_move(first), Some(MoveOutcome::Moved));
         assert_eq!(state.last_move(second), Some(MoveOutcome::Blocked { by: Some(first) }));
@@ -3768,7 +3822,7 @@ mod tests {
             let slot = state.entities.slot_of(uid).unwrap() as usize;
             state.intents[slot] = Intent::Move { to: (3.5, 0.5) };
             let GameState { map, entities, occupancy, census, facilities, intents, moves, .. } = &mut state;
-            move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, intents, moves);
+            move_step(&mut entities.freeze(), map, occupancy, census, &facilities.features, &facilities.doors, &mut facilities.panics, &mut facilities.dirt, intents, moves);
             assert_eq!(state.last_move(uid), Some(MoveOutcome::Blocked { by: None }));
             assert_eq!(state.entities().get(uid).unwrap().center_position(), Point::new(2, 0));
             assert_eq!(state.occupancy().occupant(bed), None);

@@ -121,7 +121,9 @@ route budget".
 **Who is chatting with whom** is gathered the same way `Panics` is, but by the think step,
 which already touches every unit: each writes `GameEntity::chatter` into a slot buffer
 (`GameState::chatters`, sized with `intents`, cleared on despawn, `None` for holes) and
-`Chats::rebuild` sorts it before react reads it (`Think::chats`). Never saved. Everybody's
+`Chats::rebuild` sorts it before react reads it (`Think::chats`). Never saved. **Who is making
+small talk** is gathered beside it the same way (`GameEntity::smalltalker`,
+`GameState::smalltalkers`, `Smalltalks::rebuild`, `Think::smalltalks`). Everybody's
 family and job, and the rules relationships are run by, are `Facilities::society`
 (`Think::society`), kept by the spawn pass; `Command::SetRelationshipRule` changes a rule. The
 `relationships` skill.

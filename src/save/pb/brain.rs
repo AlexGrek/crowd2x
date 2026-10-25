@@ -155,6 +155,27 @@ pub struct Memory {
     /// is not yet noted.
     #[prost(uint32, tag = "7")]
     pub night: u32,
+    /// The small talk it is in (`crate::sim::relationships::Smalltalk`).
+    /// Absent — and in every save from before there was small talk — is none.
+    #[prost(message, optional, tag = "8")]
+    pub smalltalk: Option<Smalltalk>,
+    /// World seconds since the world began, when it last started a small
+    /// talk; absent if it never has.
+    #[prost(double, optional, tag = "9")]
+    pub smalltalked: Option<f64>,
+}
+
+/// A small talk one person is in, as it remembers it.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Smalltalk {
+    #[prost(fixed64, tag = "1")]
+    pub with: u64,
+    /// World seconds since the world began, when it began.
+    #[prost(double, tag = "2")]
+    pub since: f64,
+    /// Whether both are in it.
+    #[prost(bool, tag = "3")]
+    pub answered: bool,
 }
 
 /// A chat one person is in, as it remembers it.

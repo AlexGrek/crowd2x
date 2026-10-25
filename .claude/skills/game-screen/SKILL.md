@@ -67,6 +67,12 @@ here — it is `src/sim/` (the `simulation` skill) — and `game/actors.rs` is t
   never in a pocket a lake has walled in. The HUD's `where x, y  chunks n` line is the
   camera's cell and how many wasteland chunks are loaded.
 
+**Small talk throws sparks** (`game/smalltalk.rs`, `SmalltalkPlugin`): everybody on the canvas in
+an answered small talk (`GameEntity::smalltalk`) throws a spark at the other every 0.06 s — a
+plain-colour sprite of 3, then 2, then 1 canvas pixels on an arc from mouth to mouth, cooling
+white to red and fading, placed by its corner on whole pixels, at most 400 in the air. Real
+time, so they fly on while paused; QA `expect_sparks`. The `relationships` skill has the rest.
+
 **What a hand holds is drawn in front of whoever holds it** (`game/held.rs`, art from
 `characters::item`). A unit whose `Inventory::hand` is full gets one sprite of its own, in
 front of every layer of its paperdoll and at the hands, that follows it and is gone the
@@ -93,7 +99,7 @@ goal in charge, the priority list, the task, its result and action — live, lik
 since a unit picks things up while you are reading), `talents`, `clothing` (the wardrobe;
 at work it reads `wearing: uniform guard (own: ...)` and the buttons change the clothes the
 worker goes home in), `relationship` (who it knows, best first — family, colleagues, friends,
-acquaintances — with each level and the chat it is in, live; the `relationships` skill) and `job` (the
+acquaintances — with each level and the chat or small talk it is in, live; the `relationships` skill) and `job` (the
 job, `at` (`computer at x, y`, `scrap bin at x, y` or `guard post at x, y`), hours and days, and `now` — working, on watch,
 on the way, collecting scrap, storing scrap, getting ready (`getting ready: drink`, a collector
 seeing to a need before a trip out), on a break, off, weekend —

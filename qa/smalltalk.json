@@ -1,0 +1,65 @@
+{
+  "name": "people in a corridor make small talk, and sparks fly between them",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "corridor",
+        "map": {
+          "version": 1,
+          "size": { "width": 9, "height": 6 },
+          "wasteland": false,
+          "terrain": {
+            "palette": ["floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": { "props": [], "spawners": [] }
+        }
+      }
+    ]
+  },
+  "open": "corridor",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "note": "small talk at its most and longest, and no chats to take anybody off to one: the rules (relationships.yaml), set by the script" },
+    { "relationships": {
+      "minutes of smalltalk": 600,
+      "minutes between smalltalks": 0,
+      "stranger chance": 0,
+      "acquaintance chance": 0,
+      "friend chance": 0
+    } },
+    { "relationships": { "smalltalks an hour": 10000 } },
+    { "tick": 1 },
+    { "expect_log": "relationships: smalltalks an hour is 10000" },
+    { "spawn": { "kind": "human", "x": 3, "y": 1 } },
+    { "spawn": { "kind": "human", "x": 4, "y": 1 } },
+    { "spawn": { "kind": "human", "x": 5, "y": 2 } },
+    { "spawn": { "kind": "human", "x": 6, "y": 2 } },
+    { "tick": 240 },
+    { "expect_log": " made small talk with " },
+    { "press": "-" },
+    { "look_at": { "x": 4, "y": 1 } },
+    { "wait": 0.5 },
+    { "expect_sparks": { "min": 3 } },
+    { "shot": "sparks flying between two pairs making small talk" },
+
+    { "select": 0 },
+    { "press": "relationship" },
+    { "wait": 0.2 },
+    { "expect_text": "making small talk with" },
+    { "shot": "the relationship tab of somebody making small talk" }
+  ]
+}

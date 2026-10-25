@@ -43,3 +43,16 @@ minutes to meet: 60
 # How long one side that has had its say waits for the other to finish, in
 # world minutes.
 minutes to wait for the other: 5
+
+# Small talk: a word or two with somebody close by — at work as anywhere, but
+# never asleep — with no walk over and nothing put down for it. How many a
+# person starts in an hour of company (somebody awake within `smalltalk reach`
+# cells), on average; the other answers if it is awake and in no chat.
+smalltalks an hour: 1
+smalltalk reach: 2
+# What one small talk adds to the level, each side.
+smalltalk gain: 0.5
+# How long one lasts, in world minutes.
+minutes of smalltalk: 4
+# How long after starting one a person starts no other, in world minutes.
+minutes between smalltalks: 30

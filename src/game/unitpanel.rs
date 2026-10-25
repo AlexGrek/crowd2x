@@ -831,6 +831,9 @@ fn relationship_block(sim: &Sim, entity: &dyn GameEntity) -> String {
         };
         lines.push(format!("{doing} {}", name(chat.with)));
     }
+    if let Some(smalltalk) = entity.smalltalk().filter(|smalltalk| smalltalk.answered) {
+        lines.push(format!("making small talk with {}", name(smalltalk.with)));
+    }
     let known = state.acquaintances(entity.uid());
     if known.is_empty() {
         lines.push("knows nobody yet".to_string());

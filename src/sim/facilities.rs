@@ -26,7 +26,7 @@ use super::panics::Panics;
 use super::playzone::Playzones;
 use super::property::Properties;
 use super::refuge::WaysIn;
-use super::relationships::{Chats, Society};
+use super::relationships::{Chats, Smalltalks, Society};
 use super::statistics::Tally;
 use super::uid::Uid;
 use super::wounds::Wounds;
@@ -70,6 +70,7 @@ pub struct Facilities {
     /// unplant the map with it.
     pub fields: Fields,
     pub flowers: super::flowers::Flowers,
+    pub dirt: super::dirt::DirtLayer,
     /// Which arcade cabinets work: those whose playzone computer an
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
@@ -97,6 +98,10 @@ pub struct Facilities {
     /// think step, read by react ([`super::relationships::Chats`]). Rebuilt
     /// every tick, never saved.
     pub chats: Chats,
+    /// Who is making small talk with whom this tick, gathered like `chats`
+    /// ([`super::relationships::Smalltalks`]). Rebuilt every tick, never
+    /// saved.
+    pub smalltalks: Smalltalks,
     /// Who leaves the world this tick: the bodies undertakers took up
     /// (`Effect::TakeBody`) and the deathdogs gone back into the wasteland
     /// (`Effect::Depart`). Despawned at the end of the processing pass
@@ -124,6 +129,7 @@ impl Facilities {
             tally: Tally::default(),
             fields: Fields::new(),
             flowers: Default::default(),
+            dirt: super::dirt::DirtLayer::new(map.size()),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),
@@ -131,6 +137,7 @@ impl Facilities {
             ways_in: WaysIn::from_map(map),
             society: Society::new(),
             chats: Chats::default(),
+            smalltalks: Smalltalks::default(),
             leaving: Vec::new(),
         }
     }

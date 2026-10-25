@@ -30,8 +30,10 @@
 //!      schedule says it is time to look (every 7th tick), perception.look(..)
 //!      and attention.take_in(..), which reacts to anybody not in mind — a
 //!      wanderer may ask them for a chat (`social`) — eyes shut instead,
-//!      while it is asleep; on the same beat, the nights' loss off what it
-//!      thinks of everybody; and every tick, a chat taken up or let go
+//!      while it is asleep — and anybody close by may be drawn into small
+//!      talk (`social`); on the same beat, the nights' loss off what it
+//!      thinks of everybody; and every tick, a chat taken up or let go, and
+//!      small talk answered or over
 //! 1. every routine runs
 //! 2.   ...and arranges the priority list
 //! 3. if the goal on top changed: old.deprioritized() -> current task
@@ -300,6 +302,10 @@ impl Brain {
                 attention.met_with(met);
                 // Danger, or prey, in what it saw (`alarm`).
                 alarm::take_in(ctx, &body, &sightings, memory);
+                // A word with somebody close by, perhaps (`social`).
+                if social {
+                    social::strike_up(ctx, &body, memory, &sightings, elapsed);
+                }
             }
             // A night gone by is a point off what it thinks of everybody:
             // asked on this beat rather than every tick, since it changes
@@ -308,9 +314,11 @@ impl Brain {
                 memory.relations_mut().pass_nights(ctx.clock.day(), ctx.clock.elapsed(), ctx.society.rules());
             }
         }
-        // A chat taken up, agreed or given up on (`social`).
+        // A chat taken up, agreed or given up on, and small talk answered or
+        // over (`social`).
         if social {
             social::tend(ctx, &body, memory, was_doing);
+            social::small_talk(ctx, &body, memory, is_asleep(task, action));
         }
 
         memory.medical.update(ctx, body.uid(), biology.as_deref_mut());
@@ -762,6 +770,10 @@ impl Brain {
                 crate::sim::relationships::Phase::Done => "done with",
             };
             fields.push(("chat", format!("{phase} {}", chat.with)));
+        }
+        if let Some(smalltalk) = self.memory.smalltalk() {
+            let state = if smalltalk.answered { "with" } else { "opening to" };
+            fields.push(("smalltalk", format!("{state} {}", smalltalk.with)));
         }
         fields.push(("knows", self.memory.relations().len().to_string()));
         fields.push((
