@@ -76,9 +76,15 @@ it are four steps:
    `world_step` takes the world's parts as one borrow, **`Facilities`**, and the occupancy.
    `testing::World::step` calls the same `apply`, so a test's world grants an effect exactly
    as a game's does.
-5. **bury** (`process_game_state`, after the processing pass, which may remove nobody): the
-   bodies taken up this tick (`GameState::burials`) are despawned, so nothing waits between
-   ticks and nothing new is saved.
+5. **comings and goings** (`comings_and_goings`, the end of `process_pass`, once the frozen
+   table is let go — the four steps add and remove nobody): everybody on
+   `Facilities::leaving` is despawned — bodies taken up (`Effect::TakeBody`) and deathdogs
+   gone back into the wasteland (`Effect::Depart`) — and on the tick it gets dark the night's
+   deathdogs arrive (`deathdogs::arrive`). Inside `process_pass`, so the game and QA, which
+   drive the two passes apart, get it too (`bury` in `process_game_state` never ran there).
+   `Effect::Bite { at, damage }` files a wound (`sim::wounds`) for the bitten to feel next
+   tick. The move step also rebuilds `Facilities::panics` (who is seen running in a panic,
+   `sim::panics`) and refuses a deathdog a step onto the site. See the `deathdogs` skill.
 
 **The dead** (`Body::dead`, `GameEntity::is_dead`) are skipped by think and react exactly as
 the frozen are, and for good; `sim::Corpses` (`corpses.rs`, rebuilt from the entities on load,
@@ -111,6 +117,14 @@ rotating by tick, so who gets the budget is fixed by slot and tick and never by 
 timing; the sequential path below `PARALLEL_AT` cuts the same blocks. A budget only
 delays a route, never changes it. Details in `brain-engineer`'s `architecture.md`, "The
 route budget".
+
+**Who is chatting with whom** is gathered the same way `Panics` is, but by the think step,
+which already touches every unit: each writes `GameEntity::chatter` into a slot buffer
+(`GameState::chatters`, sized with `intents`, cleared on despawn, `None` for holes) and
+`Chats::rebuild` sorts it before react reads it (`Think::chats`). Never saved. Everybody's
+family and job, and the rules relationships are run by, are `Facilities::society`
+(`Think::society`), kept by the spawn pass; `Command::SetRelationshipRule` changes a rule. The
+`relationships` skill.
 
 **The world's parts are one struct, `Facilities`** (`sim/facilities.rs`): the features index,
 the fridges, the stores (`Bins`), the doors, the properties, the dead (`Corpses`), the beds

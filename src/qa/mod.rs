@@ -1006,6 +1006,19 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::ExpectFlowers { min, varieties, blooming } => {
+            let world = &intents.sim.as_deref().ok_or("there is no simulation")?.0;
+            let mut kinds = [false; crate::sim::flowers::VARIETIES];
+            let mut count = 0;
+            for bed in world.flowers().iter().filter(|bed| !*blooming || bed.blooming(world.clock())) {
+                count += 1;
+                kinds[bed.variety as usize] = true;
+            }
+            let distinct = kinds.into_iter().filter(|kind| *kind).count() as u32;
+            (count >= *min && distinct >= *varieties).then_some(Next::Now)
+                .ok_or(format!("expected {min} flower beds in {varieties} varieties (blooming: {blooming}); found {count} in {distinct} varieties"))
+        }
+
         Step::ExpectCrops { min } => {
             let fields = intents
                 .sim
@@ -1121,6 +1134,17 @@ fn perform(
                 .get()
                 .ok_or("nobody is selected — `process` switches a process in the selected unit".to_string())?;
             intents.sim_input.0.set_process(uid, process, *on);
+            Ok(Next::Now)
+        }
+
+        Step::Relationships(rules) => {
+            for (name, value) in rules {
+                let rule = crate::sim::relationships::Rule::from_name(name).ok_or_else(|| {
+                    let names: Vec<&str> = crate::sim::relationships::Rule::ALL.iter().map(|rule| rule.name()).collect();
+                    format!("no relationship rule called {name:?}; this build has: {}", names.join(", "))
+                })?;
+                intents.sim_input.0.set_relationship_rule(rule, *value);
+            }
             Ok(Next::Now)
         }
 

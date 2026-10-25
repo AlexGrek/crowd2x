@@ -45,8 +45,11 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
 ```
 0. perception.turn, and on the unit's Priority::Med beat (every 7th tick):
    attention.age (first: it is the cold memory) -> perception.look ->
-   attention.take_in -> Event::Met per new human face
+   attention.take_in -> Event::Met per new human face, and a wanderer may
+   ask that face for a chat (social::notice)
    (eyes shut instead while Task::Sleep is current)
+   -> the nights' loss off what it thinks of everybody (Relations::pass_nights)
+   then every tick: social::tend (a chat taken up, agreed or let go)
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
 3. top changed? old.deprioritized -> current task abandoned, walk halted
                 -> queue cleared -> new.prioritized
@@ -70,7 +73,7 @@ This order has consequences:
 | I want units to... | Add |
 | --- | --- |
 | care about a new need | a **`Need`** for `NeedRoutine` (plus a stat and a **process** if the need is new) |
-| react to who or what it sees | a reaction in `Brain::react` step 0 (the `take_in` closure); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()` |
+| react to who or what it sees | a reaction in `Brain::react` step 0 (the `take_in` closure, as `social::notice` asks a new face for a chat); a new kind of thing seen is a new source in `Perception::look`, never a scan of `entities()`; something about the one seen that only its own brain knows goes in a per-tick index the think or move step gathers (`Panics`, `Chats`), never a read of its entity |
 | care about a time of day, a threat | a **routine** (file map and test list: the `add-routine` skill) |
 | have a body change by itself, or react to what happened to it | a **process** in `sim/biology/` |
 | do a new multi-step thing ("sleep in a bed") | a **goal** (`GoalId` variant + its own executor, one per need) |
@@ -94,6 +97,15 @@ variant one in `Action::save`/`restore`, a routine with memory one in `Routine::
 a process with state a field in `Biology::save`, a memory key nothing (memory is saved whole).
 Every `save` destructures its struct exhaustively, so the build points at what was missed; the
 side-by-side tests in `save::tests` catch what changes behaviour after a load.
+
+## Danger: step 0's alarm and step 7's panic
+
+After the look in step 0, `brain/alarm.rs::take_in` reads the sightings: a person outside
+the site who sees a deathdog, or somebody in `Think::panics`, remembers it in
+`Memory::spotted`; a deathdog marks the nearest person outside. Step 7 calls
+`walk.panic(top == Flee)`. A wound is read before time passes in `Human::react`
+(`Event::Bitten`, the `Health` process); death that tick is `"deathdog bites"`. Details in
+the `deathdogs` skill.
 
 ## Health and death
 
@@ -217,6 +229,7 @@ Priorities are unitless `f32`s compared only against each other.
 | Source | Value |
 | --- | --- |
 | `StayBusyRoutine` (wander) | `BUSY = 0.1`, the floor everything should beat when it matters |
+| `ChatRoutine` → chat | `CHATTING = 0.15` while a chat both sides agreed to (or this side has finished) is in memory: over wandering, under everything else. The `relationships` skill |
 | `NeedRoutine(HUNGER)` → eat | `hunger / 50`: 1.2 at `PECKISH` (60), released at `SATED` (25) |
 | `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
@@ -225,6 +238,8 @@ Priorities are unitless `f32`s compared only against each other.
 | `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk or a guard post, `Collect` for a scrap collector) while the job is due (`Job::is_due`: 09:00-17:00 Mon-Fri from 08:30 for the walk in; a guard's watch from two hours before), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
 | `ReadyRoutine` → eat / drink / play / relieve | before a trip out for a job that goes out (`JobDef::goes_out_for`: the collector): `GETTING_READY = 1.6` less 0.01 per place on its list (drink, eat, play, toilet), so over work and under any need past 80, for each need it is seeing to until every one is 85% met. Starts beside the bin or back in with a half trip, keeps a list (no need joins it mid-way) and a `ready` latch until it goes out; tells `CollectGoal` through `GoalCtx::ready_to_go_out`; reads the pack through `RoutineCtx::inventory` and held-off goals through `Goals::cooldown`. The `jobs` skill, "Getting ready" |
 | `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |
+| `FleeRoutine` → flee | `FLEEING = 3.0`, urgency 1, over everything, for `FEAR` (30 world min) after `Memory::spotted` (a deathdog seen, somebody seen panicking, a bite). Flat out at `PANIC_SPEED` (step 7, `Walker::panic`). The `deathdogs` skill |
+| a deathdog's `DepartRoutine` / `HuntRoutine` / `ProwlRoutine` | 2.0 by day / 1.0 (urgency 1) while its quarry was seen outside in the last 10 world min / `BUSY`. `Brain::deathdog`; `GoalId::Hunt`, `Prowl`, `Depart` have no catalogue executor |
 | `Idle` | 0; wins only when nothing is wanted or everything is held off |
 
 **Urgency is a second number, not the priority** (`Goals::urgency`, 0-1): how much of a

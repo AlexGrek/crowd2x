@@ -28,6 +28,8 @@ pub const WAREHOUSE_BINS: usize = 4;
 pub const STEEL_RACK: &str = "steel rack";
 pub const MEAL_RACK: &str = "meal rack";
 pub const INITIAL_MEALS: u32 = 30;
+pub const FISH_BIN: &str = "fish bin";
+pub const FISHERMEN: usize = 3;
 const WALL: &str = "wall brown";
 const FLOOR: &str = "floor diagonal";
 
@@ -44,7 +46,7 @@ pub const SPEC: LotBuilding = LotBuilding {
     },
     build: warehouse,
     tiles: &[WALL, FLOOR],
-    props: &[SCRAP_BIN, STEEL_RACK, MEAL_RACK],
+    props: &[SCRAP_BIN, STEEL_RACK, MEAL_RACK, FISH_BIN],
 };
 
 /// The warehouse, on `lot`: a room as big as a shop, a plain door — anybody
@@ -81,6 +83,37 @@ fn warehouse(rng: &mut SmallRng, map: &mut Map, props: &mut Vec<Object>, lot: Lo
     let meals = Point::new(inside.x + inside.w / 2, inside.y + 1);
     props.push(object(MEAL_RACK, meals));
     assert!(map.set_initial_stock(meals, INITIAL_MEALS));
+    // Keep the doorways, every aisle and every store accessible as fish
+    // storage is fitted around the existing warehouse furniture.
+    let occupied = |cell: Point, props: &[Object]| props.iter().any(|p| p.cell() == cell && p.kind.as_str() != DOOR);
+    let mut fitted = 0;
+    for cell in inside.cells() {
+        if occupied(cell, props) {
+            continue;
+        }
+        props.push(object(FISH_BIN, cell));
+        let free: Vec<Point> = walls.cells().filter(|&p| map.terrain(p).is_some_and(|t| t.is_passable()) && !occupied(p, props)).collect();
+        let mut reached = vec![free[0]];
+        let mut cursor = 0;
+        while cursor < reached.len() {
+            for next in reached[cursor].cardinal_neighbours() {
+                if free.contains(&next) && !reached.contains(&next) {
+                    reached.push(next);
+                }
+            }
+            cursor += 1;
+        }
+        let accessible = reached.len() == free.len() && props.iter().filter(|p| inside.contains(p.cell())).all(|p| {
+            p.cell().cardinal_neighbours().iter().any(|side| reached.contains(side))
+        });
+        if accessible {
+            fitted += 1;
+            if fitted == FISHERMEN { break; }
+        } else {
+            props.pop();
+        }
+    }
+    assert_eq!(fitted, FISHERMEN, "the warehouse needs three accessible fish bins");
     walls
 }
 
@@ -102,10 +135,11 @@ mod tests {
             let warehouse = district.the(NAME);
             let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| warehouse.interior().contains(prop.cell()));
             assert!(
-                inside.clone().all(|prop| [SCRAP_BIN, STEEL_RACK, MEAL_RACK].contains(&prop.kind.as_str())),
+                inside.clone().all(|prop| [SCRAP_BIN, STEEL_RACK, MEAL_RACK, FISH_BIN].contains(&prop.kind.as_str())),
                 "seed {seed}: the warehouse holds bins and a rack only"
             );
-            assert_eq!(inside.count(), WAREHOUSE_BINS + 2, "seed {seed}");
+            assert_eq!(inside.count(), WAREHOUSE_BINS + 2 + FISHERMEN, "seed {seed}");
+            assert_eq!(props_in(map, warehouse, FISH_BIN), FISHERMEN);
             assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), SCRAP_BIN), WAREHOUSE_BINS, "seed {seed}: bins nowhere else");
             assert_eq!(props_in(map, warehouse, STEEL_RACK), 1, "seed {seed}: a rack for the steel");
             assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), STEEL_RACK), 1, "seed {seed}: and none elsewhere");

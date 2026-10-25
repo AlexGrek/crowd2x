@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::map::Point;
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::HOUR;
+use crate::sim::relationships::{Chat, Relations};
 use crate::sim::uid::Uid;
 
 /// The key a unit remembers its own bed under: a [`Recall::Cell`]. Written once,
@@ -44,14 +45,21 @@ pub struct Memory {
     keyed: BTreeMap<String, Recall>,
     pub medical: crate::sim::hospital::Medical,
     /// Boxed, out of line: allocated once with the brain in the spawn pass,
-    /// and two hundred bytes a `Human` would otherwise carry inline against
-    /// the size wall (`a_human_stays_small_enough_to_be_worth_a_thousand_of`).
+    /// and two hundred bytes a `Human` would otherwise carry inline.
     out_of_reach: Box<OutOfReach>,
     /// The last thing that scared it — a deathdog, somebody running from
     /// one, a bite — or, for a deathdog, the last person outside it saw:
     /// who, where and when ([`Spotted`]). Inline, not a keyed [`Recall`]: a
     /// look writes it, and a keyed entry allocates its key on every write.
     spotted: Option<Spotted>,
+    /// The chat it is in, if any ([`Chat`]): inline, because the think step
+    /// reads it of every unit every tick to say who is chatting
+    /// (`sim::relationships::Chats`).
+    chat: Option<Chat>,
+    /// What it thinks of everybody it knows ([`Relations`]). Boxed, out of
+    /// line, like `out_of_reach`: read when somebody new is seen and written
+    /// when a chat ends, never every tick.
+    relations: Box<Relations>,
 }
 
 /// Somebody seen, where, and when — in **world** seconds
@@ -222,12 +230,40 @@ impl Memory {
         self.spotted = None;
     }
 
+    /// The chat it is in, if any.
+    pub fn chat(&self) -> Option<Chat> {
+        self.chat
+    }
+
+    /// Be in `chat`, over whatever chat it was in.
+    pub fn set_chat(&mut self, chat: Chat) {
+        self.chat = Some(chat);
+    }
+
+    /// The chat is over, however it went.
+    pub fn forget_chat(&mut self) {
+        self.chat = None;
+    }
+
+    /// What it thinks of everybody it knows.
+    pub fn relations(&self) -> &Relations {
+        &self.relations
+    }
+
+    pub fn relations_mut(&mut self) -> &mut Relations {
+        &mut self.relations
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations } = self;
         let OutOfReach { places } = **out_of_reach;
+        let (relations, night) = relations.save();
         pb::Memory {
+            chat: chat.map(|chat| chat.save()),
+            relations,
+            night,
             spotted: spotted.map(|Spotted { who, at, when }| pb::Spotted { who: who.raw(), at: Some(at.into()), when }),
             medical: Some(medical.save()),
             keyed: keyed
@@ -258,6 +294,8 @@ impl Memory {
     pub(crate) fn restore(saved: &pb::Memory) -> Result<Memory, Invalid> {
         let mut memory = Memory::new();
         memory.medical = crate::sim::hospital::Medical::restore(saved.medical.as_ref());
+        memory.chat = saved.chat.as_ref().map(Chat::restore).transpose()?;
+        *memory.relations = Relations::restore(&saved.relations, saved.night)?;
         if let Some(spotted) = &saved.spotted {
             let Some(who) = Uid::from_raw(spotted.who) else {
                 return invalid("memory: spotted nobody");

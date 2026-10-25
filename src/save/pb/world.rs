@@ -65,6 +65,23 @@ pub struct World {
     /// which is nobody bitten.
     #[prost(message, repeated, tag = "18")]
     pub wounds: Vec<Wound>,
+    /// Walkable flower beds; empty in older saves.
+    #[prost(message, repeated, tag = "19")]
+    pub flowers: Vec<Flower>,
+    /// The rules relationships are run by, by name
+    /// (`crate::sim::relationships::Rules`). A rule not named — every one, in
+    /// a save from before there were relationships — is its default.
+    #[prost(message, repeated, tag = "20")]
+    pub relationship_rules: Vec<RelationshipRule>,
+}
+
+/// One rule relationships are run by, under its name in `relationships.yaml`.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RelationshipRule {
+    #[prost(string, tag = "1")]
+    pub name: String,
+    #[prost(float, tag = "2")]
+    pub value: f32,
 }
 
 /// One bite (`crate::sim::wounds::Wound`).
@@ -188,4 +205,15 @@ pub struct HospitalBed {
     pub patient: u64,
     #[prost(uint32, tag = "3")]
     pub care: u32,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Flower {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    /// Stable content name, independent of the runtime art ordering.
+    #[prost(string, tag = "2")]
+    pub variety: String,
+    #[prost(double, tag = "3")]
+    pub sown: f64,
 }

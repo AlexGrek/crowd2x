@@ -1,0 +1,297 @@
+{
+  "name": "three city decorators plant varied flowers in public green zones",
+  "state": "game",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "city gardens",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 20,
+            "height": 14
+          },
+          "terrain": {
+            "palette": [
+              "grass",
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 168,
+                  "y": 168
+                },
+                "kind": "flower supplies"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 168
+                },
+                "kind": "flower supplies"
+              },
+              {
+                "at": {
+                  "x": 744,
+                  "y": 168
+                },
+                "kind": "flower supplies"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "city gardens",
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 3
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 8,
+        "y": 3
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 14,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 3
+    },
+    {
+      "expect_log": "was hired as a city decorator"
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "measure": {
+        "name": "decorators walking and planting",
+        "ticks": 2000
+      }
+    },
+    {
+      "tick": 1500
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "decorators planting city flower beds"
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "look_at": {
+        "x": 9,
+        "y": 6
+      }
+    },
+    {
+      "tick": 6500
+    },
+    {
+      "expect_flowers": {
+        "min": 30,
+        "varieties": 5
+      }
+    },
+    {
+      "shot": "flowers growing in public green zones"
+    },
+    {
+      "tick": 50000
+    },
+    {
+      "expect_flowers": {
+        "min": 30,
+        "varieties": 5,
+        "blooming": true
+      }
+    },
+    {
+      "shot": "six flower colors and shapes in bloom"
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "city decorator"
+    },
+    {
+      "expect_text": "Mon-Sat"
+    },
+    {
+      "shot": "a city decorator and the planted parks"
+    }
+  ]
+}

@@ -1058,6 +1058,37 @@ a `Command` instead. Read the `dev` skill's "Scaling to thousands of actors" sec
 its "The GameState contract", before writing anything simulation-shaped.
 
 
+### Fishermen
+
+Generated warehouses have three `fish bin` props, each employing one fisherman.
+They work 09:00–17:00 Monday–Saturday, with Sunday off. `FishGoal` walks to
+reachable water outside the district; `Fish` stands on a dry bank for ten world
+minutes and has a deterministic 50% catch chance. A human carries up to five
+fish, then deposits the catch in its warehouse bin. Needs can interrupt a trip;
+work resumes from the current inventory. Shore locations are indexed once,
+and fishing tasks, targets, inventory and stock survive saves. Fish are stored
+goods, with a named price and fishermen's wage in `economy.yaml`.
+Coverage: `brain/goals/fish.rs`, `brain/tasks/fish.rs`, `save/tests.rs`,
+district hiring/warehouse tests, and `qa/fishermen.json`.
+
+### City decorators
+
+New districts have three public `flower supplies` tables in parks, each hiring
+one city decorator. Like farmers, they work 09:00-17:00 Monday-Saturday, with
+Sunday off, and earn $60 per shift. `DecorateGoal` queues walks and ten-minute
+`PlantFlowers` tasks, sowing evenly spaced beds on public outdoor grass inside
+the city. Paving, private gardens, interiors and wasteland are excluded.
+
+`Facilities.flowers` keeps beds sorted by cell; `Effect::PlantFlowers` validates
+and plants once in the world step. Flowers stay walkable, grow from seedlings
+to blooms after one world day, and persist without harvesting. Six varieties
+combine red, yellow, blue, pink, white and purple with poppy, daisy, cornflower,
+tulip and bellflower shapes. `tools/flower_art.py` draws the native 16px art and
+the decorator's apron; `game/flowers.rs` draws visible beds. World tag 19 keeps
+the variety and planting time; older saves have no beds. Tests cover planting,
+missing/unreachable grass, Sunday, dismissal and deterministic parallel save
+continuation. `qa/city_decorators.json` checks hiring, varieties and blooms.
+
 ### Economy
 
 The current economy is documented in [.claude/skills/economy/SKILL.md](.claude/skills/economy/SKILL.md):
@@ -1085,3 +1116,21 @@ the following day. Medical memory, reservations and outstanding nurse care
 are saved. Death and despawning return reserved beds. New arrivals start at
 full health. Regression coverage: `sim/hospital.rs`, `save/tests.rs`, and
 `qa/hospital.json`.
+
+### Relationships
+
+Each person keeps points for everybody it knows (`Memory::relations`); a
+relationship's level is those points or its floor: 30 for family (everybody who
+spawned in one house, `Body::family`), 10 for colleagues (the same `JobKind`),
+kept in `sim::relationships::Society`. Every night takes a point off everybody.
+A wanderer that sees somebody new may ask them for a chat (10% a stranger, 24%
+an acquaintance over 1, 40% a friend over 45); a wanderer asked takes it up
+through the per-tick `Chats` index, the asker walks over (`ChatGoal`), both talk
+(`Talk`), each thinks 5-10 better of the other, and they do not chat again for
+an hour. Every number is a rule in `relationships.yaml` (embedded defaults,
+`CROWD2X_RELATIONSHIPS`, saved per game); QA sets rules with
+`{"relationships": {"stranger chance": 1.0}}`. The unit panel's `relationship`
+tab lists who somebody knows. The full contract is
+[.claude/skills/relationships/SKILL.md](.claude/skills/relationships/SKILL.md);
+coverage: `sim/relationships.rs`, `sim/brain/social.rs`, `save/tests.rs`,
+`qa/relationships.json`.

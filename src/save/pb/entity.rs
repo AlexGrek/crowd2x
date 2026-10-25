@@ -115,6 +115,11 @@ pub struct Body {
     /// anybody was before there were deathdogs.
     #[prost(bool, tag = "7")]
     pub panicking: bool,
+    /// The house it spawned in: everybody born into the same one is family
+    /// (`crate::sim::relationships`). Absent — and in every save from before
+    /// there were families — is nobody's.
+    #[prost(uint32, optional, tag = "8")]
+    pub family: Option<u32>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

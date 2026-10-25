@@ -8,8 +8,13 @@
 //! wait for a gap — is here.
 
 pub mod hospital;
+pub mod decorate;
+pub use decorate::DecorateGoal;
+pub mod fish;
+pub use fish::FishGoal;
 pub use hospital::{RecoverGoal, CareGoal};
 pub mod bury;
+pub mod chat;
 pub mod collect;
 pub mod cook;
 pub use cook::CookGoal;
@@ -28,6 +33,7 @@ pub mod repair;
 pub use repair::RepairGoal;
 
 pub use bury::BuryGoal;
+pub use chat::ChatGoal;
 pub use collect::CollectGoal;
 pub use drink::DrinkGoal;
 pub use eat::EatGoal;

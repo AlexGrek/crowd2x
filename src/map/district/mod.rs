@@ -721,6 +721,11 @@ pub fn generate(seed: u64) -> District {
         map.set_terrain(cell, grass);
     }
 
+    // Three park supply tables create three city decorator jobs.
+    for park in parks.iter().take(3) {
+        props.push(object("flower supplies", Point::new(park.x + 1, park.y + 1)));
+    }
+
     let gates = gates(&mut map, &mut props);
 
     for prop in props {

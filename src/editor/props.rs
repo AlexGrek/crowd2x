@@ -135,6 +135,8 @@ pub const PALETTE: &[PaletteItem] = &[
     // (`sim::bins`), filling up on screen like the scrap bin ([`BinFill`]).
     // Drawn by `tools/farm_art.py`.
     PaletteItem::posed("grain bin", "grain_bin.png", 4),
+    PaletteItem::posed("fish bin", "fish_bin.png", 4),
+    PaletteItem::upscaled("flower supplies", "flower_supplies.png"),
     // The power plant, drawn by `tools/power_plant_art.py`: a generator — a
     // source of power like the transformer (`map::utilities`), its flywheel
     // turning — and the control panel its workers keep, its lamps blinking,

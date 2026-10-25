@@ -31,6 +31,7 @@ pub mod salvage;
 pub mod sleep;
 pub mod sow;
 pub mod take_body;
+pub mod talk;
 pub mod take_item;
 pub mod tend;
 pub mod use_arcade;
@@ -41,6 +42,10 @@ pub mod watch_tv;
 pub mod withdraw;
 pub mod work;
 pub mod repair_box;
+pub mod plant_flowers;
+pub use plant_flowers::PlantFlowers;
+pub mod fish;
+pub use fish::Fish;
 pub use repair_box::RepairBox;
 
 pub use close_fridge::{CloseFridge, CLOSE_SECONDS};
@@ -56,6 +61,7 @@ pub use sleep::Sleep;
 pub use sow::{Sow, SOW_SECONDS};
 pub use take_body::{TakeBody, TAKE_BODY_SECONDS};
 pub use take_item::TakeItem;
+pub use talk::Talk;
 pub use tend::{Tend, TEND_SECONDS};
 pub use use_arcade::{UseArcade, ARCADE_SECONDS};
 pub use use_computer::UseComputer;
@@ -101,6 +107,9 @@ tasks! {
     CarePatient,
     Chase,
     Bite,
+    Fish,
+    Talk,
+    PlantFlowers,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

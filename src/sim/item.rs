@@ -201,6 +201,8 @@ catalogue! {
         Wheat = 5 => ItemDef { name: "wheat", mass: WHEAT_MASS, volume: WHEAT_VOLUME, emoji: "🌾", ..CARRIED },
         /// Factory output, separate from the food supplied by fridges.
         Meal = 6 => ItemDef { name: "meal", mass: MEAL_MASS, volume: MEAL_VOLUME, emoji: "🍱", ..CARRIED },
+        /// Fresh catch for the warehouse. Ten kilograms permits five fish.
+        Fish = 7 => ItemDef { name: "fish", mass: 2.0, volume: 2.0, emoji: "🐟", ..CARRIED },
     }
 }
 

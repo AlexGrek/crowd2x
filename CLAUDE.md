@@ -57,6 +57,19 @@ Cash and a district budget now track wages, taxes, care packages and fridge purc
 Office workers do the payroll; the palace accountant reports daily and weekly balances.
 The economy menu changes the running game?s tariffs, whose defaults are economy.yaml.
 
+At dusk two packs of three deathdogs come out of the wasteland round an endless map, prowl
+the walls, hunt and bite (20-60 health) anybody outside, and walk off at dawn; they never set
+foot on the site, so inside is safe. Anybody outside who sees one — or sees somebody running
+from one — panics, runs flat out (exactly a hunting deathdog's speed) for the nearest way in,
+and shelters there until the fright is over.
+
+People get on: everybody who spawned in one house is a family (never under 30 points),
+everybody with the same kind of job a colleague (never under 10), and a point is lost to
+everybody each night. Wanderers who see each other may ask for a chat (10% a stranger, 24% an
+acquaintance, 40% a friend), walk over and talk, each thinking 5-10 better of the other, and do
+not chat again for an hour. Every number is a rule in `relationships.yaml`; the unit panel's
+`relationship` tab lists who somebody knows.
+
 ## Commands
 
 ```sh
@@ -108,7 +121,9 @@ to `screenshots/`.
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
 | Money, budget, wages, taxes, care, fridge prices, timesheets, payroll, accountant, economy.yaml or economy menu | `economy` (+ `jobs`, `savegame` as needed) |
+| Relationships: families, colleagues, chats between wanderers, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
+| Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
 
@@ -178,8 +193,13 @@ src/sim/bins.rs         the stores: scrap bins, steel racks, hoppers, pallets, g
 src/sim/fields.rs       the crops of wheat: sown, growing, tended, harvested  [jobs, map]
 src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
 src/sim/playzone.rs     which arcade cabinets work: an administrator at the computer [jobs, simulation]
+src/sim/deathdogs.rs, deathdogs/  the night's packs: constants, arrivals, tests  [deathdogs]
+src/sim/panics.rs, wounds.rs, refuge.rs  who is seen panicking; bites to feel; ways in [deathdogs]
 src/sim/economy.rs      cash, budget, tariffs, accounts and daily books      [economy]
 src/game/economy.rs     live tariff menu and YAML loading                    [economy, game-screen]
+src/sim/relationships.rs  rules, relations, families and colleagues, chats  [relationships]
+src/sim/brain/social.rs, goals/chat.rs, tasks/talk.rs  asking, the walk, the talk  [relationships]
+src/game/relationships.rs  relationships.yaml for a new game                [relationships]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
@@ -203,6 +223,7 @@ tools/farm_art.py       draws the grain bin and the wheat at its four stages    
 tools/power_plant_art.py draws the generator and the control panel              [pixel-artist]
 tools/palace_art.py     draws the palace's throne                               [pixel-artist]
 tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and the administrator's uniform [pixel-artist]
+tools/deathdog_art.py   recolours the dog's sheets into the deathdog's                [deathdogs, pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

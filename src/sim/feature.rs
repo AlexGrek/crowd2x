@@ -186,6 +186,12 @@ catalogue! {
         AccountantComputer = 24 => FeatureDef { props: &["accountant computer"], ..BESIDE },
         HospitalBed = 25 => FeatureDef { props: &["hospital bed"], access: Access::Entered, ..BESIDE },
         NurseStation = 26 => FeatureDef { props: &["nurse station"], ..BESIDE },
+        FishBin = 27 => FeatureDef {
+            props: &["fish bin"],
+            store: Some(StoreDef { holds: ItemKind::Fish, called: "fish bin", site: "warehouse", hud: Some("fish") }),
+            ..BESIDE
+        },
+        FlowerSupplies = 28 => FeatureDef { props: &["flower supplies"], ..BESIDE },
     }
 }
 
@@ -305,6 +311,9 @@ pub fn store_of(name: &str) -> Option<FeatureKind> {
 /// never of the crowd or the map.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Features {
+    /// Water outside the site with a walkable bank, indexed once for fishing.
+    fishing_water: Vec<Point>,
+    green_plots: Vec<Point>,
     /// Every working feature of each kind, sorted, at the kind's number.
     cells: [Vec<Point>; FeatureKind::COUNT],
     /// Cells with passable terrain and exactly one blocking prop, a working
@@ -381,7 +390,23 @@ impl Features {
         for cells in &mut features.cells {
             cells.sort_unstable();
         }
+        if features.count(FeatureKind::FlowerSupplies) > 0 {
+            features.green_plots = map.size().points().filter(|&cell| super::flowers::green_plot(map, cell) && properties.of(cell).is_none()).collect();
+        }
+        if features.count(FeatureKind::FishBin) > 0 {
+            features.fishing_water = map.navigation_area().points().filter(|&cell| {
+                !map.contains(cell)
+                    && map.terrain(cell) == Some(crate::map::WATER)
+                    && cell.cardinal_neighbours().into_iter().any(|bank| map.is_passable(bank))
+            }).collect();
+        }
         features
+    }
+
+    pub fn green_plots(&self) -> &[Point] { &self.green_plots }
+
+    pub fn fishing_water(&self) -> &[Point] {
+        &self.fishing_water
     }
 
     /// Whether `cell` is a feature that must be entered to use, and so may

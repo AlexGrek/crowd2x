@@ -38,6 +38,7 @@ use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
 use super::job::Job;
+use super::relationships::{Chat, Chatter, Relations};
 use super::item::ItemKind;
 use super::property::PropertyId;
 use super::talents::Talents;
@@ -395,6 +396,28 @@ impl GameEntity for Human {
 
     fn is_getting_ready(&self) -> bool {
         self.brain.is_getting_ready()
+    }
+
+    /// Nobody chats once dead, whatever it was saying when it died.
+    fn chatter(&self) -> Option<Chatter> {
+        let body = self.walk.body();
+        self.chat().map(|chat| Chatter {
+            who: body.uid(),
+            with: chat.with,
+            phase: chat.phase,
+            cell: body.center_position(),
+        })
+    }
+
+    fn relations(&self) -> Option<&Relations> {
+        Some(self.brain.memory().relations())
+    }
+
+    fn chat(&self) -> Option<Chat> {
+        if self.is_dead() {
+            return None;
+        }
+        self.brain.memory().chat()
     }
 
     fn display_name(&self) -> Option<String> {

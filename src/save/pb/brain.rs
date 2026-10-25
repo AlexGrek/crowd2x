@@ -142,6 +142,57 @@ pub struct Memory {
     /// before there were deathdogs — is nothing seen.
     #[prost(message, optional, tag = "4")]
     pub spotted: Option<Spotted>,
+    /// The chat it is in (`crate::sim::relationships::Chat`). Absent — and in
+    /// every save from before there were relationships — is none.
+    #[prost(message, optional, tag = "5")]
+    pub chat: Option<Chat>,
+    /// Everybody it knows, and what it thinks of them
+    /// (`crate::sim::relationships::Relations`). Empty in an older save:
+    /// nobody known yet, family and colleagues still at their floors.
+    #[prost(message, repeated, tag = "6")]
+    pub relations: Vec<Relation>,
+    /// The day whose night it last lost its points for; 0, in an older save,
+    /// is not yet noted.
+    #[prost(uint32, tag = "7")]
+    pub night: u32,
+}
+
+/// A chat one person is in, as it remembers it.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Chat {
+    #[prost(fixed64, tag = "1")]
+    pub with: u64,
+    #[prost(enumeration = "ChatPhase", tag = "2")]
+    pub phase: i32,
+    /// Whether it is the one who walks over.
+    #[prost(bool, tag = "3")]
+    pub leads: bool,
+    /// World seconds since the world began, when it came to this phase.
+    #[prost(double, tag = "4")]
+    pub since: f64,
+}
+
+/// How far a chat has got (`crate::sim::relationships::Phase`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ChatPhase {
+    Inviting = 0,
+    Talking = 1,
+    Done = 2,
+}
+
+/// What one person thinks of one other.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Relation {
+    #[prost(fixed64, tag = "1")]
+    pub who: u64,
+    /// Before any floor, 0 to 100.
+    #[prost(float, tag = "2")]
+    pub points: f32,
+    /// World seconds since the world began, when their last chat ended;
+    /// absent if they never chatted.
+    #[prost(double, optional, tag = "3")]
+    pub chatted: Option<f64>,
 }
 
 /// Who was spotted, where, and when.

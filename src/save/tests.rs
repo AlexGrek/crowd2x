@@ -26,6 +26,70 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn decorators_saved_while_planting_resume_the_same_beds_in_parallel() {
+    let grass = crate::map::TerrainId(crate::map::TERRAIN.iter().position(|tile| tile.name == "grass").unwrap() as u16);
+    let mut map = Map::new(Size::new(30, 20), grass);
+    prop_at(&mut map, "flower supplies", Point::new(1, 1));
+    let mut state = GameState::new(map, 14);
+    let uid = state.spawn(EntityType::Human, Point::new(1, 2));
+    assert_eq!(state.entities().get(uid).unwrap().job().unwrap().kind, crate::sim::JobKind::CityDecorator);
+    let mut input = Input::new();
+    for process in ProcessId::ALL { input.set_process(uid, process, false); }
+    // Frozen bystanders cross the parallel threshold and keep off the flower beds.
+    for i in 0..70 {
+        let dog = state.spawn(EntityType::Dog, Point::new(1 + i % 28, 13 + i / 28));
+        input.freeze(dog, true);
+    }
+    process_game_state(&mut state, DT, &input);
+    let mut planting = false;
+    for _ in 0..8000 {
+        run(&mut state, 1);
+        planting = state.entities().get(uid).unwrap().brain_fields().iter()
+            .any(|(name, value)| *name == "task" && value.starts_with("plant flowers at"));
+        if planting && state.entities().get(uid).unwrap().interacting_with().is_some() { break; }
+    }
+    assert!(planting && state.entities().get(uid).unwrap().interacting_with().is_some());
+    run(&mut state, 20);
+    let copy = side_by_side(&mut state, 4000, |_, _| Input::new());
+    assert!(copy.flowers().iter().count() >= 8);
+    assert_eq!(copy.save_world().flowers, state.save_world().flowers);
+    // Already planted beds and a pending planting action both survive a second save.
+    let restored = round_trip(&copy);
+    assert_eq!(restored.save_world().flowers, copy.save_world().flowers);
+}
+
+#[test]
+fn fishermen_saved_mid_cast_resume_the_same_catches_and_warehouse_deliveries() {
+    let bin = Point::new(4, 3);
+    let mut map = Map::new(Size::new(9, 7), FLOOR).with_wasteland(0);
+    prop_at(&mut map, "fish bin", bin);
+    let mut state = GameState::new(map, 9);
+    let uid = state.spawn(EntityType::Human, Point::new(3, 3));
+    assert_eq!(state.entities().get(uid).unwrap().job().unwrap().kind, crate::sim::JobKind::Fisherman);
+    let mut input = Input::new();
+    for process in ProcessId::ALL { input.set_process(uid, process, false); }
+    // Keep react above its parallel threshold while this fisherman works.
+    // Frozen bystanders stay away from its routes and still occupy slots.
+    for cell in dry_cells(&state.map, Point::new(30, 30), 70) {
+        let dog = state.spawn(EntityType::Dog, cell);
+        input.freeze(dog, true);
+    }
+    assert!(state.len() > 64);
+    process_game_state(&mut state, DT, &input);
+    for _ in 0..10000 {
+        run(&mut state, 1);
+        if state.entities().get(uid).unwrap().brain_fields().iter().any(|(name, value)| *name == "task" && value.starts_with("fish at")) {
+            break;
+        }
+    }
+    assert!(state.entities().get(uid).unwrap().interacting_with().is_some(), "save during fishing");
+    run(&mut state, 20);
+    let copy = side_by_side(&mut state, 9000, |_, _| Input::new());
+    assert!(copy.bins().stored(bin) >= 5, "the resumed trip must deliver fish");
+    assert_eq!(copy.bins().stored(bin), state.bins().stored(bin));
+}
+
+#[test]
 fn hospital_reservations_rest_nurse_care_and_sick_leave_survive_a_save_exactly() {
     let bed = Point::new(5, 4);
     let mut map = Map::new(Size::new(12, 9), FLOOR);
@@ -172,6 +236,9 @@ fn fingerprint(state: &GameState) -> Vec<Vec<u8>> {
         .collect();
     parts.push(format!("{salvaged:?}").into_bytes());
     parts.push(format!("{:?}", state.map.planted().collect::<Vec<_>>()).into_bytes());
+    // Not saved, worked out again from the entities on load: it has to come
+    // out as the spawn pass kept it.
+    parts.push(format!("{:?}", state.society()).into_bytes());
     parts
 }
 
@@ -193,6 +260,7 @@ fn assert_same(a: &GameState, b: &GameState, when: &str) {
         assert_eq!(x.save(), y.save(), "{when}: {}", x.uid());
     }
     assert_eq!(a.save_world(), b.save_world(), "{when}: the world");
+    assert_eq!(a.society(), b.society(), "{when}: who is family and who a colleague");
     assert_eq!(a.economy(), b.economy(), "{when}: the economy");
     panic!("{when}: the worlds differ in something a save keeps");
 }
@@ -308,6 +376,44 @@ fn a_saved_world_carries_on_exactly_as_if_it_had_never_been_saved() {
 /// People starving at one end of a hall and the fridge at the other, each at
 /// a pace of its own, saved as they break into a run: how much of a hurry
 /// each is in, and how urgent its meal is, come back as they were.
+/// People chatting — one going over, one waiting, two talking, one done and
+/// waiting for the other — a family under one roof, and what everybody thinks
+/// of everybody: the chat in each memory, the relations, the family on each
+/// body, and the society worked out again from them on load.
+#[test]
+fn a_crowd_saved_mid_chat_carries_on_exactly() {
+    use crate::sim::relationships::Phase;
+
+    let mut state = GameState::new(crate::sim::property::tests::house(), 9);
+    // A family in the house, and a crowd of strangers in the street.
+    let mut crowd = vec![state.spawn(EntityType::Human, Point::new(4, 4)), state.spawn(EntityType::Human, Point::new(6, 5))];
+    crowd.extend((0..14).map(|i| state.spawn(EntityType::Human, Point::new(12 + (i % 7) * 6, 12 + (i / 7) * 10))));
+    assert!(state.society().are_family(crowd[0], crowd[1]));
+    let mut input = Input::new();
+    for &uid in &crowd {
+        for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy] {
+            input.set_process(uid, process, false);
+        }
+    }
+    process_game_state(&mut state, DT, &input);
+
+    // On until two are at a chat and somebody already thinks better of
+    // somebody for one.
+    let chatting = |state: &GameState| {
+        state.entities().iter().filter(|entity| entity.chat().is_some_and(|chat| chat.phase == Phase::Talking)).count() >= 2
+    };
+    let known = |state: &GameState| state.entities().iter().any(|entity| entity.relations().is_some_and(|known| !known.is_empty()));
+    let mut ticks = 0;
+    while !(chatting(&state) && known(&state)) {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 4 * 1800, "nobody chatted in four hours");
+    }
+    let mut copy = side_by_side(&mut state, 900, |_, _| Input::new());
+    // ...and saved again, from the copy, wherever its chats have got to.
+    side_by_side(&mut copy, 600, |_, _| Input::new());
+}
+
 #[test]
 fn a_crowd_saved_as_it_breaks_into_a_run_carries_on_exactly() {
     let mut map = Map::new(Size::new(40, 6), FLOOR);
@@ -1062,6 +1168,9 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
         for slot in &mut shard.slots {
             if let Some(pb::Kind::Human(human)) = &mut slot.kind {
                 human.brain.as_mut().unwrap().timesheet = None;
+                // This archive also predates relationships: its empty memory
+                // has not yet noted the current day for the nightly loss.
+                human.brain.as_mut().unwrap().memory.as_mut().unwrap().night = 0;
                 let uid = human.walker.as_ref().unwrap().body.as_ref().unwrap().uid;
                 human.biology.as_mut().unwrap().stats.as_mut().unwrap().health = birth_health[&uid];
             }
@@ -1110,4 +1219,39 @@ fn saving_twenty_thousand_humans() {
         (total - encoded - zipped).as_secs_f64() * 1e3,
     );
     assert_eq!(loaded.state.len(), 20_000);
+}
+
+/// A deathdog at night, a bite just dealt and not yet felt, the one bitten
+/// running for the site and the deathdog after it: saved and loaded, the
+/// chase goes on exactly — the wound, the fright, the panic and the chase
+/// all come back.
+#[test]
+fn a_chase_saved_at_night_with_a_bite_still_to_be_felt_carries_on_exactly() {
+    let map = Map::new(Size::new(12, 12), FLOOR).with_wasteland(14);
+    let mut state = GameState::new(map, 14);
+    crate::sim::testing::skip_to(&mut state, 1, 23.0);
+    // Three cells north of the person: in front of a deathdog that has never
+    // moved. Held still until it is bitten — a person who sees one coming
+    // outruns it — and let go the tick after loading, so the wound, the
+    // fright and the flight all come after the save.
+    let human = state.spawn(EntityType::Human, Point::new(-8, 6));
+    state.spawn(EntityType::Deathdog, Point::new(-8, 9));
+    set_stats(&mut state, human, Stats::calm().with_health(100.0).with_fun(100.0).with_stamina(100.0));
+    let mut input = Input::new();
+    input.freeze(human, true);
+    process_game_state(&mut state, DT, &input);
+    let mut ticks = 0;
+    while state.save_world().wounds.is_empty() {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 2000, "never bitten");
+    }
+    side_by_side(&mut state, 300, |tick, _| {
+        let mut input = Input::new();
+        if tick == 0 {
+            input.freeze(human, false);
+        }
+        input
+    });
+    assert_eq!(state.entities().get(human).and_then(|entity| entity.current_goal()), Some(crate::sim::GoalId::Flee));
 }

@@ -6,6 +6,7 @@ use crate::sim::clock::HOUR;
 use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 use crate::sim::job::{is_bedtime, JobKind};
+use crate::sim::relationships::Phase;
 
 use super::goal::{GoalId, Goals};
 use super::memory::SALVAGE_ORDER;
@@ -347,6 +348,32 @@ impl RoutineExecutor for StayBusyRoutine {
 
     fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         goals.raise_to(GoalId::Wander, BUSY);
+    }
+}
+
+/// How much [`ChatRoutine`] wants a chat both sides have agreed to: over
+/// wandering, which is what both were doing when they agreed, and under
+/// everything else — an order, a night in bed, any need committed to. A chat
+/// is had when there is nothing better to do, and dropped the moment there is.
+pub const CHATTING: f32 = 0.15;
+
+/// Keep company: see a chat through once both sides have agreed to it
+/// ([`ChatGoal`](super::goals::ChatGoal)), and stand by after having one's say
+/// until the other has had theirs. Reads memory only (`Memory::chat`, started
+/// and ended in the brain's step 0), so no hysteresis: an invitation not yet
+/// taken up wants nothing, and the unit keeps wandering.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ChatRoutine;
+
+impl RoutineExecutor for ChatRoutine {
+    fn name(&self) -> &'static str {
+        "keep company"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.chat().is_some_and(|chat| chat.phase != Phase::Inviting) {
+            goals.raise_to(GoalId::Chat, CHATTING);
+        }
     }
 }
 

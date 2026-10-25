@@ -24,7 +24,7 @@
     { "expect_following": false },
     { "expect_target_cell": null },
     { "note": "click the target beside the seeded human's name through the real mouse input path" },
-    { "mouse": { "x": 114.5, "y": 150 } },
+    { "mouse": { "x": 128, "y": 140 } },
     { "click": {} },
     { "expect_selected": "human" },
     { "mouse": { "x": 160, "y": 120 } },

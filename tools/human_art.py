@@ -469,6 +469,26 @@ UNIFORMS["nurse"] = (
 )
 
 
+# Navy waterproof overalls over a cream shirt, with dark rubber boots.
+UNIFORMS["fisherman"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....wbwwbw.....", "....wwkddkww....", ".....wddddw.....",
+     ".....bddddb.....", "......dbbd......", "......qqqq......"],
+    {"w": (224, 222, 190), "k": BUCKLE, "d": (42, 83, 110),
+     "b": (28, 54, 78), "q": (34, 43, 45)},
+)
+
+
+# Green gardening apron over a lavender shirt and brown boots.
+UNIFORMS["city_decorator"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....wbwwbw.....", "....wwkddkww....", ".....wddddw.....",
+     ".....bddddb.....", "......dbbd......", "......qqqq......"],
+    {"w": (190, 151, 205), "k": BUCKLE, "d": (77, 135, 68),
+     "b": (41, 84, 45), "q": (84, 58, 36)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

@@ -121,6 +121,8 @@ pub const PROPS: &[Prop] = &[
     // The farm's store of wheat, a farmer's workplace (`sim::job`). Used from
     // beside it.
     Prop::blocking("grain bin"),
+    Prop::blocking("fish bin"),
+    Prop::blocking("flower supplies"),
     // The power plant: its generators, which feed the power line under them
     // like a transformer (`super::utilities`), and the control panel its
     // workers keep (`sim::job`), used from beside it.

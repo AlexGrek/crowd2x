@@ -28,8 +28,10 @@
 //! ```text
 //! 0. perception.turn(..) to face the way it walks; and when the unit's own
 //!      schedule says it is time to look (every 7th tick), perception.look(..)
-//!      and attention.take_in(..), which reacts to anybody not in mind —
-//!      eyes shut instead, while it is asleep
+//!      and attention.take_in(..), which reacts to anybody not in mind — a
+//!      wanderer may ask them for a chat (`social`) — eyes shut instead,
+//!      while it is asleep; on the same beat, the nights' loss off what it
+//!      thinks of everybody; and every tick, a chat taken up or let go
 //! 1. every routine runs
 //! 2.   ...and arranges the priority list
 //! 3. if the goal on top changed: old.deprioritized() -> current task
@@ -71,6 +73,7 @@ pub mod memory;
 pub mod perception;
 pub mod routine;
 pub mod routines;
+mod social;
 pub mod task;
 pub mod tasks;
 pub mod timesheet;
@@ -199,6 +202,7 @@ impl Brain {
                 Routine::ready(),
                 Routine::hospital(),
                 Routine::flee(),
+                Routine::chat(),
             ],
             GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
@@ -263,6 +267,11 @@ impl Brain {
         } = self;
         let body = *walk.body();
         let job = job.as_ref();
+        // Who keeps company: a person.
+        let social = body.uid().kind() == Some(EntityType::Human);
+        // In charge as the last tick ended: what a chat is asked or taken up
+        // from (wandering), before the routines arrange the list again.
+        let was_doing = goals.top();
 
         // 0. Face the way it is going, and when it is time, look round and
         // take in what is news. Asleep, its eyes are shut: it sees nobody, and
@@ -282,12 +291,26 @@ impl Brain {
                         if let Some(biology) = biology.as_deref_mut() {
                             biology.handle(Event::Met);
                         }
+                        // Somebody to ask for a chat, perhaps (`social`).
+                        if social {
+                            social::notice(ctx, &body, memory, was_doing, notice.uid, notice.cell);
+                        }
                     }
                 });
                 attention.met_with(met);
                 // Danger, or prey, in what it saw (`alarm`).
                 alarm::take_in(ctx, &body, &sightings, memory);
             }
+            // A night gone by is a point off what it thinks of everybody:
+            // asked on this beat rather than every tick, since it changes
+            // once a day.
+            if social {
+                memory.relations_mut().pass_nights(ctx.clock.day(), ctx.clock.elapsed(), ctx.society.rules());
+            }
+        }
+        // A chat taken up, agreed or given up on (`social`).
+        if social {
+            social::tend(ctx, &body, memory, was_doing);
         }
 
         memory.medical.update(ctx, body.uid(), biology.as_deref_mut());
@@ -731,6 +754,16 @@ impl Brain {
         }
         fields.extend(self.perception.debug_fields());
         fields.extend(self.attention.debug_fields());
+        if let Some(chat) = self.memory.chat() {
+            let phase = match chat.phase {
+                crate::sim::relationships::Phase::Inviting => "asking",
+                crate::sim::relationships::Phase::Talking if chat.leads => "going over to",
+                crate::sim::relationships::Phase::Talking => "waiting for",
+                crate::sim::relationships::Phase::Done => "done with",
+            };
+            fields.push(("chat", format!("{phase} {}", chat.with)));
+        }
+        fields.push(("knows", self.memory.relations().len().to_string()));
         fields.push((
             "memory",
             if self.memory.is_empty() {
@@ -1317,7 +1350,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety, keep company"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
@@ -1333,7 +1366,7 @@ mod tests {
         saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
         let mut saved = saved.save();
         let added = saved.routines.pop().expect("a routine to leave out");
-        assert_eq!(added.name, "run for safety");
+        assert_eq!(added.name, "keep company");
         saved.job = None;
 
         let mut brain = Brain::human();

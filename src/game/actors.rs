@@ -274,6 +274,12 @@ fn build_world(
                 warn!("{warning}");
                 state.log.important(warning);
             }
+            let (rules, warning) = super::relationships::load_rules();
+            state.set_relationship_rules(rules);
+            if let Some(warning) = warning {
+                warn!("{warning}");
+                state.log.important(warning);
+            }
             state.spawn_from_spawners();
             state
         }

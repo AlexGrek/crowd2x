@@ -92,13 +92,16 @@ goal in charge, the priority list, the task, its result and action — live, lik
 `items` (the hand, what is stowed, and both totals against both limits — live too,
 since a unit picks things up while you are reading), `talents`, `clothing` (the wardrobe;
 at work it reads `wearing: uniform guard (own: ...)` and the buttons change the clothes the
-worker goes home in) and `job` (the
+worker goes home in), `relationship` (who it knows, best first — family, colleagues, friends,
+acquaintances — with each level and the chat it is in, live; the `relationships` skill) and `job` (the
 job, `at` (`computer at x, y`, `scrap bin at x, y` or `guard post at x, y`), hours and days, and `now` — working, on watch,
 on the way, collecting scrap, storing scrap, getting ready (`getting ready: drink`, a collector
 seeing to a need before a trip out), on a break, off, weekend —
 live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command::Hire`; the
 `jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
-them.
+them. The row of menu buttons wraps at `BUTTON_ROW` (270 canvas pixels), so with
+`relationship` it is two rows and never runs off the canvas — the bar is taller than it was,
+reaching up to about y 105 with nobody's menu open.
 
 **What a human has on is `GameEntity::worn(clock)`**, not `clothing()`: its job's uniform while
 the job is due, its own outfit otherwise. `actors::look_from(entity, clock)` dresses a sprite
@@ -254,3 +257,10 @@ Select a tariff, lower/raise, restore YAML defaults, or close (escape also close
 Values read Sim live; writes queue SetTariff. Statistics includes budget, daily
 flows, cash, debt and outstanding shifts/care days, with jobs in a second column.
 The job panel adds live cash, gross wage and owed counts. See ../economy/SKILL.md.
+
+## Deathdogs
+
+Drawn as dogs: `characters::dog::Breed::Deathdog` picks the deathdog's sheets, and the body
+comes from and goes back to the dog pool (`actors::breed_of`, `park_or_despawn`); the unit
+panel's portrait the same. Counted by kind in the statistics menu and offered in the spawn
+menu, both from `EntityType::ALL`. The `deathdogs` skill has the rest.

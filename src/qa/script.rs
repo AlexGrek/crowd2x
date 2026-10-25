@@ -271,6 +271,13 @@ pub enum Step {
         name: String,
         on: bool,
     },
+    /// Set rules relationships are run by, each by its name in
+    /// `relationships.yaml` — `{"relationships": {"stranger chance": 1.0}}`
+    /// makes every wanderer ask everybody it sees for a chat. On the command
+    /// queue, like a spawn: in force from the next tick. An unknown name is
+    /// an error; a value out of range is kept in it, and the log says what it
+    /// came to.
+    Relationships(std::collections::BTreeMap<String, f64>),
     /// How many of `item` the **selected** unit has stowed.
     ///
     /// What is in its hand is not stowed and is not counted here, which is the
@@ -591,6 +598,14 @@ pub enum Step {
     /// (`sim::fields`). An outcome, not a moment — give the farmers ticks
     /// enough first.
     ExpectCrops { min: u32 },
+    /// Planted city beds, distinct varieties, and (optionally) fully grown beds.
+    ExpectFlowers {
+        min: u32,
+        #[serde(default)]
+        varieties: u32,
+        #[serde(default)]
+        blooming: bool,
+    },
     /// Switch the distribution box in a cell on or off, on the command queue
     /// the game uses — applied by the next tick, like `spawn`. The panel's
     /// button is the way a player does it; this is for a test about what

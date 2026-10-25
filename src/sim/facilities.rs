@@ -26,6 +26,7 @@ use super::panics::Panics;
 use super::playzone::Playzones;
 use super::property::Properties;
 use super::refuge::WaysIn;
+use super::relationships::{Chats, Society};
 use super::statistics::Tally;
 use super::uid::Uid;
 use super::wounds::Wounds;
@@ -68,6 +69,7 @@ pub struct Facilities {
     /// harvested through `Effect::Sow`, `Tend` and `Harvest`, which plant and
     /// unplant the map with it.
     pub fields: Fields,
+    pub flowers: super::flowers::Flowers,
     /// Which arcade cabinets work: those whose playzone computer an
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
@@ -86,6 +88,15 @@ pub struct Facilities {
     /// The ways in from the wasteland, and the refuge behind each: where
     /// somebody panicking runs ([`super::refuge`]). Derived from the map.
     pub ways_in: WaysIn,
+    /// Everybody's family and job — what the floors of their relationships
+    /// are made of ([`super::relationships`]). Kept by the spawn pass as
+    /// people arrive, are hired and let go, die and leave; worked out again
+    /// from the entities on load, so never saved.
+    pub society: Society,
+    /// Who is chatting with whom this tick: gathered from the crowd by the
+    /// think step, read by react ([`super::relationships::Chats`]). Rebuilt
+    /// every tick, never saved.
+    pub chats: Chats,
     /// Who leaves the world this tick: the bodies undertakers took up
     /// (`Effect::TakeBody`) and the deathdogs gone back into the wasteland
     /// (`Effect::Depart`). Despawned at the end of the processing pass
@@ -112,11 +123,14 @@ impl Facilities {
             workplaces: Workplaces::new(),
             tally: Tally::default(),
             fields: Fields::new(),
+            flowers: Default::default(),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),
             wounds: Wounds::default(),
             ways_in: WaysIn::from_map(map),
+            society: Society::new(),
+            chats: Chats::default(),
             leaving: Vec::new(),
         }
     }

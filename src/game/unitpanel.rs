@@ -6,7 +6,7 @@
 //! | [despawn] [freeze]                |
 //! +-----------------------------------+
 //! | [##] human                        |
-//! | [##] [life][debug][stats][brains][items][talents][clothing][job][close]
+//! | [##] [life][debug][stats][brains][items][talents][clothing][job][relationship][close]
 //! +-----------------------------------+
 //! ```
 //!
@@ -68,6 +68,11 @@ use super::selection::Selected;
 /// the art stays on whole pixels of the interface.
 const PORTRAIT: f32 = 32.0;
 
+/// The widest the row of menu buttons beside the portrait may be, in canvas
+/// pixels, before it wraps: the canvas is 320, less the portrait, the gap and
+/// the bar's padding, with a little to spare.
+const BUTTON_ROW: f32 = 270.0;
+
 /// Which menu is open under the bar, if any.
 ///
 /// One at a time: these are views of one unit, and two
@@ -99,6 +104,10 @@ enum Menu {
     /// what it is doing about them right now — live — with a button to let it
     /// go or take it on.
     Job,
+    /// Who it knows and what it thinks of them: family, colleagues, friends
+    /// and whoever else it has chatted with, best first, and the chat it is
+    /// in — live, since a chat can end while you read.
+    Relationship,
 }
 
 impl Menu {
@@ -114,6 +123,7 @@ impl Menu {
             Menu::Talents => "talents",
             Menu::Clothing => "clothing",
             Menu::Job => "job",
+            Menu::Relationship => "relationship",
         }
     }
 }
@@ -162,6 +172,8 @@ enum Readout {
     /// The job menu's button, which says `dismiss` to somebody with a job
     /// and `hire` to somebody without.
     Employ,
+    /// Every line of the relationship menu, rewritten as a block.
+    Relationship,
     /// The line by the portrait: what it is, and whether it is held.
     Title,
 }
@@ -391,9 +403,15 @@ fn rebuild(
                             ],
                         ),
                         (
+                            // Wrapped onto a second row rather than run off
+                            // the right of the canvas: the portrait and the
+                            // padding leave this much of its 320 pixels.
                             Node {
                                 flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
                                 column_gap: px(3),
+                                row_gap: px(3),
+                                max_width: px(BUTTON_ROW),
                                 ..default()
                             },
                             children![
@@ -405,6 +423,7 @@ fn rebuild(
                                 (Action::Open(Menu::Talents), plain_button("talents", px(32))),
                                 (Action::Open(Menu::Clothing), plain_button("clothing", px(32))),
                                 (Action::Open(Menu::Job), plain_button("job", px(18))),
+                                (Action::Open(Menu::Relationship), plain_button("relationship", px(50))),
                                 (Action::Close, plain_button("close", px(24))),
                             ],
                         ),
@@ -495,6 +514,12 @@ fn menu_contents(
                     labelled_button((Readout::Employ, label(employ_label(entity), FONT_BODY, TEXT)), px(34)),
                 ));
             }
+        }
+        Menu::Relationship => {
+            parent.spawn((
+                Readout::Relationship,
+                label(relationship_block(sim, entity), FONT_BODY, TEXT),
+            ));
         }
         // Deliberately empty, and saying so: a menu that opened onto nothing
         // at all would read as a menu that failed to load.
@@ -658,6 +683,7 @@ fn update_readouts(
             Readout::Freeze => freeze_label(entity).to_string(),
             Readout::Job => job_and_cash(&sim, entity),
             Readout::Employ => employ_label(entity).to_string(),
+            Readout::Relationship => relationship_block(&sim, entity),
             Readout::Title => title(entity),
         };
         if **text != wanted {
@@ -775,6 +801,57 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
         ("days", shift.days()),
         ("now", now),
     ])
+}
+
+/// How many people the relationship menu lists before it says how many more.
+const RELATIONSHIP_ROWS: usize = 14;
+
+/// Who it knows, as a block of lines: the chat it is in, if any; how many of
+/// each it has; then one line each — name, level, what they are to it — best
+/// first ([`GameState::acquaintances`](crate::sim::GameState::acquaintances)),
+/// as many as fit.
+fn relationship_block(sim: &Sim, entity: &dyn GameEntity) -> String {
+    use crate::sim::relationships::Phase;
+    if entity.relations().is_none() {
+        return "knows nobody".to_string();
+    }
+    let state = &sim.0;
+    // A name, or what became of somebody who is no longer about.
+    let name = |uid: Uid| match state.entities().get(uid) {
+        Some(other) if other.is_dead() => format!("{} (dead)", other.display_name().unwrap_or_else(|| uid.to_string())),
+        Some(other) => other.display_name().unwrap_or_else(|| uid.to_string()),
+        None => format!("{uid} (gone)"),
+    };
+    let mut lines = Vec::new();
+    if let Some(chat) = entity.chat() {
+        let doing = match chat.phase {
+            Phase::Inviting => "asking for a chat:",
+            Phase::Talking => "chatting with",
+            Phase::Done => "saying goodbye to",
+        };
+        lines.push(format!("{doing} {}", name(chat.with)));
+    }
+    let known = state.acquaintances(entity.uid());
+    if known.is_empty() {
+        lines.push("knows nobody yet".to_string());
+        return lines.join("\n");
+    }
+    let count = |kind: &str| known.iter().filter(|known| known.kind() == kind).count();
+    lines.push(format!(
+        "family {}  colleagues {}  friends {}  acquaintances {}",
+        count("family"),
+        count("colleague"),
+        count("friend"),
+        count("acquaintance")
+    ));
+    let width = known.iter().take(RELATIONSHIP_ROWS).map(|known| name(known.who).chars().count()).max().unwrap_or(0) + 1;
+    for known in known.iter().take(RELATIONSHIP_ROWS) {
+        lines.push(format!("{:<width$}{:>3.0}  {}", name(known.who), known.level, known.kind()));
+    }
+    if known.len() > RELATIONSHIP_ROWS {
+        lines.push(format!("...and {} more", known.len() - RELATIONSHIP_ROWS));
+    }
+    lines.join("\n")
 }
 
 /// The line beside the portrait: this person's name, or the kind's for one

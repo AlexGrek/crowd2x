@@ -1,0 +1,306 @@
+{
+  "name": "three employed fishermen catch fish from the outside lakeshore and store their five-fish loads",
+  "state": "game",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "lakeshore",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 9,
+            "height": 7
+          },
+          "terrain": {
+            "palette": [
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 120,
+                  "y": 168
+                },
+                "kind": "fish bin"
+              },
+              {
+                "at": {
+                  "x": 216,
+                  "y": 168
+                },
+                "kind": "fish bin"
+              },
+              {
+                "at": {
+                  "x": 312,
+                  "y": 168
+                },
+                "kind": "fish bin"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "lakeshore",
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 1,
+        "y": 3
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 3,
+        "y": 3
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 5,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 3
+    },
+    {
+      "expect_log": "was hired as a fisherman at the fish bin at 4, 3"
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "fisherman"
+    },
+    {
+      "expect_text": "09:00-17:00"
+    },
+    {
+      "expect_text": "Mon-Sat"
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "tick": 2500
+    },
+    {
+      "press": "follow"
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "the fishing brain"
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "a fisherman on the dry bank"
+    },
+    {
+      "tick": 10300
+    },
+    {
+      "expect_log": "caught a fish"
+    },
+    {
+      "expect_stored": {
+        "in": "fish bin",
+        "min": 15
+      }
+    },
+    {
+      "press": "follow"
+    },
+    {
+      "select": 1
+    },
+    {
+      "expect_visible_log": "caught a fish"
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_visible_log": "caught a fish"
+    },
+    {
+      "select": 0
+    },
+    {
+      "expect_visible_log": "caught a fish"
+    },
+    {
+      "look_at": {
+        "x": 4,
+        "y": 3
+      }
+    },
+    {
+      "press": "job"
+    },
+    {
+      "shot": "fish brought into the warehouse"
+    }
+  ]
+}

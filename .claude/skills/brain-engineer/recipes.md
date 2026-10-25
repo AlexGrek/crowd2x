@@ -468,9 +468,9 @@ pub fn human() -> Brain {
   `Brain::new` panics only on two executors for one goal.
 - Routine order is fixed at construction, and determinism depends on that.
 - Update `a_human_s_brain_says_what_it_is_doing`, which asserts the routine list.
-- Watch `a_human_stays_small_enough_to_be_worth_a_thousand_of` (`size_of::<Human>() <= 640`,
-  608 today). Routines do not count against it. A goal slot (16 bytes, per `GoalId`, on every
-  kind) and a stat do: raise the wall by a cache line on purpose, with a note, never silently.
+- There is no size wall on a `Human` any more (the test was removed on 2026-10-25: the
+  project does not optimise for memory). Keep hot per-tick state inline and cold state boxed
+  for cache reasons, not for a byte count.
 
 A new **unit kind** (not just a new behaviour) is:
 

@@ -910,7 +910,7 @@ mod tests {
         assert_eq!(tariffs.minutes_per_account, 5);
         assert_eq!(tariffs.price(ItemKind::Food), Money::dollars(1));
         assert_eq!(tariffs.price(ItemKind::Water), Money::ZERO);
-        let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer];
+        let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer, JobKind::CityDecorator];
         for job in JobKind::ALL {
             let wage = if job == JobKind::King {
                 100

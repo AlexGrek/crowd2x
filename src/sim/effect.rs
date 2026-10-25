@@ -83,6 +83,7 @@ pub enum Effect {
     /// bin. Refused where somebody stands in the plot, where it was sown
     /// first, or where the farm's field is full ([`super::fields`]).
     Sow { at: Point, when: Clock },
+    PlantFlowers { at: Point, when: Clock, variety: u8 },
     /// Count a day's tending of the crop at `at` (`brain::tasks::Tend`):
     /// its quality goes up, once a day.
     Tend { at: Point, when: Clock },
@@ -190,6 +191,15 @@ pub(crate) fn apply(
             facilities.tally.cremated += 1;
             log.unit(entity.uid(), format!("{} cremated a body in the crematorium at {}, {}", entity.uid(), at.x, at.y));
         }
+        Effect::PlantFlowers { at, when, variety } => {
+            if entity.job().is_some_and(|job| job.kind == super::job::JobKind::CityDecorator)
+                && entity.center_position().manhattan_distance(at) == 1
+                && facilities.properties.of(at).is_none() && !occupancy.is_occupied(at) && facilities.corpses.at(at).is_none()
+                && facilities.flowers.sow(map, at, variety, when)
+            {
+                log.unit(entity.uid(), format!("{} planted {} at {}, {}", entity.uid(), super::flowers::NAMES[variety as usize], at.x, at.y));
+            }
+        },
         Effect::Sow { at, when } => sow(entity, map, facilities, occupancy, log, at, when),
         Effect::Tend { at, when } => match facilities.fields.tend(at, when) {
             Some(quality) => log.unit(entity.uid(), format!("{} tended the wheat at {}, {}: kept at {quality}%", entity.uid(), at.x, at.y)),
@@ -353,6 +363,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     occupancy.release(cell, uid);
     facilities.homes.release(uid);
     facilities.workplaces.release(uid);
+    facilities.society.set_job(uid, None);
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
     facilities.economy.died(uid);

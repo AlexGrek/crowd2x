@@ -127,6 +127,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"give": {"item": "food", "count": 3}}` | Stow items in the selected unit: `food` or `water`. |
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
+| `{"relationships": {"stranger chance": 1.0}}` | Set rules relationships are run by, each by its name in `relationships.yaml` (an unknown name fails the step); on the command queue, in force from the next tick, logged `relationships: <name> is <value>`. Every chance at 1 makes chats certain (`qa/relationships.json`). |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
 | `{"select_box": {"x": 4, "y": 1}}` | Select the distribution box in a cell, opening its panel (`switch off`/`switch on`, `close`). Game screen. |
@@ -239,6 +240,7 @@ request. Together they test the editor refusing to close on save failure; see
 | `{"expect_connected": {"utility": "power", "served": 2, "of": 2}}` | How many of the simulated map's things that need `power` or `water` have it, out of how many need it. Game screen only. |
 | `{"expect_objects": {"map": "loft", "layer": "lamps", "kind": "ceiling lamp", "count": 1}}` | How many objects the **saved** map has on an object layer (`props`, `spawners`, `lamps`), optionally of one kind. |
 | `{"expect_log": "spawned dog"}` | That the simulation said something containing this. |
+| `{"expect_text": "family 1"}` | That some text on screen — any label, a menu's included — contains this. |
 | `{"expect_world_time": {"hours": 1.0}}` | That at least this many hours have gone by on the world's clock. |
 | `{"expect_stat": {"stat": "hunger", "max": 75, "of": "crowd"}}` | A stat in a range — `min`, `max` or both — of the selected unit (`"of": "selected"`, the default) or the crowd's average (`"crowd"`). Any name the debug menu shows. |
 | `{"expect_under": {"measure": "1000 humans", "ms": 1.0}}` | A measurement's median sample came in under a budget. |

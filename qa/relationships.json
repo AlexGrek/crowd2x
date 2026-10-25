@@ -1,0 +1,78 @@
+{
+  "name": "the relationship tab lists family at thirty, and with every chance at one strangers chat and know each other",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "house and yard",
+        "map": {
+          "version": 1,
+          "size": { "width": 14, "height": 9 },
+          "terrain": {
+            "palette": ["void", "floor", "wall brown"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,2,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              { "at": { "x": 264, "y": 216 }, "kind": "house door" }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "house and yard",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+    { "note": "two arrive in the house — the room behind the house door at 5, 4 — and are a family; four in the yard are strangers" },
+    { "spawn": { "kind": "human", "x": 2, "y": 3 } },
+    { "spawn": { "kind": "human", "x": 3, "y": 5 } },
+    { "spawn": { "kind": "human", "x": 8, "y": 2 } },
+    { "spawn": { "kind": "human", "x": 10, "y": 4 } },
+    { "spawn": { "kind": "human", "x": 8, "y": 6 } },
+    { "spawn": { "kind": "human", "x": 11, "y": 6 } },
+    { "tick": 1 },
+    { "look_at": { "x": 7, "y": 4 } },
+
+    { "select": 0 },
+    { "press": "relationship" },
+    { "wait": 0.2 },
+    { "expect_text": "family 1  colleagues 0  friends 0  acquaintances 0" },
+    { "expect_text": " 30  family" },
+    { "shot": "a mother's relationships: her son, at the family floor" },
+
+    { "note": "every wanderer now asks everybody it sees: the chances are rules (relationships.yaml), and a script may set them" },
+    { "relationships": { "stranger chance": 1.0, "acquaintance chance": 1.0, "friend chance": 1.0 } },
+    { "tick": 1 },
+    { "expect_log": "relationships: stranger chance is 1" },
+    { "note": "three hours of wandering: strangers in the yard meet, ask each other for chats and have them" },
+    { "tick": 5760 },
+    { "expect_world_time": { "hours": 3.0 } },
+    { "select": 2 },
+    { "press": "relationship" },
+    { "wait": 0.2 },
+    { "note": "the summary line is only there for somebody who knows somebody: 'knows nobody yet' otherwise" },
+    { "expect_text": "family 0  colleagues 0" },
+    { "shot": "a stranger's relationships after a morning in the yard" },
+    { "press": "relationship" },
+    { "press": "brains" },
+    { "wait": 0.2 },
+    { "shot": "the brains menu says how many it knows" }
+  ]
+}

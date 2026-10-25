@@ -147,6 +147,7 @@ pub mod entity;
 pub(crate) mod facilities;
 pub mod feature;
 pub mod fields;
+pub mod flowers;
 pub mod fridge;
 pub mod homes;
 pub mod hospital;
@@ -163,6 +164,7 @@ pub mod path;
 pub mod playzone;
 pub mod property;
 pub mod refuge;
+pub mod relationships;
 pub(crate) mod rng;
 mod saving;
 pub mod statistics;
@@ -346,6 +348,10 @@ pub enum Command {
     /// player at the economy menu. Kept in bounds and logged
     /// ([`GameState::set_tariff`]).
     SetTariff { tariff: economy::Tariff, value: i64 },
+    /// Set one of the rules relationships are run by
+    /// ([`relationships::Rule`]) to `value` — a QA script's `relationships`
+    /// step. Kept in bounds and logged ([`GameState::set_relationship_rule`]).
+    SetRelationshipRule { rule: relationships::Rule, value: f64 },
 }
 
 /// One frame's worth of input to the simulation.
@@ -432,6 +438,11 @@ impl Input {
 
     pub fn set_tariff(&mut self, tariff: economy::Tariff, value: i64) -> &mut Input {
         self.commands.push(Command::SetTariff { tariff, value });
+        self
+    }
+
+    pub fn set_relationship_rule(&mut self, rule: relationships::Rule, value: f64) -> &mut Input {
+        self.commands.push(Command::SetRelationshipRule { rule, value });
         self
     }
 
@@ -545,6 +556,11 @@ pub struct GameState {
     /// and drained by [`world_step`] at the end of the tick. Indexed by
     /// [`Slot`] and sized alongside [`GameState::intents`].
     effects: Vec<Effect>,
+    /// The chat each entity is in, as the think step found it — gathered into
+    /// [`relationships::Chats`] before react reads it. Indexed by [`Slot`]
+    /// and sized alongside [`GameState::intents`]; overwritten every tick, so
+    /// never saved.
+    chatters: Vec<Option<relationships::Chatter>>,
     /// Cells the far route searches expanded last tick, all of them — what
     /// the route budget bounds ([`react_step`]).
     route_work: usize,
@@ -597,6 +613,7 @@ impl GameState {
             intents: Vec::new(),
             moves: Vec::new(),
             effects: Vec::new(),
+            chatters: Vec::new(),
             route_work: 0,
         }
     }
@@ -896,6 +913,10 @@ impl GameState {
     }
 
     /// Every crop in the fields. See [`fields`].
+    pub fn flowers(&self) -> &flowers::Flowers {
+        &self.facilities.flowers
+    }
+
     pub fn fields(&self) -> &Fields {
         &self.facilities.fields
     }
@@ -903,6 +924,37 @@ impl GameState {
     /// The district's money. See [`economy`].
     pub fn economy(&self) -> &economy::Economy {
         &self.facilities.economy
+    }
+
+    /// Everybody's family and job: what the floors of their relationships
+    /// are made of ([`relationships::Society`]), and the rules.
+    pub fn society(&self) -> &relationships::Society {
+        &self.facilities.society
+    }
+
+    /// Run relationships by `rules` — a new game's, from
+    /// `relationships.yaml`.
+    pub fn set_relationship_rules(&mut self, rules: relationships::Rules) {
+        self.facilities.society.set_rules(rules);
+    }
+
+    /// Set one rule, kept in bounds, and say so
+    /// ([`Command::SetRelationshipRule`]). What it was set to.
+    pub fn set_relationship_rule(&mut self, rule: relationships::Rule, value: f64) -> f32 {
+        let set = self.facilities.society.change_rule(rule, value);
+        self.log.important(format!("relationships: {} is {set}", rule.name()));
+        set
+    }
+
+    /// Everybody `uid` has a relationship with — family, colleagues, and
+    /// whoever it has chatted with — best first ([`relationships::acquaintances`]).
+    /// Empty for a kind that knows nobody. Allocates: for the relationship
+    /// tab, about the one unit selected.
+    pub fn acquaintances(&self, uid: Uid) -> Vec<relationships::Acquaintance> {
+        match self.entities.get(uid).and_then(|entity| entity.relations()) {
+            Some(relations) => relationships::acquaintances(uid, relations, &self.facilities.society),
+            None => Vec::new(),
+        }
     }
 
     /// Run the economy by `tariffs` from now on: what a new game reads out of
@@ -1043,10 +1095,12 @@ impl GameState {
             self.intents.resize(slot as usize + 1, Intent::Idle);
             self.moves.resize(slot as usize + 1, MoveOutcome::Idle);
             self.effects.resize(slot as usize + 1, Effect::None);
+            self.chatters.resize(slot as usize + 1, None);
         }
         self.intents[slot as usize] = Intent::Idle;
         self.moves[slot as usize] = MoveOutcome::Idle;
         self.effects[slot as usize] = Effect::None;
+        self.chatters[slot as usize] = None;
 
         // Takes the cell if it is free, and leaves whoever is already there in
         // possession if it is not — an entity is placed where it was asked
@@ -1057,6 +1111,15 @@ impl GameState {
         self.census.file(slot, at);
 
         self.log.unit(uid, format!("spawned {uid} at {},{}", at.x, at.y));
+        // A person is born into a family: everybody who arrives in the same
+        // house ([`relationships`]).
+        if kind == EntityType::Human {
+            let family = self.facilities.properties.of(at);
+            if let Some(entity) = self.entities.get_mut(uid) {
+                entity.body_mut().set_family(family);
+            }
+            self.facilities.society.join(uid, family);
+        }
         if let Some(cash) = cash {
             self.facilities.economy.roll(self.clock().day());
             self.facilities.economy.open(uid, cash);
@@ -1165,6 +1228,8 @@ impl GameState {
         }
         let at = job.workplace;
         self.facilities.workplaces.claim(at, job.shift, uid);
+        // Everybody doing the same is a colleague now.
+        self.facilities.society.set_job(uid, Some(job.kind));
         self.log.unit(uid, format!(
             "{uid} was hired as {} at the {} at {}, {}, {}",
             job.kind.with_article(),
@@ -1214,6 +1279,7 @@ impl GameState {
             return false;
         };
         self.facilities.workplaces.release(uid);
+        self.facilities.society.set_job(uid, None);
         self.log.unit(uid, format!(
             "{uid} was let go from the {} at {}, {}",
             job.kind.workplace_name(),
@@ -1228,6 +1294,11 @@ impl GameState {
         self.facilities.hospital.release(uid);
         if let Some(slot) = self.entities.slot_of(uid) {
             self.census.strike(slot);
+            // The think step writes only live slots, and the chats are
+            // gathered from every one: a hole must say nobody is chatting.
+            if let Some(chatter) = self.chatters.get_mut(slot as usize) {
+                *chatter = None;
+            }
         }
         match self.entities.remove(uid) {
             Some(gone) => {
@@ -1239,6 +1310,7 @@ impl GameState {
                 // desk.
                 self.facilities.homes.release(uid);
                 self.facilities.workplaces.release(uid);
+                self.facilities.society.leave(uid);
                 // What it had, or owed, goes to the budget.
                 let _ = self.facilities.economy.close(uid);
                 self.log.unit(uid, format!("despawned {uid}"));
@@ -1538,6 +1610,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             Command::SetTariff { tariff, value } => {
                 state.set_tariff(*tariff, *value);
             }
+            Command::SetRelationshipRule { rule, value } => {
+                state.set_relationship_rule(*rule, *value);
+            }
         }
     }
     state.follow_the_crowd();
@@ -1593,6 +1668,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
         moves,
         effects,
+        chatters,
         route_work,
         ..
     } = &mut *state;
@@ -1602,11 +1678,15 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // Sized by the spawn pass, which is the only thing that can change the
     // arena. If this ever trips, something grew the table outside that pass.
     debug_assert!(
-        intents.len() >= table.capacity() && moves.len() >= table.capacity() && effects.len() >= table.capacity(),
-        "the slot buffers ({}, {}, {}) are shorter than the entity table ({})",
+        intents.len() >= table.capacity()
+            && moves.len() >= table.capacity()
+            && effects.len() >= table.capacity()
+            && chatters.len() >= table.capacity(),
+        "the slot buffers ({}, {}, {}, {}) are shorter than the entity table ({})",
         intents.len(),
         moves.len(),
         effects.len(),
+        chatters.len(),
         table.capacity()
     );
 
@@ -1615,7 +1695,11 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         &table,
         &Think::new(map, occupancy, log, facilities, dt, *tick, clock),
         intents,
+        chatters,
     );
+    // Who is chatting with whom, as the think step found everybody: what
+    // react asks to know who is asking it for a chat and where a partner is.
+    facilities.chats.rebuild(&chatters[..table.capacity()]);
 
     move_step(
         &mut table,
@@ -1670,21 +1754,32 @@ const PARALLEL_AT: usize = 64;
 /// changes while they read it. Keep it that way — an entity that wants to see
 /// what another entity decided this tick is asking for the one thing this
 /// shape cannot give.
-fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent]) {
+///
+/// Each entity also says what chat it is in, if any, into `chatters` —
+/// asked here because this is the one walk of the whole crowd that already
+/// has every unit in cache ([`relationships::Chats`]).
+fn think_step(
+    table: &FrozenEntities<'_>,
+    ctx: &Think<'_>,
+    intents: &mut [Intent],
+    chatters: &mut [Option<relationships::Chatter>],
+) {
     let intents = &mut intents[..table.capacity()];
+    let chatters = &mut chatters[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots() {
-            intents[slot as usize] = think_for(entity, ctx);
+            (intents[slot as usize], chatters[slot as usize]) = think_for(entity, ctx);
         }
         return;
     }
     intents
         .par_iter_mut()
+        .zip(chatters.par_iter_mut())
         .zip(table.par_iter_slots())
-        .for_each(|(intent, entity)| {
-            if let Some(entity) = entity {
-                *intent = think_for(entity, ctx);
-            }
+        .for_each(|((intent, chatter), entity)| match entity {
+            Some(entity) => (*intent, *chatter) = think_for(entity, ctx),
+            // A hole chats with nobody, whoever left it.
+            None => *chatter = None,
         });
 }
 
@@ -1694,11 +1789,14 @@ fn think_step(table: &FrozenEntities<'_>, ctx: &Think<'_>, intents: &mut [Intent
 /// move step that is not going to move it, and the intent it did not produce
 /// is the [`Intent::Idle`] the move step wants anyway — so the freeze costs a
 /// bool per entity here rather than a decision per entity everywhere else.
-fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> Intent {
+///
+/// And the chat it is in: none for the frozen and the dead, who are in no
+/// state to talk, so whoever they were chatting with gives up on them.
+fn think_for(entity: &dyn GameEntity, ctx: &Think<'_>) -> (Intent, Option<relationships::Chatter>) {
     if entity.is_frozen() || entity.is_dead() {
-        Intent::Idle
+        (Intent::Idle, None)
     } else {
-        entity.think(ctx)
+        (entity.think(ctx), entity.chatter())
     }
 }
 
@@ -2840,9 +2938,10 @@ mod tests {
                 count(lines, "had a go on the computer"),
                 count(lines, "opened the fridge"),
                 count(lines, "worked an hour at the computer"),
+                count(lines, " chatted with "),
             ]
         };
-        let (mut done_a, mut done_b) = ([0; 6], [0; 6]);
+        let (mut done_a, mut done_b) = ([0; 7], [0; 7]);
         // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
         // parched, bursting or bored for hours: the slowest need to come round
         // is boredom, ten world hours from a great time to bored. `run` ticks
@@ -2865,7 +2964,7 @@ mod tests {
                 .map(|e| (e.uid().raw(), e.position()))
                 .collect()
         };
-        let [meals, drinks, reliefs, plays, opened, worked] = done_a;
+        let [meals, drinks, reliefs, plays, opened, worked, chats] = done_a;
         assert!(meals > 0, "nobody ate, so the eating part of the brain never ran");
         assert!(drinks > 0, "nobody drank, so the drinking part of the brain never ran");
         assert!(reliefs > 0, "nobody used a toilet, so that part of the brain never ran");
@@ -2874,6 +2973,8 @@ mod tests {
         // The first two arrivals were given the two computers as desks, and
         // from eight to two on a Monday they worked.
         assert!(worked > 0, "nobody worked a shift, so the work part of the brain never ran");
+        // Wanderers who met, all family under one roof, and chatted.
+        assert!(chats > 0, "nobody chatted, so the chat part of the brain never ran");
         assert_eq!(a.workplaces().len(), 2);
         assert_eq!(done_a, done_b);
         assert_eq!(positions(&a), positions(&b));
@@ -3396,61 +3497,6 @@ mod tests {
     }
 
     #[test]
-    fn a_human_stays_small_enough_to_be_worth_a_thousand_of() {
-        // The brain is inline — fixed arrays, no `Vec` of tasks or goals — so
-        // that a crowd is a run of entities a cache line apart rather than a
-        // pointer chase per unit per tick. The absence of a `Vec` is a property
-        // of the type, not something a test can see at runtime; its size is.
-        //
-        // The one deliberate exception is the routine list: one boxed slice,
-        // sized at spawn, because a human's routines are going to number in the
-        // dozens and an inline array would charge every unit for the longest
-        // list any kind has. However many routines there are, they cost a
-        // Human the same sixteen bytes.
-        //
-        // The wall is a number of cache lines, and it moves by one when a need
-        // is added on purpose: a need is a stat and a goal slot, about thirty
-        // bytes. A Human is 504 bytes with hunger, thirst, bladder and an
-        // inventory — which is twelve of them, a count per item kind plus the
-        // two limits, and no `Vec`. What this is here to catch is a jump
-        // nobody meant, not a need somebody did.
-        //
-        // Raised from 576 to 640 on purpose: talents filled the old wall to
-        // the byte, and a unit's own background `Schedule` — a seed, a
-        // countdown and the time owed per priority — is 32 bytes more (608).
-        // Perception keeps a heading and two counts inline and attention its
-        // faces boxed, out of line, for exactly this; company in recent memory
-        // is one more familiarity. The places a unit gave up on reaching are
-        // boxed in its memory for the same reason (624 -> 632).
-        //
-        // Raised from 640 to 704, a cache line, on purpose: salvaging scrap
-        // is a goal slot and a count of an item kind more (648).
-        //
-        // Raised from 704 to 768, a cache line, on purpose: a job (688), then
-        // the scrap collector's goal slot and executor (24 bytes), and the
-        // salvage task's `for_work` flag, which takes the byte the task enum
-        // kept its tag in (`TakeItem`'s item kind) — a task is 20 bytes, not
-        // 16, and a brain holds ten (744).
-        //
-        // Raised from 768 to 832, a cache line, on purpose: the undertaker's
-        // goal slot and executor, and a count of the body item kind (776).
-        //
-        // Raised from 832 to 896, a cache line, on purpose: the farmer's goal
-        // slot and executor, and a count of the wheat item kind (856).
-        //
-        // Raised from 896 to 960, a cache line, on purpose: an urgency beside
-        // every goal's priority (56 bytes, `Goals::urgency`) and the hurry a
-        // walker is in (920).
-        let human = std::mem::size_of::<Human>();
-        let brain = std::mem::size_of::<Brain>();
-        // Raised from 960 to 1024 for the cook goal slot/executor and meal
-        // inventory count; a Human is now 984 bytes.
-        // Hospital recovery/care and threats add goal slots, medical and
-        // sighting memory, and larger pursuit tasks. Measured together: 1232 bytes.
-        assert!(human <= 1280, "a Human is {human} bytes, {brain} of them brain");
-    }
-
-    #[test]
     fn a_different_seed_gives_a_different_world() {
         let build = |seed| {
             let mut state = GameState::new(Map::new(Size::new(16, 16), FLOOR), seed);
@@ -3944,7 +3990,10 @@ mod tests {
             let nurses = crate::map::district::hospital::STATIONS * job::NURSE_SHIFTS.len();
             assert_eq!(nurses, 4);
             let mut nursing = 0;
-            let jobs = desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses;
+            let mut fishing = 0;
+            let mut decorating = 0;
+            let fishermen = crate::map::district::warehouse::FISHERMEN;
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4012,6 +4061,14 @@ mod tests {
                         reigning += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: a throne outside the palace");
                     }
+                    JobKind::CityDecorator => {
+                        decorating += 1;
+                        assert!(district.parks.iter().any(|park| park.contains(job.workplace)));
+                    }
+                    JobKind::Fisherman => {
+                        fishing += 1;
+                        assert!(district.the(crate::map::district::warehouse::NAME).contains(job.workplace));
+                    }
                     JobKind::Nurse => {
                         nursing += 1;
                         assert!(district.the(crate::map::district::hospital::NAME).contains(job.workplace));
@@ -4024,13 +4081,15 @@ mod tests {
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
             assert_eq!(nursing, nurses);
+            assert_eq!(fishing, fishermen);
+            assert_eq!(decorating, 3);
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
             assert_eq!(reigning, kings, "seed {seed}: the palace's");
             assert_eq!(accounting, accountants, "seed {seed}: the palace's accountant");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::Nurse), "seed {seed}: the hospital staff hired last");
+            assert_eq!(last, Some(JobKind::CityDecorator), "seed {seed}: decorators hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");

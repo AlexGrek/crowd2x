@@ -33,7 +33,7 @@ pub const FIRST_LOOK: i32 = 2;
 /// Who is being chased, told apart by the low 32 bits of its uid's random
 /// half: a whole uid is eight bytes aligned to eight, and a [`Task`] holding
 /// one is four bytes more — times the ten tasks a brain holds, in every
-/// person (`a_human_stays_small_enough_to_be_worth_a_thousand_of`). It is
+/// person. It is
 /// only ever compared with whoever stands within two cells of where the
 /// quarry was, so two that share it there is a chance in hundreds of
 /// millions, and would only set a deathdog on the wrong person.

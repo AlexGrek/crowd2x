@@ -118,13 +118,13 @@ fn on_ring(origin: Point, width: i32, height: i32, along: i32) -> Point {
 }
 
 /// A cell within [`PACK_SPREAD`] of `point` a deathdog may come out in:
-/// passable, nobody in it, off the site and open wasteland (not a pocket a
-/// lake walls in). A few random tries, then every cell in a fixed order;
+/// passable, nobody in it, at least [`SPAWN_DISTANCE`] out and open
+/// wasteland (not a pocket a lake walls in). A few random tries, then every cell in a fixed order;
 /// `None` when there is none.
 fn free_ground_near(state: &mut GameState, point: Point) -> Option<Point> {
     let fits = |state: &GameState, cell: Point| {
         state.map.is_passable(cell)
-            && !state.map.site().contains(cell)
+            && distance_from_site(&state.map, cell) >= SPAWN_DISTANCE
             && state.occupancy.occupant(cell).is_none()
             && state.map.navigation().is_outside(cell)
     };
@@ -143,19 +143,4 @@ fn free_ground_near(state: &mut GameState, point: Point) -> Option<Point> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_ring_is_walked_round_every_cell_once() {
-        let origin = Point::new(-2, -3);
-        let (width, height) = (5, 4);
-        let cells: Vec<Point> = (0..2 * (width + height) - 4).map(|along| on_ring(origin, width, height, along)).collect();
-        let mut unique = cells.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(unique.len(), cells.len());
-        let bounds = crate::map::Bounds::new(origin, crate::map::Size::new(width, height));
-        assert!(cells.iter().all(|&cell| bounds.on_edge(cell)), "{cells:?}");
-    }
-}
+mod tests;

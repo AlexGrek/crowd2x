@@ -171,6 +171,16 @@ restored); the old-save path is `job::tests::a_workplace_saved_with_no_days_take
 and the `format1` / steel works fixtures. **A new oneof variant must also go in the
 field's `tags = "..."` list** or it decodes as nothing (`pb::Task.kind`: "a task of no kind").
 
+**With deathdogs**: `EntityType::Deathdog` = 3 and `pb::Kind::Deathdog` (oneof tag 6,
+`pb::Deathdog { walker, brain, facing, schedule }`), `pb::Body.panicking` (tag 7, absent =
+calm), `pb::Memory.spotted` (tag 4, `pb::Spotted { who, at, when }`), `pb::TaskKind::Chase`
+(tag 21, in the oneof's tag list; `pb::Chase { quarry: fixed32, at, rest }`), the task
+`"bite"` by name, `pb::World.wounds` (tag 18, the bites still to be felt). Routines added on
+the end of `Brain::human()` (`flee`). Not saved: `sim::panics` (rebuilt by the move step),
+`sim::refuge::WaysIn` (from the map), `Facilities::leaving` (empty between ticks). Test:
+`a_chase_saved_at_night_with_a_bite_still_to_be_felt_carries_on_exactly` (seen failing with
+the wounds not restored).
+
 ## Fast
 
 `save::snapshot` encodes on the caller's thread (the game's main thread, from `Res<Sim>`),
@@ -231,6 +241,20 @@ decodes shards in parallel. Measured, release, this machine (2026-10-17,
 
 Mutation-checked when written: breaking `PathFinder::restore` or `Schedule::restore` fails the
 side-by-side tests.
+
+## Relationships
+
+`pb::Memory.chat` (tag 5, `pb::Chat { with, phase: ChatPhase, leads, since }`, absent = in no
+chat), `pb::Memory.relations` (6, `pb::Relation { who, points, chatted? }`, empty = nobody known)
+and `pb::Memory.night` (7, 0 = not yet noted); `pb::Body.family` (8, the spawn house's property,
+absent = no family); `pb::World.relationship_rules` (20, `pb::RelationshipRule { name, value }`,
+a rule not named is its default, an unknown name refused). `GoalId::Chat` = 23 (a
+`pb::Executor::Seek`, its retries), the task `"talk"` by name, the routine "keep company" on the
+end of a person's list (older saves load without it). **Not saved**: `Chats` (gathered by every
+think step) and `Society`'s people (rebuilt by `Society::of` from each body's family and each
+job, with the saved rules). The side-by-side fingerprint includes `GameState::society()`. Test:
+`a_crowd_saved_mid_chat_carries_on_exactly` (seen failing with the chat not restored, and with
+the society not rebuilt). The `relationships` skill.
 
 ## Economy state
 

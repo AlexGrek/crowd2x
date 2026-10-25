@@ -38,7 +38,7 @@ use crate::sim::job::Job;
 
 use super::goal::Goals;
 use super::memory::Memory;
-use super::routines::{Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
+use super::routines::{ChatRoutine, Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
 use super::routines::{DepartRoutine, FleeRoutine, HuntRoutine, ProwlRoutine};
 
 #[cfg(test)]
@@ -100,6 +100,8 @@ pub enum Routine {
     Depart(DepartRoutine),
     /// Prowl round the walls (a deathdog's).
     Prowl(ProwlRoutine),
+    /// See a chat through (a person's).
+    Chat(ChatRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -158,6 +160,11 @@ impl Routine {
         Routine::Prowl(ProwlRoutine)
     }
 
+    /// See a chat through, once both sides have agreed to one.
+    pub const fn chat() -> Routine {
+        Routine::Chat(ChatRoutine)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
@@ -171,6 +178,7 @@ impl Routine {
             Routine::Hunt(routine) => routine.name(),
             Routine::Depart(routine) => routine.name(),
             Routine::Prowl(routine) => routine.name(),
+            Routine::Chat(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -190,6 +198,7 @@ impl Routine {
             Routine::Hunt(routine) => routine.arrange(ctx, goals),
             Routine::Depart(routine) => routine.arrange(ctx, goals),
             Routine::Prowl(routine) => routine.arrange(ctx, goals),
+            Routine::Chat(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -208,6 +217,7 @@ impl Routine {
             Routine::Hunt(routine) => routine.debug_fields(),
             Routine::Depart(routine) => routine.debug_fields(),
             Routine::Prowl(routine) => routine.debug_fields(),
+            Routine::Chat(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -230,6 +240,8 @@ impl Routine {
             | Routine::Hunt(HuntRoutine)
             | Routine::Depart(DepartRoutine)
             | Routine::Prowl(ProwlRoutine) => (false, 0),
+            // The chat is in its memory.
+            Routine::Chat(ChatRoutine) => (false, 0),
             Routine::Work(routine) => (routine.is_on_shift(), 0),
             Routine::Ready(routine) => {
                 let (ready, pending) = routine.state();
@@ -257,7 +269,7 @@ impl Routine {
             Routine::Work(routine) => routine.set_on_shift(saved.committed),
             Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
             Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital => {}
-            Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) => {}
+            Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) | Routine::Chat(_) => {}
             #[cfg(test)]
             Routine::Dial(_) => {}
         }

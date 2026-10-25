@@ -101,6 +101,12 @@ catalogue! {
         /// A deathdog's: by day, walk off into the wasteland
         /// ([`DepartGoal`](super::goals::DepartGoal)).
         Depart = 21 => GoalDef { name: "depart", emoji: "🌅", executor: None },
+        Fish = 22 => GoalDef { name: "fish", emoji: "🎣", executor: Some(|| Box::new(goals::FishGoal::new())) },
+        /// Go over to somebody seen while wandering and have a chat
+        /// ([`ChatGoal`](super::goals::ChatGoal)), once both have agreed to
+        /// one: over wandering, under everything else.
+        Chat = 23 => GoalDef { name: "chat", emoji: "💬", executor: Some(|| Box::new(goals::ChatGoal::new())) },
+        Decorate = 24 => GoalDef { name: "decorate", emoji: "🌷", executor: Some(|| Box::new(goals::DecorateGoal::new())) },
     }
 }
 
@@ -632,7 +638,10 @@ mod tests {
                 (GoalId::Flee, 0.0),
                 (GoalId::Hunt, 0.0),
                 (GoalId::Prowl, 0.0),
-                (GoalId::Depart, 0.0)
+                (GoalId::Depart, 0.0),
+                (GoalId::Fish, 0.0),
+                (GoalId::Chat, 0.0),
+                (GoalId::Decorate, 0.0)
             ]
         );
     }

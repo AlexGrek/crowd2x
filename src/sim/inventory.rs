@@ -494,8 +494,10 @@ mod tests {
         assert!(inventory.stow(ItemKind::Food));
         assert_eq!(before.count(ItemKind::Food), 0, "a copy is a copy");
 
+        // The eighth item (fish) adds one count byte; four-byte alignment
+        // takes the inline inventory from 16 to 20 bytes. Still no heap state.
         assert!(
-            std::mem::size_of::<Inventory>() <= 16,
+            std::mem::size_of::<Inventory>() <= 20,
             "an Inventory is {} bytes",
             std::mem::size_of::<Inventory>()
         );

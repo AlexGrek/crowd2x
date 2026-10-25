@@ -29,6 +29,7 @@ use super::feature::FeatureKind;
 use super::fields::Fields;
 use super::homes::Homes;
 use super::job::Workplaces;
+use super::relationships::{Rules, Society};
 use super::{kinds, rng, Effect, GameState, Intent, MoveOutcome};
 
 /// One entity read back from a save, before it is put in its world.
@@ -86,9 +87,11 @@ impl GameState {
             workplaces: self.facilities.workplaces.save(),
             tally: Some(self.facilities.tally.save()),
             crops: self.facilities.fields.save(),
+            flowers: self.facilities.flowers.save(),
             playzones_run: self.facilities.playzones.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
+            relationship_rules: self.facilities.society.rules().save(),
         }
     }
 
@@ -184,6 +187,10 @@ impl GameState {
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
+        state.facilities.flowers = super::flowers::Flowers::restore(&world.flowers, &state.map, state.clock())?;
+        if state.facilities.flowers.iter().any(|bed| state.facilities.properties.of(bed.cell).is_some()) {
+            return invalid("a flower bed on private property");
+        }
         if let Some(crop) = state.facilities.fields.iter().find(|crop| state.facilities.bins.store(crop.farm) != Some(FeatureKind::GrainBin)) {
             return invalid(format!("a crop at {}, {} sown for a farm with no grain bin", crop.cell.x, crop.cell.y));
         }
@@ -204,10 +211,14 @@ impl GameState {
         state.intents = vec![Intent::Idle; capacity];
         state.moves = vec![MoveOutcome::Idle; capacity];
         state.effects = vec![Effect::None; capacity];
+        state.chatters = vec![None; capacity];
         for (slot, entity) in state.entities.iter_slots() {
             state.census.file(slot, entity.center_position());
         }
         state.facilities.corpses = crate::sim::Corpses::of(&state.entities);
+        // Everybody's family and job, as the spawn pass kept them: from the
+        // people themselves, run by the rules the game was saved with.
+        state.facilities.society = Society::of(&state.entities, Rules::restore(&world.relationship_rules)?);
         for (cell, uid) in holders {
             if let Err(other) = state.occupancy.claim(cell, uid) {
                 return invalid(format!("{uid} and {other} both hold {}, {}", cell.x, cell.y));

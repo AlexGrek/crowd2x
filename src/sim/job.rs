@@ -460,6 +460,19 @@ catalogue! {
             uniform: "uniform nurse", now: |_, _| "taking care of patients",
             goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
         },
+        Fisherman = 15 => JobDef {
+            name: "fisherman", article: "a fisherman", workplace: FeatureKind::FishBin,
+            goal: GoalId::Fish, commute: COMMUTE, shifts: &[FARM_HOURS],
+            uniform: "uniform fisherman",
+            now: |at_work, _| if at_work { "storing fish" } else { "fishing at the water" },
+            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false,
+        },
+        CityDecorator = 16 => JobDef {
+            name: "city decorator", article: "a city decorator", workplace: FeatureKind::FlowerSupplies,
+            goal: GoalId::Decorate, commute: COMMUTE, shifts: &[FARM_HOURS],
+            uniform: "uniform city decorator", now: |_, _| "planting flowers in the city",
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
+        },
     }
 }
 
@@ -1017,7 +1030,9 @@ mod tests {
                 JobKind::FoodCourier,
                 JobKind::PlayzoneAdministrator,
                 JobKind::Accountant,
-                JobKind::Nurse
+                JobKind::Nurse,
+                JobKind::Fisherman,
+                JobKind::CityDecorator
             ],
             "the office first, new professions last"
         );
@@ -1161,7 +1176,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::AccountantComputer, "accountant computer"));
         assert_eq!(kind.goal(), GoalId::Work);
         assert_eq!(kind.shifts(), [OFFICE_HOURS]);
-        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::Nurse, "new jobs keep existing stable numbers");
+        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::CityDecorator, "new jobs keep existing stable numbers");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("keeping the books", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform accountant");
         assert_eq!(kind.paperwork(), Some(Paperwork::Books));

@@ -40,9 +40,11 @@ talking only to the one below:
   menu). **There is no log line per meeting** — in a crowd it would be most of the log and
   an allocation on most looks. While asleep it runs with nothing seen, so faces fade
   overnight. Its faces are boxed once at spawn: touched every 7th tick, inline they would
-  bloat a `Human`, whose size is a test (`a_human_stays_small_enough_to_be_worth_a_thousand_of`).
+  bloat a `Human` that every tick walks.
 - **memory** — a `BTreeMap<String, Recall>`, nearly empty: the one thing in it so far is which
-  bed is a human's own (`HOME_BED`, written by the spawn pass). A `BTreeMap` so iterating it
+  bed is a human's own (`HOME_BED`, written by the spawn pass). Beside the keys: the chat it is
+  in (`Memory::chat`, inline: the think step reads it of everybody every tick) and what it
+  thinks of everybody it knows (`Memory::relations`, boxed) — the `relationships` skill. A `BTreeMap` so iterating it
   can never be a hash order. What a unit has *done* lately is a different memory, kept by
   the body because a task writes it every meal (`biology::Recollection`, under "Biology").
 - **job** — `Brain::job: Option<Job>` (`sim/job.rs`): what it does for a living, its own desk
@@ -116,11 +118,14 @@ talking only to the one below:
   harvested from `Think::fields`: a free plot by a ring scan out from its field
   (`goals::farm::nearest_plot`, no route), its own crops by a walk of the few dozen there are,
   `Achieved` per packful of wheat stored, `Blocked` with no log line once the day's work is done.
+  `ChatGoal` walks a leader over to somebody it agreed a chat with and has both `Talk`; what a
+  chat is (asked, agreed, done) is memory, kept by `brain::social` in step 0 — the
+  `relationships` skill.
 - **tasks** — a fixed, double-ended inline queue of `Task`, an enum over one executor struct
   per step (`MoveTo`, `TakeItem`, `ConsumeItem`, `UseToilet`, `UseComputer`, `WatchTv`, `UseArcade`, `Sleep`, `Wait`,
   `OpenFridge`, `CloseFridge`, `Salvage` — to an order, or `for_work`, which tires —, `Work`,
   `Deposit` and `Withdraw` — into and out of any store, the item being the store's —,
-  `Smelt`, `TakeBody`, `Cremate`, `Sow`, `Tend`, `Harvest`), `match`-dispatched so
+  `Smelt`, `TakeBody`, `Cremate`, `Sow`, `Tend`, `Harvest`, `Talk`), `match`-dispatched so
   queueing one allocates nothing. **A task writes its `TaskResult`** (`InProgress`,
   `Executing`, `Failed`, `Success`), checks its preconditions every tick (`TakeItem` only
   from one step away), and applies what finishing means: food goes into a hand when a

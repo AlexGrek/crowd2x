@@ -128,6 +128,10 @@ impl World {
         // crowd; anybody else a test says is panicking stays so.
         let (uid, panicking) = (entity.uid(), entity.body().is_panicking());
         self.facilities.panics.set(uid, panicking && intent != Intent::Idle);
+        // In a chat or not, as the think step would gather it for a crowd;
+        // anybody else a test says is chatting stays so.
+        let chatter = if entity.is_frozen() || entity.is_dead() { None } else { entity.chatter() };
+        self.facilities.chats.set(uid, chatter);
         let effect = entity.react(&self.ctx(), outcome);
         self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();

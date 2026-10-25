@@ -1,0 +1,45 @@
+# How people get on (`src/sim/relationships.rs`, the `relationships` skill).
+# Read when a new game is built — `CROWD2X_RELATIONSHIPS` names another file —
+# and built into the game as its defaults. A saved game keeps its own numbers;
+# a QA script changes them with a `relationships` step.
+#
+# Every rule must be here, and nothing else: a name missing or unknown, or a
+# number out of its range, is an error, and the game falls back on its
+# built-in defaults.
+
+# A relationship's level is the points one person has for another, or its
+# floor, whichever is higher. Points run from 0 to `most`.
+most: 100
+# The least a person thinks of its family: everybody who spawned in the same
+# house.
+family floor: 30
+# The least a person thinks of its colleagues: everybody with the same kind of
+# job.
+colleague floor: 10
+# What every night takes off a person's points for everybody it knows.
+nightly loss: 1
+
+# The chance a wanderer asks somebody it has just seen for a chat, 0 to 1, by
+# the level of what it thinks of them: over `friend over` a friend, over
+# `acquaintance over` an acquaintance, a stranger at or under it.
+stranger chance: 0.10
+acquaintance chance: 0.24
+friend chance: 0.40
+acquaintance over: 1
+friend over: 45
+
+# What one chat adds to the level, each side rolling its own, between the two.
+least chat gain: 5
+most chat gain: 10
+# How long a chat is, in world minutes.
+minutes of talk: 15
+# How long after a chat ends the two do not start another, in world minutes.
+minutes between chats: 60
+# How long an invitation waits to be taken up, in world minutes.
+minutes to answer: 2
+# The longest from agreeing a chat to its end — the walk over and the talk —
+# in world minutes, before either side gives up on it.
+minutes to meet: 60
+# How long one side that has had its say waits for the other to finish, in
+# world minutes.
+minutes to wait for the other: 5

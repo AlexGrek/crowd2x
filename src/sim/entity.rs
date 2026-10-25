@@ -58,6 +58,10 @@ pub struct Body {
     /// already has in cache, because that step reads it of every mover to
     /// say who is seen panicking ([`super::panics`]).
     panicking: bool,
+    /// The house it spawned in, if it spawned in one: everybody born into the
+    /// same house is its family ([`super::relationships`]). Set once, by the
+    /// spawn pass; unlike `home`, never handed over with a bed.
+    family: Option<PropertyId>,
 }
 
 impl Body {
@@ -69,6 +73,7 @@ impl Body {
             home: None,
             dead: false,
             panicking: false,
+            family: None,
         }
     }
 
@@ -138,11 +143,29 @@ impl Body {
         self.home = home;
     }
 
+    /// The house it spawned in, whose other arrivals are its family.
+    pub fn family(&self) -> Option<PropertyId> {
+        self.family
+    }
+
+    pub fn set_family(&mut self, family: Option<PropertyId>) {
+        self.family = family;
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home, dead, panicking } = *self;
-        pb::Body { uid: uid.raw(), x, y, frozen, home: home.map(|home| home.get() as u32), dead, panicking }
+        let Body { uid, position: (x, y), frozen, home, dead, panicking, family } = *self;
+        pb::Body {
+            uid: uid.raw(),
+            x,
+            y,
+            frozen,
+            home: home.map(|home| home.get() as u32),
+            dead,
+            panicking,
+            family: family.map(|family| family.get() as u32),
+        }
     }
 
     pub(crate) fn restore(saved: &pb::Body) -> Result<Body, Invalid> {
@@ -152,13 +175,15 @@ impl Body {
         if !(saved.x.is_finite() && saved.y.is_finite()) {
             return invalid(format!("{uid} stands at {}, {}", saved.x, saved.y));
         }
-        let home = match saved.home {
-            None => None,
-            Some(home) => match u16::try_from(home).ok().and_then(PropertyId::new) {
-                Some(home) => Some(home),
-                None => return invalid(format!("{uid}'s home is property {home}")),
+        let property = |number: Option<u32>, what: &str| match number {
+            None => Ok(None),
+            Some(number) => match u16::try_from(number).ok().and_then(PropertyId::new) {
+                Some(property) => Ok(Some(property)),
+                None => invalid(format!("{uid}'s {what} is property {number}")),
             },
         };
+        let home = property(saved.home, "home")?;
+        let family = property(saved.family, "family")?;
         Ok(Body {
             uid,
             position: (saved.x, saved.y),
@@ -166,6 +191,7 @@ impl Body {
             home,
             dead: saved.dead,
             panicking: saved.panicking,
+            family,
         })
     }
 }
@@ -481,6 +507,26 @@ pub trait GameEntity: Send + Sync {
         false
     }
 
+    /// The chat it is in, as the rest of the crowd sees it this tick — what
+    /// the think step gathers into [`Chats`](super::relationships::Chats).
+    /// Asked of every unit every tick, from inside the think step's walk of
+    /// the crowd, so it reads only what is inline. `None` — the default — for
+    /// a kind that never chats.
+    fn chatter(&self) -> Option<super::relationships::Chatter> {
+        None
+    }
+
+    /// What it thinks of everybody it knows ([`super::relationships`]), for
+    /// the relationship tab. `None` for a kind that knows nobody.
+    fn relations(&self) -> Option<&super::relationships::Relations> {
+        None
+    }
+
+    /// The chat it is in, if any, as it remembers it.
+    fn chat(&self) -> Option<super::relationships::Chat> {
+        None
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,
@@ -578,6 +624,7 @@ pub struct Think<'a> {
     /// by [`super::world_step`]: what a farmer looks through for what wants
     /// doing in its field ([`super::fields`]).
     pub fields: &'a super::fields::Fields,
+    pub flowers: &'a super::flowers::Flowers,
     /// Which arcade cabinets work, as of the start of this tick, changed only
     /// by [`super::world_step`]: whether a playzone has an administrator at
     /// its computer ([`super::playzone`]).
@@ -596,6 +643,15 @@ pub struct Think<'a> {
     /// Where on the site's edge there is a way in, and how far in from it
     /// is safe: where somebody fleeing runs to ([`super::refuge`]).
     pub ways_in: &'a super::refuge::WaysIn,
+    /// Everybody's family and job, as of the start of this tick, changed only
+    /// by the spawn pass: what a wanderer asks about somebody it has just
+    /// seen, for the floor of what it thinks of them
+    /// ([`super::relationships::Society`]).
+    pub society: &'a super::relationships::Society,
+    /// Who is chatting with whom, gathered by this tick's think step: who is
+    /// asking somebody for a chat, and where a partner stands
+    /// ([`super::relationships::Chats`]).
+    pub chats: &'a super::relationships::Chats,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -641,11 +697,14 @@ impl<'a> Think<'a> {
             corpses: &facilities.corpses,
             bins: &facilities.bins,
             fields: &facilities.fields,
+            flowers: &facilities.flowers,
             playzones: &facilities.playzones,
             economy: &facilities.economy,
             panics: &facilities.panics,
             wounds: &facilities.wounds,
             ways_in: &facilities.ways_in,
+            society: &facilities.society,
+            chats: &facilities.chats,
             electrical: &facilities.electrical,
             dt,
             tick,

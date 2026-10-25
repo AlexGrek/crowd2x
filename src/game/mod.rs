@@ -56,6 +56,7 @@ pub mod actors;
 pub mod follow;
 pub mod croppanel;
 pub mod crops;
+mod flowers;
 pub mod held;
 pub mod pool;
 pub mod hud;
@@ -66,6 +67,7 @@ pub mod selection;
 pub mod speed;
 pub mod statistics;
 pub mod economy;
+pub mod relationships;
 pub mod unitpanel;
 pub mod boxpanel;
 pub mod electrical;
@@ -123,7 +125,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins(economy::EconomyPlugin)
+            .add_plugins((economy::EconomyPlugin, flowers::FlowersPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

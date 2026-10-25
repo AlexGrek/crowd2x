@@ -36,6 +36,8 @@ wages:
   food courier: 40            # low
   playzone administrator: 40  # low
   nurse: 40
+  fisherman: 40
+  city decorator: 60
   accountant: 60              # mid
 
 # What a thing costs taken from a fridge, every item by name
@@ -49,3 +51,4 @@ prices:
   steel: 0
   wheat: 0
   meal: 0
+  fish: 0
