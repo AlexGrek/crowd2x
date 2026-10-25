@@ -26,6 +26,47 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn a_saved_outdoor_toilet_trip_resumes_and_the_puddle_evaporates_on_the_saved_hour() {
+    use crate::sim::clock::{HOUR, TIME_SCALE};
+    let map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(5);
+    let mut state = GameState::new(map, 5);
+    let uid = state.spawn(EntityType::Human, Point::new(-6, 6));
+    let biology = state.entity_mut(uid).unwrap().biology_mut().unwrap();
+    biology.edit(|stats| stats.with_hunger(0.0).with_thirst(0.0).with_bladder(80.0).with_fun(100.0).with_stamina(100.0));
+    let mut found = false;
+    for _ in 0..1000 {
+        process_game_state(&mut state, DT, &Input::new());
+        found = state.entities().get(uid).unwrap().brain_fields().iter()
+            .any(|(name, value)| *name == "task" && value.starts_with("do toilet outside"));
+        if found { break; }
+    }
+    assert!(found, "never started peeing outside");
+    let mut restored = round_trip(&state);
+    for _ in 0..200 {
+        process_game_state(&mut state, DT, &Input::new());
+        process_game_state(&mut restored, DT, &Input::new());
+        assert_eq!(state.save_world().dirt, restored.save_world().dirt);
+        assert_eq!(state.entities().get(uid).unwrap().position(), restored.entities().get(uid).unwrap().position());
+    }
+    assert!(state.save_world().dirt.iter().any(|cell| cell.value.as_ref().is_some_and(|v| v.wet > 0.0)));
+    // No bodies adding water: save just before the hour and cross it once.
+    let mut state = GameState::new(Map::new(Size::new(1, 1), FLOOR), 5);
+    let mut input = Input::new();
+    input.set_dirt(Point::new(0, 0), crate::sim::dirt::PEE);
+    crate::sim::spawn_pass(&mut state, &input);
+    crate::sim::testing::skip_to(&mut state, 1, 8.999);
+    let mut restored = round_trip(&state);
+    for _ in 0..2 {
+        crate::sim::process_pass(&mut state, 0.1);
+        crate::sim::process_pass(&mut restored, 0.1);
+        assert_eq!(state.save_world().dirt, restored.save_world().dirt);
+    }
+    assert_eq!(state.dirt().at(Point::new(0, 0)).wet, 0.75);
+    crate::sim::process_pass(&mut restored, 3.0 * HOUR / TIME_SCALE);
+    assert_eq!(restored.dirt().at(Point::new(0, 0)), crate::sim::dirt::Dirt::CLEAN);
+}
+
+#[test]
 fn decorators_saved_while_planting_resume_the_same_beds_in_parallel() {
     let grass = crate::map::TerrainId(crate::map::TERRAIN.iter().position(|tile| tile.name == "grass").unwrap() as u16);
     let mut map = Map::new(Size::new(30, 20), grass);
@@ -163,6 +204,69 @@ fn a_save_without_an_economy_opens_accounts_and_refuses_accounts_for_strangers()
     economy.accounts.clear();
     files.files.push((ECONOMY.to_string(), economy.encode_to_vec()));
     assert!(restore(&files).is_err(), "missing account for a living human");
+}
+
+/// The district's Monday morning cleaner, saved in the middle of its round —
+/// a stain being mopped, more found and not yet cleaned, its next look over
+/// the district due part way into the run — carries on exactly: the look
+/// comes on the same tick in both worlds, and the same stains go.
+#[test]
+fn a_cleaner_saved_mid_round_carries_on_exactly() {
+    use crate::sim::dirt::Dirt;
+    use crate::sim::feature::FeatureKind;
+    use crate::sim::job::CLEANER_SHIFTS;
+    use crate::sim::JobKind;
+
+    let district = crate::map::district::generate(7);
+    let mut state = GameState::new(district.map.clone(), 7);
+    state.spawn_from_spawners();
+    let cleaner = state
+        .entities()
+        .iter()
+        .find(|entity| entity.job().is_some_and(|job| job.kind == JobKind::Cleaner && job.shift == CLEANER_SHIFTS[0]))
+        .unwrap()
+        .uid();
+    let mut input = Input::new();
+    for process in ProcessId::ALL {
+        input.set_process(cleaner, process, false);
+    }
+    let middle = state.features().cells_of(FeatureKind::District)[0];
+    let stains: Vec<Point> = state
+        .map
+        .size()
+        .points()
+        .filter(|&cell| {
+            cell.x % 5 == 0
+                && cell.y % 6 == 0
+                && cell.manhattan_distance(middle) <= 40
+                && state.map.is_passable(cell)
+                && state.properties().of(cell).is_none()
+        })
+        .collect();
+    assert!(stains.len() > 30, "{} stains", stains.len());
+    for &cell in &stains {
+        input.set_dirt(cell, Dirt::earth(0.6));
+    }
+    process_game_state(&mut state, DT, &input);
+
+    let field = |state: &GameState, name: &str| {
+        let fields = state.entities().get(cleaner).unwrap().brain_fields();
+        fields.into_iter().find(|(field, _)| *field == name).map(|(_, value)| value)
+    };
+    let mut ticks = 0;
+    while !(field(&state, "task").is_some_and(|task| task.starts_with("clean up"))
+        && state.entities().get(cleaner).unwrap().interacting_with().is_some()
+        && field(&state, "found").is_some_and(|found| found != "none"))
+    {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 3600, "never mopping with more found by {}", state.clock());
+    }
+    let dirty = |state: &GameState| stains.iter().filter(|&&cell| state.dirt().at(cell) != Dirt::CLEAN).count();
+    let before = dirty(&state);
+    // An hour and a half of world: two more looks, both after the load.
+    let copy = side_by_side(&mut state, 2700, |_, _| Input::new());
+    assert!(dirty(&copy) < before, "{} of {before} stains still there", dirty(&copy));
 }
 
 #[test]

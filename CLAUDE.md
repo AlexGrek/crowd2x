@@ -71,6 +71,12 @@ not chat again for an hour. Anybody awake with somebody close by — at work too
 makes small talk with them, half a point each, and sparks fly between the two. Every number is a
 rule in `relationships.yaml`; the unit panel's `relationship` tab lists who somebody knows.
 
+Dirt is tracked on the ground and on bodies (earth, blood, wet, burns): every footstep trades a
+quarter of it, work in the fields and the scrap soils the worker, the wasteland has puddles that
+never change, bites bleed and wet patches dry by the hour. Four cleaners, two a day, keep the
+district: each one's own brain looks it over every 27 minutes, mops up public ground dirtier
+than 0.15, nearest first, and walks round when there is none.
+
 ## Commands
 
 ```sh
@@ -124,6 +130,7 @@ to `screenshots/`.
 | Money, budget, wages, taxes, care, fridge prices, timesheets, payroll, accountant, economy.yaml or economy menu | `economy` (+ `jobs`, `savegame` as needed) |
 | Relationships: families, colleagues, chats between wanderers, small talk and its sparks, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
+| Dirt: stains on the ground and bodies, footsteps, trails, work grime, the wasteland's puddles, blood and pee, drying, the dirt dots on screen; the cleaners and their look over the district | `dirt` (+ `jobs`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -202,6 +209,9 @@ src/sim/relationships.rs  rules, relations, families and colleagues, chats  [rel
 src/sim/brain/social.rs, goals/chat.rs, tasks/talk.rs  asking, the walk, the talk  [relationships]
 src/game/relationships.rs  relationships.yaml for a new game                [relationships]
 src/game/smalltalk.rs   the sparks between two making small talk            [relationships, game-screen]
+src/sim/dirt.rs, soiling.rs  stains on ground and bodies; blood and pee  [dirt]
+src/game/dirt.rs        the dirt dots drawn over visible stained cells      [dirt]
+src/sim/brain/goals/clean.rs  the cleaners' look over the district and mopping  [dirt, jobs]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]

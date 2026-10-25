@@ -188,7 +188,7 @@ impl GameState {
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
-        state.facilities.dirt = super::dirt::DirtLayer::restore(state.map.size(), &world.dirt)?;
+        state.facilities.dirt = super::dirt::DirtLayer::restore(&state.map, &world.dirt)?;
         state.facilities.flowers = super::flowers::Flowers::restore(&world.flowers, &state.map, state.clock())?;
         if state.facilities.flowers.iter().any(|bed| state.facilities.properties.of(bed.cell).is_some()) {
             return invalid("a flower bed on private property");

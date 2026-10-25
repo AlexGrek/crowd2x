@@ -48,6 +48,7 @@ impl TaskExecutor for Tend {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
+                ctx.walk.body_mut().dirt_mut().soil(crate::sim::dirt::TENDING);
                 *ctx.effect = Effect::Tend { at: self.crop, when: ctx.think.clock };
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Worked { world_seconds: self.seconds * TIME_SCALE });
@@ -123,8 +124,10 @@ mod tests {
         let mut task = Task::tend(CROP, TEND_SECONDS);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.effect, Effect::None);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN);
         assert_eq!(rig.run(&mut task, 10_000), TaskResult::Success);
         assert_eq!(rig.effect, Effect::Tend { at: CROP, when: rig.world.clock });
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::TENDING, "weeding is dirty work");
     }
 
     #[test]

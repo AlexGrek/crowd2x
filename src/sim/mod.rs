@@ -140,6 +140,7 @@ pub mod corpses;
 pub mod deathdogs;
 pub mod door;
 pub mod dirt;
+mod soiling;
 pub mod economy;
 pub mod effect;
 pub mod electrical;
@@ -1683,6 +1684,13 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // Read once, and shared by both rounds: the clock does not move inside a
     // tick, and every entity should see the same time.
     let clock = state.clock();
+    // Whole world hours, derived from the saved clock rather than a second
+    // timer. Catch up every crossed hour even when a caller uses a large dt.
+    let hours_before = (before.elapsed() / clock::HOUR as f64).floor() as u64;
+    let hours_now = (clock.elapsed() / clock::HOUR as f64).floor() as u64;
+    if hours_now > hours_before {
+        state.facilities.dirt.evaporate(hours_now - hours_before);
+    }
     // Dusk or dawn on this very tick: the street lights change before
     // anybody thinks, so the whole crowd sees the same supply.
     state.follow_daylight(clock);
@@ -2151,6 +2159,11 @@ fn world_step(
     facilities.economy.roll(clock.day());
     // Who runs a playzone is said afresh every tick (`Effect::Operate`).
     facilities.playzones.begin_tick();
+    // Settle bodily stains before forgetting wounds or granting new bites.
+    // This also leaves the unit's own effect free for work or death.
+    for (_, entity) in table.iter_slots_mut() {
+        soiling::settle(entity, facilities, log);
+    }
     // Last tick's bites have been felt, in the reactions just run.
     facilities.wounds.begin_tick();
     for (slot, effect) in effects.iter_mut().enumerate() {
@@ -4047,7 +4060,10 @@ mod tests {
             let mut fishing = 0;
             let mut decorating = 0;
             let fishermen = crate::map::district::warehouse::FISHERMEN;
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses;
+            // The district itself, kept by four: two shifts of two.
+            let cleaners = job::CLEANER_SHIFTS.len();
+            let mut cleaning: Vec<(u8, u8)> = Vec::new();
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4131,6 +4147,10 @@ mod tests {
                         accounting += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: the accountant outside the palace");
                     }
+                    JobKind::Cleaner => {
+                        assert!(state.features().has(feature::FeatureKind::District, job.workplace));
+                        cleaning.push((job.shift.start(), job.shift.mask()));
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
@@ -4142,8 +4162,14 @@ mod tests {
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
             assert_eq!(reigning, kings, "seed {seed}: the palace's");
             assert_eq!(accounting, accountants, "seed {seed}: the palace's accountant");
+            // Two cleaners every day, one after the other.
+            let mut shifts = job::CLEANER_SHIFTS.map(|shift| (shift.start(), shift.mask()));
+            assert_eq!(shifts, [(7, job::FIRST_GROUP), (7, job::SECOND_GROUP), (15, job::FIRST_GROUP), (15, job::SECOND_GROUP)]);
+            shifts.sort_unstable();
+            cleaning.sort_unstable();
+            assert_eq!(cleaning, shifts, "seed {seed}");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::CityDecorator), "seed {seed}: decorators hired last");
+            assert_eq!(last, Some(JobKind::Cleaner), "seed {seed}: cleaners hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -4358,6 +4384,67 @@ mod tests {
             assert_eq!(state.fields().of(bin).count(), fields::PLOTS, "{farmer}'s field");
         }
 
+    }
+
+    /// A district's cleaners, their needs off, mop up the stains put on its
+    /// public ground on a Monday morning — the first group's morning cleaner
+    /// is on from seven — and leave a home's alone.
+    #[test]
+    fn a_district_s_morning_cleaner_mops_up_its_public_ground() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        let cleaners: Vec<Uid> = state
+            .entities()
+            .iter()
+            .filter(|e| e.job().is_some_and(|job| job.kind == JobKind::Cleaner))
+            .map(|e| e.uid())
+            .collect();
+        assert_eq!(cleaners.len(), job::CLEANER_SHIFTS.len());
+        for &cleaner in &cleaners {
+            for process in ProcessId::ALL {
+                input.set_process(cleaner, process, false);
+            }
+        }
+        // A dozen stains on public ground round the middle, and one in a home.
+        let middle = state.features().cells_of(feature::FeatureKind::District)[0];
+        let public = |cell: Point| state.map.is_passable(cell) && state.properties().of(cell).is_none();
+        let stains: Vec<Point> = state
+            .map
+            .size()
+            .points()
+            .filter(|&cell| cell.x % 9 == 0 && cell.y % 7 == 0 && cell.manhattan_distance(middle) <= 40 && public(cell))
+            .take(12)
+            .collect();
+        assert_eq!(stains.len(), 12);
+        let home = state
+            .map
+            .size()
+            .points()
+            .find(|&cell| state.map.is_passable(cell) && state.properties().of(cell).is_some())
+            .unwrap();
+        for &cell in stains.iter().chain([&home]) {
+            input.set_dirt(cell, dirt::Dirt::earth(0.6));
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let mut lines = Vec::new();
+        for _ in 0..4 {
+            run(&mut state, 1800);
+            lines.extend(state.log.drain());
+        }
+        let cleaned_up = |cell: Point| {
+            lines.iter().any(|line| line.contains("cleaned up") && line.ends_with(&format!(" at {}, {}", cell.x, cell.y)))
+        };
+        // Measured: all twelve by noon, and two more stains that people had
+        // tracked in through a gate.
+        let missed: Vec<Point> = stains.iter().copied().filter(|&cell| !cleaned_up(cell)).collect();
+        assert!(missed.is_empty(), "not cleaned by {}: {missed:?}", state.clock());
+        assert!(!cleaned_up(home), "nobody's home is cleaned");
+        // From eight to twelve, a look every 27 minutes on the minute: at
+        // 08:00, 08:27, ... 11:36. The evening cleaners are not on yet.
+        let looks = lines.iter().filter(|line| line.contains("looked over the district")).count();
+        assert_eq!(looks, 9);
     }
 
     #[test]

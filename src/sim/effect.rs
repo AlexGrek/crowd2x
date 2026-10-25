@@ -117,6 +117,12 @@ pub enum Effect {
     /// the one bitten to feel in its own react next tick — the world step may
     /// not reach into its body.
     Bite { at: Point, damage: u8 },
+    /// Deliberate outdoor relief after walking away from one's work.
+    Pee { at: Point },
+    /// A cleaner has finished mopping the cell at `at`
+    /// (`brain::tasks::Clean`): whatever dirt is on it goes. Granted to a
+    /// cleaner within a step of a cell of the district.
+    Clean { at: Point },
     /// A deathdog has gone back into the wasteland (`kinds::Deathdog`): it
     /// leaves the world at the end of the tick, as a body taken up does.
     Depart,
@@ -135,6 +141,30 @@ pub(crate) fn apply(
     log: &Log,
 ) {
     match effect {
+        Effect::Pee { at } => {
+            if entity.is_dead() || entity.is_frozen() || entity.center_position() != at
+                || map.site().contains(at) || !map.is_passable(at) {
+                return;
+            }
+            let Some(biology) = entity.biology_mut() else { return; };
+            if !biology.is_running(super::biology::ProcessId::Bladder) || biology.stats().bladder() <= 0.0 {
+                return;
+            }
+            biology.handle(super::biology::Event::Relieved);
+            facilities.dirt.soil(at, super::dirt::PEE);
+            log.unit(entity.uid(), format!("{} peed outside at {}, {}; left a wet puddle", entity.uid(), at.x, at.y));
+        }
+        Effect::Clean { at } => {
+            let stain = facilities.dirt.at(at);
+            if entity.job().is_some_and(|job| job.kind == JobKind::Cleaner)
+                && entity.center_position().manhattan_distance(at) <= 1
+                && map.site().contains(at)
+                && stain != super::dirt::Dirt::CLEAN
+                && facilities.dirt.set(at, super::dirt::Dirt::CLEAN)
+            {
+                log.unit(entity.uid(), format!("{} cleaned up {} at {}, {}", entity.uid(), stain.describe(), at.x, at.y));
+            }
+        }
         Effect::RepairBox { at } => {
             if entity.job().is_some_and(|job| job.kind == super::job::JobKind::Electrician)
                 && entity.center_position().manhattan_distance(at) <= 1

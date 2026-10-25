@@ -489,6 +489,17 @@ UNIFORMS["city_decorator"] = (
 )
 
 
+# A teal coverall with a hi-vis yellow band across the chest and yellow
+# rubber gloves: the cleaner's, mopping the district's streets.
+UNIFORMS["cleaner"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....wwwwww.....", "....gwyyyywg....", ".....wwwwww.....",
+     ".....pppppp.....", "......pqqp......", "......pqqp......"],
+    {"w": (52, 118, 128), "y": (232, 214, 64), "g": (246, 196, 48),
+     "p": (40, 84, 92), "q": (62, 112, 120)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

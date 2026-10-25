@@ -107,6 +107,10 @@ catalogue! {
         /// one: over wandering, under everything else.
         Chat = 23 => GoalDef { name: "chat", emoji: "💬", executor: Some(|| Box::new(goals::ChatGoal::new())) },
         Decorate = 24 => GoalDef { name: "decorate", emoji: "🌷", executor: Some(|| Box::new(goals::DecorateGoal::new())) },
+        /// Look over the district for dirt and mop it up, or walk round
+        /// with none to find ([`CleanGoal`](super::goals::CleanGoal)): a
+        /// cleaner's shift.
+        Clean = 25 => GoalDef { name: "clean", emoji: "🧹", executor: Some(|| Box::new(goals::CleanGoal::new())) },
     }
 }
 
@@ -482,6 +486,22 @@ pub trait GoalExecutor: Send + Sync {
     /// per-tick planning that killed the earlier prototype.
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress;
 
+    /// Asked every tick it is in charge while a task of its, `current`, is
+    /// going on: what will not wait for the task to end. `true` cuts the task
+    /// short — told so, as a hand-over tells it — and has [`process`] asked
+    /// straight away, with nothing ended. Nothing to keep up with, for every
+    /// goal but a cleaner's, whose look over the district is every 27 minutes
+    /// whatever it is doing ([`CleanGoal`](super::goals::CleanGoal)).
+    ///
+    /// Asked of the whole crowd every tick: anything but a counter compared
+    /// is for the tick it is due.
+    ///
+    /// [`process`]: GoalExecutor::process
+    fn keep_up(&mut self, ctx: &mut GoalCtx<'_>, current: &Task) -> bool {
+        let _ = (ctx, current);
+        false
+    }
+
     /// What this executor would tell a debugger. Allocates, and is only asked
     /// about the one unit somebody has selected.
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
@@ -641,7 +661,8 @@ mod tests {
                 (GoalId::Depart, 0.0),
                 (GoalId::Fish, 0.0),
                 (GoalId::Chat, 0.0),
-                (GoalId::Decorate, 0.0)
+                (GoalId::Decorate, 0.0),
+                (GoalId::Clean, 0.0)
             ]
         );
     }

@@ -15,6 +15,8 @@ pub use fish::FishGoal;
 pub use hospital::{RecoverGoal, CareGoal};
 pub mod bury;
 pub mod chat;
+pub mod clean;
+pub use clean::CleanGoal;
 pub mod collect;
 pub mod cook;
 pub use cook::CookGoal;

@@ -309,7 +309,7 @@ pub struct ExecutorState {
     /// `GoalId::number`.
     #[prost(int32, tag = "1")]
     pub goal: i32,
-    #[prost(oneof = "Executor", tags = "2, 3, 4")]
+    #[prost(oneof = "Executor", tags = "2, 3, 4, 5")]
     pub state: Option<Executor>,
 }
 
@@ -323,6 +323,26 @@ pub enum Executor {
     /// Relieve, play, sleep and salvage: a seek and nothing else.
     #[prost(message, tag = "4")]
     Seek(Seek),
+    /// A cleaner's shift (`goals::CleanGoal`).
+    #[prost(message, tag = "5")]
+    Clean(Clean),
+}
+
+/// A cleaner's shift: the cell it is cleaning, what its last look over the
+/// district found and is not cleaned yet (nearest first, at most
+/// `goals::clean::FOUND`), when it looked, and where it is walking with
+/// nothing to clean.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Clean {
+    #[prost(message, optional, tag = "1")]
+    pub seek: Option<Seek>,
+    #[prost(message, repeated, tag = "2")]
+    pub found: Vec<Cell>,
+    /// World seconds since opening time; absent before its first look.
+    #[prost(double, optional, tag = "3")]
+    pub scanned: Option<f64>,
+    #[prost(message, optional, tag = "4")]
+    pub roam: Option<Cell>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

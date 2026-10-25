@@ -739,6 +739,14 @@ the same signal a `MoveTo` refused by a body in the way carries — so `RelieveG
 two failures alike: wait it out (`WAIT_FOR_A_GAP`, up to `PATIENCE` times), then give up and
 be held off by `BLOCKED_TICKS` like any other goal that found itself impossible.
 
+Outside the district, `RelieveGoal` chooses a free reachable random spot 3–6 cells
+away from the current work spot instead of an indoor toilet. It queues `MoveTo`
+then `Pee`; the timed task asks for `Effect::Pee`, which empties the bladder and
+leaves wet ground without wetting the body. The same seek and retry rules apply,
+and a saved or interrupted trip retains its chosen spot. At 100 bladder, a living,
+unfrozen human who has not reached a working toilet has an accident instead:
+`sim::soiling` empties it and wets both body and cell, independently of brain effects.
+
 #### Biology (`sim/biology/`)
 
 What a body does *by itself* — getting hungry, getting thirsty, a bladder filling — is a
@@ -1160,4 +1168,36 @@ Protobuf tag 21 and carried vectors in Body tag 9.
 `game/dirt.rs` generates stable 16x16 RGBA dot textures on the CPU only for visible
 stained cells, scales them 3x and draws above terrain and below props/actors.
 Colors are brown/red/blue/charcoal, with independent density per component.
-Coverage: `sim/dirt.rs`, `game/dirt.rs`, `save/tests.rs`, `qa/dirt.json`.
+`sim/soiling.rs` settles bodily stains before last tick's wounds are cleared:
+a living, unfrozen human at 100 bladder empties it and wets both its body and
+its cell, unless already on a working toilet. A stopped bladder stays still.
+Deathdog wounds soil the victim and its cell with blood proportional to damage,
+including fatal bites; disabled health does not bleed. These changes preserve
+other contaminants, spread through normal footsteps and use the existing saves.
+They settle independently of brain effects, so neither work nor death is lost.
+Outside the district, `RelieveGoal` chooses a free reachable random spot 3–6
+cells away and queues a walk followed by `Task::Pee`, rather than seeking an
+indoor toilet. `Effect::Pee` empties the bladder and wets only the ground.
+The chosen spot and timed task survive saving and goal interruptions.
+On each whole world hour, `DirtLayer::evaporate` removes 0.25 wetness from
+every stored district and wasteland cell, including offscreen chunks. Four
+hours dry a saturated patch completely; the other dirt components are kept.
+The saved world clock determines this cadence, including across reloads.
+An exchange lets go of any component under `TRACE` (1/256), too faint to draw,
+so a trail ends and a wild chunk walked clean can be reclaimed.
+A finished piece of sowing, tending, harvesting, planting flowers or salvaging
+soils the worker's own body (`SOWING`, `TENDING`, `HARVESTING`, `PLANTING`,
+`SALVAGING`, through `Dirt::soil`); a piece cut short soils nobody.
+The wasteland has puddles (`Wasteland::puddle`): earth 0.5..=1.0, a pure function
+of the seed, never on the site or under a heap. They are constant: a step soils
+the body, the puddle stays as it was, and nothing stores or saves one.
+Cleaners (`JobKind::Cleaner`, hired last at `FeatureKind::District`, a workplace
+with no prop that a town of 20+ homes has) keep the district: four on the
+playzone's two groups, 07-15 and 15-23, two a day. `CleanGoal` looks over the
+site's dirt every 27 world minutes on the tick it is due (`GoalExecutor::keep_up`,
+brain step 3b), keeps the 16 nearest public reachable cells over 0.15 overall,
+mops them nearest first (`Task::clean`, `Effect::Clean`) and roams with none.
+Full detail: the `dirt` skill.
+Coverage: `sim/dirt.rs`, `sim/soiling/tests.rs`, `game/dirt.rs`, `save/tests.rs`,
+`brain/goals/clean.rs`, `brain/tasks/clean.rs`, `map/wasteland.rs`,
+`qa/dirt.json`, `qa/bladder_accident.json`, `qa/outdoor_toilet.json`.

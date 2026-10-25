@@ -13,6 +13,8 @@ pub mod bite;
 pub mod chase;
 pub use bite::Bite;
 pub use chase::Chase;
+pub mod clean;
+pub use clean::{Clean, CLEAN_SECONDS};
 pub mod close_books;
 pub mod payroll;
 pub use close_books::{CloseBooks, BOOKS_SECONDS};
@@ -37,6 +39,8 @@ pub mod tend;
 pub mod use_arcade;
 pub mod use_computer;
 pub mod use_toilet;
+pub mod pee;
+pub use pee::Pee;
 pub mod wait;
 pub mod watch_tv;
 pub mod withdraw;
@@ -80,6 +84,7 @@ tasks! {
     TakeItem,
     ConsumeItem,
     UseToilet,
+    Pee,
     UseComputer,
     WatchTv,
     Sleep,
@@ -110,6 +115,7 @@ tasks! {
     Fish,
     Talk,
     PlantFlowers,
+    Clean,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

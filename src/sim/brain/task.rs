@@ -550,6 +550,7 @@ mod tests {
             Task::take(at, ItemKind::Water, 2.0),
             Task::consume(ItemKind::Food, 3.0),
             Task::use_toilet(at, 4.0),
+            Task::pee(at, 4.0),
             Task::use_computer(at, 5.0),
             Task::watch_tv(at, 6.0),
             Task::sleep(at, 7.0),
@@ -578,6 +579,7 @@ mod tests {
             Task::harvest(at, 22.0),
             Task::work_at(crate::sim::feature::FeatureKind::ControlPanel, at, 23.0),
             Task::talk(at, 24.0),
+            Task::clean(at, 25.0),
         ]
     }
 

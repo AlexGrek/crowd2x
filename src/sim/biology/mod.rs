@@ -292,6 +292,16 @@ impl Biology {
         self.switches = self.switches.with(process, running);
     }
 
+    /// Involuntary relief, settled with the world's surface changes. A
+    /// stopped bladder holds its value even at critical fullness.
+    pub(crate) fn relieve_if_critical(&mut self) -> bool {
+        if !self.is_running(ProcessId::Bladder) || self.stats.bladder() < bladder::CRITICAL {
+            return false;
+        }
+        self.handle(Event::Relieved);
+        true
+    }
+
     /// Time passing: `dt` **world** seconds of every running process, in
     /// [`ProcessId`] order. That is
     /// [`Think::game_dt`](crate::sim::entity::Think::game_dt), not the tick's

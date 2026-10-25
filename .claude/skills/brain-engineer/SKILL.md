@@ -55,6 +55,10 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
 3. top changed? old.deprioritized -> current task abandoned, walk halted
                 -> queue cleared -> new.prioritized
+3b. otherwise, a task going on: top.keep_up(ctx, current) — what will not
+                wait for the task to end (a cleaner's look over the district every
+                27 minutes); true abandons the task as a hand-over does, and
+                process runs this tick
 4. top.process(last)             ONLY if the goal just changed or no task is current
 6. current task's executor runs  (pops the queue front if none is current)
 7. walk.hurry(urgency of the top goal, dt)  (0 with no route: every walk starts at its pace)
@@ -66,6 +70,9 @@ This order has consequences:
   There is **one tick between tasks**.
 - A goal that returns `Working` with nothing queued is asked again next tick. That is fine
   for a cheap miss and a disaster for anything that searched.
+- **`GoalExecutor::keep_up`** (default `false`) is the one way a goal acts while its task
+  runs, asked of the whole crowd every tick: keep it to a counter compared until it is due.
+  `CleanGoal` is the only one that keeps up with anything (`dirt` skill).
 - When a handover happens the tick after a task ended, the old goal never gets `process` for
   that ending. It gets it in **`deprioritized`** (`ctx.tasks.result()`, `ctx.finished`).
   `EatGoal` logs a meal there because the last bite is what makes hunger let go.

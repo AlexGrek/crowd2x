@@ -1,5 +1,5 @@
 //! [`Bladder`]: fills slowly with time, quickly after a drink, and is emptied
-//! by a toilet.
+//! by a toilet, or involuntarily at [`CRITICAL`] (settled by `sim::soiling`).
 //!
 //! The first process with state of its own. A drink does not arrive in the
 //! bladder the moment it is swallowed — it is put *on its way*, and arrives
@@ -22,6 +22,9 @@ use super::{Event, Process, ProcessId, Stats};
 ///
 /// [`BURSTING`]: crate::sim::brain::routines::BURSTING
 pub const HOURS_TO_FULL: f32 = 6.0;
+
+/// A bladder that cannot be held any longer, unless already on a toilet.
+pub const CRITICAL: f32 = 100.0;
 
 /// Bladder filled per **world** second whatever a person does —
 /// [`Think::game_dt`], never `dt`.

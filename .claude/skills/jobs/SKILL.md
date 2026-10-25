@@ -1,6 +1,6 @@
 ---
 name: jobs
-description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the power plant worker (the power plant's control panel, the three watches, standing by and nothing else yet; the Work task's STRETCHES), the playzone administrator (one central computer, four shifts: a day and an evening shift for each of two groups on alternate days; the arcade cabinets work only while one is on duty beside the computer: sim::playzone, Effect::Operate, UseArcade), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
+description: Jobs in crowd2x - who works where and when. The Job model (kind, own workplace, shift), the office worker (a computer) and the scrap collector (a scrap bin in the warehouse, scrap from the heaps in the wasteland), both 09:00-17:00 Mon-Fri, and the guard (a guard post by a gate in the district's wall, three 8-hour watches every day, a guard to each), the undertaker (a crematorium, the guards' three watches, carrying the dead to it: BuryGoal, TakeBody, Cremate), the steel factory's steelworker (a furnace: scrap from a hopper smelted into steel on a pallet, SmeltGoal, Withdraw, Smelt) and courier (a scrap hopper: scrap from the warehouse's bins to the hopper and steel from the pallets to the warehouse's rack, HaulGoal), the farmer (a grain bin at the farm, a field of ten crops of wheat sown in the wasteland's good soil, tended once a day for quality, harvested ripe after six days, 09:00-17:00 Mon-Sat: FarmGoal, Sow, Tend, Harvest, sim::fields), the power plant worker (the power plant's control panel, the three watches, standing by and nothing else yet; the Work task's STRETCHES), the playzone administrator (one central computer, four shifts: a day and an evening shift for each of two groups on alternate days; the arcade cabinets work only while one is on duty beside the computer: sim::playzone, Effect::Operate, UseArcade), the cleaner (the district itself as its workplace, no prop; four on two groups' morning and evening shifts, two a day; its brain looks over the district for dirt every 27 minutes and mops it up, roaming with none: CleanGoal, the dirt skill), the stores (Bins: scrap bins, steel racks, scrap hoppers, steel pallets, grain bins; Effect::Deposit / Effect::Withdraw), weekdays on the clock (day 1 is a Monday), commutes, sleeping by one's shift (Shift::is_bedtime), how a workplace - a cell and a shift - is handed out at spawn like a bed in hiring order - desks first, then bins, then posts (Workplaces, give_a_job, JobKind::ALL) - and taken back, Command::Hire / Command::Dismiss, WorkRoutine and its 1.5 priority against the needs, WorkGoal and the Work task (an hour a stretch), CollectGoal (every trip from the bin), getting ready before a trip out (ReadyRoutine: every need 85% met, at the bin or back in with a half trip), salvaging for work and the Deposit task, the Bins store, Event::Worked fatigue (tiring, no fun), saving a job, the desks and the bins, the job menu in the unit panel, and the tests and QA. Maps every concept to the file and function that owns it. Use when adding a job kind, changing hours, schedules, weekends or what work does to a body, when somebody does not go to work, never leaves it or brings no scrap in, or when touching the job menu.
 ---
 
 # Jobs
@@ -42,8 +42,15 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   by two who take turns by the day (`PLAYZONE_SHIFTS`: group 1 Mon, Wed, Fri, Sun; group 2 Tue,
   Thu, Sat), so every day has two shifts and two administrators on them — worked an hour at a time
   like a desk (`WorkGoal`, the `"run the playzone"` stretch), **and while one is on duty and
-  beside the computer the playzone's arcade cabinets work** (`sim::playzone`). Hired **last**
-  (`JobKind::ALL`'s end). See "The playzone" below.
+  beside the computer the playzone's arcade cabinets work** (`sim::playzone`). See "The
+  playzone" below;
+- the **cleaner**: **the district itself** (`FeatureKind::District`, no prop, one to a site of
+  `TOWN_HOMES` homes or more) — four cleaners on the playzone's two groups, a morning (07-15) and
+  an evening (15-23) shift each (`CLEANER_SHIFTS`), so two every day, one at a time, four days a
+  week or three. Its own brain looks over the district every 27 world minutes for public ground
+  dirtier than 0.15, mops it up nearest first (`CleanGoal`, `Task::clean`, `Effect::Clean`), and
+  with nothing found walks round — it has nowhere to wait. Hired **last** (`JobKind::ALL`'s end).
+  See "The cleaner" below and the `dirt` skill.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -399,6 +406,23 @@ second let go and bored, the job menu (`10:00-16:00`, `Mon, Wed, Fri, Sun`), the
 administrator at the computer at ten, a game played by half past two, `done for the day` and the
 cabinets dark at half past four, and the resident still bored at nine at night (seen failing with
 the cabinets never run).
+
+## The cleaner
+
+The district's dirt (`dirt` skill) is kept down by its cleaners. The frame is a job like the
+rest; what it does is the `dirt` skill's.
+
+| Layer | What | File |
+| --- | --- | --- |
+| kind | `JobKind::Cleaner` (`"cleaner"`, number 17, **hired last**): workplace `FeatureKind::District`, goal `GoalId::Clean` (🧹, number 25), `CLEANER_COMMUTE` = 0 (nowhere to go: it starts where it is), `CLEANER_SHIFTS`, uniform `"uniform cleaner"` (a teal coverall, a yellow hi-vis band, yellow rubber gloves), `now`: `keeping the district clean`, wage 40 | `job.rs`, `economy.yaml` |
+| workplace | `FeatureKind::District` has no prop (`prop()` says `"district"`, as the electrician's `DistributionBox` says `"distribution box"`). `Features` puts **one** at the public passable cell nearest the site's middle when the site has `TOWN_HOMES` (20) homes or more — every generated district, never a test room — so its four shifts are four workplaces (`Workplaces`, told apart by start and days as the playzone's are). Logged `"hired as a cleaner at the district at x, y, 07:00-15:00"`. A cleaner never goes there | `feature.rs` |
+| shifts | `CLEANER_SHIFTS`: 07-15 `FIRST_GROUP`, 07-15 `SECOND_GROUP`, 15-23 `FIRST_GROUP`, 15-23 `SECOND_GROUP`, handed out mornings first. Every day one morning and one evening cleaner; never two on at once, so no two race for a stain | `job.rs` |
+| goal | `CleanGoal`: the look every 27 minutes on the tick it is due (`GoalExecutor::keep_up`, brain step 3b), the nearest found cell mopped next, a walk round with none. **No `Blocked` for an empty district**: it roams, on duty, until the next look | `brain/goals/clean.rs` |
+| task, world | `Task::clean` (`CLEAN_SECONDS` 5 world minutes, `Event::Worked`), `Effect::Clean` | `brain/tasks/clean.rs`, `effect.rs` |
+
+Tests: `goals/clean.rs`, `tasks/clean.rs` (`dirt` skill, "Tests");
+`sim::tests::everybody_in_a_district_moves_into_a_bed_of_their_own_house` (four cleaners, the
+two groups' morning and evening, hired last; seen with the residents to spare).
 
 ## Saving (`savegame` skill)
 

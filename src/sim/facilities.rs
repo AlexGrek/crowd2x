@@ -129,7 +129,7 @@ impl Facilities {
             tally: Tally::default(),
             fields: Fields::new(),
             flowers: Default::default(),
-            dirt: super::dirt::DirtLayer::new(map.size()),
+            dirt: super::dirt::DirtLayer::new(map),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),

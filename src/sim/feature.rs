@@ -192,8 +192,20 @@ catalogue! {
             ..BESIDE
         },
         FlowerSupplies = 28 => FeatureDef { props: &["flower supplies"], ..BESIDE },
+        /// The district itself: a cleaner's workplace, which is no prop and
+        /// nowhere a cleaner goes — the cell it is handed out at is only
+        /// what [`crate::sim::job::Workplaces`] keeps it by. One to a town
+        /// of [`TOWN_HOMES`] homes or more, at the public ground nearest the
+        /// middle of the site.
+        District = 29 => FeatureDef { props: &[], ..BESIDE },
     }
 }
+
+/// How many homes make a place a town that keeps cleaners
+/// ([`FeatureKind::District`]): a generated district has over a hundred, and
+/// a room or a street built for a test none, so its arrivals are never hired
+/// to clean it.
+pub const TOWN_HOMES: usize = 20;
 
 /// How a feature is used: from a cell beside it, or by entering its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -281,7 +293,11 @@ impl FeatureKind {
 
     /// The prop that is one: the first its row names.
     pub const fn prop(self) -> &'static str {
-        if matches!(self, Self::DistributionBox) { "distribution box" } else { self.def().props[0] }
+        match self {
+            Self::DistributionBox => "distribution box",
+            Self::District => "district",
+            _ => self.def().props[0],
+        }
     }
 }
 
@@ -383,6 +399,19 @@ impl Features {
             {
                 features.cells[FeatureKind::DistributionBox as usize].push(cell);
                 break;
+            }
+        }
+        // A town keeps cleaners, handed out at the public ground nearest its
+        // middle: a scan of the site, once with the world.
+        if properties.len() >= TOWN_HOMES {
+            let middle = Point::new(map.size().width / 2, map.size().height / 2);
+            if let Some(cell) = map
+                .size()
+                .points()
+                .filter(|&cell| map.is_passable(cell) && properties.of(cell).is_none())
+                .min_by_key(|&cell| (cell.manhattan_distance(middle), cell))
+            {
+                features.cells[FeatureKind::District as usize].push(cell);
             }
         }
         // Sorted, so nothing that picks among them depends on the order the

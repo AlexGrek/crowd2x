@@ -54,6 +54,12 @@
 //! * the **accountant**: the computer beside the palace's throne, office
 //!   hours — the district's books closed a day at a time, and how the budget
 //!   stands said in the log ([`Paperwork::Books`]).
+//! * the **cleaner**: the district itself ([`FeatureKind::District`], a
+//!   workplace with no prop and nowhere to stand) — the dirt on its public
+//!   ground looked for and mopped up, and with none to find, a walk round
+//!   (`CleanGoal`). Two shifts a day, each kept by two cleaners who take turns
+//!   by the day ([`CLEANER_SHIFTS`]): four days a week or three, two cleaners
+//!   every day, one at a time.
 //!
 //! **Every job is paid** (`sim::economy`): a wage a shift, by its tier in
 //! `economy.yaml`, paid by the office workers, whose paperwork is the payroll
@@ -96,6 +102,10 @@ pub const GUARD_COMMUTE: f32 = 2.0 * HOUR;
 /// on time if they are there when the last one leaves. One who lives nearby is
 /// early, and waits beside the computer.
 pub const PLAYZONE_COMMUTE: f32 = 2.0 * HOUR;
+
+/// How long before its shift a cleaner sets off: not at all. Its workplace
+/// is the district, and it starts on the dirt nearest wherever it is.
+pub const CLEANER_COMMUTE: f32 = 0.0;
 
 /// How long before court a king sets off for the palace: an hour and a half.
 /// The palace is in the middle of the district, and a king walks it at
@@ -473,6 +483,24 @@ catalogue! {
             uniform: "uniform city decorator", now: |_, _| "planting flowers in the city",
             goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
         },
+        /// Keeps the district clean: looks over it for dirt on public
+        /// ground, mops it up a cell at a time, and walks round when there
+        /// is none (`CleanGoal`). Its workplace is the district itself
+        /// ([`FeatureKind::District`]): there is nowhere it waits.
+        Cleaner = 17 => JobDef {
+            name: "cleaner",
+            article: "a cleaner",
+            workplace: FeatureKind::District,
+            goal: GoalId::Clean,
+            commute: CLEANER_COMMUTE,
+            shifts: &CLEANER_SHIFTS,
+            uniform: "uniform cleaner",
+            now: |_, _| "keeping the district clean",
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+        },
     }
 }
 
@@ -602,6 +630,18 @@ pub const PLAYZONE_SHIFTS: [Shift; 4] = [
     Shift { start: 10, end: 16, days: SECOND_GROUP },
     Shift { start: 16, end: 22, days: FIRST_GROUP },
     Shift { start: 16, end: 22, days: SECOND_GROUP },
+];
+
+/// The cleaners' four shifts, in the order they are handed out: **the
+/// morning** (seven to three) of each group, then **the evening** (three to
+/// eleven) of each — the playzone's two groups ([`FIRST_GROUP`] four days a
+/// week, [`SECOND_GROUP`] three). So two cleaners keep the district every
+/// day, one after the other, and never two at once.
+pub const CLEANER_SHIFTS: [Shift; 4] = [
+    Shift { start: 7, end: 15, days: FIRST_GROUP },
+    Shift { start: 7, end: 15, days: SECOND_GROUP },
+    Shift { start: 15, end: 23, days: FIRST_GROUP },
+    Shift { start: 15, end: 23, days: SECOND_GROUP },
 ];
 
 /// A guard post's three watches, every day: the day, the evening and the
@@ -1032,7 +1072,8 @@ mod tests {
                 JobKind::Accountant,
                 JobKind::Nurse,
                 JobKind::Fisherman,
-                JobKind::CityDecorator
+                JobKind::CityDecorator,
+                JobKind::Cleaner
             ],
             "the office first, new professions last"
         );
@@ -1176,7 +1217,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::AccountantComputer, "accountant computer"));
         assert_eq!(kind.goal(), GoalId::Work);
         assert_eq!(kind.shifts(), [OFFICE_HOURS]);
-        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::CityDecorator, "new jobs keep existing stable numbers");
+        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::Cleaner, "new jobs keep existing stable numbers");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("keeping the books", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform accountant");
         assert_eq!(kind.paperwork(), Some(Paperwork::Books));
@@ -1253,6 +1294,38 @@ mod tests {
                 let hours = quarter as f32 / 4.0;
                 let on_duty = worked.iter().filter(|shift| shift.is_working_hours(at(day, hours))).count();
                 assert_eq!(on_duty, usize::from((10.0..22.0).contains(&hours)), "day {day}, {hours}: one administrator");
+            }
+        }
+    }
+
+    /// The district is kept by four cleaners: four days a week or three each,
+    /// two every day, one at a time from seven in the morning to eleven at
+    /// night — and with nowhere to go, nobody sets off early.
+    #[test]
+    fn two_cleaners_keep_the_district_every_day_one_after_the_other() {
+        let kind = JobKind::Cleaner;
+        assert_eq!((kind.name(), kind.with_article()), ("cleaner", "a cleaner"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::District, "district"));
+        assert_eq!(kind.goal(), GoalId::Clean);
+        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!(kind.uniform().name(), "uniform cleaner");
+        assert_eq!(kind.commute(), 0.0);
+        assert_eq!(kind.shifts(), CLEANER_SHIFTS);
+
+        let worked_days = |shift: &Shift| (1..=7).filter(|&day| shift.works_on(at(day, 12.0).weekday())).count();
+        let mut weeks: Vec<usize> = CLEANER_SHIFTS.iter().map(worked_days).collect();
+        weeks.sort_unstable();
+        assert_eq!(weeks, [3, 3, 4, 4], "four days a week or three");
+        for day in 1..=7 {
+            let worked: Vec<Shift> =
+                CLEANER_SHIFTS.into_iter().filter(|shift| shift.works_on(at(day, 12.0).weekday())).collect();
+            assert_eq!(worked.len(), 2, "day {day}: two cleaners");
+            for quarter in 0..96 {
+                let hours = quarter as f32 / 4.0;
+                let on_duty = worked.iter().filter(|shift| shift.is_working_hours(at(day, hours))).count();
+                assert_eq!(on_duty, usize::from((7.0..23.0).contains(&hours)), "day {day}, {hours}: one cleaner");
+                let due = worked.iter().filter(|shift| Job::new(kind, Point::new(0, 0), **shift).is_due(at(day, hours))).count();
+                assert_eq!(due, on_duty, "day {day}, {hours}: due only on duty");
             }
         }
     }

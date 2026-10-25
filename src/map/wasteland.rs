@@ -49,6 +49,17 @@
 //! two free cells beside it to be worked from. Heaps keep out of the
 //! [`CLEARING`] too, so nothing in a yard ever stands across the way off a
 //! map.
+//!
+//! # Puddles
+//!
+//! Small patches of muddy water lie about on the dry ground, a few cells
+//! across ([`Wasteland::puddle`]): the same pure function of seed and cell,
+//! a fifth field, *puddles*, at a scale of a few cells, with a puddle only
+//! where it is highest, dirtier towards the middle. Not on the site, not on
+//! cracked earth, meadow, mud or water, and never under a heap — but in the
+//! clearing, too, so whoever walks off a map can walk through one. What a
+//! puddle does to whoever walks through it is the simulation's business
+//! (`sim::dirt`): here it is only how dirty it is, and that never changes.
 
 use super::coords::{Bounds, Point};
 use super::terrain::{TerrainId, DIRT, DIRT_CRACKED, DIRT_STONES, MEADOW, MUD, SCRUB, WATER};
@@ -118,6 +129,18 @@ const DRY: u64 = 0x4452_5900_0000_0003;
 const STONES: u64 = 0x5354_4f4e_4500_0004;
 const JUNK: u64 = 0x4a55_4e4b_0000_0005;
 const HEAPS: u64 = 0x4845_4150_5300_0006;
+const PUDDLES: u64 = 0x5055_4444_4c45_0007;
+
+// Puddles: where the puddle field is above `PUDDLE_ABOVE`, at their dirtiest
+// where it reaches `PUDDLE_FULL`.
+// `puddles_lie_in_small_patches_on_dry_ground` holds them to a few in a
+// hundred cells.
+const PUDDLE_ABOVE: f32 = 0.79;
+const PUDDLE_FULL: f32 = 0.87;
+
+/// What a puddle may lie on: bare dirt, stony or scrubby. Not cracked earth,
+/// which is dry, not meadow, not mud and never water.
+const PUDDLE_GROUND: [TerrainId; 3] = [DIRT, DIRT_STONES, SCRUB];
 
 /// A heap of scrap metal, as the wasteland lays it ([`Wasteland::scrap`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -230,6 +253,37 @@ impl Wasteland {
             pieces: 1 + ((roll >> 16) % MAX_SCRAP as u64) as u8,
         })
     }
+}
+
+impl Wasteland {
+    /// How dirty the puddle at `cell` is, in `(0, 1]`, round a site covering
+    /// `site` — or `None`, which is nearly everywhere.
+    ///
+    /// Half dirty at a patch's rim, filthy in its middle, in steps of a
+    /// sixty-fourth (what the game can draw). The cheap question first: the
+    /// field alone rules out most cells before the ground is worked out.
+    pub fn puddle(self, cell: Point, site: Bounds) -> Option<f32> {
+        if site.contains(cell) {
+            return None;
+        }
+        let field = puddles(self.seed, cell.x, cell.y);
+        if field <= PUDDLE_ABOVE {
+            return None;
+        }
+        let tile = self.tile(cell, site);
+        if !PUDDLE_GROUND.contains(&tile) || self.scrap_on(cell, site, tile).is_some() {
+            return None;
+        }
+        let depth = ((field - PUDDLE_ABOVE) / (PUDDLE_FULL - PUDDLE_ABOVE)).min(1.0);
+        Some(((0.5 + 0.5 * depth) * 64.0).round() / 64.0)
+    }
+}
+
+/// The puddle field, in `[0, 1)`: where it is highest there is a puddle. An
+/// octave a few cells across for the patches and a finer one to fray them.
+#[inline]
+fn puddles(seed: u64, x: i32, y: i32) -> f32 {
+    value(seed ^ PUDDLES, x, y, 6) * 0.65 + value(mix(seed ^ PUDDLES), x, y, 3) * 0.35
 }
 
 /// The junk field, in `[0, 1)`: where it is high there is a scrapyard. A
@@ -475,6 +529,50 @@ mod tests {
             let free = cell.cardinal_neighbours().iter().filter(|&&next| land.scrap(next, site()).is_none()).count();
             assert!(free > 0, "{cell:?} is walled in by scrap");
         }
+    }
+
+    #[test]
+    fn puddles_lie_in_small_patches_on_dry_ground() {
+        let patch = Bounds::new(Point::new(-1500, 900), Size::new(384, 384));
+        let (mut found, mut joined) = (0usize, 0usize);
+        for seed in [0, 1, 7, 40500] {
+            let land = Wasteland::new(seed);
+            for cell in patch.points() {
+                let Some(dirt) = land.puddle(cell, site()) else { continue };
+                found += 1;
+                assert!((0.5..=1.0).contains(&dirt), "a puddle {dirt} dirty");
+                assert_eq!(dirt, (dirt * 64.0).round() / 64.0, "{dirt} is not in sixty-fourths");
+                let tile = land.tile(cell, site());
+                assert!(PUDDLE_GROUND.contains(&tile), "a puddle on {} at {cell:?}", tile.name());
+                assert_eq!(land.scrap(cell, site()), None, "a puddle under a heap at {cell:?}");
+                assert_eq!(land.puddle(cell, site()), Some(dirt), "the same puddle asked twice");
+                if cell.cardinal_neighbours().iter().any(|&next| land.puddle(next, site()).is_some()) {
+                    joined += 1;
+                }
+            }
+        }
+        let share = found as f32 / (patch.area() * 4) as f32;
+        assert!((0.01..0.04).contains(&share), "a puddle in {share} of the cells");
+        // Patches, not a sprinkling: nearly every puddle cell has another
+        // beside it.
+        assert!(joined as f32 > found as f32 * 0.9, "only {joined} of {found} puddle cells are in a patch");
+    }
+
+    #[test]
+    fn puddles_lie_in_the_clearing_too_but_never_on_the_site() {
+        let near = site().grown(CLEARING);
+        let mut in_clearing = 0;
+        for seed in 0..16 {
+            let land = Wasteland::new(seed);
+            for cell in near.points() {
+                match land.puddle(cell, site()) {
+                    Some(_) if site().contains(cell) => panic!("seed {seed}: a puddle on the site at {cell:?}"),
+                    Some(_) => in_clearing += 1,
+                    None => {}
+                }
+            }
+        }
+        assert!(in_clearing > 0, "no puddle in any clearing");
     }
 
     #[test]

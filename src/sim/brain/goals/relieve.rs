@@ -1,4 +1,5 @@
-//! [`RelieveGoal`]: walk to the nearest toilet, then into it, and use it.
+//! [`RelieveGoal`]: use a toilet inside the district; outside, walk away
+//! from work to a random nearby spot and relieve there.
 //!
 //! Two tasks — [`MoveTo`](crate::sim::brain::tasks::MoveTo) beside the toilet,
 //! [`UseToilet`](crate::sim::brain::tasks::UseToilet), which finishes the walk
@@ -13,6 +14,8 @@ use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
+use crate::sim::rng::tick_rng;
+use rand::RngExt;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
@@ -22,6 +25,10 @@ use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
 /// written in world units like every duration a body is watched standing
 /// through (see [`crate::sim::clock`]).
 pub const TOILET_SECONDS: f32 = watched(5.0 * MINUTE);
+
+/// Step away from the job before relieving outdoors, within six cells.
+pub const OUTSIDE_DISTANCE: i32 = 3;
+pub const OUTSIDE_RADIUS: i32 = 6;
 
 /// Use the toilet.
 ///
@@ -46,6 +53,34 @@ impl RelieveGoal {
         RelieveGoal::default()
     }
 
+    fn choose(ctx: &GoalCtx<'_>) -> Option<Point> {
+        let here = ctx.body.center_position();
+        if ctx.think.map.site().contains(here) {
+            return choose_nearest(ctx, FeatureKind::Toilet);
+        }
+        let mut rng = tick_rng(ctx.body.uid(), ctx.think.tick);
+        let navigation = ctx.think.map.navigation();
+        for _ in 0..16 {
+            let candidate = here.offset(
+                rng.random_range(-OUTSIDE_RADIUS..=OUTSIDE_RADIUS),
+                rng.random_range(-OUTSIDE_RADIUS..=OUTSIDE_RADIUS),
+            );
+            if here.chebyshev_distance(candidate) >= OUTSIDE_DISTANCE
+                && !ctx.think.map.site().contains(candidate)
+                && ctx.think.is_passable(candidate)
+                && !ctx.think.occupancy.is_occupied(candidate)
+                && ctx.think.corpses.at(candidate).is_none()
+                && ctx.think.dirt.puddle(candidate).is_none()
+                && ctx.job.is_none_or(|job| job.workplace != candidate)
+                && !ctx.memory.out_of_reach().contains(candidate, ctx.think.clock.elapsed())
+                && navigation.may_reach(here, candidate)
+            {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
     /// Queue the rest **from what is true now**, on the back of the queue:
     /// walk beside the toilet (unless already there), use it. `false` when
     /// there is nowhere to stand to use it.
@@ -53,6 +88,13 @@ impl RelieveGoal {
         let Some(toilet) = self.seek.target else {
             return false;
         };
+        if !ctx.think.map.site().contains(toilet) {
+            if ctx.body.center_position() != toilet {
+                let _ = ctx.tasks.push_back(Task::move_to(toilet));
+            }
+            let _ = ctx.tasks.push_back(Task::pee(toilet, TOILET_SECONDS));
+            return true;
+        }
         match stand_beside(ctx, toilet) {
             Stand::Nowhere => return false,
             Stand::Here => {}
@@ -94,6 +136,10 @@ impl GoalExecutor for RelieveGoal {
 
     /// The half-walked route is gone, the toilet is not.
     fn prioritized(&mut self, ctx: &mut GoalCtx<'_>) {
+        if self.seek.target.is_some_and(|target|
+            ctx.think.map.site().contains(target) != ctx.think.map.site().contains(ctx.body.center_position())) {
+            self.forget();
+        }
         if self.seek.target.is_none() {
             return;
         }
@@ -112,6 +158,9 @@ impl GoalExecutor for RelieveGoal {
         {
             self.relieved(ctx, task.toilet);
         }
+        if ctx.tasks.result() == TaskResult::Success && matches!(ctx.finished, Some(Task::Pee(_))) {
+            self.forget();
+        }
     }
 
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
@@ -121,7 +170,7 @@ impl GoalExecutor for RelieveGoal {
         }
 
         match (last, ctx.finished) {
-            (TaskResult::Failed, Some(Task::MoveTo(_)) | Some(Task::UseToilet(_))) => {
+            (TaskResult::Failed, Some(Task::MoveTo(_)) | Some(Task::UseToilet(_)) | Some(Task::Pee(_))) => {
                 // A body in the way of the walk there, or already inside the
                 // toilet when this one tried to step in — either way,
                 // something a moving body caused, so it may move again.
@@ -129,7 +178,13 @@ impl GoalExecutor for RelieveGoal {
                 // A body in the way: wait and try again. No way there, or
                 // no end to the crowd: remember it as out of reach and try
                 // the next one (see `Seek`).
-                if self.seek.setback(ctx, |ctx| nearest_in_reach(ctx, FeatureKind::Toilet)) && self.plan(ctx) {
+                if self.seek.setback(ctx, |ctx| {
+                    if ctx.think.map.site().contains(ctx.body.center_position()) {
+                        nearest_in_reach(ctx, FeatureKind::Toilet)
+                    } else {
+                        Self::choose(ctx)
+                    }
+                }) && self.plan(ctx) {
                     return GoalProgress::Working;
                 }
                 // Nowhere left to try: give up on this visit rather than
@@ -148,6 +203,10 @@ impl GoalExecutor for RelieveGoal {
                 self.relieved(ctx, task.toilet);
                 return GoalProgress::Achieved;
             }
+            (TaskResult::Success, Some(Task::Pee(_))) => {
+                self.forget();
+                return GoalProgress::Achieved;
+            }
             (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
             _ => {}
         }
@@ -157,7 +216,7 @@ impl GoalExecutor for RelieveGoal {
         }
 
         // Nothing queued: start, or start again.
-        let Some(toilet) = choose_nearest(ctx, FeatureKind::Toilet) else {
+        let Some(toilet) = Self::choose(ctx) else {
             return GoalProgress::Blocked;
         };
         self.seek.choose(toilet);
@@ -196,6 +255,74 @@ mod tests {
     /// Bursting, and nothing else pressing.
     fn bursting_human(cell: Point, bladder: f32) -> Human {
         needy_human(cell, 0.0, 0.0, bladder)
+    }
+
+    #[test]
+    fn somebody_outside_walks_away_and_pees_there_even_with_a_toilet_inside() {
+        for with_toilet in [false, true] {
+            let mut map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(5);
+            if with_toilet { prop_at(&mut map, "toilet", Point::new(1, 5)); }
+            let mut world = World::new(map);
+            let start = Point::new(-6, 6);
+            let mut human = bursting_human(start, 80.0);
+            for _ in 0..1000 {
+                world.step(&mut human);
+                assert!(!world.map.site().contains(human.center_position()), "went back inside");
+                if world.log_contains("peed outside") { break; }
+            }
+            assert!(world.log_contains("peed outside"), "{:?}", human.brain_fields());
+            let spot = human.center_position();
+            assert!(spot.chebyshev_distance(start) >= OUTSIDE_DISTANCE);
+            assert_eq!(world.dirt.at(start).wet, 0.0, "work spot stays dry");
+            assert_eq!(world.dirt.at(spot).wet, 1.0);
+            assert_eq!(human.body().dirt().wet, 0.0, "deliberate relief does not wet clothes");
+            assert_eq!(human.stats().bladder(), 0.0);
+            assert_eq!(world.reliefs(), 0);
+        }
+    }
+
+    #[test]
+    fn an_outdoor_toilet_trip_resumes_after_a_drink_without_leaving_a_half_done_puddle() {
+        let mut world = World::new(Map::new(Size::new(10, 10), FLOOR).with_wasteland(5));
+        let mut human = bursting_human(Point::new(-6, 6), 80.0);
+        for _ in 0..500 {
+            world.step(&mut human);
+            if matches!(human.brain().current_task(), Some(Task::Pee(_))) { break; }
+        }
+        let Some(Task::Pee(task)) = human.brain().current_task() else { panic!("never arrived"); };
+        assert_eq!(world.dirt.at(task.at).wet, 0.0);
+        human.set_thirst(100.0);
+        human.set_carried(Some(crate::sim::ItemKind::Water));
+        world.step(&mut human);
+        assert_eq!(human.brain().top_goal(), GoalId::Drink);
+        assert_eq!(world.dirt.at(task.at).wet, 0.0);
+        for _ in 0..1000 {
+            world.step(&mut human);
+            if world.log_contains("peed outside") { break; }
+        }
+        assert!(world.log_contains("peed outside"), "{:?}", human.brain_fields());
+        assert_eq!(human.center_position(), task.at);
+        assert_eq!(world.dirt.at(task.at).wet, 1.0);
+    }
+
+    #[test]
+    fn no_free_outdoor_spot_is_held_off_and_critical_fullness_still_causes_an_accident() {
+        let start = Point::new(-6, 6);
+        let mut world = World::new(Map::new(Size::new(10, 10), FLOOR).with_wasteland(5));
+        let mut human = bursting_human(start, 90.0);
+        for dx in -OUTSIDE_RADIUS..=OUTSIDE_RADIUS {
+            for dy in -OUTSIDE_RADIUS..=OUTSIDE_RADIUS {
+                if dx == 0 && dy == 0 { continue; }
+                let _ = world.occupancy.claim(start.offset(dx, dy), Uid::new(EntityType::Dog, ((dx + 6) * 13 + dy + 7) as u64));
+            }
+        }
+        world.step(&mut human);
+        assert!(human.brain().goals().cooldown(GoalId::Relieve) > 0);
+        crate::sim::walker::ROUTES_ASKED.with(|asked| asked.set(0));
+        for _ in 0..1300 { world.step(&mut human); }
+        assert!(world.log_contains("bladder critical"));
+        assert_eq!(world.dirt.at(start).wet, 1.0);
+        assert!(crate::sim::walker::ROUTES_ASKED.with(|asked| asked.get()) < 100);
     }
 
     #[test]
@@ -292,7 +419,9 @@ mod tests {
         // first attempt at stepping in still has to cross from beside it to
         // the boundary of the toilet's cell before it can be refused, and
         // each retry after that waits out `WAIT_FOR_A_GAP` in between.
-        let mut human = bursting_human(Point::new(5, 6), 95.0);
+        // Leave enough capacity for this whole retry window: reaching 100
+        // now causes an accident and releases the need altogether.
+        let mut human = bursting_human(Point::new(5, 6), 90.0);
         for _ in 0..1000 {
             world.step(&mut human);
         }

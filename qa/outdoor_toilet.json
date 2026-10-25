@@ -1,0 +1,41 @@
+{
+  "name": "somebody outside takes a toilet break outdoors instead of returning to the district",
+  "state": "game",
+  "given": { "maps": [{
+    "name": "district",
+    "map": {
+      "version": 1,
+      "wasteland": 5,
+      "size": { "width": 10, "height": 10 },
+      "terrain": {
+        "palette": ["wall brown"],
+        "layers": [{ "rows": [
+          "0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,0,0,0,0",
+          "0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,0,0,0,0",
+          "0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,0,0,0,0",
+          "0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,0,0,0,0",
+          "0,0,0,0,0,0,0,0,0,0", "0,0,0,0,0,0,0,0,0,0"
+        ] }]
+      },
+      "objects": { "props": [], "spawners": [] }
+    }
+  }] },
+  "open": "district",
+  "steps": [
+    { "key": "p" },
+    { "spawn": { "kind": "human", "x": -6, "y": 6 } },
+    { "tick": 1 },
+    { "select": 0 },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "health", "on": false } },
+    { "press": "follow" },
+    { "press": "brains" },
+    { "tick": 9000 },
+    { "expect_log": "peed outside" },
+    { "expect_stat": { "stat": "bladder", "max": 50 } },
+    { "shot": "after an outdoor toilet break" }
+  ]
+}

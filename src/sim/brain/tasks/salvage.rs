@@ -65,6 +65,7 @@ impl TaskExecutor for Salvage {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
+                ctx.walk.body_mut().dirt_mut().soil(crate::sim::dirt::SALVAGING);
                 *ctx.effect = Effect::Salvage { at: self.heap };
                 if self.for_work
                     && let Some(biology) = ctx.biology.as_deref_mut()
@@ -161,8 +162,10 @@ mod tests {
         let mut task = Task::salvage(heap, 0.5);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.effect, Effect::None, "not yet");
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN);
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         assert_eq!(rig.effect, Effect::Salvage { at: heap });
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::SALVAGING, "an order soils as much as a job");
         // The piece is the world step's to hand over, not the task's.
         assert_eq!(rig.inventory.stowed_items(), 0);
         assert_eq!(rig.walk.body().center_position(), heap.offset(-1, 0), "worked from where it stood");

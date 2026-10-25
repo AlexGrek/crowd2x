@@ -38,6 +38,9 @@
 //! 2.   ...and arranges the priority list
 //! 3. if the goal on top changed: old.deprioritized() -> current task
 //!      abandoned, walk halted -> queue cleared -> new.prioritized()
+//! 3b. otherwise, with a task going on: top.keep_up(current) — what will not
+//!      wait for the task to end (a cleaner's look over the district); true
+//!      abandons the task as a hand-over would
 //! 4. ONLY IF the goal changed or no task is current: top.process(last result)
 //! 4b.  the timesheet: on duty or not, a shift over, a day turned (`timesheet`)
 //! 5.   ...which manages the task queue
@@ -349,6 +352,39 @@ impl Brain {
         {
             current.interrupted(action, biology.as_deref_mut());
         }
+        let ready_to_go_out = routines.iter().any(Routine::is_ready_to_go_out);
+        // 3b. The goal in charge keeps up with what will not wait for its task
+        // to end — a cleaner's look over the district — and may cut the task
+        // short to act on it, which it is told of as a hand-over tells it.
+        let mut cut_short = false;
+        if changed.is_none()
+            && let Some(current) = task.as_ref()
+            && let Some(executor) = executors[goals.top() as usize].as_deref_mut()
+        {
+            let mut goal_ctx = GoalCtx {
+                think: ctx,
+                body: &body,
+                perception,
+                biology: biology.as_deref(),
+                memory,
+                tasks,
+                inventory: inventory.as_deref(),
+                job,
+                ready_to_go_out,
+                blocked_by: *blocked_by,
+                finished: *finished,
+            };
+            cut_short = executor.keep_up(&mut goal_ctx, current);
+        }
+        if cut_short && let Some(mut current) = task.take() {
+            current.interrupted(action, biology.as_deref_mut());
+            *action = Action::None;
+            walk.halt();
+            tasks.clear();
+            tasks.set_result(TaskResult::InProgress);
+            *finished = None;
+            *blocked_by = None;
+        }
         {
             // Goals read the body and what it carries; only tasks, below,
             // change them.
@@ -361,7 +397,7 @@ impl Brain {
                 tasks,
                 inventory: inventory.as_deref(),
                 job,
-                ready_to_go_out: routines.iter().any(Routine::is_ready_to_go_out),
+                ready_to_go_out,
                 blocked_by: *blocked_by,
                 finished: *finished,
             };

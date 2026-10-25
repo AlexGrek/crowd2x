@@ -56,6 +56,7 @@ impl TaskExecutor for Harvest {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
+                ctx.walk.body_mut().dirt_mut().soil(crate::sim::dirt::HARVESTING);
                 *ctx.effect = Effect::Harvest { at: self.crop, when: ctx.think.clock };
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Worked { world_seconds: self.seconds * TIME_SCALE });
@@ -130,8 +131,10 @@ mod tests {
         let mut task = Task::harvest(CROP, HARVEST_SECONDS);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.effect, Effect::None);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN);
         assert_eq!(rig.run(&mut task, 10_000), TaskResult::Success);
         assert_eq!(rig.effect, Effect::Harvest { at: CROP, when: rig.world.clock });
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::HARVESTING);
         assert_eq!(rig.inventory.count(ItemKind::Wheat), 0, "the world puts it in the pack, not the task");
     }
 

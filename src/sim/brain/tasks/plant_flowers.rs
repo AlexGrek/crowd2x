@@ -47,6 +47,7 @@ impl TaskExecutor for PlantFlowers {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
+                ctx.walk.body_mut().dirt_mut().soil(crate::sim::dirt::PLANTING);
                 use rand::RngExt;
                 let variety = crate::sim::rng::tick_rng(ctx.walk.body().uid(), ctx.think.tick)
                     .random_range(0..crate::sim::flowers::VARIETIES)
@@ -136,6 +137,7 @@ mod tests {
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.effect, Effect::None);
         assert_eq!(rig.run(&mut task, 1000), TaskResult::Success);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::PLANTING, "a bed dug by hand");
         assert!(matches!(
             rig.effect,
             Effect::PlantFlowers {
@@ -154,6 +156,7 @@ mod tests {
         rig.world.map.set_terrain(PLOT, FLOOR);
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.effect, Effect::None);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN, "a bed not dug soils nobody");
         let mut far = Rig::new(park(), Point::new(1, 1));
         assert_eq!(
             far.tick(&mut Task::plant_flowers(PLOT, PLANT_SECONDS)),

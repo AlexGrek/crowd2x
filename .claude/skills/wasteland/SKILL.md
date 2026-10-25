@@ -21,6 +21,12 @@ there; it is terrain only. Every map loaded from a file stands in one.
   The thresholds are the `*_ABOVE` constants.
 - **The site keeps a clearing.** Water fades out near the site and is gone within
   `CLEARING` (12) cells, so whatever leads off a map's edge opens onto dry ground.
+- **Puddles** (`Wasteland::puddle(cell, site)`): a fourth field, value noise over
+  `PUDDLE_ABOVE`, on dirt, stony dirt and scrub only, never under a heap, never on the site —
+  about 2% of the ground, in small patches, the clearing included. A puddle is earth
+  (`0.5..=1.0`, in sixty-fourths) for the dirt layer, **constant and immutable**: a body walking
+  through is soiled and the puddle is as it was; nothing stores or saves one. Not a tile, so no
+  `GENERATION` bump (`dirt` skill).
 - `TILES` lists the seven tiles. `MIN_COST` is the cheapest wasteland step, which
   navigation uses as the outside's minimum.
 - Tiles live in `src/map/terrain.rs` (`DIRT` .. `WATER`, named constants by catalogue

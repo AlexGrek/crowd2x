@@ -49,6 +49,7 @@ impl TaskExecutor for Sow {
         }
         match ctx.advance_action() {
             ActionState::Finished => {
+                ctx.walk.body_mut().dirt_mut().soil(crate::sim::dirt::SOWING);
                 *ctx.effect = Effect::Sow { at: self.plot, when: ctx.think.clock };
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Worked { world_seconds: self.seconds * TIME_SCALE });
@@ -114,8 +115,10 @@ mod tests {
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.action.interacting_with(), Some(PLOT));
         assert_eq!(rig.effect, Effect::None);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN, "no grime before the seed is in");
         assert_eq!(rig.run(&mut task, 10_000), TaskResult::Success);
         assert!(matches!(rig.effect, Effect::Sow { at: PLOT, .. }), "{:?}", rig.effect);
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::SOWING, "hands in the soil");
         assert!(rig.biology.stats().stamina() < 80.0, "it is work");
         assert_eq!(rig.biology.stats().fun(), 40.0, "and no fun");
     }
@@ -124,6 +127,7 @@ mod tests {
     fn not_from_across_the_field_not_on_the_plot_and_not_where_nothing_can_grow() {
         let mut rig = Rig::new(Map::new(Size::new(8, 8), MEADOW), Point::new(1, 1));
         assert_eq!(rig.tick(&mut Task::sow(PLOT, SOW_SECONDS)), TaskResult::Failed, "too far");
+        assert_eq!(rig.walk.body().dirt(), crate::sim::dirt::Dirt::CLEAN, "nothing sown, nothing soiled");
         assert_eq!(rig.tick(&mut Task::sow(Point::new(1, 2), SOW_SECONDS)), TaskResult::Failed, "not a plot");
         let mut on = Rig::new(Map::new(Size::new(8, 8), MEADOW), PLOT);
         assert_eq!(on.tick(&mut Task::sow(PLOT, SOW_SECONDS)), TaskResult::Failed, "standing on it");

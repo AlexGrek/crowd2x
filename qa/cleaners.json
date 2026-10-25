@@ -1,0 +1,46 @@
+{
+  "name": "a district keeps four cleaners, two a day, and the Monday morning one goes round it in its uniform",
+  "state": "game",
+  "timeout": 180,
+  "given": { "maps": [{ "name": "district", "district": 7 }] },
+  "open": "district",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "the district itself is the cleaners' workplace, four shifts of it: a morning and an evening for each of two groups on alternate days" },
+    { "press": "statistics" },
+    { "expect_text": "cleaners of 4 posts" },
+    { "press": "close" },
+
+    { "note": "arrival 84 of seed 7 is the first group's morning cleaner: Monday, Wednesday, Friday and Sunday, seven to three. It is eight o'clock on the Monday, so it is on duty. Its needs are switched off so that nothing calls it away" },
+    { "select": 84 },
+    { "expect_selected": "human" },
+    { "process": { "name": "hunger", "on": false } },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "bladder", "on": false } },
+    { "process": { "name": "fun", "on": false } },
+    { "process": { "name": "energy", "on": false } },
+    { "press": "job" },
+    { "expect_text": "cleaner" },
+    { "expect_text": "district at" },
+    { "expect_text": "07:00-15:00" },
+    { "expect_text": "Mon, Wed, Fri, Sun" },
+    { "tick": 2 },
+    { "expect_text": "keeping the district clean" },
+    { "press": "clothing" },
+    { "expect_text": "wearing: uniform cleaner (own: " },
+
+    { "note": "with nothing to clean yet it walks round, its look over the district kept on the brains menu" },
+    { "tick": 600 },
+    { "press": "brains" },
+    { "expect_text": "roaming to" },
+    { "expect_text": "looked" },
+    { "press": "brains" },
+    { "press": "follow" },
+    { "key": "e" },
+    { "key": "e" },
+    { "wait": 0.3 },
+    { "shot": "the Monday morning cleaner going round the district in its teal coverall" }
+  ]
+}

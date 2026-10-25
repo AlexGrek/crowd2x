@@ -38,6 +38,7 @@ wages:
   nurse: 40
   fisherman: 40
   city decorator: 60
+  cleaner: 40                 # low
   accountant: 60              # mid
 
 # What a thing costs taken from a fridge, every item by name

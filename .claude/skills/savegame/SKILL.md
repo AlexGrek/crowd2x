@@ -87,7 +87,7 @@ Where the code is:
 | --- | --- |
 | `GameState` scalars, fixtures, arena, restore order | `sim/saving.rs` (`save_world`, `save_entities` — parallel, `restore`, `RestoredEntity`) |
 | an entity kind | `GameEntity::save` (**required**, no default) + `kinds::restore` (twin of `kinds::build`, checks the uid's kind) |
-| a goal executor | `GoalExecutor::save`/`restore` (**required**); state is a `pb::Executor` variant (`Wander`, `Fetch`, `Seek`) |
+| a goal executor | `GoalExecutor::save`/`restore` (**required**); state is a `pb::Executor` variant (`Wander`, `Fetch`, `Seek`, `Clean`) |
 | a routine | `Routine::save`/`restore` (`brain/routine.rs`) — matched by name and position |
 | a task / action | `Task::save`/`restore` (`brain/task.rs`), `Action::save`/`restore` |
 | brain parts | `brain/{mod,goal,perception,attention,memory,routines}.rs`, `goals/mod.rs` (`Seek`) |
@@ -257,6 +257,15 @@ end of a person's list (older saves load without it). **Not saved**: `Chats` and
 job, with the saved rules). The side-by-side fingerprint includes `GameState::society()`. Test:
 `a_crowd_saved_mid_chat_carries_on_exactly` (seen failing with the chat not restored, with
 the society not rebuilt, and with the small talk not restored). The `relationships` skill.
+
+## Dirt and the cleaners
+
+`pb::World.dirt` (tag 21, `pb::DirtCell { cell, value }`: every stored cell not clean, site and
+wild, sorted; duplicates and invalid values refused) and `pb::Body.dirt` (9); absent = clean, as
+every older save reads. **Not saved**: the wasteland's puddles (a pure function of the seed).
+`JobKind::Cleaner` = 17, `GoalId::Clean` = 25, a `pb::Executor::Clean` (tag 5: its seek, the
+found cells, when it last looked as world seconds, where it roams; refused: more than
+`goals::clean::FOUND` cells, a non-finite time), the task `"clean"` by name. The `dirt` skill.
 
 ## Economy state
 
