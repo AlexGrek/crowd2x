@@ -15,8 +15,9 @@ use super::{Event, Process, ProcessId, Stats};
 /// Twice what an empty stomach takes: being at a loose end is slower to
 /// become pressing than being hungry is, so a person who has nothing else on
 /// looks for something to do about once a day and drops it the moment a meal
-/// matters more.
-pub const HOURS_TO_BORED: f32 = 10.0;
+/// matters more. (Twice what it was, like every need; a chat and a word in
+/// passing are fun too, and keep it off longer.)
+pub const HOURS_TO_BORED: f32 = 20.0;
 
 /// Fun lost per **world** second — [`Think::game_dt`], never `dt`.
 ///
@@ -33,6 +34,20 @@ pub const FUN_PER_SECOND: f32 = 100.0 / (HOURS_TO_BORED * HOUR);
 ///
 /// [`BORED`]: crate::sim::brain::routines::BORED
 pub const AMUSEMENT: f32 = 60.0;
+
+/// How much fun a chat is worth — a talk both sides agreed to, walked over for
+/// and stood through to its end ([`Event::Chatted`]).
+///
+/// A third of a go at something entertaining: company is how most people keep
+/// boredom off, and two hours of the drain it takes the edge off are about
+/// right for a quarter of an hour of talk. Not dulled by recent memory — who
+/// it is with is what makes a chat, and that is the relationship's business.
+pub const CHAT_FUN: f32 = 20.0;
+
+/// How much fun small talk is worth to each side ([`Event::SmallTalk`]): a
+/// word in passing. A fraction of a chat's, so that it slows boredom and never
+/// cures it.
+pub const SMALL_TALK_FUN: f32 = 2.0;
 
 /// How much of its pace boredom keeps asleep: none. Nobody gets bored in their
 /// sleep, and a sleeper who did was up at two in the morning for the computer.
@@ -66,8 +81,12 @@ impl Process for Fun {
     /// a bladder does not care which toilet was used: a task says what
     /// happened to the body and the body decides what it comes to.
     fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
-        if event == Event::Entertained {
-            stats.change_fun(AMUSEMENT * novelty);
+        match event {
+            Event::Entertained => stats.change_fun(AMUSEMENT * novelty),
+            // Talking to somebody is fun, and a chat more than a word.
+            Event::Chatted => stats.change_fun(CHAT_FUN),
+            Event::SmallTalk => stats.change_fun(SMALL_TALK_FUN),
+            _ => {}
         }
     }
 }

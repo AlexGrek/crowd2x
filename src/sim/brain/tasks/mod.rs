@@ -39,6 +39,8 @@ pub mod move_to;
 pub mod open_fridge;
 pub mod salvage;
 pub mod sleep;
+pub mod dog_sleep;
+pub use dog_sleep::DogSleep;
 pub mod sow;
 pub mod take_body;
 pub mod talk;
@@ -96,6 +98,7 @@ tasks! {
     UseComputer,
     WatchTv,
     Sleep,
+    DogSleep,
     Wait,
     OpenFridge,
     CloseFridge,

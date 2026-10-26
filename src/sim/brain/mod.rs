@@ -105,7 +105,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{DefecateGoal, DepartGoal, FollowGoal, HuntGoal, ProwlGoal, WanderGoal};
+use goals::{DefecateGoal, DepartGoal, DogSleepGoal, FollowGoal, HuntGoal, ProwlGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -216,7 +216,8 @@ impl Brain {
 
     /// A dog: stays busy; wanders. A pet - one with an owner, which is its
     /// companion - stays with it instead, roaming freely within range, and
-    /// relieves itself out of doors. Same machinery, fewer parts.
+    /// relieves itself out of doors, and sleeps nearby while the owner is
+    /// asleep. Same machinery, fewer parts.
     pub fn dog() -> Brain {
         Brain::new(
             [Routine::stay_busy(), Routine::heel()],
@@ -224,6 +225,7 @@ impl Brain {
                 Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
                 Box::new(FollowGoal::new()),
                 Box::new(DefecateGoal::new()),
+                Box::new(DogSleepGoal::default()),
             ],
         )
     }
@@ -328,7 +330,12 @@ impl Brain {
         // over (`social`).
         if social {
             social::tend(ctx, &body, memory, was_doing);
-            social::small_talk(ctx, &body, memory, is_asleep(task, action));
+            // A word had is a little fun, whatever else it is doing.
+            if social::small_talk(ctx, &body, memory, is_asleep(task, action))
+                && let Some(biology) = biology.as_deref_mut()
+            {
+                biology.handle(Event::SmallTalk);
+            }
         }
 
         memory.medical.update(ctx, body.uid(), biology.as_deref_mut());
@@ -537,11 +544,11 @@ impl Brain {
         self.action
     }
 
-    /// Whether it is lying in a bed asleep — not walking to one, not getting
-    /// in. What the body ages by (`Biology::advance_asleep`) and what shuts
-    /// its eyes.
     pub fn is_hospital_patient(&self) -> bool { self.memory.medical.recovering }
 
+    /// Actually asleep, in a bed or on the ground beside a pet's owner.
+    /// Walking to a sleeping spot does not count. This shuts its eyes and
+    /// tells a human's biology to advance asleep.
     pub fn is_asleep(&self) -> bool {
         is_asleep(&self.task, &self.action)
     }
@@ -863,7 +870,7 @@ impl Brain {
 /// Asleep: the task is a stretch of sleep and its action is the lying in the
 /// bed, not the step into it.
 fn is_asleep(task: &Option<Task>, action: &Action) -> bool {
-    matches!(task, Some(Task::Sleep(_) | Task::HospitalRest(_))) && matches!(action, Action::Interact { .. })
+    matches!(task, Some(Task::Sleep(_) | Task::DogSleep(_) | Task::HospitalRest(_))) && matches!(action, Action::Interact { .. })
 }
 
 #[cfg(test)]

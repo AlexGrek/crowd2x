@@ -526,10 +526,15 @@ fn sync_sprites(
             transform.translation = wanted;
         }
 
-        // The dead lie where they fell: the whole doll turned a quarter
-        // round. A square turned about its middle keeps its texels on the
-        // grid they were on.
-        let lying = if entity.is_dead() { Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY };
+        // The dead lie where they fell, and the sleeping where they sleep (zzz
+        // rise from them, `snooze`): the whole doll turned a quarter round. A
+        // square turned about its middle keeps its texels on the grid they
+        // were on.
+        let lying = if entity.is_dead() || entity.is_asleep() {
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)
+        } else {
+            Quat::IDENTITY
+        };
         if transform.rotation != lying {
             transform.rotation = lying;
         }

@@ -181,6 +181,13 @@ pub enum Event {
     /// seconds; what that costs the body is [`Energy`]'s to say, and what it
     /// does *not* give — any fun — is [`Fun`]'s, by having no arm for it.
     Worked { world_seconds: f32 },
+    /// A chat was had: a talk both sides agreed to, stood through to its end
+    /// (`brain::tasks::talk`). What it does to what they think of each other
+    /// is the goal's (memory); what it does to the body is [`Fun`]'s.
+    Chatted,
+    /// A word in passing, to somebody close by whatever either was doing
+    /// (`brain::social`). A small thing: [`Fun`] gives a fraction of a chat.
+    SmallTalk,
     /// A deathdog's teeth: `damage` health gone at once
     /// ([`Health`](health::Health)'s to take, so a body with it switched off
     /// shrugs a bite off). Felt by the one bitten in its own react

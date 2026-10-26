@@ -98,8 +98,8 @@ mod tests {
         let mut rig = Rig::new(Map::new(Size::new(9, 9), FLOOR), Point::new(4, 4));
         rig.set_hand(Some(ItemKind::DogFood));
         let bonds = &mut rig.world.facilities.bonds;
-        bonds.set(owner(), Some(Bond { who: owner(), with: dog(), cell: Point::new(4, 4), hunger: 0.0, bowel: 0.0 }));
-        bonds.set(dog(), Some(Bond { who: dog(), with: owner(), cell: dog_at, hunger: 70.0, bowel: 0.0 }));
+        bonds.set(owner(), Some(Bond { who: owner(), with: dog(), cell: Point::new(4, 4), hunger: 0.0, bowel: 0.0, asleep: false }));
+        bonds.set(dog(), Some(Bond { who: dog(), with: owner(), cell: dog_at, hunger: 70.0, bowel: 0.0, asleep: false }));
         rig
     }
 
@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         rig.world.facilities.bonds.set(
             dog(),
-            Some(Bond { who: dog(), with: owner(), cell: Point::new(8, 8), hunger: 70.0, bowel: 0.0 }),
+            Some(Bond { who: dog(), with: owner(), cell: Point::new(8, 8), hunger: 70.0, bowel: 0.0, asleep: false }),
         );
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.effect, Effect::None);

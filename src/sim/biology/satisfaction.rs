@@ -75,6 +75,9 @@ impl Process for Satisfaction {
             // way, beyond leaving less of the day for what does.
             Event::Relieved | Event::Slept { .. } | Event::Worked { .. } | Event::Treated { .. } => {}
             Event::Bitten { .. } => {}
+            // A talk lifts the mood of the moment ([`Fun`](super::Fun)), not
+            // the day.
+            Event::Chatted | Event::SmallTalk => {}
         }
     }
 }

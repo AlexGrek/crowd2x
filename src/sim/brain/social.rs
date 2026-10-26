@@ -81,7 +81,10 @@ pub(super) fn notice(ctx: &Think<'_>, body: &Body, memory: &mut Memory, top: Goa
     // chances, not one.
     let roll: f32 = tick_rng(me, ctx.tick ^ other.raw()).random();
     if roll < rules.chance(level) {
-        memory.set_chat(Chat { with: other, phase: Phase::Inviting, leads: true, since: now });
+        // How long the talk is to be is decided now, with the asking, and
+        // the other talks for as long: drawn from a stream of its own.
+        let talk = rules.draw_talk_seconds(&mut tick_rng(me, ctx.tick ^ other.raw() ^ TALK_STREAM));
+        memory.set_chat(Chat { with: other, phase: Phase::Inviting, leads: true, since: now, talk });
     }
 }
 
@@ -96,13 +99,13 @@ pub(super) fn tend(ctx: &Think<'_>, body: &Body, memory: &mut Memory, top: GoalI
             return;
         }
         let now = ctx.clock.elapsed();
-        let inviter = ctx
+        let invitation = ctx
             .chats
             .invitations(me)
-            .map(|invitation| invitation.who)
-            .find(|&inviter| !memory.relations().chatted_lately(inviter, now, ctx.society.rules()));
-        if let Some(inviter) = inviter {
-            memory.set_chat(Chat { with: inviter, phase: Phase::Talking, leads: false, since: now });
+            .find(|invitation| !memory.relations().chatted_lately(invitation.who, now, ctx.society.rules()));
+        if let Some(invitation) = invitation {
+            // For as long as the one who asked said.
+            memory.set_chat(Chat { with: invitation.who, phase: Phase::Talking, leads: false, since: now, talk: invitation.talk });
         }
         return;
     };
@@ -116,12 +119,13 @@ pub(super) fn tend(ctx: &Think<'_>, body: &Body, memory: &mut Memory, top: GoalI
             _ if top != GoalId::Wander => memory.forget_chat(),
             // Taken up — or asked back at the same moment, in which case
             // the lower uid goes over.
-            Some(partner) => memory.set_chat(Chat {
-                phase: Phase::Talking,
-                leads: partner.phase != Phase::Inviting || me < chat.with,
-                since: now,
-                ..chat
-            }),
+            Some(partner) => {
+                let leads = partner.phase != Phase::Inviting || me < chat.with;
+                // Of two who asked at once, the length is the one who goes
+                // over's.
+                let talk = if leads { chat.talk } else { partner.talk };
+                memory.set_chat(Chat { phase: Phase::Talking, leads, since: now, talk, ..chat });
+            }
             None if now - chat.since >= rules.invite_patience() => memory.forget_chat(),
             None => {}
         },
@@ -143,6 +147,10 @@ pub(super) fn tend(ctx: &Think<'_>, body: &Body, memory: &mut Memory, top: GoalI
         }
     }
 }
+
+/// The stream a chat's length is drawn from, mixed into the tick so it is not
+/// the roll that asked.
+const TALK_STREAM: u64 = 0x7461_6c6b_6c65_6e67;
 
 /// The stream small talk's rolls are drawn from, mixed into the tick so they
 /// are not the draws a wander or a first look makes.
@@ -191,12 +199,18 @@ pub(super) fn strike_up(ctx: &Think<'_>, body: &Body, memory: &mut Memory, sight
 /// minutes, whose other side has stopped, or whose other has walked off. Each side has its points — the
 /// smalltalk gain on the level — when both are in it. Asleep, or in a chat,
 /// it is in none.
-pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asleep: bool) {
+///
+/// Whether it had its say **this tick** — answered, or heard the answer — which
+/// the brain tells the body of ([`Event::SmallTalk`]): this module writes memory
+/// and never the body.
+///
+/// [`Event::SmallTalk`]: crate::sim::biology::Event::SmallTalk
+pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asleep: bool) -> bool {
     let me = body.uid();
     let busy = asleep || memory.chat().is_some();
     let Some(smalltalk) = memory.smalltalk() else {
         if busy || ctx.smalltalks.is_empty() {
-            return;
+            return false;
         }
         let here = body.center_position();
         let reach = ctx.society.rules().smalltalk_reach();
@@ -207,8 +221,9 @@ pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asle
             memory.started_smalltalk(now);
             let (before, after) = gain(ctx, me, memory, opener);
             ctx.log.related(me, opener, format!("{opener} made small talk with {me}: {before:.1} -> {after:.1}"));
+            return true;
         }
-        return;
+        return false;
     };
     let now = ctx.clock.elapsed();
     let rules = ctx.society.rules();
@@ -220,6 +235,7 @@ pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asle
             Some(_) => {
                 memory.set_smalltalk(Smalltalk { answered: true, ..smalltalk });
                 gain(ctx, me, memory, smalltalk.with);
+                return true;
             }
             None if now - smalltalk.since >= rules.invite_patience() => memory.forget_smalltalk(),
             None => {}
@@ -229,6 +245,7 @@ pub(super) fn small_talk(ctx: &Think<'_>, body: &Body, memory: &mut Memory, asle
     {
         memory.forget_smalltalk();
     }
+    false
 }
 
 /// Whether the other, in `cell`, has gone too far off to talk to: a step past
@@ -271,14 +288,14 @@ mod tests {
     fn world(minutes: f32, phase: Option<Phase>) -> World {
         let mut world = World::new(Map::new(Size::new(9, 9), FLOOR));
         world.clock = Clock::after_watching((minutes * MINUTE / TIME_SCALE) as f64);
-        let chatter = phase.map(|phase| Chatter { who: other(), with: me().uid(), phase, cell: OTHER });
+        let chatter = phase.map(|phase| Chatter { who: other(), with: me().uid(), phase, cell: OTHER, talk: 1.0 });
         world.chats.set(other(), chatter);
         world
     }
 
     fn chatting(phase: Phase, since_minutes: f32) -> Memory {
         let mut memory = Memory::new();
-        memory.set_chat(Chat { with: other(), phase, leads: true, since: (since_minutes * MINUTE) as f64 });
+        memory.set_chat(Chat { with: other(), phase, leads: true, since: (since_minutes * MINUTE) as f64, talk: 1.0 });
         memory
     }
 

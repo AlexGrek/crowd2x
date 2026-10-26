@@ -5,11 +5,13 @@ use crate::sim::clock::HOUR;
 use super::{Event, Process, ProcessId, Stats};
 
 /// World hours from quenched to parched: well under what hunger takes, so a
-/// person is [`THIRSTY`] three hours after a drink and drinks half as often
+/// person is [`THIRSTY`] six hours after a drink and drinks half as often
 /// again as they eat.
 ///
+/// Twice what it was, like every need.
+///
 /// [`THIRSTY`]: crate::sim::brain::routines::THIRSTY
-pub const HOURS_TO_PARCHED: f32 = 5.0;
+pub const HOURS_TO_PARCHED: f32 = 10.0;
 
 /// Thirst gained per **world** second — [`Think::game_dt`], never `dt`.
 ///

@@ -72,6 +72,7 @@ pub mod statistics;
 pub mod economy;
 pub mod relationships;
 pub mod smalltalk;
+mod snooze;
 pub mod unitpanel;
 pub mod boxpanel;
 pub mod electrical;
@@ -129,7 +130,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, dirt::DirtPlugin, needs::NeedsPlugin))
+            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

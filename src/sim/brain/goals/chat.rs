@@ -144,7 +144,7 @@ impl GoalExecutor for ChatGoal {
                 // It has not seen this side agree yet: a tick or two.
                 let _ = ctx.tasks.push_back(Task::wait(LISTEN_SECONDS));
             } else {
-                let _ = ctx.tasks.push_back(Task::talk(partner.cell, ctx.think.society.rules().talk_seconds()));
+                let _ = ctx.tasks.push_back(Task::talk(partner.cell, chat.talk));
             }
             return GoalProgress::Working;
         }
@@ -166,7 +166,7 @@ impl GoalExecutor for ChatGoal {
         }
         match stand_beside(ctx, partner.cell) {
             Stand::Here => {
-                let _ = ctx.tasks.push_back(Task::talk(partner.cell, ctx.think.society.rules().talk_seconds()));
+                let _ = ctx.tasks.push_back(Task::talk(partner.cell, chat.talk));
                 GoalProgress::Working
             }
             Stand::At(cell) => {

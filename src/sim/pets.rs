@@ -2,7 +2,8 @@
 //!
 //! A pet is a [`Dog`](super::kinds::Dog) with an owner — one person, who has
 //! the dog as its companion (`Memory::companion`, on both sides). The dog
-//! stays close to its owner and goes to the toilet on the street, and **it
+//! stays close to its owner, sleeps nearby while its owner is asleep,
+//! goes to the toilet on the street, and **it
 //! cannot feed itself**: its owner buys dog food from a fridge and gives it
 //! to it (`brain::goals::DogCareGoal`).
 //!
@@ -153,6 +154,8 @@ pub struct Bond {
     pub hunger: f32,
     /// A dog's bowel; 0 for an owner.
     pub bowel: f32,
+    /// Actually asleep, rather than walking to a bed. Rebuilt every tick.
+    pub asleep: bool,
 }
 
 /// **Who is bonded to whom this tick** ([`Bond`]), sorted by who. A dozen or
@@ -296,7 +299,7 @@ pub(crate) mod rig {
     pub fn owner_stands(world: &mut World, at: Point) {
         world.bonds.set(
             owner_uid(),
-            Some(Bond { who: owner_uid(), with: dog_uid(), cell: at, hunger: 0.0, bowel: 0.0 }),
+            Some(Bond { who: owner_uid(), with: dog_uid(), cell: at, hunger: 0.0, bowel: 0.0, asleep: false }),
         );
     }
 }
@@ -357,9 +360,9 @@ mod tests {
         let other = Uid::new(EntityType::Dog, 7);
         let mut bonds = Bonds::default();
         bonds.rebuild(&[
-            Some(Bond { who: owner, with: dog, cell: Point::new(1, 1), hunger: 0.0, bowel: 0.0 }),
+            Some(Bond { who: owner, with: dog, cell: Point::new(1, 1), hunger: 0.0, bowel: 0.0, asleep: false }),
             None,
-            Some(Bond { who: dog, with: owner, cell: Point::new(2, 1), hunger: 55.0, bowel: 10.0 }),
+            Some(Bond { who: dog, with: owner, cell: Point::new(2, 1), hunger: 55.0, bowel: 10.0, asleep: false }),
         ]);
         assert_eq!(bonds.get(dog).map(|bond| bond.with), Some(owner));
         assert_eq!(bonds.get(owner).map(|bond| bond.cell), Some(Point::new(1, 1)));

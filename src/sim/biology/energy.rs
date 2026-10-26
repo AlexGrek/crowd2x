@@ -16,8 +16,10 @@ use crate::sim::clock::HOUR;
 
 use super::{Event, Process, ProcessId, Stats};
 
-/// World hours from fully rested to exhausted: a waking day.
-pub const HOURS_TO_EXHAUSTED: f32 = 16.0;
+/// World hours from fully rested to exhausted: a day and a half awake, twice
+/// what it was. A normal waking day (sixteen hours) now tires a body half
+/// way, and bed is for the night rather than for being unable to go on.
+pub const HOURS_TO_EXHAUSTED: f32 = 32.0;
 
 /// Stamina lost per **world** second — [`Think::game_dt`], never `dt`.
 ///
@@ -37,13 +39,15 @@ pub const RECOVERY_PER_SECOND: f32 = 100.0 / (HOURS_OF_SLEEP * HOUR) + ENERGY_PE
 
 /// How many waking hours one hour of work tires a body like.
 ///
-/// **Only a little over one, on purpose.** A day already runs close to the
-/// line: somebody up rested at six is 68.75 tired by five o'clock, and
+/// **Only a little over one, on purpose.** Somebody up rested at six is 34.4
+/// tired by five o'clock, and eight hours of work at 1.1 add 2.5 to that: an
+/// office worker ends the day a little more worn out than somebody with no
+/// job, and nowhere near
 /// [`EXHAUSTED`](crate::sim::brain::routines::EXHAUSTED) — 75, where a nap
-/// ties with work and wins — is six and a quarter points past that. Eight
-/// hours at 1.1 is five more, so an office worker ends the day at 73.75: worn
-/// out, in bed an hour before somebody with no job, but at the desk until five
-/// rather than walking out of it for a nap at four.
+/// ties with work and wins — so it is at the desk until five rather than
+/// walking out of it for a nap at four. (Before every need was twice as slow
+/// the same day ran 68.75 and 73.75, close to that line by design; the ratio
+/// is what is kept.)
 pub const WORK_TIRES_LIKE: f32 = 1.1;
 
 /// Stamina a world second of work costs **on top of** being awake for it —

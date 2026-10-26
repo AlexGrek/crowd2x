@@ -11,9 +11,10 @@
 //! finish, which is still a chat.
 
 use crate::map::Point;
+use crate::sim::biology::Event;
 use crate::sim::relationships::Phase;
 
-use super::super::action::Action;
+use super::super::action::{Action, ActionState};
 use super::super::task::{Task, TaskCtx, TaskExecutor, TaskResult, TimedTask};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -45,7 +46,15 @@ impl TaskExecutor for Talk {
             *ctx.action = Action::interact(self.with, self.seconds);
             return TaskResult::Executing;
         }
-        TaskResult::of(ctx.advance_action())
+        match ctx.advance_action() {
+            ActionState::Finished => {
+                if let Some(biology) = ctx.biology.as_deref_mut() {
+                    biology.handle(Event::Chatted);
+                }
+                TaskResult::Success
+            }
+            state => TaskResult::of(state),
+        }
     }
 
     fn describe(&self) -> String {
@@ -95,8 +104,8 @@ mod tests {
         let mut rig = Rig::new(Map::new(Size::new(9, 9), FLOOR), ME);
         let me = rig.walk.body().uid();
         let other = Uid::new(EntityType::Human, 77);
-        rig.world.chats.set(me, Some(Chatter { who: me, with: other, phase: Phase::Talking, cell: ME }));
-        rig.world.chats.set(other, phase.map(|phase| Chatter { who: other, with: me, phase, cell }));
+        rig.world.chats.set(me, Some(Chatter { who: me, with: other, phase: Phase::Talking, cell: ME, talk: 1.0 }));
+        rig.world.chats.set(other, phase.map(|phase| Chatter { who: other, with: me, phase, cell, talk: 1.0 }));
         (rig, other)
     }
 
@@ -123,7 +132,7 @@ mod tests {
         let mut task = Task::talk(Point::new(4, 4), 1.0);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         let me = rig.walk.body().uid();
-        rig.world.chats.set(other, Some(Chatter { who: other, with: me, phase: Phase::Talking, cell: OTHER }));
+        rig.world.chats.set(other, Some(Chatter { who: other, with: me, phase: Phase::Talking, cell: OTHER, talk: 1.0 }));
         assert_eq!(rig.run(&mut task, 200), TaskResult::Success);
     }
 
@@ -139,7 +148,7 @@ mod tests {
         let mut task = Task::talk(OTHER, 1.0);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         let me = rig.walk.body().uid();
-        rig.world.chats.set(other, Some(Chatter { who: other, with: me, phase: Phase::Done, cell: Point::new(6, 3) }));
+        rig.world.chats.set(other, Some(Chatter { who: other, with: me, phase: Phase::Done, cell: Point::new(6, 3), talk: 1.0 }));
         assert_eq!(rig.tick(&mut task), TaskResult::Failed, "two steps off");
     }
 

@@ -27,8 +27,8 @@ use super::clock::{watched, Clock};
 use super::uid::EntityType;
 use super::GameState;
 
-/// How many packs come out a night.
-pub const PACKS: usize = 2;
+/// How many packs come out a night: four, twelve deathdogs in all.
+pub const PACKS: usize = 4;
 
 /// How many deathdogs to a pack.
 pub const PACK_SIZE: usize = 3;

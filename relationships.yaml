@@ -31,8 +31,10 @@ friend over: 45
 # What one chat adds to the level, each side rolling its own, between the two.
 least chat gain: 5
 most chat gain: 10
-# How long a chat is, in world minutes.
-minutes of talk: 15
+# How long a chat is, in world minutes: whoever asks draws a length between
+# these two when it asks, and the other talks for as long.
+least minutes of talk: 2
+most minutes of talk: 6
 # How long after a chat ends the two do not start another, in world minutes.
 minutes between chats: 60
 # How long an invitation waits to be taken up, in world minutes.

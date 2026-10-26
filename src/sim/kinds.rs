@@ -411,6 +411,7 @@ impl GameEntity for Human {
             with: chat.with,
             phase: chat.phase,
             cell: body.center_position(),
+            talk: chat.talk,
         })
     }
 
@@ -443,6 +444,10 @@ impl GameEntity for Human {
         self.brain.memory().smalltalk()
     }
 
+    fn is_asleep(&self) -> bool {
+        !self.is_dead() && self.brain.is_asleep()
+    }
+
     fn display_name(&self) -> Option<String> {
         Some(self.identity.name().to_string())
     }
@@ -453,7 +458,7 @@ impl GameEntity for Human {
             return None;
         }
         let body = self.walk.body();
-        Some(Bond { who: body.uid(), with: self.brain.companion()?, cell: body.center_position(), hunger: 0.0, bowel: 0.0 })
+        Some(Bond { who: body.uid(), with: self.brain.companion()?, cell: body.center_position(), hunger: 0.0, bowel: 0.0, asleep: self.brain.is_asleep() })
     }
 
     fn companion(&self) -> Option<Uid> {
@@ -624,6 +629,7 @@ impl GameEntity for Dog {
             cell: body.center_position(),
             hunger: gut.hunger(),
             bowel: gut.bowel(),
+            asleep: self.brain.is_asleep(),
         })
     }
 
@@ -677,6 +683,10 @@ impl GameEntity for Dog {
 
     fn current_goal(&self) -> Option<GoalId> {
         (!self.is_dead()).then(|| self.brain.top_goal())
+    }
+
+    fn is_asleep(&self) -> bool {
+        !self.is_dead() && self.brain.is_asleep()
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {

@@ -70,6 +70,24 @@ pub const URGENT: f32 = CALLED_AWAY;
 /// boredom, which does a body no harm.
 pub const NEVER_URGENT: f32 = f32::INFINITY;
 
+/// What [`Need::at_most`] says of a need that is wanted the more the worse it
+/// gets, all the way to 2: hunger, thirst and the bladder, which do a body harm.
+pub const NO_CEILING: f32 = f32::INFINITY;
+
+/// How much a go at something entertaining is wanted, however bored: over
+/// wandering ([`BUSY`]), which is all it ever takes over from, and under a chat
+/// ([`CHATTING`]) and so under everything else there is.
+///
+/// **Fun never interrupts.** Boredom does a body no harm, and a unit in the
+/// middle of anything — a meal, a nap, an errand, a shift, a talk — has more
+/// to lose by stopping than it has to gain from the TV. It is what a unit
+/// does when it has nothing better to do, and whatever else turns up (an order,
+/// a dog to feed, a bed at night, a need committed to, work) is better. A talk
+/// with somebody is the better kind of entertainment ([`CHAT_FUN`]).
+///
+/// [`CHAT_FUN`]: crate::sim::biology::fun::CHAT_FUN
+pub const PLAYING: f32 = 0.12;
+
 /// A need a [`NeedRoutine`] keeps met: which stat it watches, the process
 /// that drives that stat, which goal meets it, and where it commits and lets
 /// go.
@@ -91,6 +109,9 @@ pub struct Need {
     /// The stat past which seeing to it is urgent, and its unit hurries:
     /// [`URGENT`], or [`NEVER_URGENT`].
     pub urgent_at: f32,
+    /// The most the goal is ever wanted, whatever the stat says: [`NO_CEILING`],
+    /// or [`PLAYING`] for a need that must never take a unit off anything.
+    pub at_most: f32,
 }
 
 /// Keep fed: hunger, met by eating.
@@ -103,6 +124,7 @@ pub const HUNGER: Need = Need {
     commit_at: PECKISH,
     release_at: SATED,
     urgent_at: URGENT,
+    at_most: NO_CEILING,
 };
 
 /// Keep hydrated: thirst, met by drinking.
@@ -115,6 +137,7 @@ pub const THIRST: Need = Need {
     commit_at: THIRSTY,
     release_at: QUENCHED,
     urgent_at: URGENT,
+    at_most: NO_CEILING,
 };
 
 /// Stay comfortable: bladder, met by using the toilet.
@@ -127,6 +150,7 @@ pub const BLADDER: Need = Need {
     commit_at: BURSTING,
     release_at: RELIEVED,
     urgent_at: URGENT,
+    at_most: NO_CEILING,
 };
 
 /// Keep entertained: boredom, met by having a go at something.
@@ -143,6 +167,7 @@ pub const BOREDOM: Need = Need {
     commit_at: BORED,
     release_at: AMUSED,
     urgent_at: NEVER_URGENT,
+    at_most: PLAYING,
 };
 
 /// Maps a need onto how badly the goal that meets it is wanted.
@@ -200,20 +225,7 @@ impl RoutineExecutor for NeedRoutine {
             self.committed = false;
         }
         if self.committed {
-            let mut priority = level / NEED_PER_PRIORITY;
-            if self.need.goal == GoalId::Play && is_bedtime(ctx.job, ctx.think.clock) && biology.is_running(ProcessId::Energy) {
-                // Entertainment can fill time if no bed is usable, but must
-                // never keep somebody up or wake them during the night —
-                // their own night, which a night watch keeps by day.
-                priority = priority.min(SLEEPY / NEED_PER_PRIORITY / 2.0);
-            }
-            if self.need.goal == GoalId::Play && ctx.job.is_some_and(|job| job.is_due(ctx.think.clock)) {
-                // Work is no fun, and a worker does not go off for a go at
-                // something while its shift is due: the TV it may watch is
-                // its own, at home across the district as often as not. With
-                // nothing to do at work, though, it may.
-                priority = priority.min(BORED_AT_WORK);
-            }
+            let priority = (level / NEED_PER_PRIORITY).min(self.need.at_most);
             goals.raise_to(self.need.goal, priority);
             goals.hurry(self.need.goal, urgency(level, self.need.urgent_at));
         }
@@ -233,12 +245,6 @@ fn urgency(level: f32, urgent_at: f32) -> f32 {
     }
     ((level - urgent_at) / (100.0 - urgent_at)).min(1.0)
 }
-
-/// The most a go at something is wanted while its worker's shift is due:
-/// boredom's commit level, under [`WORKING`] — so it never takes a worker off
-/// its work, and still comes before wandering about when the work is held
-/// off. Boredom does a body no harm.
-const BORED_AT_WORK: f32 = BORED / NEED_PER_PRIORITY;
 
 /// Tiredness at which a human decides to go to bed **in the daytime**. High:
 /// somebody has to be properly worn out to give up an afternoon.
@@ -354,9 +360,12 @@ impl RoutineExecutor for StayBusyRoutine {
 }
 
 /// How much [`ChatRoutine`] wants a chat both sides have agreed to: over
-/// wandering, which is what both were doing when they agreed, and under
-/// everything else — an order, a night in bed, any need committed to. A chat
-/// is had when there is nothing better to do, and dropped the moment there is.
+/// wandering, which is what both were doing when they agreed, and over a go at
+/// something ([`PLAYING`]), since a chat is fun too ([`CHAT_FUN`]); under
+/// everything else: an order, a night in bed, any need committed to. A chat is
+/// had when there is nothing better to do, and dropped the moment there is.
+///
+/// [`CHAT_FUN`]: crate::sim::biology::fun::CHAT_FUN
 pub const CHATTING: f32 = 0.15;
 
 /// Keep company: see a chat through once both sides have agreed to it
@@ -419,7 +428,8 @@ pub const SQUATTING: f32 = 0.3;
 /// Stay with the owner ([`GoalId::Follow`], at [`FOLLOWING`]) for as long as
 /// there is one, and go when the bowel is full ([`GoalId::Defecate`], at
 /// [`SQUATTING`]). A dog with no owner wants nothing but to wander. Reads its
-/// own bond for its bowel; nothing to remember.
+/// own bond for its bowel and its owner's for sleep. Sleep beats following
+/// while the owner is asleep, but yields to a full bowel; nothing to remember.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct HeelRoutine;
 
@@ -433,6 +443,9 @@ impl RoutineExecutor for HeelRoutine {
             return;
         }
         goals.raise_to(GoalId::Follow, FOLLOWING);
+        if ctx.think.bonds.partner(ctx.body.uid()).is_some_and(|owner| owner.asleep) {
+            goals.raise_to(GoalId::Sleep, (FOLLOWING + SQUATTING) / 2.0);
+        }
         if ctx.think.bonds.get(ctx.body.uid()).is_some_and(|dog| dog.bowel >= MUST_GO) {
             goals.raise_to(GoalId::Defecate, SQUATTING);
         }
@@ -588,7 +601,7 @@ const IN_TURN: f32 = 0.01;
 const CALLED_AWAY: f32 = WORKING * NEED_PER_PRIORITY;
 
 /// What [`ReadyNeed::top_up`] says of a need [`ReadyRoutine`] never sees to:
-/// boredom, which never takes a worker off its shift ([`BORED_AT_WORK`]) and
+/// boredom, which never takes a worker off its shift ([`PLAYING`]) and
 /// so never calls one back from a trip. Seen to before every trip, it sent a
 /// worker home to its TV across the district, and by the time it was back
 /// the rest were short again: it was never ready.

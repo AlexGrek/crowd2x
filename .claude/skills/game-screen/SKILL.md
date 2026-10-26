@@ -24,7 +24,10 @@ here — it is `src/sim/` (the `simulation` skill) — and `game/actors.rs` is t
   quarter round (`Quat::from_rotation_z(FRAC_PI_2)`) while `GameEntity::is_dead`, compared
   before writing like the translation; a square turned about its middle keeps its texels on
   the grid. The dead have no goal label or action bar (`current_goal`/`action_progress` are
-  `None`), and the unit panel's `condition` field says `dead`.
+  `None`), and the unit panel's `condition` field says `dead`. **So do the sleeping**
+  (`GameEntity::is_asleep`: lying in a bed, a hospital bed, or on the floor where a unit
+  collapsed; humans and dogs, never the dead) - turned the same quarter round, with zzz
+  rising from them (below).
 - **It only draws what is on the canvas.** `src/view.rs` works out `VisibleArea` once a
   frame, after the camera is snapped: `canvas` (exactly what is rendered), `actors`
   (`canvas` grown by `characters::OVERHANG_*`, so a unit whose bar or goal label reaches
@@ -72,6 +75,14 @@ an answered small talk (`GameEntity::smalltalk`) throws a spark at the other eve
 plain-colour sprite of 3, then 2, then 1 canvas pixels on an arc from mouth to mouth, cooling
 white to red and fading, placed by its corner on whole pixels, at most 400 in the air. Real
 time, so they fly on while paused; QA `expect_sparks`. The `relationships` skill has the rest.
+
+**Sleepers breathe zzz** (`game/snooze.rs`, `SnoozePlugin`): everybody on the canvas for whom
+`GameEntity::is_asleep` lets a "Z" float up from its head (to the left of the middle, the doll
+being on its side) every 0.9 s - one sprite of a 5x5-texel Z made at startup (`z_pixels`),
+two canvas pixels a texel to begin with and three after a third of its 2.4 s life, climbing
+14 px/s and swaying a few pixels, pale blue, solid for half its life and then fading; placed
+by its corner on whole pixels, at most 200 afloat, real time like the sparks (they rise on
+while paused).
 
 **What a hand holds is drawn in front of whoever holds it** (`game/held.rs`, art from
 `characters::item`). A unit whose `Inventory::hand` is full gets one sprite of its own, in

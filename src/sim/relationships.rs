@@ -80,8 +80,10 @@ pub struct Rules {
     /// What one chat adds to the level, between these two.
     pub least_chat_gain: f32,
     pub most_chat_gain: f32,
-    /// How long a chat is, in world minutes.
-    pub minutes_of_talk: f32,
+    /// How long a chat is, in world minutes: a length drawn between these two
+    /// by whoever asks, when it asks ([`Rules::draw_talk_seconds`]).
+    pub least_minutes_of_talk: f32,
+    pub most_minutes_of_talk: f32,
     /// How long after a chat ends the two do not start another, in world
     /// minutes. Each remembers it ([`Relation::chatted`]).
     pub minutes_between_chats: f32,
@@ -122,7 +124,8 @@ pub enum Rule {
     FriendOver,
     LeastChatGain,
     MostChatGain,
-    MinutesOfTalk,
+    LeastMinutesOfTalk,
+    MostMinutesOfTalk,
     MinutesBetweenChats,
     MinutesToAnswer,
     MinutesToMeet,
@@ -136,7 +139,7 @@ pub enum Rule {
 
 impl Rule {
     /// Every rule, in the order `relationships.yaml` lists them.
-    pub const ALL: [Rule; 21] = [
+    pub const ALL: [Rule; 22] = [
         Rule::Most,
         Rule::FamilyFloor,
         Rule::ColleagueFloor,
@@ -148,7 +151,8 @@ impl Rule {
         Rule::FriendOver,
         Rule::LeastChatGain,
         Rule::MostChatGain,
-        Rule::MinutesOfTalk,
+        Rule::LeastMinutesOfTalk,
+        Rule::MostMinutesOfTalk,
         Rule::MinutesBetweenChats,
         Rule::MinutesToAnswer,
         Rule::MinutesToMeet,
@@ -174,7 +178,8 @@ impl Rule {
             Rule::FriendOver => "friend over",
             Rule::LeastChatGain => "least chat gain",
             Rule::MostChatGain => "most chat gain",
-            Rule::MinutesOfTalk => "minutes of talk",
+            Rule::LeastMinutesOfTalk => "least minutes of talk",
+            Rule::MostMinutesOfTalk => "most minutes of talk",
             Rule::MinutesBetweenChats => "minutes between chats",
             Rule::MinutesToAnswer => "minutes to answer",
             Rule::MinutesToMeet => "minutes to meet",
@@ -199,12 +204,16 @@ impl Rule {
         match self {
             Rule::StrangerChance | Rule::AcquaintanceChance | Rule::FriendChance => 0.0..=1.0,
             Rule::Most => 1.0..=10_000.0,
-            Rule::MinutesOfTalk | Rule::MinutesOfSmalltalk => 1.0..=24.0 * 60.0,
+            Rule::LeastMinutesOfTalk | Rule::MostMinutesOfTalk | Rule::MinutesOfSmalltalk => 1.0..=24.0 * 60.0,
             Rule::SmalltalkReach => 1.0..=FAR as f32,
             _ => 0.0..=10_000.0,
         }
     }
 }
+
+/// What a saved game from before a chat's length was drawn called its one
+/// length: now the most ([`Rule::MostMinutesOfTalk`]).
+const LEGACY_MINUTES_OF_TALK: &str = "minutes of talk";
 
 /// The file the defaults are, built into the game.
 pub const DEFAULTS_YAML: &str = include_str!("../../relationships.yaml");
@@ -259,6 +268,12 @@ impl Rules {
         if self.least_chat_gain > self.most_chat_gain {
             return Err(format!("least chat gain: {} is more than the most, {}", self.least_chat_gain, self.most_chat_gain));
         }
+        if self.least_minutes_of_talk > self.most_minutes_of_talk {
+            return Err(format!(
+                "least minutes of talk: {} is more than the most, {}",
+                self.least_minutes_of_talk, self.most_minutes_of_talk
+            ));
+        }
         Ok(())
     }
 
@@ -275,7 +290,8 @@ impl Rules {
             Rule::FriendOver => self.friend_over,
             Rule::LeastChatGain => self.least_chat_gain,
             Rule::MostChatGain => self.most_chat_gain,
-            Rule::MinutesOfTalk => self.minutes_of_talk,
+            Rule::LeastMinutesOfTalk => self.least_minutes_of_talk,
+            Rule::MostMinutesOfTalk => self.most_minutes_of_talk,
             Rule::MinutesBetweenChats => self.minutes_between_chats,
             Rule::MinutesToAnswer => self.minutes_to_answer,
             Rule::MinutesToMeet => self.minutes_to_meet,
@@ -303,7 +319,8 @@ impl Rules {
             Rule::FriendOver => &mut self.friend_over,
             Rule::LeastChatGain => &mut self.least_chat_gain,
             Rule::MostChatGain => &mut self.most_chat_gain,
-            Rule::MinutesOfTalk => &mut self.minutes_of_talk,
+            Rule::LeastMinutesOfTalk => &mut self.least_minutes_of_talk,
+            Rule::MostMinutesOfTalk => &mut self.most_minutes_of_talk,
             Rule::MinutesBetweenChats => &mut self.minutes_between_chats,
             Rule::MinutesToAnswer => &mut self.minutes_to_answer,
             Rule::MinutesToMeet => &mut self.minutes_to_meet,
@@ -333,6 +350,8 @@ impl Rules {
             Rule::ColleagueFloor => self.colleague_floor = self.colleague_floor.min(self.most),
             Rule::LeastChatGain => self.most_chat_gain = self.most_chat_gain.max(self.least_chat_gain),
             Rule::MostChatGain => self.least_chat_gain = self.least_chat_gain.min(self.most_chat_gain),
+            Rule::LeastMinutesOfTalk => self.most_minutes_of_talk = self.most_minutes_of_talk.max(self.least_minutes_of_talk),
+            Rule::MostMinutesOfTalk => self.least_minutes_of_talk = self.least_minutes_of_talk.min(self.most_minutes_of_talk),
             _ => {}
         }
         self.get(rule)
@@ -360,10 +379,21 @@ impl Rules {
         }
     }
 
-    /// How long a chat is, in **watched** seconds: what a talk's action
-    /// counts.
-    pub fn talk_seconds(&self) -> f32 {
-        watched(self.minutes_of_talk * MINUTE)
+    /// How long a chat is to be, in **watched** seconds — what a talk's action
+    /// counts — from one draw of `rng`, between the least and the most minutes
+    /// of talk. Drawn once, by whoever asks, and the same for both sides.
+    pub fn draw_talk_seconds(&self, rng: &mut impl RngExt) -> f32 {
+        let minutes = if self.least_minutes_of_talk < self.most_minutes_of_talk {
+            rng.random_range(self.least_minutes_of_talk..=self.most_minutes_of_talk)
+        } else {
+            self.least_minutes_of_talk
+        };
+        watched(minutes * MINUTE)
+    }
+
+    /// The longest a chat is to be, in **watched** seconds.
+    pub fn longest_talk_seconds(&self) -> f32 {
+        watched(self.most_minutes_of_talk * MINUTE)
     }
 
     /// [`Rules::minutes_between_chats`], in world seconds.
@@ -433,7 +463,9 @@ impl Rules {
     pub(crate) fn restore(saved: &[pb::RelationshipRule]) -> Result<Rules, Invalid> {
         let mut rules = Rules::default();
         for rule in saved {
-            let Some(which) = Rule::from_name(&rule.name) else {
+            // `minutes of talk`, before a chat's length was drawn, is the most.
+            let which = Rule::from_name(&rule.name).or_else(|| (rule.name == LEGACY_MINUTES_OF_TALK).then_some(Rule::MostMinutesOfTalk));
+            let Some(which) = which else {
                 return invalid(format!("relationships: no rule {:?}", rule.name));
             };
             rules.check(which, rule.value as f64).map_err(Invalid::new)?;
@@ -458,7 +490,8 @@ const DEFAULT_SHAPE: Rules = Rules {
     friend_over: 0.0,
     least_chat_gain: 0.0,
     most_chat_gain: 0.0,
-    minutes_of_talk: 0.0,
+    least_minutes_of_talk: 0.0,
+    most_minutes_of_talk: 0.0,
     minutes_between_chats: 0.0,
     minutes_to_answer: 0.0,
     minutes_to_meet: 0.0,
@@ -850,16 +883,22 @@ pub struct Chat {
     /// When it came to this phase, in world seconds: what [`INVITE_PATIENCE`]
     /// and [`CHAT_PATIENCE`] are counted from.
     pub since: f64,
+    /// How long the talk is to be, in **watched** seconds: drawn by whoever
+    /// asked ([`Rules::draw_talk_seconds`]) and taken by the other from the
+    /// invitation, so both talk for as long as each other.
+    pub talk: f32,
 }
 
 /// One person in a chat, as the rest of the crowd sees it this tick.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Chatter {
     pub who: Uid,
     pub with: Uid,
     pub phase: Phase,
     /// The cell it stood in as the last tick ended.
     pub cell: Point,
+    /// How long its talk is to be ([`Chat::talk`]).
+    pub talk: f32,
 }
 
 /// **Who is chatting with whom this tick** ([`Chatter`]), rebuilt from the
@@ -1045,8 +1084,8 @@ impl Smalltalk {
 
 impl Chat {
     pub(crate) fn save(&self) -> pb::Chat {
-        let Chat { with, phase, leads, since } = *self;
-        pb::Chat { with: with.raw(), phase: phase.save() as i32, leads, since }
+        let Chat { with, phase, leads, since, talk } = *self;
+        pb::Chat { with: with.raw(), phase: phase.save() as i32, leads, since, talk }
     }
 
     pub(crate) fn restore(saved: &pb::Chat) -> Result<Chat, Invalid> {
@@ -1056,7 +1095,13 @@ impl Chat {
         if !saved.since.is_finite() {
             return invalid(format!("chat with {with}: since {}", saved.since));
         }
-        Ok(Chat { with, phase: Phase::restore(saved.phase)?, leads: saved.leads, since: saved.since })
+        if !saved.talk.is_finite() || saved.talk < 0.0 {
+            return invalid(format!("chat with {with}: a talk of {} seconds", saved.talk));
+        }
+        // A chat saved before its length was drawn talks for as long as the
+        // rules say at most.
+        let talk = if saved.talk > 0.0 { saved.talk } else { Rules::default().longest_talk_seconds() };
+        Ok(Chat { with, phase: Phase::restore(saved.phase)?, leads: saved.leads, since: saved.since, talk })
     }
 }
 
@@ -1117,12 +1162,68 @@ mod tests {
         let mut rules = rules();
         assert_eq!(rules.change(Rule::StrangerChance, 1.0), 1.0);
         assert_eq!(rules.change(Rule::FriendChance, 7.0), 1.0, "a chance is a share");
-        assert_eq!(rules.change(Rule::MinutesOfTalk, 0.0), 1.0, "a minute's talk at least");
+        assert_eq!(rules.change(Rule::LeastMinutesOfTalk, 0.0), 1.0, "a minute's talk at least");
         rules.change(Rule::LeastChatGain, 20.0);
         assert_eq!((rules.least_chat_gain, rules.most_chat_gain), (20.0, 20.0));
+        rules.change(Rule::LeastMinutesOfTalk, 90.0);
+        assert_eq!((rules.least_minutes_of_talk, rules.most_minutes_of_talk), (90.0, 90.0), "the least pulls the most up");
+        rules.change(Rule::MostMinutesOfTalk, 3.0);
+        assert_eq!((rules.least_minutes_of_talk, rules.most_minutes_of_talk), (3.0, 3.0), "the most pulls the least down");
         rules.change(Rule::Most, 25.0);
         assert_eq!((rules.family_floor, rules.colleague_floor), (25.0, 10.0));
         assert_eq!(rules.change(Rule::NightlyLoss, f64::NAN), 1.0, "not a number changes nothing");
+    }
+
+    /// A chat is as long as the draw says, between the least and the most, and
+    /// a rule set where they meet always draws that.
+    #[test]
+    fn a_chats_length_is_drawn_between_the_least_and_the_most_minutes_of_talk() {
+        use crate::sim::rng::tick_rng;
+        let rules = rules();
+        let (least, most) = (watched(rules.least_minutes_of_talk * MINUTE), watched(rules.most_minutes_of_talk * MINUTE));
+        assert!(least < most, "the defaults are a range");
+        let drawn: Vec<f32> = (0..200).map(|tick| rules.draw_talk_seconds(&mut tick_rng(person(1), tick))).collect();
+        assert!(drawn.iter().all(|&seconds| (least..=most).contains(&seconds)), "{drawn:?}");
+        assert!(drawn.iter().any(|&s| s < least + (most - least) * 0.25), "some are short");
+        assert!(drawn.iter().any(|&s| s > least + (most - least) * 0.75), "some are long");
+
+        let mut fixed = rules;
+        fixed.change(Rule::LeastMinutesOfTalk, 4.0);
+        fixed.change(Rule::MostMinutesOfTalk, 4.0);
+        assert_eq!(fixed.draw_talk_seconds(&mut tick_rng(person(1), 0)), watched(4.0 * MINUTE));
+    }
+
+    /// Faster: a chat is shorter than the quarter of an hour it used to be.
+    #[test]
+    fn a_chat_is_never_longer_than_a_few_minutes() {
+        let rules = rules();
+        assert!(rules.most_minutes_of_talk <= 10.0, "{}", rules.most_minutes_of_talk);
+        assert!(rules.least_minutes_of_talk >= 1.0 && rules.least_minutes_of_talk < rules.most_minutes_of_talk);
+    }
+
+    /// A save from before a chat's length was drawn has one rule, `minutes of
+    /// talk`: it is the most.
+    #[test]
+    fn an_older_saves_one_length_of_talk_is_the_most() {
+        let older = [pb::RelationshipRule { name: "minutes of talk".into(), value: 12.0 }];
+        let rules = Rules::restore(&older).unwrap();
+        assert_eq!(rules.most_minutes_of_talk, 12.0);
+        assert_eq!(rules.least_minutes_of_talk, Rules::default().least_minutes_of_talk);
+        let backwards = [pb::RelationshipRule { name: "minutes of talk".into(), value: 1.0 }];
+        assert!(Rules::restore(&backwards).is_err(), "a most under the default least is no range");
+    }
+
+    /// A chat keeps its length through a save, and one saved without one talks
+    /// as long as the rules say at most.
+    #[test]
+    fn a_chats_length_comes_back_from_a_save() {
+        let chat = Chat { with: person(6), phase: Phase::Talking, leads: true, since: 33.0, talk: 2.5 };
+        assert_eq!(Chat::restore(&chat.save()).unwrap(), chat);
+        let mut older = chat.save();
+        older.talk = 0.0;
+        assert_eq!(Chat::restore(&older).unwrap().talk, Rules::default().longest_talk_seconds());
+        older.talk = f32::NAN;
+        assert!(Chat::restore(&older).is_err());
     }
 
     #[test]
@@ -1252,10 +1353,10 @@ mod tests {
         let at = Point::new(0, 0);
         let mut chats = Chats::default();
         chats.rebuild(&[
-            Some(Chatter { who: c, with: b, phase: Phase::Inviting, cell: at }),
+            Some(Chatter { who: c, with: b, phase: Phase::Inviting, cell: at, talk: 1.0 }),
             None,
-            Some(Chatter { who: a, with: b, phase: Phase::Inviting, cell: at }),
-            Some(Chatter { who: d, with: b, phase: Phase::Talking, cell: at }),
+            Some(Chatter { who: a, with: b, phase: Phase::Inviting, cell: at, talk: 1.0 }),
+            Some(Chatter { who: d, with: b, phase: Phase::Talking, cell: at, talk: 1.0 }),
         ]);
         assert_eq!(chats.len(), 3);
         assert_eq!(chats.get(c).map(|chatter| chatter.with), Some(b));
@@ -1290,7 +1391,7 @@ mod tests {
     #[test]
     fn a_chat_comes_back_from_a_save_as_it_was() {
         for phase in [Phase::Inviting, Phase::Talking, Phase::Done] {
-            let chat = Chat { with: person(6), phase, leads: phase == Phase::Talking, since: 33.0 };
+            let chat = Chat { with: person(6), phase, leads: phase == Phase::Talking, since: 33.0, talk: 2.5 };
             assert_eq!(Chat::restore(&chat.save()).unwrap(), chat);
         }
     }

@@ -5,6 +5,10 @@ bites outside the site, and heal naturally at 100 health per 24 world hours whil
 Fatal bites leave a dead body; every bite soils the dog and its cell with blood.
 Health and its process switch persist in saves; older dogs load at full health.
 The hunt, bite task and world effect share `EntityType::is_deathdog_prey`.
+Pet dogs sleep on free ground within two cells of their sleeping owner
+(`DogSleepGoal`, `Task::dog_sleep`, using `GoalId::Sleep`). The bond snapshot
+reports actual sleep, so pets wake when their owner wakes. Relieving a full
+bowel takes priority; strays keep wandering and dogs never claim beds.
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 

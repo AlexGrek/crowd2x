@@ -17,11 +17,14 @@ use crate::sim::item::DRINK;
 use super::{Event, Process, ProcessId, Stats};
 
 /// World hours from empty to full for somebody who never drinks anything.
-/// [`BURSTING`] is four hours of that — which nobody reaches, because
-/// drinking is what really fills a bladder.
+/// [`BURSTING`] is eight hours of that — which nobody reaches, because
+/// drinking is what really fills a bladder (and drinking is twice as rare as
+/// it was: thirst is twice as slow).
+///
+/// Twice what it was, like every need.
 ///
 /// [`BURSTING`]: crate::sim::brain::routines::BURSTING
-pub const HOURS_TO_FULL: f32 = 6.0;
+pub const HOURS_TO_FULL: f32 = 12.0;
 
 /// A bladder that cannot be held any longer, unless already on a toilet.
 pub const CRITICAL: f32 = 100.0;
@@ -96,8 +99,8 @@ impl Process for Bladder {
             // Nor does sleeping, to a process that fills and empties on its
             // own clock.
             Event::Slept { .. } => {}
-            // Nor does company.
-            Event::Met => {}
+            // Nor does company, or a word with it.
+            Event::Met | Event::Chatted | Event::SmallTalk => {}
             // Nor does a day at the desk.
             Event::Worked { .. } | Event::Treated { .. } => {}
             Event::Bitten { .. } => {}

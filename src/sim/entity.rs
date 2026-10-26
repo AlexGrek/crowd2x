@@ -556,6 +556,13 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Whether it is lying asleep: in a bed, on the floor where it fell, in a
+    /// hospital bed (not walking to one, not getting in). What the game turns
+    /// on its side, like the dead, and lets zzz rise from. Never the dead.
+    fn is_asleep(&self) -> bool {
+        false
+    }
+
     /// Who it is bonded to, as the rest of the crowd sees it this tick — what
     /// the think step gathers into [`Bonds`](super::pets::Bonds): a person's
     /// pet dog, or a dog's owner, where it stands, and a dog's hunger. Asked

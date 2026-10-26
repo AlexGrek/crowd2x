@@ -195,6 +195,10 @@ pub struct Chat {
     /// World seconds since the world began, when it came to this phase.
     #[prost(double, tag = "4")]
     pub since: f64,
+    /// How long the talk is to be, in watched seconds; drawn by whoever asked.
+    /// Nothing (0) in a save from before it was drawn.
+    #[prost(float, tag = "5")]
+    pub talk: f32,
 }
 
 /// How far a chat has got (`crate::sim::relationships::Phase`).

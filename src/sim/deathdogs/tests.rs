@@ -126,7 +126,7 @@ fn at(hours: f32) -> Clock {
 }
 
 #[test]
-fn two_packs_of_three_come_out_at_dusk_far_out_and_only_then() {
+fn the_nights_packs_of_three_come_out_at_dusk_far_out_and_only_then() {
     let mut state = GameState::new(endless(Size::new(16, 16), 3), 3);
     run(&mut state, 600);
     assert!(deathdogs(&state).is_empty(), "none by day");

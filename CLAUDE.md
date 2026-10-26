@@ -60,7 +60,7 @@ Cash and a district budget now track wages, taxes, care packages and fridge purc
 Office workers do the payroll; the palace accountant reports daily and weekly balances.
 The economy menu changes the running game?s tariffs, whose defaults are economy.yaml.
 
-At dusk two packs of three deathdogs come out of the wasteland round an endless map, prowl
+At dusk four packs of three deathdogs come out of the wasteland round an endless map, prowl
 the walls, hunt and bite (20-60 health) anybody outside, and walk off at dawn; they never set
 foot on the site, so inside is safe. Anybody outside who sees one — or sees somebody running
 from one — panics, runs flat out (exactly a hunting deathdog's speed) for the nearest way in,

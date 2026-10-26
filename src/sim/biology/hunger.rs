@@ -5,11 +5,14 @@ use crate::sim::clock::HOUR;
 use super::{Event, Process, ProcessId, Stats};
 
 /// World hours from a full stomach to starving, if nothing is eaten. A human
-/// is [`PECKISH`] not quite five hours after a meal, so a day holds three or
-/// four of them — which is what a day holds.
+/// is [`PECKISH`] about ten hours after a meal that cleared its stomach, so a
+/// day holds two or three of them.
+///
+/// Twice what it was: needs are slow, so that what a unit is in the middle of
+/// is not forever being cut short by the next one.
 ///
 /// [`PECKISH`]: crate::sim::brain::routines::PECKISH
-pub const HOURS_TO_STARVING: f32 = 8.0;
+pub const HOURS_TO_STARVING: f32 = 16.0;
 
 /// Hunger gained per **world** second — [`Think::game_dt`], never `dt`.
 ///

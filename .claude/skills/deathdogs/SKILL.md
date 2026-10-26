@@ -16,7 +16,7 @@ nobody inside reacts to one. Everything here is plain simulation
 | --- | --- |
 | The kind: `EntityType::Deathdog` (3), `keeps_off_the_site()` | `sim/uid.rs` |
 | The entity: `Deathdog { walk, brain, facing, schedule }`, `DEATHDOG_SPEED` (= `PANIC_SPEED / (1 + HURRY)`, 4), `DEATHDOG_BITES` cause | `sim/kinds.rs` |
-| Constants (`PACKS` 2, `PACK_SIZE` 3, `SPAWN_DISTANCE` / `DEPART_DISTANCE` 48, `LURK_NEAR` 3 / `LURK_FAR` 24, `BITE_DAMAGE` 20..=60, `BITE_INTERVAL` 1 watched s), `distance_from_site`, `is_dusk`, `arrive` | `sim/deathdogs.rs` |
+| Constants (`PACKS` 4, `PACK_SIZE` 3, `SPAWN_DISTANCE` / `DEPART_DISTANCE` 48, `LURK_NEAR` 3 / `LURK_FAR` 24, `BITE_DAMAGE` 20..=60, `BITE_INTERVAL` 1 watched s), `distance_from_site`, `is_dusk`, `arrive` | `sim/deathdogs.rs` |
 | Tests (arrivals, keeping out, bites, panic, spread, hunt, routes bounded, departure through the two passes, nobody inside bitten, determinism) | `sim/deathdogs/tests.rs` |
 | Save test (mid-chase at night, a wound pending) | `save/tests.rs` `a_chase_saved_at_night_with_a_bite_still_to_be_felt_carries_on_exactly` |
 
