@@ -2,7 +2,7 @@
 //!
 //! The end of a [`Chase`](super::Chase) (`HuntGoal`). Instant: whoever stands
 //! in the cell the quarry was found in — or failing that, in one of the eight
-//! round the deathdog, in a fixed order — is bitten, if it is a person
+//! round the deathdog, in a fixed order — is bitten, if it is a person or dog
 //! outside the site; nobody inside is ever bitten. How hard comes from the
 //! deathdog's own dice for the tick ([`BITE_DAMAGE`]), and the world is asked
 //! to deal it ([`Effect::Bite`]): the wound is the bitten one's to feel.
@@ -38,7 +38,7 @@ impl TaskExecutor for Bite {
             cell != here
                 && here.chebyshev_distance(cell) <= 1
                 && !site.contains(cell)
-                && occupancy.occupant(cell).is_some_and(|uid| uid.kind() == Some(EntityType::Human))
+                && occupancy.occupant(cell).is_some_and(|uid| uid.kind().is_some_and(EntityType::is_deathdog_prey))
         };
         let Some(cell) = std::iter::once(self.at).chain(AROUND.map(|(dx, dy)| here.offset(dx, dy))).find(|&cell| prey(cell)) else {
             return TaskResult::Failed;
@@ -103,11 +103,11 @@ mod tests {
     }
 
     #[test]
-    fn nobody_in_reach_a_dog_or_somebody_on_the_site_is_not_bitten() {
+    fn nobody_in_reach_another_deathdog_or_somebody_on_the_site_is_not_bitten() {
         let mut rig = rig();
         assert_eq!(rig.tick(&mut Task::bite(Point::new(-4, -5))), TaskResult::Failed, "nobody");
-        let _ = rig.world.occupancy.claim(Point::new(-4, -5), Uid::new(EntityType::Dog, 4));
-        assert_eq!(rig.tick(&mut Task::bite(Point::new(-4, -5))), TaskResult::Failed, "a dog");
+        let _ = rig.world.occupancy.claim(Point::new(-4, -5), Uid::new(EntityType::Deathdog, 4));
+        assert_eq!(rig.tick(&mut Task::bite(Point::new(-4, -5))), TaskResult::Failed, "another deathdog");
 
         let mut rig = Rig::new(rig.world.map.clone(), Point::new(-1, 0));
         let _ = rig.world.occupancy.claim(Point::new(0, 0), Uid::new(EntityType::Human, 5));

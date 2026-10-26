@@ -10,7 +10,7 @@
 //!   how **panic spreads by sight**, one onlooker to the next — and remembers
 //!   who scared it, where and when ([`Memory::spot`]). `FleeRoutine` does the
 //!   rest.
-//! * **A deathdog** marks the nearest person it sees outside the site — the
+//! * **A deathdog** marks the nearest person or dog it sees outside the site — the
 //!   one it is already after, if it sees that one again — and `HuntRoutine`
 //!   does the rest.
 //!
@@ -47,7 +47,7 @@ pub fn take_in(ctx: &Think<'_>, body: &Body, sightings: &Sightings, memory: &mut
             let quarry = memory.spotted().map(|spotted| spotted.who);
             let mut prey = sightings
                 .iter()
-                .filter(|seen| seen.uid.kind() == Some(EntityType::Human) && !site.contains(seen.cell));
+                .filter(|seen| seen.uid.kind().is_some_and(EntityType::is_deathdog_prey) && !site.contains(seen.cell));
             let first = prey.next();
             let chosen = match first {
                 Some(seen) if Some(seen.uid) == quarry => Some(seen),
@@ -59,5 +59,27 @@ pub fn take_in(ctx: &Think<'_>, body: &Body, sightings: &Sightings, memory: &mut
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map::{Map, Point, Size, FLOOR};
+    use crate::sim::brain::perception::Perception;
+    use crate::sim::testing::World;
+    use crate::sim::uid::Uid;
+
+    #[test]
+    fn a_deathdog_marks_a_dog_it_sees_outside_as_prey() {
+        let world_map = Map::new(Size::new(12, 12), FLOOR).with_wasteland(6);
+        let mut world = World::new(world_map);
+        let prey = Uid::new(EntityType::Dog, 51);
+        world.occupancy.claim(Point::new(-8, 3), prey).unwrap();
+        let body = Body::at_cell(Uid::new(EntityType::Deathdog, 52), Point::new(-8, 6));
+        let seen = Perception::default().look(&world.ctx(), &body);
+        let mut memory = Memory::default();
+        take_in(&world.ctx(), &body, &seen, &mut memory);
+        assert_eq!(memory.spotted().map(|s| s.who), Some(prey));
     }
 }

@@ -253,6 +253,16 @@ pub struct Biology {
 }
 
 impl Biology {
+    /// Dogs use the health process for bites and natural healing. Feeding
+    /// and digestion remain in `pets::Gut`, without human needs or hospitals.
+    pub fn dog() -> Biology {
+        let mut biology = Biology::new(Stats::dog());
+        for process in ProcessId::ALL {
+            biology.set_running(process, process == ProcessId::Health);
+        }
+        biology
+    }
+
     /// A body with these stats and every process running.
     pub fn new(stats: Stats) -> Biology {
         Biology {

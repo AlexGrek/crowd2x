@@ -75,6 +75,9 @@ pub struct Dog {
     /// Absent, in a save from before pets: a full belly.
     #[prost(message, optional, tag = "5")]
     pub gut: Option<Gut>,
+    /// Absent in older saves: full health with natural healing enabled.
+    #[prost(message, optional, tag = "6")]
+    pub biology: Option<Biology>,
 }
 
 /// A dog's belly (`crate::sim::pets::Gut`): hunger, what is still being

@@ -58,6 +58,9 @@ building (`jobs` skill).
 2. **`pub mod <building>;`** and **its `SPEC` on the end of `LOT_BUILDINGS`** in
    `src/map/district/mod.rs`.
 3. **`HOUSES`** re-chosen if `EMPTY_LOTS` would go negative.
+4. **A row in `LANDMARKS`** (`src/map/landmarks.rs`, and bump `KINDS`): the props only this
+   building has, so the game screen's find menu can centre the camera on it. It is found from the
+   map's props, not from the `District` (a map file and a save do not keep that).
 
 Everything else follows: the lot it takes from the houses, `District::the(name)` /
 `all(name)`, `District::buildings()`, its roof, lamp, windows, power and sewer, the street

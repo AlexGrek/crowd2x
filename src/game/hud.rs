@@ -4,7 +4,7 @@
 //! ```text
 //! +---------------------------------------------------------------+
 //! | [-] x4 [+]              [slower] x1 [faster] [pause] [menu]    |
-//! |                                            [save] [quick save] |
+//! |                          [save] [quick save] [statistics] [find] |
 //! | map, crowd, clock                       what the world is doing |
 //! |                                                               |
 //! |                       the map                                 |
@@ -270,6 +270,7 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                 ),
                 super::statistics::open_button(),
                 super::economy::open_button(),
+                super::find::open_button(),
             ]),
             logview::panel(),
         ],

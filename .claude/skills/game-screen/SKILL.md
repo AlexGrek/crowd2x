@@ -262,6 +262,38 @@ on behind it** and the text is rebuilt every frame the menu is open and written 
 changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text
 (unit-tested); `qa/statistics.json` opens, reads and closes it.
 
+### The find menu (`game/find.rs`, `sim/find.rs`, `map/landmarks.rs`)
+
+`find`, last in the world's second corner row (after `save`, `quick save`, `statistics`, `economy`),
+opens a full-screen modal like the statistics menu (`FindMenu` resource so `leave` closes it on
+`esc`, its own `Scope`, nav `Focusable` buttons packed into rows by `width_of`: 4 canvas pixels a
+letter and 8 of padding, 300 a row). Four kinds of answer, one button each:
+
+- **Units** — one per `JobKind` (`JobKind::ALL`, so a new job is in the menu with no edit) and
+  `pet dogs` (a living `Dog` with a `companion`).
+- **Squares** — `dirty squares` (site cells with `Dirt::overall() >` the cleaners' `DIRTY`, 0.15;
+  the wasteland's chunks and puddles are not searched) and `broken objects` (the distribution boxes
+  in `Electrical::damaged`; the only thing that breaks).
+- **Buildings** — the warehouse, restaurants, crematorium, steel factory, farm, power plant, food
+  factory, playzone, hospital and palace, **found on the map from its props**
+  (`map::landmarks::find`, `LANDMARKS`: each kind's identifying props, props within 9 cells being one
+  building, centred on the bounding box of its props; a restaurant is a toilet on the restaurants'
+  `tiles yellow` floor, which the houses' and the bank's are not). The bank has no prop of its own
+  and is not listed. Only the kinds the map has get a button, `restaurant (4)` where there are
+  several. **Pressing it centres the camera** (`CameraPan`, and the camera follow is dropped) and
+  marks nothing; pressing it again goes on to the next of the kind (`Finding::next`).
+- `clear` and `close`.
+
+`sim::find::Search` is the question (`Workers(JobKind)`, `PetDogs`, `DirtySquares`,
+`BrokenObjects`) and `Search::scan` answers it by one read of the arena or a layer, into `Uid`s for
+units (they move) or cells. **A search stays up until cleared or replaced**, and `find` stays lit
+while one is. `Finding` (view state, not saved, reset `OnExit`) rescans twice a second of real time
+(`RESCAN`) and each frame `show` asks `position_of` for every unit found, keeps the cells on the
+canvas (`VisibleArea::tiles`), dedupes them and moves that many pooled `Mark` sprites onto them
+(the rest hidden, not despawned, at most `MAX_MARKS`). The square is `follow`'s flash — gold fill
+0.20, a 2 px border 0.95, `LIFT` 500 — as one generated 48x48 image at one pixel to the pixel, one
+sprite each. The menu's status line reads `showing 3 guards` / `no guards found`.
+
 ### Saving, and opening a loaded game (`game/saving.rs`)
 
 `save` opens the on-screen keyboard titled "save the game as" (its own `Scope`, blocks the

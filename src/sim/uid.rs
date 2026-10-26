@@ -52,6 +52,11 @@ pub enum EntityType {
 }
 
 impl EntityType {
+    /// A deathdog's prey. Other deathdogs are never hunted or bitten.
+    pub const fn is_deathdog_prey(self) -> bool {
+        matches!(self, EntityType::Human | EntityType::Dog)
+    }
+
     pub const ALL: [EntityType; 3] = [EntityType::Human, EntityType::Dog, EntityType::Deathdog];
 
     /// The name used in logs and in a QA script's `spawn` step.

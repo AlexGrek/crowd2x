@@ -1477,6 +1477,15 @@ fn dirt_on_units_and_tiles_survives_saves_and_parallel_continuation() {
 }
 
 #[test]
+fn an_injured_dog_saves_its_health_and_heals_identically_after_loading() {
+    let mut state = GameState::new(Map::new(Size::new(12, 12), FLOOR), 14);
+    let dog = state.spawn(EntityType::Dog, Point::new(5, 5));
+    state.entity_mut(dog).unwrap().biology_mut().unwrap().edit(|s| s.with_health(40.0));
+    side_by_side(&mut state, 300, |_, _| Input::new());
+    assert!(state.entities().get(dog).unwrap().biology().unwrap().stats().health() > 40.0);
+}
+
+#[test]
 fn older_saves_default_to_clean_ground_and_clean_units() {
     let mut state = fixture_world();
     let mut input = Input::new();

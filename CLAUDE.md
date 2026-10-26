@@ -53,7 +53,8 @@ throne ten to four but Sundays, in purple robes and a crown always, walking at a
 the major decisions are to be the king's. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
-the dead.
+the dead. Its `find` menu marks every unit of a job, every pet dog, the dirty squares and the broken
+distribution boxes with gold squares, and centres the camera over a building every district has.
 
 Cash and a district budget now track wages, taxes, care packages and fridge purchases.
 Office workers do the payroll; the palace accountant reports daily and weekly balances.
@@ -117,7 +118,7 @@ to `screenshots/`.
 | `src/lighting/`, shaders, lamps, day/night, the sun (`src/sim/sun.rs`), something lit wrong | `lighting` |
 | Screens, menus, buttons, focus/navigation, text entry, the map browser | `interface` |
 | The map editor, palettes, map windows, placing terrain/props/lamps | `editor` (+ `map-layers`) |
-| The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD, the statistics menu, crops drawn and the crop panel | `game-screen` |
+| The game screen: sprite bridge, culling, speed, camera, selection, panels, HUD, the statistics menu, the find menu, crops drawn and the crop panel | `game-screen` |
 | The map data model, passability, catalogues, spawners, the file format | `map` |
 | Layers (terrain/object/grid), the `LAYERS` table, x-ray overlay, a new layer or network | `map-layers` |
 | Power: transformers, the power plant's generators, lines, boxes, wiring, powered props, street lights and their controllers, light switches | `electrician` |
@@ -223,6 +224,8 @@ src/sim/brain/goals/clean.rs  the cleaners' look over the district and mopping  
 src/sim/pets.rs         a dog's belly; who is bonded to whom; meals served    [pets]
 src/sim/brain/goals/follow.rs, defecate.rs, dog_care.rs  the dog stays near; the street; the owner feeds it  [pets]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
+src/sim/find.rs, src/game/find.rs  the find menu: searches; gold squares     [game-screen]
+src/map/landmarks.rs    a district's buildings found again from the props   [game-screen, map-generator]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]

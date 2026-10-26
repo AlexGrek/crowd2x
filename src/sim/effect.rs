@@ -366,7 +366,7 @@ fn take_body(entity: &mut dyn GameEntity, facilities: &mut Facilities, log: &Log
     log.related(uid, dead, format!("{uid} took up the body of {dead} at {}, {}", at.x, at.y));
 }
 
-/// [`Effect::Bite`]: a wound for whoever stands at `at`, if that is a person
+/// [`Effect::Bite`]: a wound for whoever stands at `at`, if that is a person or dog
 /// outside the site and within the biter's reach — never anybody inside.
 /// Logged once a bite, a watched second apart at the most.
 fn bite(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, occupancy: &Occupancy, log: &Log, at: Point, damage: u8) {
@@ -375,7 +375,7 @@ fn bite(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, occupan
     let Some(target) = occupancy.occupant(at) else {
         return;
     };
-    if target.kind() != Some(super::uid::EntityType::Human) || map.site().contains(at) || from.chebyshev_distance(at) > 1 {
+    if !target.kind().is_some_and(super::uid::EntityType::is_deathdog_prey) || map.site().contains(at) || from.chebyshev_distance(at) > 1 {
         return;
     }
     facilities.wounds.inflict(super::wounds::Wound { target, by: dog, from, damage });

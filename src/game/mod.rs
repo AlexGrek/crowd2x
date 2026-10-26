@@ -53,6 +53,7 @@
 //! for a cancel it would otherwise fire on every zoom.
 
 pub mod actors;
+pub mod find;
 pub mod follow;
 pub mod croppanel;
 pub mod crops;
@@ -128,7 +129,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, dirt::DirtPlugin, needs::NeedsPlugin))
+            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, dirt::DirtPlugin, needs::NeedsPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),
@@ -348,6 +349,7 @@ fn leave(
     mut menu: ResMut<hud::SpawnMenu>,
     mut statistics: ResMut<statistics::StatisticsMenu>,
     mut economy: ResMut<economy::EconomyMenu>,
+    mut find: ResMut<find::FindMenu>,
     mut scope: ResMut<Scope>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -362,6 +364,8 @@ fn leave(
         hud::close_spawn_menu(&mut commands, &mut menu, &mut scope);
     } else if economy.root.is_some() {
         economy::close_economy(&mut commands, &mut economy, &mut scope);
+    } else if find.0.is_some() {
+        find::close_find(&mut commands, &mut find, &mut scope);
     } else if statistics.0.is_some() {
         statistics::close_statistics(&mut commands, &mut statistics, &mut scope);
     } else {

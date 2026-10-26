@@ -284,7 +284,9 @@ three watches, and the palace's king last) and
   `src/map/district/<building>.rs` — copy `crematorium.rs` (a `public_room`) or
   `steel_factory.rs` (the whole lot, drawing nothing) — with its constants, builder, `SPEC` and
   its own tests over `SEEDS`; `pub mod` and the `SPEC` **on the end** of `LOT_BUILDINGS` in
-  `mod.rs`; `HOUSES` re-chosen if `EMPTY_LOTS` would go negative. Nothing else: the lot, the
+  `mod.rs`; `HOUSES` re-chosen if `EMPTY_LOTS` would go negative; **a row in `LANDMARKS`**
+  (`src/map/landmarks.rs`) for the game screen's find menu, which locates each building from the
+  map's props since the `District` is gone by then. Nothing else: the lot, the
   `District` record (`the`/`all`), `buildings()`, roof, lamp, windows, power and the catalogue
   test follow from the list. On the end of the list it keeps every seed's bank, shops and lot
   buildings, and moves only houses and parks; re-read seed 7's resident count. The `add-content`

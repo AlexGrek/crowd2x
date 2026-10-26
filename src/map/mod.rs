@@ -86,6 +86,7 @@ mod coords;
 pub mod district;
 mod format;
 pub mod grid;
+pub mod landmarks;
 pub mod mount;
 mod passability;
 mod save;

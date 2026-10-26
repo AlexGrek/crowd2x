@@ -1,5 +1,11 @@
 # AGENTS.md
 
+Regular dogs have health (`Biology::dog`, health process only), take deathdog
+bites outside the site, and heal naturally at 100 health per 24 world hours while alive.
+Fatal bites leave a dead body; every bite soils the dog and its cell with blood.
+Health and its process switch persist in saves; older dogs load at full health.
+The hunt, bite task and world effect share `EntityType::is_deathdog_prey`.
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this is

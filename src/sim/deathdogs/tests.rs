@@ -10,6 +10,7 @@ use crate::sim::brain::{GoalId, Spotted, Task};
 use crate::sim::clock::{Clock, HOUR, MINUTE, TIME_SCALE};
 use crate::sim::entity::GameEntity;
 use crate::sim::kinds::{Deathdog, Facing, DEATHDOG_BITES, DEATHDOG_SPEED};
+use crate::sim::kinds::Dog;
 use crate::sim::refuge::{depth, SAFE_DEPTH};
 use crate::sim::testing::{needy_human, skip_to, World};
 use crate::sim::uid::Uid;
@@ -18,6 +19,79 @@ use crate::sim::wounds::Wound;
 use crate::sim::{process_game_state, process_pass, spawn_pass, Input, MoveOutcome};
 
 const DT: f32 = 1.0 / 60.0;
+
+#[test]
+fn a_dog_takes_bite_damage_spills_blood_and_heals_without_hospital_care() {
+    let mut world = World::new(endless(Size::new(10, 10), 5));
+    let mut dog = Dog::new(Uid::new(EntityType::Dog, 31), Point::new(-3, 2), Facing::Right, &mut rand::rngs::SmallRng::seed_from_u64(1));
+    let wound = |damage| Wound { target: dog.uid(), by: Uid::new(EntityType::Deathdog, 32), from: Point::new(-4, 2), damage };
+    world.wounds.inflict(wound(30));
+    world.step(&mut dog);
+    let health = dog.biology().unwrap().stats().health();
+    assert!((health - 70.0).abs() < 0.01, "{health}");
+    assert_eq!(dog.body().dirt().blood, 0.3);
+    assert_eq!(world.dirt.at(dog.center_position()).blood, 0.3);
+    assert!(!dog.is_dead());
+    world.dt = HOUR / TIME_SCALE;
+    world.step(&mut dog);
+    assert!((dog.biology().unwrap().stats().health() - health - 100.0 / 24.0).abs() < 0.01);
+    world.dt *= 24.0;
+    world.step(&mut dog);
+    assert_eq!(dog.biology().unwrap().stats().health(), 100.0);
+}
+
+#[test]
+fn switching_off_a_dogs_health_stops_both_damage_and_healing_and_blood() {
+    let mut world = World::new(endless(Size::new(10, 10), 5));
+    let mut dog = Dog::new(Uid::new(EntityType::Dog, 35), Point::new(-3, 2), Facing::Right, &mut rand::rngs::SmallRng::seed_from_u64(1));
+    let biology = dog.biology_mut().unwrap();
+    biology.edit(|s| s.with_health(60.0));
+    biology.set_running(ProcessId::Health, false);
+    world.wounds.inflict(Wound { target: dog.uid(), by: Uid::new(EntityType::Deathdog, 32), from: Point::new(-4, 2), damage: 30 });
+    world.step(&mut dog);
+    world.dt = HOUR / TIME_SCALE;
+    world.step(&mut dog);
+    assert_eq!(dog.biology().unwrap().stats().health(), 60.0);
+    assert_eq!(dog.body().dirt().blood, 0.0);
+}
+
+#[test]
+fn a_fatal_bite_kills_a_dog_leaves_blood_and_releases_its_cell() {
+    let mut state = GameState::new(endless(Size::new(10, 10), 5), 5);
+    let dog = state.spawn(EntityType::Dog, Point::new(-3, 2));
+    state.entity_mut(dog).unwrap().biology_mut().unwrap().edit(|s| s.with_health(20.0));
+    state.facilities.wounds.inflict(Wound { target: dog, by: Uid::new(EntityType::Deathdog, 32), from: Point::new(-4, 2), damage: 30 });
+    process_pass(&mut state, DT);
+    let dead = state.entities().get(dog).unwrap();
+    assert!(dead.is_dead());
+    assert_eq!(dead.biology().unwrap().stats().health(), 0.0);
+    assert_eq!(dead.body().dirt().blood, 0.3);
+    assert_eq!(state.dirt().at(dead.center_position()).blood, 0.3);
+    assert_eq!(state.occupancy().occupant(dead.center_position()), None);
+    assert!(state.log.drain().iter().any(|line| line.contains("died of deathdog bites")));
+}
+
+#[test]
+fn a_deathdog_hunts_and_bites_a_regular_dog_outside_but_not_inside() {
+    for outside in [true, false] {
+        let mut world = World::new(endless(Size::new(12, 12), 8));
+        world.clock = at(23.0);
+        let prey = Uid::new(EntityType::Dog, 33);
+        let cell = if outside { Point::new(-3, 3) } else { Point::new(0, 3) };
+        world.occupancy.claim(cell, prey).unwrap();
+        let mut hunter = Deathdog::new(Uid::new(EntityType::Deathdog, 34), cell.offset(0, 3), Facing::Right, &mut rand::rngs::SmallRng::seed_from_u64(1));
+        hunter.brain_mut().memory_mut().spot(Spotted { who: prey, at: cell, when: world.clock.elapsed() });
+        let mut bitten = false;
+        for _ in 0..300 {
+            world.step(&mut hunter);
+            if world.wounds.on(prey).next().is_some() {
+                bitten = true;
+                break;
+            }
+        }
+        assert_eq!(bitten, outside, "outside: {outside}, {:?}", world.lines());
+    }
+}
 
 /// An open site of `size` floor with the wasteland of `seed` round it.
 fn endless(size: Size, seed: u64) -> crate::map::Map {

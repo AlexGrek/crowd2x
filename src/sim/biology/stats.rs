@@ -54,6 +54,22 @@ fn need(value: f32) -> f32 {
 pub const BORN_AT_LEAST_SATISFIED: f32 = 70.0;
 
 impl Stats {
+    /// A dog's health starts full. Its other needs belong to its gut;
+    /// these neutral values stay fixed with their processes switched off.
+    pub(super) fn dog() -> Stats {
+        Stats {
+            health: 100.0,
+            stamina: 100.0,
+            fun: 100.0,
+            hunger: 0.0,
+            thirst: 0.0,
+            bladder: 0.0,
+            mental_health: 100.0,
+            attention: 0.5,
+            satisfaction: 100.0,
+        }
+    }
+
     /// A new body: every need 70 to 100 percent satisfied
     /// ([`BORN_AT_LEAST_SATISFIED`]), as content with life, and fully healthy.
     /// Mental health and attention start anywhere in their ranges.

@@ -207,6 +207,10 @@ fn default_vsync() -> bool {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Step {
+    /// Advance at most this many ticks until a bite is queued for the
+    /// selected unit. Useful with a frozen victim: thaw it on the next tick
+    /// to check damage and blood without depending on the bite's timing.
+    TickUntilBitten { max_ticks: u32 },
     /// Replace the four normalized ground components at one cell.
     Dirt { x: i32, y: i32, value: crate::sim::dirt::Dirt },
     UnitDirt(crate::sim::dirt::Dirt),

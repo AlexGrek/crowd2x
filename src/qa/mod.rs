@@ -765,6 +765,20 @@ fn perform(
     windows: &mut Query<&mut Window, With<PrimaryWindow>>,
 ) -> Result<Next, String> {
     match step {
+        Step::TickUntilBitten { max_ticks } => {
+            let uid = intents.selected.get().ok_or("select a victim before `tick_until_bitten`")?;
+            let commands = std::mem::take(&mut intents.sim_input.0);
+            let sim = intents.sim.as_deref_mut().ok_or("`tick_until_bitten` needs the game screen")?;
+            spawn_pass(&mut sim.0, &commands);
+            let dt = checks.fixed.timestep().as_secs_f32();
+            for _ in 0..*max_ticks {
+                process_pass(&mut sim.0, dt);
+                if sim.0.wounds().on(uid).next().is_some() {
+                    return Ok(Next::Now);
+                }
+            }
+            Err(format!("{uid} was not bitten in {max_ticks} ticks"))
+        }
         Step::CloseWindow {} => {
             let window = checks.primary_window.single().map_err(|error| error.to_string())?;
             devices.close.write(bevy::window::WindowCloseRequested { window });

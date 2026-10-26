@@ -1,0 +1,100 @@
+{
+  "name": "deathdogs bite dogs, spill blood, and surviving dogs heal naturally",
+  "state": "game",
+  "timeout": 180,
+  "given": {
+    "maps": [
+      {
+        "name": "kennel",
+        "map": {
+          "version": 1,
+          "wasteland": 5,
+          "size": {
+            "width": 5,
+            "height": 5
+          },
+          "terrain": {
+            "palette": [
+              "floor white"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0",
+                  "0,0,0,0,0",
+                  "0,0,0,0,0",
+                  "0,0,0,0,0",
+                  "0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "kennel",
+  "steps": [
+    {"key": "p"},
+    {"tick": 27000},
+    {"note": "Remove the six night-pack deathdogs to isolate one predator."},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"spawn": {"y": 2, "x": -3, "kind": "dog"}},
+    {"tick": 1},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "freeze"},
+    {"tick": 1},
+    {"spawn": {"y": 3, "x": -3, "kind": "deathdog"}},
+    {"note": "Wait for an actual bite while the dog is frozen, then thaw it to feel that bite on the next tick."},
+    {"tick_until_bitten": {"max_ticks": 1200}},
+    {"expect_log": "bit dog:"},
+    {"select": 0},
+    {"press": "life"},
+    {"press": "unfreeze"},
+    {"tick": 1},
+    {"expect_stat": {"min": 39, "stat": "health", "max": 81}},
+    {"press": "follow"},
+    {"look_at": {"y": 2, "x": -3}},
+    {"press": "debug"},
+    {"shot": "a bitten dog and blood on the ground"},
+    {"press": "close"},
+    {"look_at": {"y": 3, "x": -3}},
+    {"shot": "blood spilled on the ground"},
+    {"select": 1},
+    {"press": "life"},
+    {"press": "despawn"},
+    {"tick": 1},
+    {"select": 0},
+    {"note": "With the predator removed, allow enough world time to heal even a maximum-damage bite."},
+    {"tick": 30000},
+    {"expect_stat": {"min": 99.9, "stat": "health", "max": 100}}
+  ]
+}

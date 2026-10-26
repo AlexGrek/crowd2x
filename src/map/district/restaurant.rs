@@ -13,7 +13,9 @@ pub const NAME: &str = "restaurant";
 /// How many restaurants: one to each quarter of the district.
 pub const RESTAURANTS: usize = 4;
 const WALL: &str = "wall red";
-const FLOOR: &str = "tiles yellow";
+/// What a restaurant's floor is, and so what a toilet stands on to be one's
+/// (`map::landmarks`): the houses' and the bank's stand on other floors.
+pub const FLOOR: &str = "tiles yellow";
 
 /// The middle of each quarter, in the order the restaurants are placed.
 const QUARTERS: [(i32, i32); RESTAURANTS] = [(1, 1), (3, 1), (1, 3), (3, 3)];

@@ -245,7 +245,7 @@ pub const OFFICE_LAMP: &str = "tube lamp";
 /// light overlaps (a tube lamp reaches five).
 pub const OFFICE_LAMP_SPACING: i32 = 5;
 const HOUSE_WALL: &str = "wall red";
-const HOUSE_FLOORS: [&str; 2] = ["wood", "wood cracked"];
+const HOUSE_FLOORS: [&str; 1] = ["wood"];
 const BANK_WALL: &str = "wall purple";
 const BANK_FLOOR: &str = "floor white";
 const RESTROOM_FLOOR: &str = "tiles blue";
@@ -308,7 +308,6 @@ const TILES: &[&str] = &[
     GRASS,
     HOUSE_WALL,
     HOUSE_FLOORS[0],
-    HOUSE_FLOORS[1],
     BANK_WALL,
     BANK_FLOOR,
     RESTROOM_FLOOR,

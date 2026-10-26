@@ -148,6 +148,7 @@ pub mod entities;
 pub mod entity;
 pub(crate) mod facilities;
 pub mod feature;
+pub mod find;
 pub mod fields;
 pub mod flowers;
 pub mod fridge;
@@ -649,6 +650,9 @@ impl GameState {
     }
 
     pub fn dirt(&self) -> &dirt::DirtLayer { &self.facilities.dirt }
+
+    /// Bites dealt last tick, waiting for their victims to feel them.
+    pub fn wounds(&self) -> &wounds::Wounds { &self.facilities.wounds }
 
     pub fn entities(&self) -> &Entities {
         &self.entities
@@ -2533,7 +2537,7 @@ mod tests {
     #[test]
     fn switching_a_process_on_something_without_a_body_says_so_rather_than_panicking() {
         let mut state = world();
-        let dog = state.spawn(EntityType::Dog, Point::new(4, 4));
+        let dog = state.spawn(EntityType::Deathdog, Point::new(-1, 4));
         let stranger = Uid::new(EntityType::Human, 99);
 
         let mut input = Input::new();

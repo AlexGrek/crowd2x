@@ -525,9 +525,10 @@ pub struct Dog {
     /// Name and gender, rolled once at spawn — [`Identity::pet`], not
     /// [`Identity::human`]: a dog gets a first name and no surname.
     identity: Identity,
-    /// How hungry it is and what it has yet to pass: a belly, and no more of
-    /// a body than that ([`super::pets`]). Its owner feeds it.
+    /// How hungry it is and what it has yet to pass ([`super::pets`]).
+    /// Its owner feeds it; health is independent of this belly.
     gut: Gut,
+    biology: Biology,
 }
 
 impl Dog {
@@ -535,7 +536,7 @@ impl Dog {
         // Rolled in this order, each after what was there before it.
         let identity = Identity::pet(rng);
         let gut = Gut::hungry_to(rng.random_range(0.0..40.0));
-        Dog { walk: Walker::new(uid, cell, DOG_SPEED), brain: Brain::dog(), facing, identity, gut }
+        Dog { walk: Walker::new(uid, cell, DOG_SPEED), brain: Brain::dog(), facing, identity, gut, biology: Biology::dog() }
     }
 
     pub fn gut(&self) -> &Gut {
@@ -587,11 +588,19 @@ impl GameEntity for Dog {
         Some(self.facing)
     }
 
-    /// A belly and no more: it eats what it was served last tick (its
-    /// owner's doing, `sim::pets`), gets hungrier, and its brain gets the
-    /// walker and nothing else — no hands. No schedule either, so it never
-    /// looks round: a dog has nothing yet that seeing somebody would change.
+    /// Feel bites before healing, so a fatal wound cannot heal back to life.
+    /// A surviving dog heals naturally on the world's clock. Its belly is
+    /// separate, and its brain has no human needs, hospital care or hands.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        for wound in ctx.wounds.on(self.walk.body().uid()) {
+            let _ = self.biology.handle(Event::Bitten { damage: wound.damage });
+        }
+        if self.biology.stats().health() <= 0.0 {
+            self.walk.halt();
+            self.walk.body_mut().set_dead();
+            return Effect::Died { cause: DEATHDOG_BITES };
+        }
+        self.biology.advance(ctx.game_dt());
         for _ in ctx.feedings.to(self.walk.body().uid()) {
             self.gut.fed();
         }
@@ -620,6 +629,14 @@ impl GameEntity for Dog {
 
     fn companion(&self) -> Option<Uid> {
         self.brain.companion()
+    }
+
+    fn biology(&self) -> Option<&Biology> {
+        Some(&self.biology)
+    }
+
+    fn biology_mut(&mut self) -> Option<&mut Biology> {
+        Some(&mut self.biology)
     }
 
     fn set_companion(&mut self, companion: Uid) -> bool {
@@ -659,7 +676,7 @@ impl GameEntity for Dog {
     }
 
     fn current_goal(&self) -> Option<GoalId> {
-        Some(self.brain.top_goal())
+        (!self.is_dead()).then(|| self.brain.top_goal())
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
@@ -668,8 +685,10 @@ impl GameEntity for Dog {
             ("gender", self.identity.gender().label().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
             ("owner", self.brain.companion().map_or_else(|| "none".to_string(), |owner| owner.to_string())),
+            ("condition", if self.is_dead() { "dead" } else { "alive" }.to_string()),
             ("hunger", format!("{:.1}", self.gut.hunger())),
             ("bowel", format!("{:.1}", self.gut.bowel())),
+            ("health", format!("{:.1}", self.biology.stats().health())),
         ];
         fields.extend(self.walk.debug_fields());
         fields
@@ -684,10 +703,12 @@ impl GameEntity for Dog {
     }
 
     fn action_progress(&self) -> Option<f32> {
+        if self.is_dead() { return None; }
         self.brain.action().progress()
     }
 
     fn interacting_with(&self) -> Option<Point> {
+        if self.is_dead() { return None; }
         self.brain.action().interacting_with()
     }
 
@@ -696,8 +717,9 @@ impl GameEntity for Dog {
     }
 
     fn save(&self) -> pb::Kind {
-        let Dog { walk, brain, facing, identity, gut } = self;
+        let Dog { walk, brain, facing, identity, gut, biology } = self;
         pb::Kind::Dog(pb::Dog {
+            biology: Some(biology.save()),
             gut: Some(gut.save()),
             walker: Some(walk.save()),
             brain: Some(brain.save()),
@@ -723,6 +745,7 @@ impl Dog {
             },
             identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
             gut: saved.gut.as_ref().map(Gut::restore).transpose()?.unwrap_or_default(),
+            biology: saved.biology.as_ref().map(Biology::restore).transpose()?.unwrap_or_else(Biology::dog),
         })
     }
 }
@@ -927,6 +950,18 @@ mod tests {
     use crate::sim::brain::GoalId;
     use crate::sim::testing::World;
     use rand::SeedableRng;
+
+    #[test]
+    fn a_dog_from_before_health_existed_loads_healthy_with_only_health_running() {
+        let dog = Dog::new(Uid::new(EntityType::Dog, 41), Point::new(2, 2), Facing::Left, &mut SmallRng::seed_from_u64(1));
+        let pb::Kind::Dog(mut saved) = dog.save() else { unreachable!() };
+        saved.biology = None;
+        let loaded = Dog::restore(&saved, 0).unwrap();
+        assert_eq!(loaded.biology().unwrap().stats().health(), 100.0);
+        for process in super::super::biology::ProcessId::ALL {
+            assert_eq!(loaded.biology().unwrap().is_running(process), process == super::super::biology::ProcessId::Health);
+        }
+    }
 
     fn room() -> Map {
         Map::new(Size::new(9, 9), FLOOR)
@@ -1238,7 +1273,7 @@ mod tests {
             assert_eq!(dog.brain.top_goal(), GoalId::Wander);
         }
         assert_ne!(dog.position(), start);
-        assert!(dog.biology().is_none());
+        assert_eq!(dog.biology().unwrap().stats().health(), 100.0);
     }
 
     #[test]
