@@ -556,6 +556,42 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Who it is bonded to, as the rest of the crowd sees it this tick — what
+    /// the think step gathers into [`Bonds`](super::pets::Bonds): a person's
+    /// pet dog, or a dog's owner, where it stands, and a dog's hunger. Asked
+    /// of every unit every tick, so it reads only what is inline. `None` —
+    /// the default — for a kind that is bonded to nobody. Handed `ctx` because
+    /// a dog's hunger counts the meal served and not yet felt.
+    fn bond(&self, ctx: &Think<'_>) -> Option<super::pets::Bond> {
+        let _ = ctx;
+        None
+    }
+
+    /// Who it keeps company with: a person's pet dog, or a dog's owner.
+    fn companion(&self) -> Option<super::uid::Uid> {
+        None
+    }
+
+    /// Keep company with `companion` from now on (a pet dog and its owner,
+    /// each told of the other by the spawn pass), and say whether it did.
+    /// `false` — the default — for a kind that keeps none.
+    fn set_companion(&mut self, companion: super::uid::Uid) -> bool {
+        let _ = companion;
+        false
+    }
+
+    /// A test's way to make a dog this hungry, with nothing eaten.
+    #[cfg(test)]
+    fn starve_to(&mut self, hunger: f32) {
+        let _ = hunger;
+    }
+
+    /// Empty the bowel, and say whether there was one (`Effect::Defecate`).
+    /// `false` — the default — for a kind that has none.
+    fn defecate(&mut self) -> bool {
+        false
+    }
+
     /// This entity's own name, for a kind that has one.
     ///
     /// `None` rather than a made-up default: a dog is not almost a person,
@@ -685,6 +721,13 @@ pub struct Think<'a> {
     /// Who is making small talk with whom, gathered by this tick's think
     /// step ([`super::relationships::Smalltalks`]).
     pub smalltalks: &'a super::relationships::Smalltalks,
+    /// Who is bonded to whom — a person to its pet dog — gathered by this
+    /// tick's think step: where an owner is for its dog to stay by, and how
+    /// hungry the dog is for its owner to feed it ([`super::pets::Bonds`]).
+    pub bonds: &'a super::pets::Bonds,
+    /// The dog foods given at the end of the last tick, each felt only by the
+    /// dog fed, in its own react ([`super::pets::Feedings`]).
+    pub feedings: &'a super::pets::Feedings,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -740,6 +783,8 @@ impl<'a> Think<'a> {
             society: &facilities.society,
             chats: &facilities.chats,
             smalltalks: &facilities.smalltalks,
+            bonds: &facilities.bonds,
+            feedings: &facilities.feedings,
             electrical: &facilities.electrical,
             dt,
             tick,

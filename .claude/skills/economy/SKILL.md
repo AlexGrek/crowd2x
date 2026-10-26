@@ -16,7 +16,7 @@ Death forfeits unpaid shifts and care days. Grants are excluded from daily balan
 `LazyLock`. Wages and prices use catalogue names; every job and item must be
 present, and unknown names fail. Starting wages: $60 office/accountant/scrap/farmer,
 $100 king, $40 other jobs. Tax 20%, care $20/day, arrival grant $1000, starting
-cash $10?90, food $1, water free, payroll five world minutes/account.
+cash $10?90, food $1 (a meal an outside worker keeps in its pocket is paid for at the fridge too), dog food $1, water free, payroll five world minutes/account.
 
 `Facilities.economy` is read through `Think.economy`. The world applies `Record`,
 `Payroll`, `Buy`, `CloseBooks` in slot order, after parallel react. Never mutate the

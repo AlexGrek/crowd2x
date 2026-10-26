@@ -92,6 +92,7 @@ impl GameState {
             playzones_run: self.facilities.playzones.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
+            feedings: self.facilities.feedings.save(),
             relationship_rules: self.facilities.society.rules().save(),
         }
     }
@@ -185,6 +186,8 @@ impl GameState {
         state.facilities.playzones.restore(&world.playzones_run)?;
         // The bites dealt as the saved tick ended, still to be felt.
         state.facilities.wounds = super::wounds::Wounds::restore(&world.wounds)?;
+        // ...and the dog foods given, still to be felt.
+        state.facilities.feedings = super::pets::Feedings::restore(&world.feedings)?;
         // The crops, planted on the map again: a save keeps the ground as it
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
@@ -215,6 +218,7 @@ impl GameState {
         state.effects = vec![Effect::None; capacity];
         state.chatters = vec![None; capacity];
         state.smalltalkers = vec![None; capacity];
+        state.bonders = vec![None; capacity];
         for (slot, entity) in state.entities.iter_slots() {
             state.census.file(slot, entity.center_position());
         }

@@ -26,7 +26,9 @@ Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
 the heaps in the wasteland and stores it in its own bin in the district's warehouse, and
 before every trip out gets ready — eats, drinks, plays and uses the toilet until every need is
-85% met — so that no need calls it back in from the far end of a trip. A
+85% met, and puts a meal and a drink in its pocket (farmers and fishermen go out too) — so that no
+need calls it back in from the far end of a trip, where it eats and drinks from the pocket where it
+stands. A
 district is walled in, with eight gates, and each gate's guard post is kept round the clock by
 three guards on eight-hour watches, every day, each sleeping by its watch; undertakers on the
 same watches carry the dead to the crematoria in the district's crematorium. Four public
@@ -76,6 +78,11 @@ quarter of it, work in the fields and the scrap soils the worker, the wasteland 
 never change, bites bleed and wet patches dry by the hour. Four cleaners, two a day, keep the
 district: each one's own brain looks it over every 27 minutes, mops up public ground dirtier
 than 0.15, nearest first, and walks round when there is none.
+
+One resident in eight of a district has a pet dog that stays within range of its owner and roams
+freely there. It cannot feed itself: its owner takes dog food out of a fridge, a dollar, and gives
+it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
+the cleaners.
 
 ## Commands
 
@@ -131,6 +138,7 @@ to `screenshots/`.
 | Relationships: families, colleagues, chats between wanderers, small talk and its sparks, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 | Dirt: stains on the ground and bodies, footsteps, trails, work grime, the wasteland's puddles, blood and pee, drying, the dirt dots on screen; the cleaners and their look over the district | `dirt` (+ `jobs`) |
+| Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($1), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -212,6 +220,8 @@ src/game/smalltalk.rs   the sparks between two making small talk            [rel
 src/sim/dirt.rs, soiling.rs  stains on ground and bodies; blood and pee  [dirt]
 src/game/dirt.rs        the dirt dots drawn over visible stained cells      [dirt]
 src/sim/brain/goals/clean.rs  the cleaners' look over the district and mopping  [dirt, jobs]
+src/sim/pets.rs         a dog's belly; who is bonded to whom; meals served    [pets]
+src/sim/brain/goals/follow.rs, defecate.rs, dog_care.rs  the dog stays near; the street; the owner feeds it  [pets]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]

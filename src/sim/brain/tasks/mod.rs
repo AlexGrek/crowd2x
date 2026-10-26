@@ -15,6 +15,14 @@ pub use bite::Bite;
 pub use chase::Chase;
 pub mod clean;
 pub use clean::{Clean, CLEAN_SECONDS};
+pub mod defecate;
+pub mod stow;
+pub mod unpack;
+pub use stow::{Stow, STOW_SECONDS};
+pub use unpack::{Unpack, UNPACK_SECONDS};
+pub use defecate::{Defecate, DEFECATE_SECONDS};
+pub mod feed;
+pub use feed::{Feed, FEED_SECONDS};
 pub mod close_books;
 pub mod payroll;
 pub use close_books::{CloseBooks, BOOKS_SECONDS};
@@ -116,6 +124,10 @@ tasks! {
     Talk,
     PlantFlowers,
     Clean,
+    Defecate,
+    Feed,
+    Unpack,
+    Stow,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

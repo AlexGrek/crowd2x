@@ -580,6 +580,11 @@ mod tests {
             Task::work_at(crate::sim::feature::FeatureKind::ControlPanel, at, 23.0),
             Task::talk(at, 24.0),
             Task::clean(at, 25.0),
+            Task::defecate(at, 26.0),
+            Task::feed(at, 27.0),
+            Task::unpack(ItemKind::Food, 28.0),
+            Task::unpack(ItemKind::Water, 29.0),
+            Task::stow(30.0),
         ]
     }
 

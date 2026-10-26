@@ -6,9 +6,11 @@ use crate::sim::clock::HOUR;
 use crate::sim::inventory::Inventory;
 use crate::sim::item::ItemKind;
 use crate::sim::job::{is_bedtime, JobKind};
+use crate::sim::pets::{HUNGRY, MUST_GO};
 use crate::sim::relationships::Phase;
 
 use super::goal::{GoalId, Goals};
+use super::goals::provision;
 use super::memory::SALVAGE_ORDER;
 use super::routine::{RoutineCtx, RoutineExecutor};
 
@@ -377,6 +379,66 @@ impl RoutineExecutor for ChatRoutine {
     }
 }
 
+/// How much [`KeepRoutine`] wants a hungry dog fed: over wandering, a chat
+/// and an order, and under a night in bed (`SLEEPY / 50`, 0.6), every need
+/// committed to and a shift - a dog waits for its owner to have time.
+pub const DOG_CARE: f32 = 0.55;
+
+/// Look after one's dog: want it fed ([`GoalId::DogCare`], at [`DOG_CARE`])
+/// while the dog it keeps is hungry ([`HUNGRY`](crate::sim::pets::HUNGRY)).
+/// What the dog is, and how hungry, is its bond in the crowd's
+/// [`Bonds`](crate::sim::pets::Bonds); a person with none wants nothing. A
+/// meal served counts at once (`Dog::bond`), so it does not set off for a
+/// second dinner on the tick after the first. Nothing to remember, so no hysteresis: a meal
+/// takes a dog from hungry to below it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct KeepRoutine;
+
+impl RoutineExecutor for KeepRoutine {
+    fn name(&self) -> &'static str {
+        "look after the dog"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.companion().is_none() {
+            return;
+        }
+        if ctx.think.bonds.partner(ctx.body.uid()).is_some_and(|dog| dog.hunger >= HUNGRY) {
+            goals.raise_to(GoalId::DogCare, DOG_CARE);
+        }
+    }
+}
+
+/// How much [`HeelRoutine`] wants a dog with its owner: over wandering, which
+/// is what a stray does.
+pub const FOLLOWING: f32 = 0.2;
+
+/// How much it wants to relieve itself once it must: over keeping company.
+pub const SQUATTING: f32 = 0.3;
+
+/// Stay with the owner ([`GoalId::Follow`], at [`FOLLOWING`]) for as long as
+/// there is one, and go when the bowel is full ([`GoalId::Defecate`], at
+/// [`SQUATTING`]). A dog with no owner wants nothing but to wander. Reads its
+/// own bond for its bowel; nothing to remember.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct HeelRoutine;
+
+impl RoutineExecutor for HeelRoutine {
+    fn name(&self) -> &'static str {
+        "stay with the owner"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.companion().is_none() {
+            return;
+        }
+        goals.raise_to(GoalId::Follow, FOLLOWING);
+        if ctx.think.bonds.get(ctx.body.uid()).is_some_and(|dog| dog.bowel >= MUST_GO) {
+            goals.raise_to(GoalId::Defecate, SQUATTING);
+        }
+    }
+}
+
 /// How much [`OrdersRoutine`] wants an order carried out: over wandering,
 /// under every need committed to and under a night in bed (`SLEEPY / 50`,
 /// 0.6). An order is an errand, got round to when nothing more pressing is.
@@ -560,8 +622,19 @@ pub const READY_NEEDS: [ReadyNeed; 4] = [
     ReadyNeed { need: &BLADDER, top_up: TOPPED_UP },
 ];
 
+/// The bit of [`ReadyRoutine`]'s list of things to see to that is not a need
+/// but **stocking the pocket** ([`GoalId::Provision`]): the one after the needs.
+pub const PROVISIONS_BIT: u8 = 1 << READY_NEEDS.len();
+
+/// Every bit there is a place for on that list.
+const READY_BITS: u8 = (PROVISIONS_BIT << 1) - 1;
+
 /// Get ready to go out: before every trip out into the wasteland, see to
-/// every need on [`READY_NEEDS`] until it is [`READY`], and only then set out
+/// every need on [`READY_NEEDS`] until it is [`READY`], **fill the pocket with
+/// a meal and a drink for the trip** ([`GoalId::Provision`], what
+/// [`PROVISIONS`](super::goals::provision::PROVISIONS) says: out there a worker
+/// eats and drinks from it where it stands, and is not called home), and only
+/// then set out
 /// — so that nothing calls a worker back in from the far end of a trip, an
 /// hour's walk from the nearest fridge or toilet. For a job worked on trips
 /// out ([`JobKind::goes_out_for`]): the scrap collector's.
@@ -590,6 +663,11 @@ pub const READY_NEEDS: [ReadyNeed; 4] = [
 ///   not turn the worker round on its way to the toilet. When the list is
 ///   empty a fresh one is taken if anything is worse than ready again; none
 ///   is **ready**.
+/// * **Provisions** come last, once every need is seen to, and — like a need —
+///   are on the list until done. A pocket short of them
+///   ([`provision::is_short`](super::goals::provision::is_short)) is filled at
+///   a fridge; one with no fridge to go to ([`GoalId::Provision`] held off) is
+///   not waited for, as no other need nothing can meet is.
 /// * **Ready lasts** until it has gone out or the shift is over, so the walk
 ///   out to the gate does not send it back for the thirst it works up on
 ///   the way.
@@ -619,7 +697,7 @@ impl ReadyRoutine {
     }
 
     pub(crate) fn set_state(&mut self, ready: bool, pending: u32) -> Result<(), Invalid> {
-        if pending >> READY_NEEDS.len() != 0 {
+        if pending & !(READY_BITS as u32) != 0 {
             return invalid(format!("getting ready: no needs numbered {pending:#b}"));
         }
         let pending = pending as u8;
@@ -686,9 +764,15 @@ impl RoutineExecutor for ReadyRoutine {
         // A need stays on the list until it is topped up; a fresh list is
         // taken when anything is worse than ready, and tops up everything.
         let short = Self::worse_than(|ready| ready.top_up, biology, goals);
-        self.pending &= short;
+        self.pending &= short | PROVISIONS_BIT;
         if self.pending == 0 && Self::worse_than(|ready| ready.top_up.max(READY), biology, goals) != 0 {
             self.pending = short;
+        }
+        // The needs seen to, the pocket: stocked for the trip, or no fridge
+        // to stock it at.
+        if self.pending & !PROVISIONS_BIT == 0 {
+            let to_stock = provision::is_short(pack) && goals.cooldown(GoalId::Provision) == 0;
+            self.pending = if to_stock { PROVISIONS_BIT } else { 0 };
         }
         if self.pending == 0 {
             self.ready = true;
@@ -700,15 +784,21 @@ impl RoutineExecutor for ReadyRoutine {
                 goals.raise_to(ready.need.goal, GETTING_READY - i as f32 * IN_TURN);
             }
         }
+        if self.pending & PROVISIONS_BIT != 0 {
+            goals.raise_to(GoalId::Provision, GETTING_READY - READY_NEEDS.len() as f32 * IN_TURN);
+        }
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
-        let seeing_to: Vec<&str> = READY_NEEDS
+        let mut seeing_to: Vec<&str> = READY_NEEDS
             .iter()
             .enumerate()
             .filter(|(i, _)| self.pending & (1 << i) != 0)
             .map(|(_, ready)| ready.need.goal.name())
             .collect();
+        if self.pending & PROVISIONS_BIT != 0 {
+            seeing_to.push(GoalId::Provision.name());
+        }
         vec![
             ("ready to go out", if self.ready { "yes" } else { "no" }.to_string()),
             ("seeing to", if seeing_to.is_empty() { "nothing".to_string() } else { seeing_to.join(", ") }),
@@ -1371,8 +1461,20 @@ mod tests {
         Biology::new(Stats::calm().with_hunger(hunger).with_thirst(thirst).with_bladder(bladder).with_fun(100.0 - boredom))
     }
 
-    /// A scrap collector's pack: `scrap` pieces in it.
+    /// A scrap collector's pack: `scrap` pieces in it, and the meal and
+    /// the drink it keeps for a trip.
     fn pack(scrap: u8) -> Inventory {
+        let mut pack = bare_pack(scrap);
+        for (item, many) in crate::sim::brain::goals::provision::PROVISIONS {
+            for _ in 0..many {
+                assert!(pack.stow(item));
+            }
+        }
+        pack
+    }
+
+    /// [`pack`] with nothing to eat or drink in it.
+    fn bare_pack(scrap: u8) -> Inventory {
         let mut pack = Inventory::human();
         for _ in 0..scrap {
             assert!(pack.stow(ItemKind::Scrap));
@@ -1422,6 +1524,81 @@ mod tests {
     /// The goals a [`ReadyRoutine`] raised, highest first.
     fn raised(goals: &Goals) -> Vec<GoalId> {
         goals.ranked().into_iter().filter(|(_, priority)| *priority > 0.0).map(|(goal, _)| goal).collect()
+    }
+
+    /// With every need met the pocket is next: a collector with nothing to
+    /// eat or drink on it goes for provisions and is ready only once they are
+    /// in it.
+    #[test]
+    fn a_collector_with_its_needs_met_stocks_its_pocket_before_it_is_ready() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
+        collector.pack = bare_pack(0);
+        let said = collector.arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Provision]);
+        assert!(goals.priority(GoalId::Provision) > WORKING, "before the trip, like a need");
+        assert_eq!(routine.state(), (false, PROVISIONS_BIT));
+        assert!(routine.is_getting_ready(), "the job menu says so");
+        assert_eq!(
+            routine.debug_fields(),
+            [("ready to go out", "no".to_string()), ("seeing to", "provision".to_string())]
+        );
+        assert!(said.is_empty());
+
+        // On the list, so it is saved and comes back as it was.
+        let saved = super::super::routine::Routine::Ready(routine).save();
+        assert_eq!((saved.committed, saved.pending), (false, PROVISIONS_BIT as u32));
+        let mut loaded = super::super::routine::Routine::ready();
+        loaded.restore(&saved).unwrap();
+        assert_eq!(loaded.save(), saved);
+        assert!(loaded.is_getting_ready());
+
+        collector.pack = pack(0);
+        let said = collector.arrange(&mut routine, &mut goals);
+        assert!(raised(&goals).is_empty());
+        assert_eq!(routine.state(), (true, 0));
+        assert_eq!(said, [format!("{} is ready to go out for scrap metal", Uid::new(EntityType::Human, 1))]);
+    }
+
+    /// The needs come first, as they do among themselves, and a meal or a
+    /// drink taken out of the fridge for the pocket does not stand in for one
+    /// eaten.
+    #[test]
+    fn the_pocket_is_stocked_after_every_need_is_seen_to() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let mut collector = Readiness::of(needs(30.0, 40.0, 4.0, 0.0));
+        collector.pack = bare_pack(0);
+        collector.arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat], "no provisions yet");
+        collector.biology = needs(0.0, 0.0, 4.0, 0.0);
+        collector.arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Provision]);
+    }
+
+    /// Like a need, it is on the list until it is done: the worker leaving the
+    /// bin for the fridge does not drop it.
+    #[test]
+    fn stocking_the_pocket_goes_on_wherever_the_fridge_is() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
+        collector.pack = bare_pack(0);
+        collector.arrange(&mut routine, &mut goals);
+        collector.cell = ACROSS_THE_SITE;
+        collector.arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Provision]);
+    }
+
+    /// No fridge to stock it from — the goal found that out and is held off —
+    /// is no reason to stand at the bin for ever.
+    #[test]
+    fn a_pocket_nothing_can_stock_is_not_waited_for() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
+        collector.pack = bare_pack(0);
+        goals.block(GoalId::Provision);
+        collector.arrange(&mut routine, &mut goals);
+        assert!(raised(&goals).is_empty());
+        assert_eq!(routine.state(), (true, 0));
     }
 
     #[test]
@@ -1662,7 +1839,7 @@ mod tests {
         assert!(loaded.is_getting_ready());
         assert_eq!(loaded.save(), saved);
 
-        for (committed, pending) in [(false, 1 << READY_NEEDS.len()), (true, 0b1)] {
+        for (committed, pending) in [(false, 1 << (READY_NEEDS.len() + 1)), (true, 0b1)] {
             let nonsense = crate::save::pb::RoutineState { committed, pending, ..saved.clone() };
             assert!(super::super::routine::Routine::ready().restore(&nonsense).is_err(), "{committed} {pending:#b}");
         }

@@ -1,0 +1,40 @@
+{
+  "name": "a district's pet dog has an owner and a belly, stays with it and goes about the district",
+  "state": "game",
+  "timeout": 180,
+  "given": { "maps": [{ "name": "district", "district": 7 }] },
+  "open": "district",
+  "steps": [
+    { "key": "p" },
+    { "expect_speed": "paused" },
+
+    { "note": "the pets arrive after every resident, so arrival 178 of this district, which has 178 of them, is the first dog; a dog is somebody's, hungry to some degree, and its debug menu says so" },
+    { "select": 178 },
+    { "expect_selected": "dog" },
+    { "press": "debug" },
+    { "expect_text": "owner" },
+    { "expect_text": "hunger" },
+    { "expect_text": "bowel" },
+    { "press": "debug" },
+
+    { "note": "its mind: the routines it has, and where it is going to next, within sight of its owner" },
+    { "tick": 2 },
+    { "press": "brains" },
+    { "expect_text": "stay with the owner" },
+    { "expect_text": "following to" },
+    { "press": "brains" },
+
+    { "note": "a while later, the owner has walked on and the dog with it" },
+    { "tick": 1200 },
+    { "expect_selected": "dog" },
+    { "press": "brains" },
+    { "expect_text": "following to" },
+    { "press": "brains" },
+    { "press": "follow" },
+    { "key": "q" },
+    { "key": "q" },
+    { "key": "q" },
+    { "wait": 0.3 },
+    { "shot": "a pet dog going about the district with its owner" }
+  ]
+}

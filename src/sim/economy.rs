@@ -148,7 +148,7 @@ impl Sum for Money {
 }
 
 /// The items a fridge sells: what the economy menu prices.
-pub const SOLD: [ItemKind; 2] = [ItemKind::Food, ItemKind::Water];
+pub const SOLD: [ItemKind; 3] = [ItemKind::Food, ItemKind::Water, ItemKind::DogFood];
 
 /// The numbers an economy is run by. Every one is a default in
 /// `economy.yaml` ([`Tariffs::default`]), and every one can be changed while

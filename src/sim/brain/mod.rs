@@ -105,7 +105,7 @@ use super::uid::{EntityType, Uid};
 use super::walker::Walker;
 use super::{Effect, MoveOutcome};
 
-use goals::{DepartGoal, HuntGoal, ProwlGoal, WanderGoal};
+use goals::{DefecateGoal, DepartGoal, FollowGoal, HuntGoal, ProwlGoal, WanderGoal};
 use routines::{BLADDER, BOREDOM, HUNGER, THIRST};
 
 pub struct Brain {
@@ -208,16 +208,23 @@ impl Brain {
                 Routine::hospital(),
                 Routine::flee(),
                 Routine::chat(),
+                Routine::keep(),
             ],
             GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
     }
 
-    /// A dog: stays busy; wanders. Same machinery, fewer parts.
+    /// A dog: stays busy; wanders. A pet - one with an owner, which is its
+    /// companion - stays with it instead, roaming freely within range, and
+    /// relieves itself out of doors. Same machinery, fewer parts.
     pub fn dog() -> Brain {
         Brain::new(
-            [Routine::stay_busy()],
-            [Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>],
+            [Routine::stay_busy(), Routine::heel()],
+            [
+                Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
+                Box::new(FollowGoal::new()),
+                Box::new(DefecateGoal::new()),
+            ],
         )
     }
 
@@ -553,6 +560,16 @@ impl Brain {
 
     pub fn memory(&self) -> &Memory {
         &self.memory
+    }
+
+    /// Its dog, or a dog's owner.
+    pub fn companion(&self) -> Option<Uid> {
+        self.memory.companion()
+    }
+
+    /// Keep company with `companion` from now on.
+    pub fn set_companion(&mut self, companion: Uid) {
+        self.memory.set_companion(Some(companion));
     }
 
     #[cfg(test)]
@@ -1398,7 +1415,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety, keep company"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety, keep company, look after the dog"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
@@ -1414,7 +1431,7 @@ mod tests {
         saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
         let mut saved = saved.save();
         let added = saved.routines.pop().expect("a routine to leave out");
-        assert_eq!(added.name, "keep company");
+        assert_eq!(added.name, "look after the dog");
         saved.job = None;
 
         let mut brain = Brain::human();

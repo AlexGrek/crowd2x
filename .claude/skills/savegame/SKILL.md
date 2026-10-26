@@ -87,7 +87,7 @@ Where the code is:
 | --- | --- |
 | `GameState` scalars, fixtures, arena, restore order | `sim/saving.rs` (`save_world`, `save_entities` — parallel, `restore`, `RestoredEntity`) |
 | an entity kind | `GameEntity::save` (**required**, no default) + `kinds::restore` (twin of `kinds::build`, checks the uid's kind) |
-| a goal executor | `GoalExecutor::save`/`restore` (**required**); state is a `pb::Executor` variant (`Wander`, `Fetch`, `Seek`, `Clean`) |
+| a goal executor | `GoalExecutor::save`/`restore` (**required**); state is a `pb::Executor` variant (`Wander`, `Fetch`, `Seek`, `Clean`, `DogCare`) |
 | a routine | `Routine::save`/`restore` (`brain/routine.rs`) — matched by name and position |
 | a task / action | `Task::save`/`restore` (`brain/task.rs`), `Action::save`/`restore` |
 | brain parts | `brain/{mod,goal,perception,attention,memory,routines}.rs`, `goals/mod.rs` (`Seek`) |
@@ -266,6 +266,24 @@ every older save reads. **Not saved**: the wasteland's puddles (a pure function 
 `JobKind::Cleaner` = 17, `GoalId::Clean` = 25, a `pb::Executor::Clean` (tag 5: its seek, the
 found cells, when it last looked as world seconds, where it roams; refused: more than
 `goals::clean::FOUND` cells, a non-finite time), the task `"clean"` by name. The `dirt` skill.
+
+## Provisions
+
+`GoalId::Provision` = 29 (`pb::Executor::Seek`: the fridge it is going to), the tasks `"stow"` and
+`"unpack food"` / `"unpack water"` by name (no schema: `NamedTask` with no cell), and a new bit in
+`pb::RoutineState.pending` for the ready routine (the one after its four needs, `PROVISIONS_BIT`; a bit
+beyond it is refused). What is in the pocket and the hand is `pb::Inventory`, as ever. The `jobs` skill,
+"Getting ready".
+
+## Pet dogs
+
+`pb::Dog.gut` (tag 5: hunger, digesting, bowel; absent = a full belly), `pb::Memory.companion` (10: a
+person's dog or a dog's owner, a uid; refused if not one), `pb::World.feedings` (22: the dog foods given
+as the tick ended, still to be felt, `pb::Feeding { dog, by }`; **a meal in flight is saved state** like a
+wound). `GoalId::DogCare` = 26 (`pb::Executor::DogCare`, tag 6: its seek and the chases; refused: more
+than 255), `Follow` = 27 and `Defecate` = 28 (both `pb::Executor::Wander`: a spot and its retries), the
+tasks `"defecate"` and `"feed"` by name, `ItemKind::DogFood` by name. The per-tick `Bonds` index is not
+saved. The `pets` skill.
 
 ## Economy state
 

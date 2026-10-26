@@ -48,6 +48,10 @@ pub const SALVAGING: Dirt = Dirt::earth(0.15);
 /// A bladder accident leaves a wet body and a wet patch underfoot.
 pub const PEE: Dirt = Dirt { wet: 1.0, ..Dirt::CLEAN };
 
+/// What a dog leaves on the street (`brain::tasks::Defecate`): well over
+/// what a cleaner takes notice of (`brain::goals::clean::DIRTY`).
+pub const DROPPING: Dirt = Dirt { dirt: 0.6, wet: 0.2, ..Dirt::CLEAN };
+
 /// Wetness lost on each whole world hour: a saturated patch dries in four.
 pub const EVAPORATION_PER_HOUR: f32 = 0.25;
 

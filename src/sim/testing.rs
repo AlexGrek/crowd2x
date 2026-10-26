@@ -135,11 +135,16 @@ impl World {
         self.facilities.chats.set(uid, chatter);
         let smalltalker = if away { None } else { entity.smalltalker() };
         self.facilities.smalltalks.set(uid, smalltalker);
+        // Bonded or not, the same way: the dog's owner, or the owner's dog,
+        // a test stands in the world with `bonds.set`.
+        let bond = if entity.is_dead() { None } else { entity.bond(&self.ctx()) };
+        self.facilities.bonds.set(uid, bond);
         let effect = entity.react(&self.ctx(), outcome);
         self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();
         super::soiling::settle(entity, &mut self.facilities, &self.log);
         self.facilities.wounds.begin_tick();
+        self.facilities.feedings.begin_tick();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         self.facilities.doors.advance(self.dt, &self.occupancy);
         self.facilities.fridges.advance(self.dt * super::clock::TIME_SCALE);

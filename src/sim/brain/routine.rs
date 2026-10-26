@@ -38,7 +38,7 @@ use crate::sim::job::Job;
 
 use super::goal::Goals;
 use super::memory::Memory;
-use super::routines::{ChatRoutine, Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
+use super::routines::{ChatRoutine, HeelRoutine, KeepRoutine, Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
 use super::routines::{DepartRoutine, FleeRoutine, HuntRoutine, ProwlRoutine};
 
 #[cfg(test)]
@@ -102,6 +102,10 @@ pub enum Routine {
     Prowl(ProwlRoutine),
     /// See a chat through (a person's).
     Chat(ChatRoutine),
+    /// Feed the dog it keeps when it is hungry (a person's).
+    Keep(KeepRoutine),
+    /// Stay with the owner, and go when it must (a pet dog's).
+    Heel(HeelRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -165,6 +169,16 @@ impl Routine {
         Routine::Chat(ChatRoutine)
     }
 
+    /// Feed the dog it keeps, when it is hungry.
+    pub const fn keep() -> Routine {
+        Routine::Keep(KeepRoutine)
+    }
+
+    /// Stay with the owner, and relieve itself out of doors.
+    pub const fn heel() -> Routine {
+        Routine::Heel(HeelRoutine)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
@@ -179,6 +193,8 @@ impl Routine {
             Routine::Depart(routine) => routine.name(),
             Routine::Prowl(routine) => routine.name(),
             Routine::Chat(routine) => routine.name(),
+            Routine::Keep(routine) => routine.name(),
+            Routine::Heel(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -199,6 +215,8 @@ impl Routine {
             Routine::Depart(routine) => routine.arrange(ctx, goals),
             Routine::Prowl(routine) => routine.arrange(ctx, goals),
             Routine::Chat(routine) => routine.arrange(ctx, goals),
+            Routine::Keep(routine) => routine.arrange(ctx, goals),
+            Routine::Heel(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -218,6 +236,8 @@ impl Routine {
             Routine::Depart(routine) => routine.debug_fields(),
             Routine::Prowl(routine) => routine.debug_fields(),
             Routine::Chat(routine) => routine.debug_fields(),
+            Routine::Keep(routine) => routine.debug_fields(),
+            Routine::Heel(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -242,6 +262,8 @@ impl Routine {
             | Routine::Prowl(ProwlRoutine) => (false, 0),
             // The chat is in its memory.
             Routine::Chat(ChatRoutine) => (false, 0),
+            // The dog it keeps, and the owner it follows, are in its memory.
+            Routine::Keep(KeepRoutine) | Routine::Heel(HeelRoutine) => (false, 0),
             Routine::Work(routine) => (routine.is_on_shift(), 0),
             Routine::Ready(routine) => {
                 let (ready, pending) = routine.state();
@@ -270,6 +292,7 @@ impl Routine {
             Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
             Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital => {}
             Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) | Routine::Chat(_) => {}
+            Routine::Keep(_) | Routine::Heel(_) => {}
             #[cfg(test)]
             Routine::Dial(_) => {}
         }

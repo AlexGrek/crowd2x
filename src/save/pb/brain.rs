@@ -163,6 +163,10 @@ pub struct Memory {
     /// talk; absent if it never has.
     #[prost(double, optional, tag = "9")]
     pub smalltalked: Option<f64>,
+    /// Its dog, or a dog's owner (`Memory::companion`). Absent — and in every
+    /// save from before there were pets — is none.
+    #[prost(fixed64, optional, tag = "10")]
+    pub companion: Option<u64>,
 }
 
 /// A small talk one person is in, as it remembers it.
@@ -309,7 +313,7 @@ pub struct ExecutorState {
     /// `GoalId::number`.
     #[prost(int32, tag = "1")]
     pub goal: i32,
-    #[prost(oneof = "Executor", tags = "2, 3, 4, 5")]
+    #[prost(oneof = "Executor", tags = "2, 3, 4, 5, 6")]
     pub state: Option<Executor>,
 }
 
@@ -326,6 +330,19 @@ pub enum Executor {
     /// A cleaner's shift (`goals::CleanGoal`).
     #[prost(message, tag = "5")]
     Clean(Clean),
+    /// An owner seeing to its dog's dinner (`goals::DogCareGoal`).
+    #[prost(message, tag = "6")]
+    DogCare(DogCare),
+}
+
+/// Seeing to a dog's dinner: the fridge it is fetching dog food from, and how
+/// many times it has gone after the dog and not caught it.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DogCare {
+    #[prost(message, optional, tag = "1")]
+    pub seek: Option<Seek>,
+    #[prost(uint32, tag = "2")]
+    pub chases: u32,
 }
 
 /// A cleaner's shift: the cell it is cleaning, what its last look over the

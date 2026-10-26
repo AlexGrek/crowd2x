@@ -163,6 +163,7 @@ pub mod log;
 pub mod occupancy;
 pub mod panics;
 pub mod path;
+pub mod pets;
 pub mod playzone;
 pub mod property;
 pub mod refuge;
@@ -578,6 +579,9 @@ pub struct GameState {
     /// Who is making small talk, slot for slot, as the think step found
     /// them: gathered into [`relationships::Smalltalks`] like `chatters`.
     smalltalkers: Vec<Option<relationships::Smalltalker>>,
+    /// Who is bonded to whom, slot for slot, as the think step found them:
+    /// gathered into [`pets::Bonds`] like `chatters`.
+    bonders: Vec<Option<pets::Bond>>,
     /// Cells the far route searches expanded last tick, all of them — what
     /// the route budget bounds ([`react_step`]).
     route_work: usize,
@@ -632,6 +636,7 @@ impl GameState {
             effects: Vec::new(),
             chatters: Vec::new(),
             smalltalkers: Vec::new(),
+            bonders: Vec::new(),
             route_work: 0,
         }
     }
@@ -1119,12 +1124,14 @@ impl GameState {
             self.effects.resize(slot as usize + 1, Effect::None);
             self.chatters.resize(slot as usize + 1, None);
             self.smalltalkers.resize(slot as usize + 1, None);
+            self.bonders.resize(slot as usize + 1, None);
         }
         self.intents[slot as usize] = Intent::Idle;
         self.moves[slot as usize] = MoveOutcome::Idle;
         self.effects[slot as usize] = Effect::None;
         self.chatters[slot as usize] = None;
         self.smalltalkers[slot as usize] = None;
+        self.bonders[slot as usize] = None;
 
         // Takes the cell if it is free, and leaves whoever is already there in
         // possession if it is not — an entity is placed where it was asked
@@ -1184,7 +1191,55 @@ impl GameState {
         if arrived > 0 {
             self.log.push(format!("{arrived} moved in"));
         }
+        // A town keeps pets, once everybody is in: after the last arrival, so
+        // nobody's roll depends on whether somebody before it has a dog.
+        if self.facilities.properties.len() >= feature::TOWN_HOMES {
+            self.adopt_pets();
+        }
         arrived
+    }
+
+    /// Give a pet dog to one resident in [`pets::ONE_IN`] who has a home, by
+    /// the random half of their id: the same ones for the same seed. In
+    /// the order they arrived.
+    fn adopt_pets(&mut self) {
+        for owner in self.entities.in_spawn_order() {
+            let homed = self.entities.get(owner).is_some_and(|entity| {
+                entity.kind() == Some(EntityType::Human) && entity.body().home().is_some()
+            });
+            if homed && owner.body() % pets::ONE_IN == 0 {
+                self.adopt_dog(owner);
+            }
+        }
+    }
+
+    /// Give `owner` a pet dog: a new dog in a free cell beside it, bonded to
+    /// it, with its owner's key (so it goes where its owner may), and bonded
+    /// back. `None`, and nothing done, for somebody who is not a living person
+    /// or already keeps a dog, or with no free cell within three of it.
+    pub fn adopt_dog(&mut self, owner: Uid) -> Option<Uid> {
+        let entity = self.entities.get(owner)?;
+        if entity.kind() != Some(EntityType::Human) || entity.is_dead() || entity.companion().is_some() {
+            return None;
+        }
+        let (at, key) = (entity.center_position(), entity.body().home());
+        let beside = (1..=3).find_map(|reach: i32| {
+            (-reach..=reach)
+                .flat_map(|dy| (-reach..=reach).map(move |dx| (dx, dy)))
+                .filter(|&(dx, dy)| dx.abs().max(dy.abs()) == reach)
+                .map(|(dx, dy)| at.offset(dx, dy))
+                .find(|&cell| self.map.is_passable(cell) && !self.occupancy.is_occupied(cell))
+        })?;
+        let dog = self.spawn(EntityType::Dog, beside);
+        if let Some(entity) = self.entities.get_mut(dog) {
+            entity.set_companion(owner);
+            entity.body_mut().set_home(key);
+        }
+        if let Some(entity) = self.entities.get_mut(owner) {
+            entity.set_companion(dog);
+        }
+        self.log.related(owner, dog, format!("{owner} adopted the dog {dog}"));
+        Some(dog)
     }
 
     /// Hand somebody who has just arrived the nearest bed nobody owns, if it
@@ -1325,6 +1380,9 @@ impl GameState {
             }
             if let Some(smalltalker) = self.smalltalkers.get_mut(slot as usize) {
                 *smalltalker = None;
+            }
+            if let Some(bonder) = self.bonders.get_mut(slot as usize) {
+                *bonder = None;
             }
         }
         match self.entities.remove(uid) {
@@ -1712,6 +1770,7 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         effects,
         chatters,
         smalltalkers,
+        bonders,
         route_work,
         ..
     } = &mut *state;
@@ -1725,13 +1784,15 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
             && moves.len() >= table.capacity()
             && effects.len() >= table.capacity()
             && chatters.len() >= table.capacity()
-            && smalltalkers.len() >= table.capacity(),
-        "the slot buffers ({}, {}, {}, {}, {}) are shorter than the entity table ({})",
+            && smalltalkers.len() >= table.capacity()
+            && bonders.len() >= table.capacity(),
+        "the slot buffers ({}, {}, {}, {}, {}, {}) are shorter than the entity table ({})",
         intents.len(),
         moves.len(),
         effects.len(),
         chatters.len(),
         smalltalkers.len(),
+        bonders.len(),
         table.capacity()
     );
 
@@ -1742,12 +1803,16 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
         intents,
         chatters,
         smalltalkers,
+        bonders,
     );
     // Who is chatting with whom, as the think step found everybody: what
     // react asks to know who is asking it for a chat and where a partner is.
     // Small talk the same way.
     facilities.chats.rebuild(&chatters[..table.capacity()]);
     facilities.smalltalks.rebuild(&smalltalkers[..table.capacity()]);
+    // Who is bonded to whom, the same way: where an owner is for its dog to
+    // stay by, and how hungry the dog is.
+    facilities.bonds.rebuild(&bonders[..table.capacity()]);
 
     move_step(
         &mut table,
@@ -1807,21 +1872,24 @@ const PARALLEL_AT: usize = 64;
 /// Each entity also says what chat and what small talk it is in, if any,
 /// into `chatters` and `smalltalkers` — asked here because this is the one
 /// walk of the whole crowd that already has every unit in cache
-/// ([`relationships::Chats`], [`relationships::Smalltalks`]).
+/// ([`relationships::Chats`], [`relationships::Smalltalks`]), and who it is
+/// bonded to if it is somebody's pet or has one ([`pets::Bonds`]).
 fn think_step(
     table: &FrozenEntities<'_>,
     ctx: &Think<'_>,
     intents: &mut [Intent],
     chatters: &mut [Option<relationships::Chatter>],
     smalltalkers: &mut [Option<relationships::Smalltalker>],
+    bonders: &mut [Option<pets::Bond>],
 ) {
     let intents = &mut intents[..table.capacity()];
     let chatters = &mut chatters[..table.capacity()];
     let smalltalkers = &mut smalltalkers[..table.capacity()];
+    let bonders = &mut bonders[..table.capacity()];
     if table.len() < PARALLEL_AT {
         for (slot, entity) in table.iter_slots() {
             let slot = slot as usize;
-            (intents[slot], chatters[slot], smalltalkers[slot]) = think_for(entity, ctx);
+            (intents[slot], chatters[slot], smalltalkers[slot], bonders[slot]) = think_for(entity, ctx);
         }
         return;
     }
@@ -1829,11 +1897,12 @@ fn think_step(
         .par_iter_mut()
         .zip(chatters.par_iter_mut())
         .zip(smalltalkers.par_iter_mut())
+        .zip(bonders.par_iter_mut())
         .zip(table.par_iter_slots())
-        .for_each(|(((intent, chatter), smalltalker), entity)| match entity {
-            Some(entity) => (*intent, *chatter, *smalltalker) = think_for(entity, ctx),
+        .for_each(|((((intent, chatter), smalltalker), bonder), entity)| match entity {
+            Some(entity) => (*intent, *chatter, *smalltalker, *bonder) = think_for(entity, ctx),
             // A hole talks with nobody, whoever left it.
-            None => (*chatter, *smalltalker) = (None, None),
+            None => (*chatter, *smalltalker, *bonder) = (None, None, None),
         });
 }
 
@@ -1850,11 +1919,15 @@ fn think_step(
 fn think_for(
     entity: &dyn GameEntity,
     ctx: &Think<'_>,
-) -> (Intent, Option<relationships::Chatter>, Option<relationships::Smalltalker>) {
-    if entity.is_frozen() || entity.is_dead() {
-        (Intent::Idle, None, None)
+) -> (Intent, Option<relationships::Chatter>, Option<relationships::Smalltalker>, Option<pets::Bond>) {
+    if entity.is_dead() {
+        (Intent::Idle, None, None, None)
+    } else if entity.is_frozen() {
+        // Held still, and still where it stands: a dog keeps its frozen
+        // owner's place, and the owner its dog's.
+        (Intent::Idle, None, None, entity.bond(ctx))
     } else {
-        (entity.think(ctx), entity.chatter(), entity.smalltalker())
+        (entity.think(ctx), entity.chatter(), entity.smalltalker(), entity.bond(ctx))
     }
 }
 
@@ -2166,6 +2239,8 @@ fn world_step(
     }
     // Last tick's bites have been felt, in the reactions just run.
     facilities.wounds.begin_tick();
+    // ...and so have last tick's meals served, by the dogs fed.
+    facilities.feedings.begin_tick();
     for (slot, effect) in effects.iter_mut().enumerate() {
         let asked = std::mem::take(effect);
         if asked != Effect::None
@@ -4028,7 +4103,8 @@ mod tests {
             let district = crate::map::district::generate(seed);
             let mut state = GameState::new(district.map.clone(), seed);
             assert_eq!(state.spawn_from_spawners(), district.residents(), "seed {seed}");
-            assert_eq!(state.len(), district.residents());
+            let dogs = state.entities().iter().filter(|entity| entity.kind() == Some(EntityType::Dog)).count();
+            assert_eq!(state.len() - dogs, district.residents(), "seed {seed}: the residents, and a dog for some of them");
             assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
             // The bank's computers are the district's desks, and nobody's
             // house has one: every desk is given out, every one in the bank;
@@ -4445,6 +4521,124 @@ mod tests {
         // 08:00, 08:27, ... 11:36. The evening cleaners are not on yet.
         let looks = lines.iter().filter(|line| line.contains("looked over the district")).count();
         assert_eq!(looks, 9);
+    }
+
+    #[test]
+    fn adopting_a_dog_bonds_it_to_its_owner_both_ways() {
+        let mut state = world();
+        let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+        let dog = state.adopt_dog(owner).expect("a dog");
+        assert_eq!(dog.kind(), Some(EntityType::Dog));
+        assert_eq!(state.entities().get(owner).unwrap().companion(), Some(dog));
+        assert_eq!(state.entities().get(dog).unwrap().companion(), Some(owner));
+        let beside = state.entities().get(dog).unwrap().center_position().chebyshev_distance(Point::new(5, 5));
+        assert_eq!(beside, 1, "in the cell next to its owner");
+        assert_eq!(state.adopt_dog(owner), None, "one dog each");
+        assert_eq!(state.adopt_dog(dog), None, "a dog does not keep a dog");
+        assert_eq!(state.adopt_dog(Uid::new(EntityType::Human, 12345)), None, "nobody to adopt it");
+    }
+
+    #[test]
+    fn a_dog_is_not_adopted_where_there_is_no_room_for_it() {
+        let mut map = Map::new(Size::new(9, 9), WALL);
+        map.set_terrain(Point::new(4, 4), FLOOR);
+        let mut state = GameState::new(map, 1);
+        let owner = state.spawn(EntityType::Human, Point::new(4, 4));
+        assert_eq!(state.adopt_dog(owner), None);
+        assert_eq!(state.len(), 1);
+        assert_eq!(state.entities().get(owner).unwrap().companion(), None);
+    }
+
+    /// One resident in eight has a dog, beside it, with its key; nobody has two.
+    #[test]
+    fn a_district_gives_some_of_its_residents_a_pet_dog_beside_them() {
+        for seed in [0, 7, 42] {
+            let district = crate::map::district::generate(seed);
+            let mut state = GameState::new(district.map.clone(), seed);
+            state.spawn_from_spawners();
+            let dogs: Vec<Uid> = state
+                .entities()
+                .iter()
+                .filter(|entity| entity.kind() == Some(EntityType::Dog))
+                .map(|entity| entity.uid())
+                .collect();
+            let residents = district.residents();
+            assert!(
+                (residents / 16..=residents / 4).contains(&dogs.len()),
+                "seed {seed}: {} dogs for {residents} residents",
+                dogs.len()
+            );
+            let mut owners = std::collections::BTreeSet::new();
+            for dog in dogs {
+                let pet = state.entities().get(dog).unwrap();
+                let owner = pet.companion().expect("a pet has an owner");
+                let keeper = state.entities().get(owner).unwrap();
+                assert_eq!(keeper.kind(), Some(EntityType::Human), "seed {seed}");
+                assert_eq!(keeper.companion(), Some(dog), "seed {seed}: bonded both ways");
+                assert!(keeper.body().home().is_some(), "seed {seed}: an owner has a home");
+                assert_eq!(pet.body().home(), keeper.body().home(), "seed {seed}: a dog goes where its owner may");
+                assert!(pet.center_position().chebyshev_distance(keeper.center_position()) <= 3, "seed {seed}");
+                assert!(owners.insert(owner), "seed {seed}: two dogs for one owner");
+            }
+        }
+    }
+
+    /// A 12x12 floor with a fridge at (6, 0) that works: on a powered line
+    /// along the top edge, off a transformer at (3, 0).
+    fn with_a_powered_fridge() -> (GameState, Point) {
+        let mut map = Map::new(Size::new(12, 12), FLOOR);
+        for (x, c) in "-B=B=B-".chars().enumerate() {
+            map.set_grid(crate::map::GridLayer::Power, Point::new(x as i32, 0), crate::map::GridLayer::Power.value_of(c).unwrap());
+        }
+        for (name, x) in [("transformer", 3), ("fridge", 6)] {
+            map.add_object(
+                ObjectLayer::Props,
+                crate::map::Object {
+                    at: Point::new(x * crate::map::PIXELS_PER_CELL + 24, 24),
+                    kind: crate::map::ObjectKind::new(name),
+                },
+            );
+        }
+        let state = GameState::new(map, 1);
+        let fridge = Point::new(6, 0);
+        assert!(state.features().has(FeatureKind::Food, fridge), "the fridge works");
+        (state, fridge)
+    }
+
+    /// The whole of it in one small world: a hungry dog is bought a dinner
+    /// out of the fridge by its owner and fed it, and hours later, the dinner
+    /// having passed through, fouls the street.
+    #[test]
+    fn a_hungry_dog_is_fed_by_its_owner_and_hours_later_fouls_the_street() {
+        let (mut state, _fridge) = with_a_powered_fridge();
+        let owner = state.spawn(EntityType::Human, Point::new(3, 6));
+        let mut input = Input::new();
+        for process in ProcessId::ALL {
+            input.set_process(owner, process, false);
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        let dog = state.adopt_dog(owner).unwrap();
+        state.entity_mut(dog).unwrap().starve_to(90.0);
+        let cash = |state: &GameState| state.facilities.economy.account(owner).unwrap().cash;
+        let before = cash(&state);
+
+        let mut lines = Vec::new();
+        let said = |lines: &[String], what: &str| lines.iter().filter(|line| line.contains(what)).count();
+        for _ in 0..80 {
+            run(&mut state, 100);
+            lines.extend(state.log.drain());
+            if said(&lines, "fouled the street") > 0 {
+                break;
+            }
+        }
+        let fed = said(&lines, &format!("{owner} fed {dog}"));
+        let paid = said(&lines, "paid $1.00 for dog food");
+        assert!(fed >= 1, "never fed: {lines:?}");
+        assert_eq!(paid, fed, "a dollar a dinner");
+        assert_eq!(before - cash(&state), economy::Money::dollars(paid as i64));
+        assert!(said(&lines, "fouled the street") >= 1, "never fouled the street by {}", state.clock());
+        let stained = state.map.size().points().any(|cell| state.dirt().at(cell).overall() > 0.15);
+        assert!(stained, "the street is clean");
     }
 
     #[test]

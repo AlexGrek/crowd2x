@@ -1,6 +1,6 @@
 ---
 name: dirt
-description: Dirt in crowd2x - the four contaminants (dirt, blood, wet, burns) on bodies and on the ground (sim::dirt, Dirt, DirtLayer, dense on the site and chunked in the wasteland), the exchange a footstep makes and the TRACE that ends a trail, where dirt comes from (work in the earth and the scrap - sowing, tending, harvesting, planting flowers, salvaging; the wasteland's constant puddles; blood from bites and pee from a critical bladder in sim::soiling; outdoor relief), wetness drying by the hour, the cleaners who look over the district every 27 world minutes and mop up public ground (CleanGoal, the Clean task, Effect::Clean, FeatureKind::District), how dirt is drawn (game::dirt), saved and set from QA, and the tests. Maps every concept to the file that owns it. Use when changing dirt, stains, trails, puddles, who gets dirty or how, cleaning or the cleaners, or the dirt dots on screen.
+description: Dirt in crowd2x - the four contaminants (dirt, blood, wet, burns) on bodies and on the ground (sim::dirt, Dirt, DirtLayer, dense on the site and chunked in the wasteland), the exchange a footstep makes and the TRACE that ends a trail, where dirt comes from (work in the earth and the scrap - sowing, tending, harvesting, planting flowers, salvaging; the wasteland's constant puddles; blood from bites and pee from a critical bladder in sim::soiling; outdoor relief, and a pet dog's droppings), wetness drying by the hour, the cleaners who look over the district every 27 world minutes and mop up public ground (CleanGoal, the Clean task, Effect::Clean, FeatureKind::District), how dirt is drawn (game::dirt), saved and set from QA, and the tests. Maps every concept to the file that owns it. Use when changing dirt, stains, trails, puddles, who gets dirty or how, cleaning or the cleaners, or the dirt dots on screen.
 ---
 
 # Dirt
@@ -44,6 +44,9 @@ new cell), `sim::soiling::settle` (the world step), `effect::apply` (`Pee`, `Cle
   bite soils victim and cell with blood (damage / 100); a bladder at 100 off a toilet wets
   body and cell (`PEE`). Outside the district a bursting unit walks 3-6 cells and pees on the
   ground (`RelieveGoal`, `Task::Pee`, `Effect::Pee`), wetting only the ground.
+- **Dogs** (`pets` skill): a pet dog that must go, out of doors on public ground, leaves `DROPPING`
+  (0.6 earth, 0.2 wet) on the cell it squats in (`Effect::Defecate`, `GameEntity::defecate`) - well over
+  the cleaners' 0.15, so they mop it up; a dog tracks it on like anything else.
 - **Drying**: on each whole world hour `DirtLayer::evaporate` takes `EVAPORATION_PER_HOUR`
   (0.25) wetness off every stored cell, on and off the site. Earth, blood and burns stay.
 

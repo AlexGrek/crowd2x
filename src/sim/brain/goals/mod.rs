@@ -17,6 +17,14 @@ pub mod bury;
 pub mod chat;
 pub mod clean;
 pub use clean::CleanGoal;
+pub mod defecate;
+pub mod dog_care;
+pub mod follow;
+pub mod provision;
+pub use defecate::DefecateGoal;
+pub use dog_care::DogCareGoal;
+pub use follow::FollowGoal;
+pub use provision::ProvisionGoal;
 pub mod collect;
 pub mod cook;
 pub use cook::CookGoal;
@@ -126,6 +134,14 @@ pub(super) fn nearest_store(ctx: &GoalCtx<'_>, kind: FeatureKind, stocked: bool)
     ctx.think.features.nearest_where(kind, here, |cell| {
         ctx.think.may_use(cell, key) && !places.contains(cell, now) && (!stocked || ctx.think.bins.stored(cell) > 0)
     })
+}
+
+/// Whether `item` is to be had from the pocket and is not to be had from a
+/// fridge: the unit is out of the district, with one stowed
+/// ([`ProvisionGoal`] put it there). A meal or a drink eaten out there is
+/// not a walk home.
+pub(super) fn pocket_has(ctx: &GoalCtx<'_>, item: crate::sim::item::ItemKind) -> bool {
+    !ctx.think.map.site().contains(ctx.body.center_position()) && ctx.inventory.is_some_and(|pack| pack.count(item) > 0)
 }
 
 /// Where a visit *starts*: [`nearest_in_reach`], or — when it has given up on

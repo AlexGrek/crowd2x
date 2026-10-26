@@ -71,6 +71,22 @@ pub struct Dog {
     pub facing: i32,
     #[prost(message, optional, tag = "4")]
     pub identity: Option<Identity>,
+    /// How hungry it is and what it has yet to pass (`crate::sim::pets::Gut`).
+    /// Absent, in a save from before pets: a full belly.
+    #[prost(message, optional, tag = "5")]
+    pub gut: Option<Gut>,
+}
+
+/// A dog's belly (`crate::sim::pets::Gut`): hunger, what is still being
+/// digested and the bowel, each 0 to 100.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Gut {
+    #[prost(float, tag = "1")]
+    pub hunger: f32,
+    #[prost(float, tag = "2")]
+    pub digesting: f32,
+    #[prost(float, tag = "3")]
+    pub bowel: f32,
 }
 
 /// A deathdog: a body, a mind, which way it faces and its background

@@ -46,6 +46,7 @@ wages:
 # bought, and cost nothing.
 prices:
   food: 1           # a meal out of a fridge
+  dog food: 1       # a pet's dinner out of a fridge
   water: 0          # a drink out of a fridge
   scrap metal: 0
   body: 0

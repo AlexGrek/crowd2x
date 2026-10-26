@@ -1,0 +1,58 @@
+{
+  "name": "a selected human's stats are progress bars down the right edge",
+  "state": "game",
+  "given": {
+    "maps": [
+      { "name": "yard", "file": "qa/fixtures/yard.json" }
+    ]
+  },
+  "open": "yard",
+  "steps": [
+    { "note": "a human, paused so it stays put" },
+    { "key": "p" },
+    { "spawn": { "kind": "human", "x": 7, "y": 4 } },
+    { "tick": 1 },
+
+    { "note": "nobody selected, so nobody's stats are on screen" },
+    { "expect_selected": null },
+    { "shot": "nobody selected" },
+
+    { "note": "selecting the human puts its nine stats down the right edge, one bar each, the bottom bar keeping to the left of them" },
+    { "select": 0 },
+    { "expect_selected": "human" },
+    { "tick": 1 },
+    { "expect_text": "health" },
+    { "expect_text": "thirst" },
+    { "expect_text": "bladder" },
+    { "expect_text": "stamina" },
+    { "expect_text": "satisfaction" },
+    { "expect_text": "mental health" },
+    { "expect_text": "attention" },
+    { "shot": "a selected human with its needs as bars" },
+
+    { "note": "the bars are live: a day passes and somebody who has not eaten is hungrier" },
+    { "press": "faster" },
+    { "press": "faster" },
+    { "press": "faster" },
+    { "key": "p" },
+    { "tick": 3000 },
+    { "shot": "the same bars a while later" },
+
+    { "note": "a menu opens over the panel rather than under it" },
+    { "press": "debug" },
+    { "shot": "the debug menu over the bars" },
+    { "press": "debug" },
+
+    { "note": "a dog has none of it, and the bar goes back to the width it has for a dog" },
+    { "spawn": { "kind": "dog", "x": 8, "y": 2 } },
+    { "tick": 1 },
+    { "select": 1 },
+    { "expect_selected": "dog" },
+    { "shot": "a dog selected: no needs panel" },
+
+    { "note": "closing the selection takes the bars away with it" },
+    { "select": 0 },
+    { "press": "close" },
+    { "expect_selected": null }
+  ]
+}

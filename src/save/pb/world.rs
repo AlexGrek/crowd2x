@@ -76,6 +76,19 @@ pub struct World {
     /// Ground contamination; older worlds start clean.
     #[prost(message, repeated, tag = "21")]
     pub dirt: Vec<DirtCell>,
+    /// The dog foods given as the tick ended, for the dogs to feel next tick
+    /// (`crate::sim::pets::Feedings`). Older saves have none.
+    #[prost(message, repeated, tag = "22")]
+    pub feedings: Vec<Feeding>,
+}
+
+/// One dog food given to a dog (`crate::sim::pets::Feeding`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Feeding {
+    #[prost(fixed64, tag = "1")]
+    pub dog: u64,
+    #[prost(fixed64, tag = "2")]
+    pub by: u64,
 }
 
 /// One rule relationships are run by, under its name in `relationships.yaml`.

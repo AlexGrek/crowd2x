@@ -107,7 +107,8 @@ live, with a `dismiss` / `hire` button that sends `Command::Dismiss` / `Command:
 `jobs` skill). Clicking empty ground, or `close`, selects nobody and the panel goes with
 them. The row of menu buttons wraps at `BUTTON_ROW` (270 canvas pixels), so with
 `relationship` it is two rows and never runs off the canvas — the bar is taller than it was,
-reaching up to about y 105 with nobody's menu open.
+reaching up to about y 105 with nobody's menu open. A human's bar wraps at 190 instead, to leave
+the right edge to its needs (below).
 
 **What a human has on is `GameEntity::worn(clock)`**, not `clothing()`: its job's uniform while
 the job is due, its own outfit otherwise. `actors::look_from(entity, clock)` dresses a sprite
@@ -138,6 +139,28 @@ going on or off with a shift), and the panel's rebuild watches own and worn clot
 
 Nothing here is `Focusable`, for the reason the corners are not (below), and every button
 still answers to `Activated` so a QA script can press it by name.
+
+### A human's needs down the right edge (`game/needs.rs`, `NeedsPlugin`)
+
+While a **human** is selected (`needs::shows`: kind human with a biology; a dog gets none) a
+panel of progress bars stands on the right edge, bottom right, one row per `Stats` field:
+health, hunger, thirst, bladder, fun, stamina, satisfaction, mental health, attention
+(`Need::ALL`, a test holds it to `Stats::named()`). **Every bar reads the same way up — how well
+the stat is met, 0 to 100:** hunger, thirst and bladder rise towards trouble so they are shown as
+`100 - stat`, attention (0-1) is times 100, the rest as they are. A full green bar is never a
+problem; the colour steps at 50 (amber) and 25 (red, the point past which a need is urgent). The
+name and the percentage sit over the bar. A new `Stats` field is a `Need` variant (and its
+`met`).
+
+Like the unit bar it is **built once** (`rebuild`, when the selected `Uid` changes or stops being a
+human) and **written every frame** (`update_bars`: fill width in whole canvas pixels, colour, the
+number, only when they differ). It absorbs clicks, sits under the unit menus (`GlobalZIndex(1)`),
+and is not `Focusable`. **The unit bar makes room for it**: for a human the bar gets a right margin of
+`needs::GUTTER` and wraps its buttons at `BUTTON_ROW_BESIDE_NEEDS` (190) instead of `BUTTON_ROW`
+(270), still two rows, so the bar centres in the canvas left of the panel — which moves the
+`follow` target and every other bar button left by about 40 canvas pixels for a human, so a QA
+click on the bar by coordinate must account for that (`press` by name does not). QA
+`needs_panel` reads the nine labels with `expect_text` and takes shots, a dog's included.
 
 ### Flipping a light switch (`selection::pick`, `game/props.rs`)
 

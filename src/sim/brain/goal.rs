@@ -111,6 +111,21 @@ catalogue! {
         /// with none to find ([`CleanGoal`](super::goals::CleanGoal)): a
         /// cleaner's shift.
         Clean = 25 => GoalDef { name: "clean", emoji: "🧹", executor: Some(|| Box::new(goals::CleanGoal::new())) },
+        /// Feed one's pet dog: dog food out of a fridge, given to the dog
+        /// ([`DogCareGoal`](super::goals::DogCareGoal)). Over wandering and
+        /// under a night in bed and every need committed to.
+        DogCare = 26 => GoalDef { name: "dog care", emoji: "🦴", executor: Some(|| Box::new(goals::DogCareGoal::new())) },
+        /// A pet dog's: stay with its owner, roaming freely within range
+        /// ([`FollowGoal`](super::goals::FollowGoal)). No executor here, so
+        /// no person carries one: `Brain::dog` builds it.
+        Follow = 27 => GoalDef { name: "follow", emoji: "🐕", executor: None },
+        /// A pet dog's: empty its bowel out of doors
+        /// ([`DefecateGoal`](super::goals::DefecateGoal)).
+        Defecate = 28 => GoalDef { name: "defecate", emoji: "💩", executor: None },
+        /// Fill the pocket with a meal and a drink for a trip out
+        /// ([`ProvisionGoal`](super::goals::ProvisionGoal)): part of getting
+        /// ready, for the jobs worked out in the wasteland.
+        Provision = 29 => GoalDef { name: "provision", emoji: "🎒", executor: Some(|| Box::new(goals::ProvisionGoal::new())) },
     }
 }
 
@@ -662,7 +677,11 @@ mod tests {
                 (GoalId::Fish, 0.0),
                 (GoalId::Chat, 0.0),
                 (GoalId::Decorate, 0.0),
-                (GoalId::Clean, 0.0)
+                (GoalId::Clean, 0.0),
+                (GoalId::DogCare, 0.0),
+                (GoalId::Follow, 0.0),
+                (GoalId::Defecate, 0.0),
+                (GoalId::Provision, 0.0)
             ]
         );
     }

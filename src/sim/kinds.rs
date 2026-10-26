@@ -38,6 +38,7 @@ use super::entity::{Body, GameEntity, Think};
 use super::identity::Identity;
 use super::inventory::Inventory;
 use super::job::Job;
+use super::pets::{Bond, Gut};
 use super::relationships::{Chat, Chatter, Relations, Smalltalk, Smalltalker};
 use super::item::ItemKind;
 use super::property::PropertyId;
@@ -336,6 +337,10 @@ impl GameEntity for Human {
                 self.walk.body().home().map_or_else(|| "nowhere".to_string(), |home| home.to_string()),
             ),
         ];
+        // Near the top, where the debug menu shows it.
+        if let Some(dog) = self.brain.companion() {
+            fields.push(("dog", dog.to_string()));
+        }
         fields.extend(self.walk.debug_fields());
         fields.extend(self.inventory.debug_fields());
         fields.extend(self.biology.debug_fields());
@@ -442,6 +447,24 @@ impl GameEntity for Human {
         Some(self.identity.name().to_string())
     }
 
+    /// Its dog, where it stands: what the dog stays by. None for the dead.
+    fn bond(&self, _ctx: &Think<'_>) -> Option<Bond> {
+        if self.is_dead() {
+            return None;
+        }
+        let body = self.walk.body();
+        Some(Bond { who: body.uid(), with: self.brain.companion()?, cell: body.center_position(), hunger: 0.0, bowel: 0.0 })
+    }
+
+    fn companion(&self) -> Option<Uid> {
+        self.brain.companion()
+    }
+
+    fn set_companion(&mut self, companion: Uid) -> bool {
+        self.brain.set_companion(companion);
+        true
+    }
+
     fn save(&self) -> pb::Kind {
         let Human { walk, brain, biology, identity, inventory, talents, schedule, clothing } = self;
         pb::Kind::Human(pb::Human {
@@ -502,16 +525,31 @@ pub struct Dog {
     /// Name and gender, rolled once at spawn — [`Identity::pet`], not
     /// [`Identity::human`]: a dog gets a first name and no surname.
     identity: Identity,
+    /// How hungry it is and what it has yet to pass: a belly, and no more of
+    /// a body than that ([`super::pets`]). Its owner feeds it.
+    gut: Gut,
 }
 
 impl Dog {
     pub fn new(uid: Uid, cell: Point, facing: Facing, rng: &mut SmallRng) -> Dog {
-        Dog {
-            walk: Walker::new(uid, cell, DOG_SPEED),
-            brain: Brain::dog(),
-            facing,
-            identity: Identity::pet(rng),
-        }
+        // Rolled in this order, each after what was there before it.
+        let identity = Identity::pet(rng);
+        let gut = Gut::hungry_to(rng.random_range(0.0..40.0));
+        Dog { walk: Walker::new(uid, cell, DOG_SPEED), brain: Brain::dog(), facing, identity, gut }
+    }
+
+    pub fn gut(&self) -> &Gut {
+        &self.gut
+    }
+
+    #[cfg(test)]
+    pub(crate) fn gut_mut(&mut self) -> &mut Gut {
+        &mut self.gut
+    }
+
+    #[cfg(test)]
+    pub(crate) fn brain_mut(&mut self) -> &mut Brain {
+        &mut self.brain
     }
 
     /// Who this dog is: name and gender.
@@ -549,11 +587,56 @@ impl GameEntity for Dog {
         Some(self.facing)
     }
 
-    /// No needs and no hands: the brain gets the walker and nothing else.
-    /// No schedule either, so it never looks round — a dog has nothing yet
-    /// that seeing somebody would change.
+    /// A belly and no more: it eats what it was served last tick (its
+    /// owner's doing, `sim::pets`), gets hungrier, and its brain gets the
+    /// walker and nothing else — no hands. No schedule either, so it never
+    /// looks round: a dog has nothing yet that seeing somebody would change.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        for _ in ctx.feedings.to(self.walk.body().uid()) {
+            self.gut.fed();
+        }
+        self.gut.advance(ctx.game_dt());
         self.brain.react(ctx, &Due::NOTHING, outcome, &mut self.walk, None, None)
+    }
+
+    /// Its owner, where the owner stands, and how hungry and how full it is —
+    /// **counting a meal served and not yet felt**, or its owner would take it
+    /// for hungry still on the tick after the first and set off for another
+    /// dinner. None for a stray.
+    fn bond(&self, ctx: &Think<'_>) -> Option<Bond> {
+        let body = self.walk.body();
+        let mut gut = self.gut;
+        for _ in ctx.feedings.to(body.uid()) {
+            gut.fed();
+        }
+        Some(Bond {
+            who: body.uid(),
+            with: self.brain.companion()?,
+            cell: body.center_position(),
+            hunger: gut.hunger(),
+            bowel: gut.bowel(),
+        })
+    }
+
+    fn companion(&self) -> Option<Uid> {
+        self.brain.companion()
+    }
+
+    fn set_companion(&mut self, companion: Uid) -> bool {
+        self.brain.set_companion(companion);
+        true
+    }
+
+    #[cfg(test)]
+    fn starve_to(&mut self, hunger: f32) {
+        self.gut = Gut::hungry_to(hunger);
+    }
+
+    /// Whether it had anything to pass.
+    fn defecate(&mut self) -> bool {
+        let had = self.gut.bowel() > 0.0;
+        self.gut.relieved();
+        had
     }
 
     /// Turns to face the way it is walking.
@@ -584,6 +667,9 @@ impl GameEntity for Dog {
             ("name", self.identity.name().to_string()),
             ("gender", self.identity.gender().label().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
+            ("owner", self.brain.companion().map_or_else(|| "none".to_string(), |owner| owner.to_string())),
+            ("hunger", format!("{:.1}", self.gut.hunger())),
+            ("bowel", format!("{:.1}", self.gut.bowel())),
         ];
         fields.extend(self.walk.debug_fields());
         fields
@@ -610,8 +696,9 @@ impl GameEntity for Dog {
     }
 
     fn save(&self) -> pb::Kind {
-        let Dog { walk, brain, facing, identity } = self;
+        let Dog { walk, brain, facing, identity, gut } = self;
         pb::Kind::Dog(pb::Dog {
+            gut: Some(gut.save()),
             walker: Some(walk.save()),
             brain: Some(brain.save()),
             facing: match facing {
@@ -635,6 +722,7 @@ impl Dog {
                 pb::Facing::Right => Facing::Right,
             },
             identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
+            gut: saved.gut.as_ref().map(Gut::restore).transpose()?.unwrap_or_default(),
         })
     }
 }

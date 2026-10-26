@@ -62,6 +62,7 @@ pub mod held;
 pub mod pool;
 pub mod hud;
 pub mod logview;
+pub mod needs;
 pub mod props;
 pub mod saving;
 pub mod selection;
@@ -127,7 +128,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, dirt::DirtPlugin))
+            .add_plugins((economy::EconomyPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, dirt::DirtPlugin, needs::NeedsPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

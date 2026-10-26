@@ -144,7 +144,8 @@ calls a collector back in for that one need, then out, then back for the next. S
 going out it **gets ready**: every need on `READY_NEEDS` 85% met (`READY` = 15).
 
 - **Which jobs**: a `JobDef::goes_out_for` column, what a trip brings back — `Some(Scrap)`
-  for the collector, `None` for the rest (a farmer's field is ten cells past the wall).
+  for the collector, `Some(Wheat)` for the farmer (a field is ten cells past the wall),
+  `Some(Fish)` for the fisherman, `None` for the rest.
 - **When**: shift due, in the district (on the site), room in the pack, and either **beside
   its bin** (the trip's start; `CollectGoal` goes there first) or **back in with a trip half
   done** (called in by a need — it tops everything up at that fridge, instead of in and out
@@ -160,6 +161,28 @@ going out it **gets ready**: every need on `READY_NEEDS` 85% met (`READY` = 15).
   ready; none → **ready**, and the log says `"{uid} is ready to go out for scrap metal"`.
   A need whose goal is held off (nothing to play on — a computer is entertainment only in a
   home) is not waited for.
+- **Provisions, last** (`PROVISIONS_BIT`, the bit after the needs on the same list, so saved with
+  it, `pb::RoutineState.pending`): once every need is seen to, a worker whose **pocket** is short
+  of `goals::provision::PROVISIONS` — **one meal and one drink**, stowed, the hand not counting —
+  raises `GoalId::Provision` at `GETTING_READY` less four places (`IN_TURN` each, after the needs), and is **ready only when the
+  last thing is put away**. Like a need, the bit stays on the list wherever the fridge is (the
+  worker leaves the bin for it). `ProvisionGoal` (`brain/goals/provision.rs`): walk beside the
+  nearest fridge it may use, open it, `Task::take` each thing missing (**a meal costs a dollar,
+  a drink nothing**, the usual `Effect::Buy`) and `Task::stow` it, **shutting the fridge before
+  the last stow** (nothing may be left to do once the pocket is full, the routine lets the
+  worker go that tick). `Blocked` — no fridge, a fridge off, no room — holds it off and the
+  routine stops waiting (`goals.cooldown(Provision)`), as for any need nothing can meet. A pocket
+  that is already stocked costs nothing: a worker with its meal and drink goes straight out.
+  **Why only one of each**: a pocket is the unit's mass limit like anything else, and three
+  pieces of scrap are 9 of the 10 kg a person carries — a meal and a drink are exactly the last
+  kilo, so a collector still brings home a full packful of three; two of each would cost it a
+  piece. (A farmer's twelve sheaves, 12 L, now fit ten: it takes its harvest home a little oftener.)
+- **Eaten out there**: `EatGoal` / `DrinkGoal` — **off the site, with one stowed**
+  (`goals::pocket_has`) — queue `Task::unpack` (pocket to hand, half a world minute) and the
+  usual `Task::consume` instead of walking to a fridge, and log `"ate what it was carrying"` /
+  `"drank what it was carrying"`. On the site they walk to the fridge as ever and leave the
+  pocket alone, so the pocket is the trip's. What was eaten is restocked at the next trip's
+  start (a meal is a dollar again).
 - **Ready lasts** until it is off the site or off shift, so the walk to the gate does not
   send it back. `GoalCtx::ready_to_go_out` tells `CollectGoal`: ready → out from wherever
   it is to the heap nearest the bin; not ready → the bin first.

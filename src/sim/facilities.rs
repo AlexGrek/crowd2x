@@ -102,6 +102,14 @@ pub struct Facilities {
     /// ([`super::relationships::Smalltalks`]). Rebuilt every tick, never
     /// saved.
     pub smalltalks: Smalltalks,
+    /// Who is bonded to whom — a person to its pet dog — gathered from the
+    /// crowd by the think step like `chats` ([`super::pets::Bonds`]).
+    /// Rebuilt every tick, never saved.
+    pub bonds: super::pets::Bonds,
+    /// The dog foods given as the last tick ended, each for its dog to feel
+    /// in its own react ([`super::pets::Feedings`]). Saved: it is held
+    /// between ticks.
+    pub feedings: super::pets::Feedings,
     /// Who leaves the world this tick: the bodies undertakers took up
     /// (`Effect::TakeBody`) and the deathdogs gone back into the wasteland
     /// (`Effect::Depart`). Despawned at the end of the processing pass
@@ -138,6 +146,8 @@ impl Facilities {
             society: Society::new(),
             chats: Chats::default(),
             smalltalks: Smalltalks::default(),
+            bonds: Default::default(),
+            feedings: Default::default(),
             leaving: Vec::new(),
         }
     }

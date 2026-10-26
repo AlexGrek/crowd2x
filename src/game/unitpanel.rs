@@ -62,6 +62,7 @@ use crate::ui::{
 use super::actors::{facing_of, look_from, world_pos, Sim, SimInput};
 use super::hud;
 use super::follow::{self, CameraFollow};
+use super::needs;
 use super::selection::Selected;
 
 /// Size of the portrait, in canvas pixels. Two pixels to a source texel, so
@@ -72,6 +73,11 @@ const PORTRAIT: f32 = 32.0;
 /// pixels, before it wraps: the canvas is 320, less the portrait, the gap and
 /// the bar's padding, with a little to spare.
 const BUTTON_ROW: f32 = 270.0;
+
+/// The same, for a unit that has the needs panel down the right edge
+/// ([`needs`]): the canvas less that panel's [`needs::GUTTER`], less the
+/// portrait, the gap and the padding. Still two rows of buttons.
+const BUTTON_ROW_BESIDE_NEEDS: f32 = 190.0;
 
 /// Which menu is open under the bar, if any.
 ///
@@ -328,6 +334,14 @@ fn rebuild(
         // Despawned this frame; `selection` clears the selection next.
         return;
     };
+    // A human has its needs down the right edge, and the bar keeps to the left
+    // of them: its margin is the panel's width, so the bar centres in what is
+    // left rather than under the bars.
+    let (button_row, gutter) = if needs::shows(entity) {
+        (BUTTON_ROW_BESIDE_NEEDS, needs::GUTTER)
+    } else {
+        (BUTTON_ROW, 0.0)
+    };
     let root = commands
         .spawn((
             Name::new("unit panel"),
@@ -376,6 +390,7 @@ fn rebuild(
                     align_items: AlignItems::Center,
                     column_gap: px(4),
                     padding: UiRect::axes(px(4), px(3)),
+                    margin: UiRect::right(px(gutter)),
                     ..default()
                 },
                 BackgroundColor(PANEL),
@@ -411,7 +426,7 @@ fn rebuild(
                                 flex_wrap: FlexWrap::Wrap,
                                 column_gap: px(3),
                                 row_gap: px(3),
-                                max_width: px(BUTTON_ROW),
+                                max_width: px(button_row),
                                 ..default()
                             },
                             children![

@@ -1198,6 +1198,8 @@ site's dirt every 27 world minutes on the tick it is due (`GoalExecutor::keep_up
 brain step 3b), keeps the 16 nearest public reachable cells over 0.15 overall,
 mops them nearest first (`Task::clean`, `Effect::Clean`) and roams with none.
 Full detail: the `dirt` skill.
+A pet dog's droppings (`DROPPING`: 0.6 earth, 0.2 wet, left on public open ground by
+`Effect::Defecate`) are what cleaners find: the `pets` skill.
 Coverage: `sim/dirt.rs`, `sim/soiling/tests.rs`, `game/dirt.rs`, `save/tests.rs`,
 `brain/goals/clean.rs`, `brain/tasks/clean.rs`, `map/wasteland.rs`,
 `qa/dirt.json`, `qa/bladder_accident.json`, `qa/outdoor_toilet.json`.

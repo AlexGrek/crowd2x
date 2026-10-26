@@ -123,6 +123,13 @@ pub enum Effect {
     /// (`brain::tasks::Clean`): whatever dirt is on it goes. Granted to a
     /// cleaner within a step of a cell of the district.
     Clean { at: Point },
+    /// An owner has given `dog` the dog food in its hand (`brain::tasks::Feed`):
+    /// a meal is served, for the dog to feel in its own react next tick
+    /// ([`super::pets::Feedings`]). Granted to the dog's owner within reach of it.
+    Feed { dog: Uid },
+    /// A dog has finished emptying its bowel at `at` (`brain::tasks::Defecate`):
+    /// the street is fouled ([`super::dirt::DROPPING`]) and the dog relieved.
+    Defecate { at: Point },
     /// A deathdog has gone back into the wasteland (`kinds::Deathdog`): it
     /// leaves the world at the end of the tick, as a body taken up does.
     Depart,
@@ -163,6 +170,25 @@ pub(crate) fn apply(
                 && facilities.dirt.set(at, super::dirt::Dirt::CLEAN)
             {
                 log.unit(entity.uid(), format!("{} cleaned up {} at {}, {}", entity.uid(), stain.describe(), at.x, at.y));
+            }
+        }
+        Effect::Feed { dog } => {
+            let owner = entity.uid();
+            let here = entity.center_position();
+            let near = facilities.bonds.partner(owner).filter(|bond| {
+                bond.who == dog && here.chebyshev_distance(bond.cell) <= super::pets::FEED_REACH + 1
+            });
+            if near.is_some() && !entity.is_dead() {
+                facilities.feedings.serve(super::pets::Feeding { dog, by: owner });
+                log.related(owner, dog, format!("{owner} fed {dog}"));
+            }
+        }
+        Effect::Defecate { at } => {
+            if !entity.is_dead() && !entity.is_frozen() && entity.center_position() == at && map.is_passable(at)
+                && entity.defecate()
+            {
+                facilities.dirt.soil(at, super::dirt::DROPPING);
+                log.unit(entity.uid(), format!("{} fouled the street at {}, {}", entity.uid(), at.x, at.y));
             }
         }
         Effect::RepairBox { at } => {

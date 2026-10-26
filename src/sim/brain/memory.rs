@@ -66,6 +66,11 @@ pub struct Memory {
     /// When it last started a small talk, in world seconds; `None` if it
     /// never has.
     smalltalked: Option<f64>,
+    /// Who it keeps company with: a person's pet dog, or a dog's owner
+    /// (`sim::pets`). Set by the spawn pass when a dog is adopted, on both
+    /// sides; inline because the think step reads it of every unit every
+    /// tick to say who is bonded (`sim::pets::Bonds`).
+    companion: Option<Uid>,
 }
 
 /// Somebody seen, where, and when — in **world** seconds
@@ -285,10 +290,19 @@ impl Memory {
         self.smalltalked = Some(now);
     }
 
+    /// Its dog, or its owner.
+    pub fn companion(&self) -> Option<Uid> {
+        self.companion
+    }
+
+    pub fn set_companion(&mut self, companion: Option<Uid>) {
+        self.companion = companion;
+    }
+
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion } = self;
         let OutOfReach { places } = **out_of_reach;
         let (relations, night) = relations.save();
         pb::Memory {
@@ -297,6 +311,7 @@ impl Memory {
             night,
             smalltalk: smalltalk.map(|smalltalk| smalltalk.save()),
             smalltalked: *smalltalked,
+            companion: companion.map(Uid::raw),
             spotted: spotted.map(|Spotted { who, at, when }| pb::Spotted { who: who.raw(), at: Some(at.into()), when }),
             medical: Some(medical.save()),
             keyed: keyed
@@ -333,6 +348,13 @@ impl Memory {
         memory.smalltalked = match saved.smalltalked {
             Some(when) if !when.is_finite() => return invalid(format!("memory: small talk started at {when}")),
             when => when,
+        };
+        memory.companion = match saved.companion {
+            Some(raw) => match Uid::from_raw(raw) {
+                Some(uid) => Some(uid),
+                None => return invalid("memory: kept company with nobody"),
+            },
+            None => None,
         };
         if let Some(spotted) = &saved.spotted {
             let Some(who) = Uid::from_raw(spotted.who) else {

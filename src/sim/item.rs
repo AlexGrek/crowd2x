@@ -203,6 +203,10 @@ catalogue! {
         Meal = 6 => ItemDef { name: "meal", mass: MEAL_MASS, volume: MEAL_VOLUME, emoji: "🍱", ..CARRIED },
         /// Fresh catch for the warehouse. Ten kilograms permits five fish.
         Fish = 7 => ItemDef { name: "fish", mass: 2.0, volume: 2.0, emoji: "🐟", ..CARRIED },
+        /// A dog's dinner, taken out of a fridge by its owner and given to
+        /// the dog (`brain::tasks::Feed`). Nothing a person can use: how much
+        /// of a meal it is, is the dog's (`sim::pets::MEAL`).
+        DogFood = 8 => ItemDef { name: "dog food", mass: MEAL_MASS, volume: MEAL_VOLUME, emoji: "🦴", ..CARRIED },
     }
 }
 

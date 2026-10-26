@@ -21,8 +21,8 @@ use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
-use super::super::tasks::{CLOSE_SECONDS, OPEN_SECONDS};
-use super::{choose_nearest, nearest_in_reach, stand_beside, Seek, Stand};
+use super::super::tasks::{CLOSE_SECONDS, OPEN_SECONDS, UNPACK_SECONDS};
+use super::{choose_nearest, nearest_in_reach, pocket_has, stand_beside, Seek, Stand};
 
 /// A couple of world minutes at the fridge getting food out of it. Eating it
 /// takes [`CHEW_SECONDS`](crate::sim::item::CHEW_SECONDS).
@@ -58,7 +58,7 @@ impl Stage {
             // A wait is only ever queued in front of a walk.
             Some(Task::MoveTo(_) | Task::Wait(_)) => Stage::Walking,
             Some(Task::OpenFridge(_)) => Stage::Opening,
-            Some(Task::TakeItem(_)) => Stage::Taking,
+            Some(Task::TakeItem(_) | Task::Unpack(_)) => Stage::Taking,
             Some(Task::CloseFridge(_)) => Stage::Closing,
             // Nothing queued, or a task no meal is made of: still choosing.
             _ => Stage::Finding,
@@ -128,7 +128,14 @@ impl EatGoal {
         if held == Some(ItemKind::Body) {
             return false;
         }
-        if held != Some(ItemKind::Food) {
+        if held != Some(ItemKind::Food) && self.seek.target.is_none() && pocket_has(ctx, ItemKind::Food) {
+            // Out of the district with a meal in its pocket: it is not a walk
+            // home to a fridge.
+            if let Some(other) = held {
+                let _ = ctx.tasks.push_back(Task::consume(other, other.consume_seconds()));
+            }
+            let _ = ctx.tasks.push_back(Task::unpack(ItemKind::Food, UNPACK_SECONDS));
+        } else if held != Some(ItemKind::Food) {
             let Some(fridge) = self.seek.target else {
                 return false;
             };
@@ -288,7 +295,9 @@ impl GoalExecutor for EatGoal {
         }
 
         // Nothing queued: start, or start again.
-        if held(ctx) != Some(ItemKind::Food) {
+        if held(ctx) != Some(ItemKind::Food) && pocket_has(ctx, ItemKind::Food) {
+            self.seek.forget();
+        } else if held(ctx) != Some(ItemKind::Food) {
             let Some(fridge) = choose_nearest(ctx, FeatureKind::Food) else {
                 return GoalProgress::Blocked;
             };
@@ -762,5 +771,71 @@ mod tests {
             }
         }
         assert!(world.log_contains("drank at the fridge at 13, 6"), "brain: {:?}", human.brain_fields());
+    }
+
+    /// A site with a fridge on it, in the wasteland of seed 0, and a cell out
+    /// in that wasteland a human can stand in and get back from.
+    fn site_and_the_wasteland() -> (World, Point) {
+        let mut map = Map::new(Size::new(9, 7), FLOOR).with_wasteland(0);
+        prop_at(&mut map, "fridge", Point::new(7, 1));
+        map.load_chunks(map.navigation_area());
+        let out = (-12..-4)
+            .flat_map(|x| (0..7).map(move |y| Point::new(x, y)))
+            .find(|&cell| map.is_passable(cell) && map.navigation().is_outside(cell))
+            .expect("a dry cell in the wasteland");
+        (World::new(map), out)
+    }
+
+    /// The reason for a pocket: out where there is no fridge, a worker eats
+    /// what it carries where it stands, not an hour's walk home.
+    #[test]
+    fn a_hungry_human_out_in_the_wasteland_eats_from_its_pocket_and_does_not_walk_home() {
+        let (mut world, out) = site_and_the_wasteland();
+        let mut human = needy_human(out, 90.0, 0.0, 0.0);
+        assert!(human.inventory_mut().stow(ItemKind::Food));
+        for _ in 0..1000 {
+            world.step(&mut human);
+            assert!(!world.map.site().contains(human.center_position()), "went back in for a meal");
+            if world.log_contains("ate what it was carrying") {
+                break;
+            }
+        }
+        assert!(world.log_contains("ate what it was carrying"), "{:?}", human.brain_fields());
+        assert!(human.stats().hunger() < 90.0 - MEAL + 10.0, "a meal and some of the minutes it took: {}", human.stats().hunger());
+        assert_eq!(human.inventory().count(ItemKind::Food), 0, "out of the pocket");
+        assert_eq!(human.carried(), None);
+        assert!(!world.log_contains("opened the fridge"), "{:?}", world.lines());
+    }
+
+    /// Inside the district the fridge is a step away and the pocket is for
+    /// the trip: it is not eaten into.
+    #[test]
+    fn a_hungry_human_inside_the_district_goes_to_the_fridge_and_leaves_its_pocket_alone() {
+        let (mut world, _) = site_and_the_wasteland();
+        let mut human = needy_human(Point::new(2, 3), 90.0, 0.0, 0.0);
+        assert!(human.inventory_mut().stow(ItemKind::Food));
+        for _ in 0..1500 {
+            world.step(&mut human);
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1, "{:?}", world.lines());
+        assert_eq!(human.inventory().count(ItemKind::Food), 1, "the pocket's meal is kept");
+    }
+
+    /// Out there with nothing in the pocket it does what it always did: back
+    /// to the fridge.
+    #[test]
+    fn a_hungry_human_out_in_the_wasteland_with_nothing_in_its_pocket_walks_to_a_fridge() {
+        let (mut world, out) = site_and_the_wasteland();
+        let mut human = needy_human(out, 90.0, 0.0, 0.0);
+        for _ in 0..2000 {
+            world.step(&mut human);
+            if world.meals() > 0 {
+                break;
+            }
+        }
+        assert_eq!(world.meals(), 1, "{:?}", world.lines());
     }
 }

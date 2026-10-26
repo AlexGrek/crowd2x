@@ -121,7 +121,10 @@ route budget".
 **Who is chatting with whom** is gathered the same way `Panics` is, but by the think step,
 which already touches every unit: each writes `GameEntity::chatter` into a slot buffer
 (`GameState::chatters`, sized with `intents`, cleared on despawn, `None` for holes) and
-`Chats::rebuild` sorts it before react reads it (`Think::chats`). Never saved. **Who is making
+`Chats::rebuild` sorts it before react reads it (`Think::chats`). Never saved. **Who is bonded to
+whom** — a person to its pet dog and the dog back, where each stands and the dog's hunger — is gathered
+the same way (`GameEntity::bond`, `GameState::bonders`, `Bonds::rebuild`, `Think::bonds`), and a meal
+served by one for the other to feel in its own react is `Facilities::feedings`, saved (`pets` skill). **Who is making
 small talk** is gathered beside it the same way (`GameEntity::smalltalker`,
 `GameState::smalltalkers`, `Smalltalks::rebuild`, `Think::smalltalks`). Everybody's
 family and job, and the rules relationships are run by, are `Facilities::society`

@@ -269,6 +269,93 @@ fn a_cleaner_saved_mid_round_carries_on_exactly() {
     assert!(dirty(&copy) < before, "{} of {before} stains still there", dirty(&copy));
 }
 
+/// A dog fed by its owner and saved with the meal served, not yet felt and
+/// then inside it, carries on exactly: the owner and the dog still bonded, the
+/// meal digested at the same pace, and the street fouled on the same tick.
+#[test]
+fn a_pet_dog_saved_with_a_meal_inside_it_carries_on_exactly() {
+    use crate::map::{GridLayer, Object, ObjectKind, ObjectLayer, PIXELS_PER_CELL};
+
+    let mut map = Map::new(Size::new(12, 12), FLOOR);
+    for (x, c) in "-B=B=B-".chars().enumerate() {
+        map.set_grid(GridLayer::Power, Point::new(x as i32, 0), GridLayer::Power.value_of(c).unwrap());
+    }
+    for (name, x) in [("transformer", 3), ("fridge", 6)] {
+        map.add_object(
+            ObjectLayer::Props,
+            Object { at: Point::new(x * PIXELS_PER_CELL + 24, 24), kind: ObjectKind::new(name) },
+        );
+    }
+    let mut state = GameState::new(map, 1);
+    let owner = state.spawn(EntityType::Human, Point::new(3, 6));
+    let mut input = Input::new();
+    for process in ProcessId::ALL {
+        input.set_process(owner, process, false);
+    }
+    process_game_state(&mut state, DT, &input);
+    let dog = state.adopt_dog(owner).expect("a dog");
+    state.entity_mut(dog).unwrap().starve_to(90.0);
+
+    // Until the meal is served: filed as the tick ends, for the dog to feel.
+    let mut ticks = 0;
+    while state.save_world().feedings.is_empty() {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 6000, "never fed by {}", state.clock());
+    }
+    // Two hours and a half of world later the meal has passed through.
+    let copy = side_by_side(&mut state, 5200, |_, _| Input::new());
+    let fouled = |state: &GameState| state.map.size().points().any(|cell| state.dirt().at(cell).overall() > 0.15);
+    assert!(fouled(&state) && fouled(&copy), "the street was never fouled");
+    assert_eq!(copy.entities().get(owner).unwrap().companion(), Some(dog));
+    assert_eq!(copy.entities().get(dog).unwrap().companion(), Some(owner));
+}
+
+/// A collector saved in the middle of stocking its pocket — a meal taken out
+/// of the fridge, in its hand, the fridge standing open — carries on exactly:
+/// puts it away, takes the drink, shuts the fridge and is ready, the same tick
+/// in both worlds, with a meal and a drink in its pocket.
+#[test]
+fn a_collector_saved_mid_provisioning_carries_on_exactly() {
+    use crate::map::{GridLayer, Object, ObjectKind, ObjectLayer, PIXELS_PER_CELL};
+    use crate::sim::testing::skip_to;
+
+    let mut map = Map::new(Size::new(12, 12), FLOOR).with_wasteland(7);
+    for (x, c) in "-B=B=B-".chars().enumerate() {
+        map.set_grid(GridLayer::Power, Point::new(x as i32, 0), GridLayer::Power.value_of(c).unwrap());
+    }
+    for (name, x, y) in [("transformer", 3, 0), ("fridge", 6, 0), ("scrap bin", 3, 6)] {
+        map.add_object(
+            ObjectLayer::Props,
+            Object { at: Point::new(x * PIXELS_PER_CELL + 24, y * PIXELS_PER_CELL + 24), kind: ObjectKind::new(name) },
+        );
+    }
+    map.load_chunks(map.navigation_area());
+    let mut state = GameState::new(map, 1);
+    let collector = state.spawn(EntityType::Human, Point::new(2, 6));
+    assert_eq!(state.entities().get(collector).unwrap().job().map(|job| job.kind), Some(crate::sim::JobKind::ScrapCollector));
+    let mut input = Input::new();
+    for process in ProcessId::ALL {
+        input.set_process(collector, process, false);
+    }
+    process_game_state(&mut state, DT, &input);
+    skip_to(&mut state, 1, 8.5);
+
+    let pocket = |state: &GameState, item: ItemKind| state.entities().get(collector).unwrap().inventory().unwrap().count(item);
+    let mut ticks = 0;
+    while state.entities().get(collector).unwrap().inventory().unwrap().hand() != Some(ItemKind::Food) {
+        run(&mut state, 1);
+        ticks += 1;
+        assert!(ticks < 6000, "never took a meal out of the fridge by {}", state.clock());
+    }
+    assert_eq!((pocket(&state, ItemKind::Food), pocket(&state, ItemKind::Water)), (0, 0));
+
+    let copy = side_by_side(&mut state, 1500, |_, _| Input::new());
+    for world in [&state, &copy] {
+        assert!(pocket(world, ItemKind::Food) + pocket(world, ItemKind::Water) >= 1, "nothing in the pocket by {}", world.clock());
+    }
+}
+
 #[test]
 fn a_damaged_box_and_an_electrician_mid_repair_resume_identically_after_loading() {
     let at = Point::new(3, 3);
