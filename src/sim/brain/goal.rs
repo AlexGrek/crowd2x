@@ -147,6 +147,15 @@ impl GoalId {
         self as usize
     }
 
+    /// Whether, in charge, it **holds** against a rival wanted only a little
+    /// more than it is ([`HOLD`]): anything a unit is actually doing. Not the
+    /// floors a list rests on — idling, wandering about, a dog at heel, a
+    /// deathdog prowling the walls — which are what a unit does with nothing
+    /// to do, and give way to anything at all.
+    pub const fn holds(self) -> bool {
+        !matches!(self, GoalId::Idle | GoalId::Wander | GoalId::Follow | GoalId::Prowl)
+    }
+
     /// The goal a save numbered `number`, or why not.
     pub(crate) fn restore(number: i32, what: &str) -> Result<GoalId, Invalid> {
         GoalId::from_number(number).ok_or_else(|| Invalid::new(format!("{what}: no goal numbered {number}")))
@@ -159,6 +168,29 @@ impl GoalId {
 /// for it every tick is a frame-rate cliff that only appears on maps with a
 /// sealed room in them. Roughly half a second at the fixed timestep.
 pub const BLOCKED_TICKS: u16 = 32;
+
+/// How much more a rival has to be wanted than the goal in charge to take
+/// over from it ([`Goals::settle`]): **what a unit is doing counts.** Fifteen
+/// points of a need on the routines' scale (a need's priority is its level
+/// over 50), so a meal under way is not dropped for a drink wanted a little
+/// more, a night in bed not for a dog that wants feeding, an errand not for
+/// bedtime; and a shift ([`WORKING`], 1.5) is left only for a need past 90 —
+/// starving, parched, about to wet itself — or for danger
+/// ([`FLEEING`], 3.0, over everything however it is held).
+///
+/// Only while the goal in charge still holds ([`GoalId::holds`]), is still
+/// wanted at all and is not held off: a goal its routine let go of, or one
+/// that found itself impossible, holds nothing. A routine that has to break
+/// in on something on purpose — getting ready for a trip out, before the
+/// trip itself — raises its goal past the hold
+/// ([`GETTING_READY`](super::routines::GETTING_READY)).
+///
+/// [`WORKING`]: super::routines::WORKING
+/// [`FLEEING`]: super::routines::FLEEING
+pub const HOLD: f32 = 0.3;
+
+// `Goals::breaking_in` is a bit per goal.
+const _: () = assert!(GoalId::COUNT <= u64::BITS as usize);
 
 /// How many times [`BLOCKED_TICKS`] may double for a goal that keeps being
 /// impossible: 32 ticks, then 64, up to about half a minute.
@@ -198,6 +230,10 @@ pub struct Goals {
     /// Consecutive times a goal has been found impossible, which is how long
     /// its next cooldown is. Reset by any sign of progress.
     strikes: [u8; GoalId::COUNT],
+    /// A bit per goal raised this tick to break in on whatever is in charge
+    /// ([`Goals::break_in`]): the goal in charge does not hold against it.
+    /// Arranged with the priorities, every tick.
+    breaking_in: u64,
     top: GoalId,
 }
 
@@ -214,6 +250,7 @@ impl Goals {
             urgency: [0.0; GoalId::COUNT],
             cooldown: [0; GoalId::COUNT],
             strikes: [0; GoalId::COUNT],
+            breaking_in: 0,
             top: GoalId::Idle,
         }
     }
@@ -249,6 +286,22 @@ impl Goals {
         *priority = priority.max(at_least);
     }
 
+    /// Raise `goal` to at least `at_least`, as [`Goals::raise_to`] does, **and
+    /// let it break in** on whatever is in charge this tick: the goal in charge
+    /// does not hold against it ([`HOLD`]), so it takes over the moment it is
+    /// wanted more at all. For a routine whose whole point is to stop
+    /// something going on — getting ready before a trip out, which stops the
+    /// shift at the bin — and never for an ordinary want.
+    pub fn break_in(&mut self, goal: GoalId, at_least: f32) {
+        self.raise_to(goal, at_least);
+        self.breaking_in |= 1 << goal.index();
+    }
+
+    /// Whether `goal` is breaking in this tick ([`Goals::break_in`]).
+    pub fn is_breaking_in(&self, goal: GoalId) -> bool {
+        self.breaking_in & (1 << goal.index()) != 0
+    }
+
     /// Make `goal` at least `urgency` urgent (0 to 1), whoever wants it.
     ///
     /// A max, like [`Goals::raise_to`], and for the same reason. Urgency is
@@ -266,7 +319,7 @@ impl Goals {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Goals {
-        let Goals { priority, urgency, cooldown, strikes, top } = self;
+        let Goals { priority, urgency, cooldown, strikes, breaking_in, top } = self;
         pb::Goals {
             top: top.number(),
             slots: GoalId::ALL
@@ -277,6 +330,7 @@ impl Goals {
                     cooldown: cooldown[goal.index()] as u32,
                     strikes: strikes[goal.index()] as u32,
                     urgency: urgency[goal.index()],
+                    breaking_in: breaking_in & (1 << goal.index()) != 0,
                 })
                 .collect(),
         }
@@ -300,6 +354,9 @@ impl Goals {
 
             goals.cooldown[goal.index()] = cooldown;
             goals.strikes[goal.index()] = strikes;
+            if slot.breaking_in {
+                goals.breaking_in |= 1 << goal.index();
+            }
         }
         Ok(goals)
     }
@@ -307,6 +364,7 @@ impl Goals {
     pub(crate) fn suppress(&mut self, goal: GoalId) {
         self.priority[goal.index()] = 0.0;
         self.urgency[goal.index()] = 0.0;
+        self.breaking_in &= !(1 << goal.index());
     }
 
     /// Zero every priority and urgency, ready for the routines to arrange
@@ -314,6 +372,7 @@ impl Goals {
     pub(super) fn clear_priorities(&mut self) {
         self.priority = [0.0; GoalId::COUNT];
         self.urgency = [0.0; GoalId::COUNT];
+        self.breaking_in = 0;
     }
 
     /// One tick off every cooldown.
@@ -370,15 +429,32 @@ impl Goals {
         best
     }
 
-    /// Put the best goal in charge. Returns `(old, new)` only when that changed
-    /// who is in charge — exactly the moment a handover is owed.
+    /// Put the best goal in charge — unless the goal in charge holds against
+    /// it ([`HOLD`]). Returns `(old, new)` only when that changed who is in
+    /// charge — exactly the moment a handover is owed.
     pub fn settle(&mut self) -> Option<(GoalId, GoalId)> {
         let best = self.best();
-        if best == self.top {
+        if best == self.top || self.holds_against(best) {
             return None;
         }
         let old = std::mem::replace(&mut self.top, best);
         Some((old, best))
+    }
+
+    /// Whether the goal in charge keeps charge against `rival`, the best of the
+    /// rest: it holds ([`GoalId::holds`]), is still wanted, is not held off,
+    /// and `rival` is wanted by no more than [`HOLD`] over it. A NaN is never
+    /// wanted, so it never holds; and a rival is compared with a plain `>`,
+    /// so a NaN never takes over.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    fn holds_against(&self, rival: GoalId) -> bool {
+        let top = self.top;
+        let mine = self.priority(top);
+        top.holds()
+            && self.cooldown(top) == 0
+            && mine > 0.0
+            && !self.is_breaking_in(rival)
+            && !(self.priority(rival) > mine + HOLD)
     }
 
     /// Every goal with its priority, highest first, ties in goal order.
@@ -552,6 +628,101 @@ mod tests {
         assert_eq!(goals.settle(), Some((GoalId::Idle, GoalId::Eat)));
         assert_eq!(goals.top(), GoalId::Eat);
         assert_eq!(goals.settle(), None, "no change, no handover");
+    }
+
+    /// `goals` with `top` put in charge at `wanted`, then the list arranged
+    /// afresh with `top` at `still` — the next tick.
+    fn in_charge(top: GoalId, wanted: f32, still: f32) -> Goals {
+        let mut goals = Goals::new();
+        goals.raise_to(top, wanted);
+        goals.settle();
+        assert_eq!(goals.top(), top);
+        goals.clear_priorities();
+        goals.raise_to(top, still);
+        goals
+    }
+
+    /// What a unit is doing counts: a rival takes over only when it is
+    /// wanted by more than the hold over the goal in charge, and a tie with
+    /// the hold is not enough.
+    #[test]
+    fn the_goal_in_charge_holds_against_a_rival_wanted_only_a_little_more() {
+        let mut goals = in_charge(GoalId::Eat, 1.2, 1.2);
+        goals.raise_to(GoalId::Drink, 1.2 + HOLD * 0.9);
+        assert_eq!(goals.best(), GoalId::Drink, "wanted more, on a fresh choice");
+        assert_eq!(goals.settle(), None, "the meal goes on");
+        assert_eq!(goals.top(), GoalId::Eat);
+
+        let mut goals = in_charge(GoalId::Eat, 1.2, 1.2);
+        goals.raise_to(GoalId::Drink, 1.2 + HOLD);
+        assert_eq!(goals.settle(), None, "a tie with the hold holds");
+
+        let mut goals = in_charge(GoalId::Eat, 1.2, 1.2);
+        goals.raise_to(GoalId::Drink, 1.2 + HOLD + 0.01);
+        assert_eq!(goals.settle(), Some((GoalId::Eat, GoalId::Drink)));
+    }
+
+    /// Wandering, idling, a dog at heel and a deathdog's prowl are what a
+    /// unit does with nothing to do: they give way to anything wanted more.
+    #[test]
+    fn nothing_much_holds_nothing() {
+        for floor in [GoalId::Wander, GoalId::Follow, GoalId::Prowl] {
+            assert!(!floor.holds(), "{floor:?}");
+            let mut goals = in_charge(floor, 0.1, 0.1);
+            goals.raise_to(GoalId::Play, 0.12);
+            assert_eq!(goals.settle(), Some((floor, GoalId::Play)), "{floor:?}");
+        }
+        assert!(GoalId::Eat.holds() && GoalId::Work.holds() && GoalId::Chat.holds() && GoalId::Play.holds());
+    }
+
+    /// A goal its routine let go of, one that found itself impossible, and
+    /// one whose priority is no number hold nothing.
+    #[test]
+    fn a_goal_let_go_of_or_held_off_holds_nothing() {
+        let mut goals = in_charge(GoalId::Eat, 1.2, 0.0);
+        goals.raise_to(GoalId::Wander, 0.1);
+        assert_eq!(goals.settle(), Some((GoalId::Eat, GoalId::Wander)), "let go of");
+
+        let mut goals = in_charge(GoalId::Eat, 1.2, 1.2);
+        goals.block(GoalId::Eat);
+        goals.raise_to(GoalId::Wander, 0.1);
+        assert_eq!(goals.settle(), Some((GoalId::Eat, GoalId::Wander)), "held off");
+
+        let mut goals = in_charge(GoalId::Eat, 1.2, 1.2);
+        goals.priority[GoalId::Eat.index()] = f32::NAN;
+        goals.raise_to(GoalId::Wander, 0.1);
+        assert_eq!(goals.settle(), Some((GoalId::Eat, GoalId::Wander)), "not a number");
+    }
+
+    /// A goal raised to break in takes over the moment it is wanted more at
+    /// all, hold or no hold — and only on the tick it was raised so.
+    #[test]
+    fn a_goal_raised_to_break_in_is_not_held_against() {
+        let mut goals = in_charge(GoalId::Collect, 1.5, 1.5);
+        goals.break_in(GoalId::Drink, 1.6);
+        assert!(goals.is_breaking_in(GoalId::Drink));
+        assert_eq!(goals.settle(), Some((GoalId::Collect, GoalId::Drink)));
+
+        let mut goals = in_charge(GoalId::Collect, 1.5, 1.5);
+        goals.break_in(GoalId::Drink, 1.4);
+        assert_eq!(goals.settle(), None, "breaking in is not wanting more");
+
+        goals.clear_priorities();
+        assert!(!goals.is_breaking_in(GoalId::Drink), "arranged afresh every tick");
+        goals.break_in(GoalId::Drink, 1.6);
+        goals.suppress(GoalId::Drink);
+        assert!(!goals.is_breaking_in(GoalId::Drink), "suppressed, it breaks in on nothing");
+    }
+
+    /// The goal in charge and what is breaking in come back from a save, so
+    /// a loaded brain holds — and gives way — exactly as the saved one would.
+    #[test]
+    fn the_hold_and_what_breaks_in_come_back_from_a_save() {
+        let mut goals = in_charge(GoalId::Collect, 1.5, 1.5);
+        goals.break_in(GoalId::Drink, 1.6);
+        let restored = Goals::restore(&goals.save()).unwrap();
+        assert_eq!(restored, goals);
+        assert!(restored.is_breaking_in(GoalId::Drink) && !restored.is_breaking_in(GoalId::Eat));
     }
 
     #[test]

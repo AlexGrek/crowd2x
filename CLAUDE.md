@@ -22,6 +22,11 @@ energy, satisfaction, health). A need left at its worst — starving, parched, s
 health, and at none a unit dies: it lies where it fell (drawn turned 90°), thinks and moves no
 more. Each walks at a pace of its own, a little faster or slower than the next, and breaks
 into a run when what it is after is urgent — a need past 75, or late for its desk or post.
+Needs are slow (a day holds two or three meals), and **what a unit is doing holds**: only
+something wanted clearly more takes it off it — a need past 90 at work, danger. Fun is the
+least of its wants and never interrupts anything; a chat or a word in passing is fun too, and
+fun run under 10 wears its mental health down. Too spent to go on (95 tired) it lies down and
+sleeps where it stands; anybody asleep is drawn lying, like the dead, with zzz rising from it.
 Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
 the heaps in the wasteland and stores it in its own bin in the district's warehouse, and
@@ -69,7 +74,8 @@ and shelters there until the fright is over.
 People get on: everybody who spawned in one house is a family (never under 30 points),
 everybody with the same kind of job a colleague (never under 10), and a point is lost to
 everybody each night. Wanderers who see each other may ask for a chat (10% a stranger, 24% an
-acquaintance, 40% a friend), walk over and talk, each thinking 5-10 better of the other, and do
+acquaintance, 40% a friend), walk over and talk for the two to six minutes the asker drew, each
+thinking 5-10 better of the other, and do
 not chat again for an hour. Anybody awake with somebody close by — at work too — now and then
 makes small talk with them, half a point each, and sparks fly between the two. Every number is a
 rule in `relationships.yaml`; the unit panel's `relationship` tab lists who somebody knows.

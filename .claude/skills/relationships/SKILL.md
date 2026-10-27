@@ -13,6 +13,14 @@ close by now and then has a word with them, whatever it is doing — at work too
 point each, with sparks flying between the two on screen. Every night takes a point off
 everybody's points. Every number is a **rule** in `relationships.yaml`.
 
+**Talking is fun.** A talk that ran its time tells the body `Event::Chatted` (the `Talk` task,
+on `ActionState::Finished`; one cut short, nothing) and `Fun` gives `CHAT_FUN` (20, a third of a
+go at something); small talk had — answered, or seen answered — tells it `Event::SmallTalk`
+(`social::small_talk` returns true on that tick alone and `Brain::react` passes it on) for
+`SMALL_TALK_FUN` (2). Neither is dulled by recent memory. Those numbers are the body's
+(`biology/fun.rs`), not rules. A go at something (`PLAYING` 0.12) is wanted under a chat
+(`CHATTING` 0.15), so it never breaks one up (`brain-engineer`, the priority table).
+
 Plain Rust in `src/sim/` like the rest of the simulation; the unit panel draws it.
 
 ## Where everything is
@@ -21,7 +29,7 @@ Plain Rust in `src/sim/` like the rest of the simulation; the unit panel draws i
 | --- | --- |
 | The rules (every number), their defaults, YAML parsing, `change` in play, save | `sim/relationships.rs`: `Rules`, `Rule` (name, range), `DEFAULTS_YAML = include_str!("../../relationships.yaml")` |
 | One person's points and last chat per person, the nightly loss | `Relations` (sorted `Vec<Relation>` + `night`), boxed in `brain::Memory::relations` |
-| The chat a person is in | `relationships::Chat { with, phase, leads, since }`, inline in `Memory::chat` |
+| The chat a person is in | `relationships::Chat { with, phase, leads, since, talk }`, inline in `Memory::chat`; `talk` is how long its talk is to be, in watched seconds |
 | Family (spawn house) and job per person, the rules | `Society` (`BTreeMap<Uid, Person>` + `Rules`), `Facilities::society`, `Think::society`, `GameState::society()` |
 | Who is chatting with whom this tick | `Chats` (two sorted lists of `Chatter`), `Facilities::chats`, `Think::chats` |
 | Asking somebody just seen; taking an invitation up; keeping watch | `brain/social.rs`: `notice` (in attention's `take_in`), `tend` (every tick) |
@@ -66,18 +74,22 @@ then `Chats::rebuild`, before react) — like `Panics`, never saved.
    person not already in a chat, whose cell it may use (`Think::may_use`) and reach
    (`Navigation::may_reach`, O(1)), not chatted with within `minutes between chats` — and rolls
    `Rules::chance(level)` (stranger / acquaintance over 1 / friend over 45) on
-   `tick_rng(me, tick ^ other)`. Success: `Chat { Inviting, leads: true }`. It keeps wandering:
-   the routine wants nothing for an invitation.
+   `tick_rng(me, tick ^ other)`. Success: `Chat { Inviting, leads: true }`, and **how long the
+   talk is to be is drawn now**, with the asking (`Rules::draw_talk_seconds`, between `least`
+   and `most minutes of talk`, on its own stream `tick ^ other ^ TALK_STREAM`). It keeps
+   wandering: the routine wants nothing for an invitation.
 2. **Taking it up** (`social::tend`): a wanderer in no chat finds an invitation addressed to it
    (`Chats::invitations`, lowest uid first, not from somebody chatted with lately) and
-   remembers `Chat { Talking, leads: false }`. `ChatRoutine` raises `Chat` over wandering; the
+   remembers `Chat { Talking, leads: false }` with the invitation's `talk` (`Chatter::talk`): it
+   talks for as long as the one who asked said. `ChatRoutine` raises `Chat` over wandering; the
    walk halts.
 3. **Agreed**: the asker sees the other `Talking` with it and becomes `Talking`, leading. Two who
-   asked each other at once both see the other `Inviting` and agree; the lower uid leads.
+   asked each other at once both see the other `Inviting` and agree; the lower uid leads, and
+   both talk for as long as it drew.
 4. **The walk and the talk** (`ChatGoal`): the leader `move_beside`s the other's cell (from
    `Chats`), retrying a body in the way `PATIENCE` times; the other waits (`LISTEN_SECONDS`).
    Within a step (Chebyshev 1) of a partner who has agreed, each queues its own `Talk` for
-   `minutes of talk`. `Talk` checks every tick that its partner — found by uid through its own
+   its chat's `talk`. `Talk` checks every tick that its partner — found by uid through its own
    entry in `Chats`, so a partner still taking its last step does not break it — is in the chat
    (talking or done) and within a step.
 5. **Done**: a talk that ends raises the points (`Relations::chatted`, gain from
@@ -141,7 +153,7 @@ by name; a rule not named is its default, an unknown one refused).
 | `stranger chance` / `acquaintance chance` / `friend chance` | 0.10 / 0.24 / 0.40 |
 | `acquaintance over` / `friend over` | 1 / 45 |
 | `least chat gain` / `most chat gain` | 5 / 10 |
-| `minutes of talk` | 15 |
+| `least minutes of talk` / `most minutes of talk` | 2 / 6 (drawn per chat by whoever asks; a save from before has one `minutes of talk`, read as the most) |
 | `minutes between chats` | 60 |
 | `minutes to answer` / `minutes to meet` / `minutes to wait for the other` | 2 / 60 / 5 (`minutes to answer` is small talk's too) |
 | `smalltalks an hour` / `smalltalk reach` | 1 / 2 cells (1 to perception's `FAR`) |
@@ -160,7 +172,7 @@ counting `Spark` sprites) and the tab.
 
 ## Saving
 
-`pb::Memory.chat` (5), `.relations` (6, `pb::Relation { who, points, chatted? }`), `.night` (7),
+`pb::Memory.chat` (5; `pb::Chat.talk` tag 5, 0 in an older save = the rules' most), `.relations` (6, `pb::Relation { who, points, chatted? }`), `.night` (7),
 `.smalltalk` (8, `pb::Smalltalk { with, since, answered }`), `.smalltalked` (9, optional);
 `pb::Body.family` (8); `pb::World.relationship_rules` (20); `ChatGoal` is a `pb::Executor::Seek`
 (retries); `Talk` is a `TimedTask` named `"talk"`. Older saves: nobody known, no chat or small

@@ -133,15 +133,22 @@ fn the_nights_packs_of_three_come_out_at_dusk_far_out_and_only_then() {
 
     until_dark(&mut state);
     let pack = deathdogs(&state);
-    assert_eq!(pack.len(), PACKS * PACK_SIZE);
     for uid in &pack {
         let cell = state.entities().get(*uid).unwrap().center_position();
         assert!(distance_from_site(&state.map, cell) >= SPAWN_DISTANCE, "{uid} came out at {cell:?}");
     }
+    // Every pack says how many of it came out: all of it, or fewer where its
+    // point on the ring is a lake with no ground round it.
     let lines = state.log.drain();
-    assert_eq!(lines.iter().filter(|line| line.contains("a pack of 3 deathdogs came out of the wasteland")).count(), PACKS, "{lines:?}");
+    let told = |what: &str| lines.iter().filter(|line| line.contains(what)).count();
+    let (full, none) = (told("a pack of 3 deathdogs came out of the wasteland"), told("no deathdogs could come out of the wasteland"));
+    assert_eq!(told("out of the wasteland at"), PACKS, "every pack is told of: {lines:?}");
+    assert!(full >= PACKS - 1, "the most of them come out whole: {lines:?}");
+    let some = PACKS - full - none;
+    assert!(pack.len() >= full * PACK_SIZE + some && pack.len() <= full * PACK_SIZE + some * (PACK_SIZE - 1), "{lines:?}");
+    assert!(pack.len() > 2 * PACK_SIZE, "more than the two packs there were");
     run(&mut state, 60);
-    assert_eq!(deathdogs(&state).len(), PACKS * PACK_SIZE, "once a night");
+    assert_eq!(deathdogs(&state).len(), pack.len(), "once a night");
 
     let mut bounded = GameState::new(Map::new(Size::new(16, 16), FLOOR), 3);
     until_dark(&mut bounded);

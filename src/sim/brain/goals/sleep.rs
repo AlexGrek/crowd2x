@@ -26,6 +26,13 @@
 //! 4. Otherwise **nothing**: the goal is held off like any other that found
 //!    itself impossible, and the unit stays up.
 //!
+//! **Unless it cannot go on.** At [`COLLAPSED`] a unit sleeps **where it
+//! stands** — a Sleep task whose "bed" is its own cell, with no step to take —
+//! wherever that is, and goes down mid-way if it was walking to a bed when it
+//! got that far ([`GoalExecutor::keep_up`]). It stays down, a stretch at a
+//! time, while it is still worse than [`EXHAUSTED`], and then gets up to find
+//! a bed as above.
+//!
 //! A bed it could not get to, or into, is remembered as out of reach for a
 //! while ([`OutOfReach`](crate::sim::brain::memory::OutOfReach)) and passed
 //! over in 2 and 3 for any bed that is not — so one critically tired tries
@@ -41,7 +48,7 @@ use crate::sim::rng::tick_rng;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::memory::{Recall, HOME_BED};
-use super::super::routines::CRITICALLY_TIRED;
+use super::super::routines::{COLLAPSED, CRITICALLY_TIRED, EXHAUSTED};
 use super::super::task::{Task, TaskResult};
 use super::{stand_beside, Seek, Stand};
 
@@ -82,6 +89,10 @@ impl SleepGoal {
 
         // Already in one: it is the bed for the next stretch.
         if think.features.has(FeatureKind::Bed, here) {
+            return Some(here);
+        }
+        // Too spent to walk another step: down where it stands.
+        if tiredness(ctx) >= COLLAPSED {
             return Some(here);
         }
 
@@ -138,11 +149,23 @@ impl SleepGoal {
 
     /// One stretch done: say so, and start the next from scratch.
     fn slept(&mut self, ctx: &GoalCtx<'_>, bed: Point) {
+        let on = if on_the_floor(ctx, bed) { "on the floor" } else { "in the bed" };
         ctx.think
             .log
-            .unit(ctx.body.uid(), format!("{} slept in the bed at {}, {}", ctx.body.uid(), bed.x, bed.y));
+            .unit(ctx.body.uid(), format!("{} slept {on} at {}, {}", ctx.body.uid(), bed.x, bed.y));
         self.forget();
     }
+}
+
+/// How tired the unit is; nothing for a kind with no body.
+fn tiredness(ctx: &GoalCtx<'_>) -> f32 {
+    ctx.biology.map_or(0.0, |biology| biology.stats().tiredness())
+}
+
+/// Whether a stretch at `cell` is one on the floor — no bed there — which a
+/// unit only sleeps where it fell ([`COLLAPSED`]).
+fn on_the_floor(ctx: &GoalCtx<'_>, cell: Point) -> bool {
+    !ctx.think.features.has(FeatureKind::Bed, cell)
 }
 
 impl GoalExecutor for SleepGoal {
@@ -213,6 +236,12 @@ impl GoalExecutor for SleepGoal {
             }
             (TaskResult::Success, Some(Task::Sleep(task))) => {
                 self.slept(ctx, task.bed);
+                if on_the_floor(ctx, task.bed) && tiredness(ctx) > EXHAUSTED {
+                    // Still too worn out to get up: another stretch where it
+                    // lies, rather than a walk across the district at 90.
+                    let _ = ctx.tasks.push_back(Task::sleep(task.bed, SLEEP_SECONDS));
+                    return GoalProgress::Working;
+                }
                 return GoalProgress::Achieved;
             }
             (TaskResult::Success, Some(Task::MoveTo(_))) => self.seek.steady(),
@@ -234,6 +263,13 @@ impl GoalExecutor for SleepGoal {
             self.forget();
             GoalProgress::Blocked
         }
+    }
+
+    /// On the way to a bed and past [`COLLAPSED`] on the way: the walk is
+    /// cut short, and it goes down where it stands. One comparison a tick,
+    /// and only while sleep is in charge.
+    fn keep_up(&mut self, ctx: &mut GoalCtx<'_>, current: &Task) -> bool {
+        matches!(current, Task::MoveTo(_)) && tiredness(ctx) >= COLLAPSED
     }
 
     fn debug_fields(&self) -> Vec<(&'static str, String)> {
@@ -568,7 +604,7 @@ mod tests {
     #[test]
     fn a_tired_human_with_no_bed_in_the_world_goes_back_to_wandering() {
         let mut world = night_with_beds(&[]);
-        let mut human = tired_human(Point::new(6, 6), 95.0);
+        let mut human = tired_human(Point::new(6, 6), COLLAPSED - 1.0);
         let start = human.position();
 
         for _ in 0..200 {
@@ -655,7 +691,7 @@ mod tests {
     fn a_critical_sleeper_stays_in_the_bed_it_took_as_its_tiredness_falls() {
         let beds = [Point::new(5, 5), Point::new(8, 5)];
         let mut world = night_with_beds(&beds);
-        let mut human = only_tired(Point::new(6, 5), CRITICALLY_TIRED + 5.0);
+        let mut human = only_tired(Point::new(6, 5), CRITICALLY_TIRED + 3.0);
 
         for _ in 0..(5.0 * HOUR / TIME_SCALE * 64.0) as u32 {
             world.step(&mut human);
@@ -708,7 +744,9 @@ mod tests {
             .occupancy
             .claim(bed, Uid::new(EntityType::Human, 999))
             .expect("empty at the start");
-        let mut human = owner(Point::new(5, 6), 95.0, bed);
+        // Critical, so it would take any free bed — and short of collapsing
+        // for all the time the test runs.
+        let mut human = owner(Point::new(5, 6), CRITICALLY_TIRED + 2.0, bed);
 
         for _ in 0..1000 {
             world.step(&mut human);
@@ -738,6 +776,48 @@ mod tests {
         let routes = crate::sim::walker::ROUTES_ASKED.with(|asked| asked.get());
         assert_eq!(world.sleeps(), 0);
         assert!(routes < 100, "{routes} routes in 1000 ticks");
+    }
+
+    /// Past collapsing, with no bed in the world: down where it stands, and
+    /// there it stays, a stretch at a time, while it is still past exhausted.
+    #[test]
+    fn a_human_past_collapsing_sleeps_where_it_stands_bed_or_none() {
+        let mut world = night_with_beds(&[]);
+        let mut human = only_tired(Point::new(6, 6), COLLAPSED + 2.0);
+        for _ in 0..(2.5 * HOUR / TIME_SCALE * 64.0) as u32 {
+            world.step(&mut human);
+        }
+        assert!(world.floor_sleeps() >= 2, "{} stretches, lines {:?}", world.floor_sleeps(), world.lines());
+        assert!(world.log_contains("slept on the floor at 6, 6"), "lines {:?}", world.lines());
+        assert!(human.stats().tiredness() < COLLAPSED - 15.0, "{}", human.stats().tiredness());
+    }
+
+    /// Asleep on the floor, it is drawn lying down like anybody asleep.
+    #[test]
+    fn a_human_asleep_on_the_floor_is_asleep() {
+        let mut world = night_with_beds(&[]);
+        let mut human = only_tired(Point::new(6, 6), COLLAPSED + 2.0);
+        assert!(step_until(&mut world, &mut human, 200, |h| h.brain().is_asleep()), "{:?}", human.brain_fields());
+        assert!(human.is_asleep());
+        assert_eq!(human.center_position(), Point::new(6, 6), "not a step taken");
+    }
+
+    /// On its way to its own bed and past collapsing on the way: the walk is
+    /// cut short, and it goes down where it is.
+    #[test]
+    fn a_human_who_gets_too_spent_on_the_way_to_bed_goes_down_where_it_is() {
+        let bed = Point::new(10, 10);
+        let mut world = night_with_beds(&[bed]);
+        let mut human = owner(Point::new(2, 2), CRITICALLY_TIRED, bed);
+        assert!(
+            step_until(&mut world, &mut human, 400, |h| matches!(h.brain().current_task(), Some(Task::MoveTo(_)))),
+            "never set off: {:?}",
+            human.brain_fields()
+        );
+        human.set_stamina(100.0 - (COLLAPSED + 1.0));
+        assert!(step_until(&mut world, &mut human, 200, |h| h.brain().is_asleep()), "{:?}", human.brain_fields());
+        assert_ne!(human.center_position(), bed, "down short of the bed");
+        assert!(matches!(human.brain().current_task(), Some(Task::Sleep(task)) if task.bed == human.center_position()));
     }
 
     #[test]

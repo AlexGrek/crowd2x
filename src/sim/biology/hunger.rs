@@ -66,20 +66,21 @@ mod tests {
         let mut stats = Stats::calm().with_hunger(10.0);
         Hunger.advance(&mut stats, 5.0 * MINUTE);
         assert_eq!(stats.hunger(), 10.0 + 5.0 * MINUTE * HUNGER_PER_SECOND);
-        Hunger.advance(&mut stats, 10.0 * HOUR);
+        Hunger.advance(&mut stats, HOURS_TO_STARVING * HOUR);
         assert_eq!(stats.hunger(), 100.0);
     }
 
     /// The number the rate is chosen for: an empty stomach reaches
-    /// [`PECKISH`] in a plausible few hours rather than in a plausible few
-    /// seconds.
+    /// [`PECKISH`] in a plausible ten hours or so — twice what it used to
+    /// take — rather than in a plausible few seconds.
     #[test]
     fn an_empty_stomach_takes_hours_to_become_peckish() {
         let mut stats = Stats::calm().with_hunger(0.0);
-        Hunger.advance(&mut stats, 4.0 * HOUR);
+        Hunger.advance(&mut stats, 9.0 * HOUR);
         assert!(stats.hunger() < PECKISH, "{}", stats.hunger());
         Hunger.advance(&mut stats, 1.0 * HOUR);
         assert!(stats.hunger() > PECKISH, "{}", stats.hunger());
+        assert!(HOURS_TO_STARVING >= 2.0 * 8.0, "at least twice as slow as it was");
     }
 
     #[test]

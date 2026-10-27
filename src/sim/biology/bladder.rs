@@ -141,12 +141,14 @@ mod tests {
         );
     }
 
-    /// Slowly means hours, and a drink is what really fills one.
+    /// Slowly means hours — six and a half of them leave it short of
+    /// bursting — and a drink is what really fills one.
     #[test]
     fn hours_alone_are_what_it_takes_without_a_drink() {
         let (mut bladder, mut stats) = (Bladder::default(), Stats::calm().with_bladder(0.0));
-        run(&mut bladder, &mut stats, 3.0 * HOUR);
+        run(&mut bladder, &mut stats, 6.5 * HOUR);
         assert!(stats.bladder() < BURSTING, "{}", stats.bladder());
+        assert!(HOURS_TO_FULL >= 2.0 * 6.0, "at least twice as slow as it was");
 
         bladder.handle(Event::Ingested(ItemKind::Water), FRESH, &mut stats);
         run(&mut bladder, &mut stats, ARRIVES_OVER);

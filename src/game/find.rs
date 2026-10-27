@@ -45,7 +45,7 @@ use crate::sim::{cell_of, JobKind, Uid};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
-use crate::ui::{button, label, plain_button, FIELD, FONT_BODY, FONT_TITLE, HIGHLIGHT_SOLID, MODAL, TEXT, TEXT_ACCENT};
+use crate::ui::{button, label, plain_button, FIELD, FONT_BODY, FONT_TITLE, HIGHLIGHT_SOLID, OVERLAY, TEXT, TEXT_ACCENT};
 use crate::view::{ViewSystems, VisibleArea};
 
 use super::actors::Sim;
@@ -263,7 +263,7 @@ fn open(
                 row_gap: px(GAP),
                 ..default()
             },
-            BackgroundColor(MODAL),
+            BackgroundColor(OVERLAY),
             GlobalZIndex(MODAL_Z),
             DespawnOnExit(AppState::Game),
         ))

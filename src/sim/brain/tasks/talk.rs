@@ -117,6 +117,28 @@ mod tests {
         assert_eq!(rig.run(&mut task, 200), TaskResult::Success);
     }
 
+    /// A chat had is fun — once it is over, and not before; one cut short by
+    /// the other walking off is none.
+    #[test]
+    fn a_talk_had_to_its_end_is_fun_and_one_cut_short_is_not() {
+        use crate::sim::biology::fun::CHAT_FUN;
+        let (mut rig, _) = talking(Some(Phase::Talking), OTHER);
+        rig.biology.edit(|stats| stats.with_fun(30.0));
+        let mut task = Task::talk(OTHER, 1.0);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert_eq!(rig.biology.stats().fun(), 30.0, "not yet");
+        assert_eq!(rig.run(&mut task, 200), TaskResult::Success);
+        assert_eq!(rig.biology.stats().fun(), 30.0 + CHAT_FUN);
+
+        let (mut rig, other) = talking(Some(Phase::Talking), OTHER);
+        rig.biology.edit(|stats| stats.with_fun(30.0));
+        let mut task = Task::talk(OTHER, 1.0);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        rig.world.chats.set(other, None);
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert_eq!(rig.biology.stats().fun(), 30.0, "walked off mid-sentence");
+    }
+
     #[test]
     fn a_talk_ends_well_with_somebody_who_has_already_had_their_say() {
         let (mut rig, _) = talking(Some(Phase::Done), OTHER);

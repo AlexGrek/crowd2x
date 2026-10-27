@@ -23,8 +23,9 @@ use crate::save::{invalid, pb, Invalid};
 /// [`Stats::attention`], which is 0-1 — see each getter for what the ends
 /// mean.
 ///
-/// Hunger, thirst, bladder, fun, stamina, satisfaction and health are the stats that move so far —
-/// the rest are rolled at spawn and stay put until a process wants them to.
+/// Hunger, thirst, bladder, fun, stamina, satisfaction, health and mental health (worn down by
+/// fun run too low, [`Fun`](super::Fun)) are the stats that move so far — the rest are rolled
+/// at spawn and stay put until a process wants them to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
     health: f32,
@@ -124,6 +125,10 @@ impl Stats {
 
     pub(super) fn change_health(&mut self, by: f32) {
         self.health = need(self.health + by);
+    }
+
+    pub(super) fn change_mental_health(&mut self, by: f32) {
+        self.mental_health = need(self.mental_health + by);
     }
 
     // --- saving ---

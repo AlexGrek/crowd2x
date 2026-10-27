@@ -9,7 +9,7 @@
 //! photograph of it. Worked out once a frame and only while the menu is
 //! open, one walk of the arena, which is nothing beside a tick.
 //!
-//! A modal like the spawn menu ([`super::hud`]): full screen and opaque, its
+//! A translucent modal: the world stays visible beneath it, with its
 //! own [`Scope`], so the corner buttons behind it stop taking the pointer
 //! and the highlight cannot be walked out of it.
 
@@ -21,7 +21,7 @@ use crate::sim::{GameState, Statistics};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
-use crate::ui::{button, hover_highlight, label, plain_button, FONT_BODY, FONT_TITLE, MODAL, TEXT};
+use crate::ui::{button, hover_highlight, label, plain_button, FONT_BODY, FONT_TITLE, OVERLAY, TEXT};
 
 use super::actors::Sim;
 
@@ -104,7 +104,7 @@ fn open(
                 row_gap: px(4),
                 ..default()
             },
-            BackgroundColor(MODAL),
+            BackgroundColor(OVERLAY),
             GlobalZIndex(MODAL_Z),
             DespawnOnExit(AppState::Game),
             children![

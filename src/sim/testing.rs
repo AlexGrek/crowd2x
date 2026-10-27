@@ -200,6 +200,12 @@ impl World {
         self.count("slept in the bed")
     }
 
+    /// How many stretches of sleep were had on the floor, where somebody too
+    /// spent to go on lay down ([`COLLAPSED`](crate::sim::brain::routines::COLLAPSED)).
+    pub fn floor_sleeps(&self) -> usize {
+        self.count("slept on the floor")
+    }
+
     /// How many hours have been worked at a desk here.
     pub fn works(&self) -> usize {
         self.count("worked an hour at the computer")

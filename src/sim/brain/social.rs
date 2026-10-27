@@ -268,7 +268,7 @@ fn gain(ctx: &Think<'_>, me: Uid, memory: &mut Memory, with: Uid) -> (f32, f32) 
 mod tests {
     use super::*;
     use crate::map::{Map, Size, FLOOR};
-    use crate::sim::clock::{Clock, MINUTE, TIME_SCALE};
+    use crate::sim::clock::{watched, Clock, MINUTE, TIME_SCALE};
     use crate::sim::relationships::{Chatter, Rule, Rules, Smalltalker};
     use crate::sim::testing::World;
 
@@ -384,6 +384,49 @@ mod tests {
         memory.relations_mut().chatted(other(), 0.0, 5.0, (9.0 * MINUTE) as f64, &Rules::default());
         tend(&world_.ctx(), &me(), &mut memory, GoalId::Wander);
         assert!(memory.chat().is_none(), "a minute since the last");
+    }
+
+    /// How long a chat is to be is drawn by whoever asks, when it asks, between
+    /// the rules' least and most minutes of talk — and the one who takes it up
+    /// talks for as long.
+    #[test]
+    fn whoever_asks_draws_how_long_the_chat_is_and_the_other_talks_as_long() {
+        let mut world_ = world(10.0, None);
+        world_.society.change_rule(Rule::StrangerChance, 1.0);
+        let rules = *world_.society.rules();
+        let (least, most) = (watched(rules.least_minutes_of_talk * MINUTE), watched(rules.most_minutes_of_talk * MINUTE));
+        let mut drawn = std::collections::BTreeSet::new();
+        for _ in 0..50 {
+            world_.tick += 1;
+            let mut memory = Memory::new();
+            notice(&world_.ctx(), &me(), &mut memory, GoalId::Wander, other(), OTHER);
+            let talk = memory.chat().expect("a sure chance").talk;
+            assert!((least..=most).contains(&talk), "{talk} not in {least}..={most}");
+            drawn.insert(talk.to_bits());
+        }
+        assert!(drawn.len() > 10, "drawn afresh for every invitation: {drawn:?}");
+
+        // Taken up: for as long as the one who asked said.
+        let mut world_ = world(10.0, None);
+        world_.chats.set(other(), Some(Chatter { who: other(), with: me().uid(), phase: Phase::Inviting, cell: OTHER, talk: 3.25 }));
+        let mut memory = Memory::new();
+        tend(&world_.ctx(), &me(), &mut memory, GoalId::Wander);
+        assert_eq!(memory.chat().map(|chat| (chat.leads, chat.talk)), Some((false, 3.25)));
+    }
+
+    /// Two who asked each other at once talk for as long as the one who goes
+    /// over — the lower uid — said, so both talk for the same.
+    #[test]
+    fn two_who_asked_at_once_talk_for_as_long_as_the_one_who_goes_over_said() {
+        let (low, high) = (me(), Body::at_cell(Uid::new(EntityType::Human, 3), ME));
+        for (body, partner, leads, expect) in [(low, other(), true, 1.0), (high, other(), false, 7.0)] {
+            let mut world_ = world(10.0, None);
+            world_.chats.set(partner, Some(Chatter { who: partner, with: body.uid(), phase: Phase::Inviting, cell: OTHER, talk: 7.0 }));
+            let mut memory = Memory::new();
+            memory.set_chat(Chat { with: partner, phase: Phase::Inviting, leads: true, since: (10.0 * MINUTE) as f64, talk: 1.0 });
+            tend(&world_.ctx(), &body, &mut memory, GoalId::Wander);
+            assert_eq!(memory.chat().map(|chat| (chat.leads, chat.talk)), Some((leads, expect)), "{}", body.uid());
+        }
     }
 
     /// Asked over many ticks — each its own roll — how often a wanderer
@@ -502,6 +545,26 @@ mod tests {
         small_talk(&world_.ctx(), &me(), &mut memory, false);
         assert_eq!(memory.smalltalk().map(|talk| talk.answered), Some(true));
         assert_eq!(memory.relations().points(other()), 10.5);
+    }
+
+    /// Each side has its say once — answering, or seeing its opening answered
+    /// — and that tick alone says so, for the brain to tell the body (a little
+    /// fun, `Event::SmallTalk`).
+    #[test]
+    fn a_small_talk_is_had_once_by_each_side_and_says_so_on_that_tick_alone() {
+        let mut memory = Memory::new();
+        assert!(small_talk(&talking_world(10.0, Some(false)).ctx(), &me(), &mut memory, false), "answered");
+        assert!(!small_talk(&talking_world(11.0, Some(true)).ctx(), &me(), &mut memory, false), "going on");
+        assert!(!small_talk(&talking_world(14.0, Some(true)).ctx(), &me(), &mut memory, false), "over");
+
+        let mut memory = Memory::new();
+        memory.set_smalltalk(Smalltalk { with: other(), since: (10.0 * MINUTE) as f64, answered: false });
+        assert!(!small_talk(&talking_world(10.0, None).ctx(), &me(), &mut memory, false), "not answered yet");
+        assert!(small_talk(&talking_world(10.5, Some(true)).ctx(), &me(), &mut memory, false), "its opening answered");
+        assert!(!small_talk(&talking_world(11.0, Some(true)).ctx(), &me(), &mut memory, false), "and no more");
+
+        let mut memory = Memory::new();
+        assert!(!small_talk(&talking_world(10.0, Some(false)).ctx(), &me(), &mut memory, true), "nobody answers asleep");
     }
 
     #[test]

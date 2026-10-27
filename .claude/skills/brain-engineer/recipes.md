@@ -45,7 +45,7 @@ use super::{Event, Process, ProcessId, Stats};
 /// World hours from rested to exhausted. [A process runs on the world's clock
 /// — `Think::game_dt`, two minutes to the watched second — so say what the
 /// number means in hours of a person's day, not in seconds of watching.]
-pub const HOURS_TO_EXHAUSTED: f32 = 16.0;
+pub const HOURS_TO_EXHAUSTED: f32 = 32.0;
 
 /// Stamina lost per world second.
 pub const STAMINA_PER_SECOND: f32 = 100.0 / (HOURS_TO_EXHAUSTED * HOUR);

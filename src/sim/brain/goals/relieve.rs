@@ -309,7 +309,9 @@ mod tests {
     fn no_free_outdoor_spot_is_held_off_and_critical_fullness_still_causes_an_accident() {
         let start = Point::new(-6, 6);
         let mut world = World::new(Map::new(Size::new(10, 10), FLOOR).with_wasteland(5));
-        let mut human = bursting_human(start, 90.0);
+        // Near enough to critical that a bladder as slow as it is gets there
+        // in the ticks below.
+        let mut human = bursting_human(start, 95.0);
         for dx in -OUTSIDE_RADIUS..=OUTSIDE_RADIUS {
             for dy in -OUTSIDE_RADIUS..=OUTSIDE_RADIUS {
                 if dx == 0 && dy == 0 { continue; }

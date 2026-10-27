@@ -46,6 +46,8 @@ pub const HIGHLIGHT_SOLID: Color = Color::srgba(0.98, 0.82, 0.31, 0.34);
 /// question, and the screen it interrupted showing through it is just noise
 /// behind the answer.
 pub const MODAL: Color = Color::srgb(0.04, 0.04, 0.06);
+/// Backing for world readouts, keeping the running game visible beneath them.
+pub const OVERLAY: Color = Color::srgba(0.04, 0.04, 0.06, 0.65);
 /// A widget you can put something into: a text field, a key on the on-screen
 /// keyboard.
 pub const FIELD: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);

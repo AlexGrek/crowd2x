@@ -3069,6 +3069,13 @@ mod tests {
                 // well as work, so both behaviours run in this test.
                 state.entities.get_mut(uid).unwrap().body_mut().set_home(PropertyId::new(1));
                 state.hire(uid);
+                // Boredom is the slowest need to come round, twenty world
+                // hours from a great time, and talk keeps it off: a quarter
+                // of them arrive bored, so the computer is played on.
+                if i % 4 == 3 {
+                    let biology = state.entities.get_mut(uid).unwrap().biology_mut().unwrap();
+                    biology.edit(|stats| stats.with_fun(100.0 - crate::sim::brain::routines::BORED - 10.0));
+                }
             }
             state
         };
@@ -3088,9 +3095,8 @@ mod tests {
         };
         let (mut done_a, mut done_b) = ([0; 8], [0; 8]);
         // Everybody is born 70 to 100 percent satisfied, so nobody is hungry,
-        // parched, bursting or bored for hours: the slowest need to come round
-        // is boredom, ten world hours from a great time to bored. `run` ticks
-        // at 60Hz, so a world hour is 1800 of them, and this is six.
+        // parched or bursting for hours (the bored were made so above). `run`
+        // ticks at 60Hz, so a world hour is 1800 of them, and this is six.
         for _ in 0..(6 * 1800) {
             run(&mut a, 1);
             run(&mut b, 1);

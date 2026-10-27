@@ -42,6 +42,11 @@ files come only from what the routine needs *around* it:
   0..1)`, beside `raise_to`): it only sets how fast its unit walks while that goal is on top. A
   `Need` gives its `urgent_at` (`URGENT`, 75, or `NEVER_URGENT`); a routine type works it out
   as `WorkRoutine` does lateness. Raise none for a want that is no hurry.
+- **The goal in charge holds** (`goal::HOLD`, 0.3; `brain-engineer`, "the hold"): a new want
+  takes a unit off what it is doing only when wanted by more than the hold over it. Order a
+  new routine against what it should interrupt *with the hold added*. Only a routine whose
+  whole point is to stop something going on raises with `Goals::break_in` (getting ready, a
+  dog's full bowel); everything else uses `raise_to`.
 - **Hysteresis.** Commit at a high level, release at a lower one, kept in a `committed` field
   on the routine. Without it a stat hovering at one threshold makes a unit turn round halfway
   to the goal. `&mut self` in `arrange` exists for this.

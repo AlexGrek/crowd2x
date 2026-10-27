@@ -309,6 +309,10 @@ pub struct GoalSlot {
     /// all there was before.
     #[prost(float, tag = "5")]
     pub urgency: f32,
+    /// Whether it was raised to break in on whatever is in charge
+    /// (`Goals::break_in`); absent = no, which is all there was before.
+    #[prost(bool, tag = "6")]
+    pub breaking_in: bool,
 }
 
 /// One goal executor's state.

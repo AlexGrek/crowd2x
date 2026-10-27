@@ -67,7 +67,8 @@ talking only to the one below:
   comes back. **Work is the other clock routine**: `WorkRoutine` wants the job's goal
   (`GoalId::Work` at a desk or guard post, `GoalId::Collect` for a scrap collector) at a
   flat 1.5 while the job's shift is due (09:00-17:00 Mon-Fri, from 08:30 on the way) — over
-  every need at its commit level, under any need past 75, and tied with (so losing to) a
+  every need at its commit level, under any need past 75 on a fresh choice (a shift under
+  way holds, `goal::HOLD`, until a need past 90), and tied with (so losing to) a
   nap at `EXHAUSTED`. **`ReadyRoutine` gets a worker ready to go out** (the collector): before
   a trip into the wasteland it raises eat, drink, play and relieve over work (1.6, in that
   list's order) until every need is 85% met, then latches `ready` until the worker has gone
@@ -79,7 +80,9 @@ talking only to the one below:
   change. A per-routine `Box<dyn>` would be dozens of allocations per unit and a pointer
   chase per routine per unit per tick, which is what a human with dozens of routines in a
   crowd of thousands cannot afford.
-- **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort. A
+- **goals** — `GoalId` over a fixed array; the one on top is an argmax, not a sort — and
+  the goal in charge **holds** against a rival wanted by no more than `HOLD` (0.3) over it,
+  unless the rival was raised to break in (`Goals::break_in`); SKILL.md, "the hold". A
   `GoalExecutor` (`WanderGoal`, `EatGoal`, `DrinkGoal`, `RelieveGoal`, `PlayGoal`, `SleepGoal`, `SalvageGoal`, `WorkGoal`, `CollectGoal`) is a `Box` owned for
   the entity's life, so **its fields are its saved state** across being put down and
   picked up. It reads the body, hands and memory, and manages the task queue; it never

@@ -9,7 +9,7 @@ use crate::sim::job::{is_bedtime, JobKind};
 use crate::sim::pets::{HUNGRY, MUST_GO};
 use crate::sim::relationships::Phase;
 
-use super::goal::{GoalId, Goals};
+use super::goal::{GoalId, Goals, HOLD};
 use super::goals::provision;
 use super::memory::SALVAGE_ORDER;
 use super::routine::{RoutineCtx, RoutineExecutor};
@@ -61,10 +61,10 @@ const NEED_PER_PRIORITY: f32 = 50.0;
 
 /// A need worse than this is **urgent**: its unit hurries to see to it,
 /// more the worse it gets, flat out at 100 — starving, parched, about to
-/// wet itself. The line where a need takes a worker off its work
-/// ([`CALLED_AWAY`]), and for the same reason: past it, the need is what
-/// matters.
-pub const URGENT: f32 = CALLED_AWAY;
+/// wet itself. A fresh choice puts a need past it over a shift ([`WORKING`]
+/// is a need at 75); a shift already under way holds against it until
+/// [`CALLED_AWAY`].
+pub const URGENT: f32 = WORKING * NEED_PER_PRIORITY;
 
 /// What [`Need::urgent_at`] says of a need that is never worth hurrying for:
 /// boredom, which does a body no harm.
@@ -270,6 +270,16 @@ pub const RESTED: f32 = 10.0;
 /// and a half more world hours awake.
 pub const CRITICALLY_TIRED: f32 = 90.0;
 
+/// Tiredness at which a human **cannot take another step**: it lies down and
+/// sleeps where it stands, bed or no bed, indoors or out
+/// ([`SleepGoal`](super::goals::SleepGoal)) — and lies there, stretch after
+/// stretch, until it is no more than [`EXHAUSTED`], when it gets up to find
+/// a bed. Past [`CRITICALLY_TIRED`], short of spent (100), where health
+/// drains. A night watch that could not get to bed, a worker kept up, a
+/// collector far out: by day and with energy as slow as it is, a day and a
+/// half awake.
+pub const COLLAPSED: f32 = 95.0;
+
 /// Sleep: tiredness and the time of day, met by going to bed.
 ///
 /// A routine type of its own rather than a [`Need`], because a need reads a
@@ -447,7 +457,9 @@ impl RoutineExecutor for HeelRoutine {
             goals.raise_to(GoalId::Sleep, (FOLLOWING + SQUATTING) / 2.0);
         }
         if ctx.think.bonds.get(ctx.body.uid()).is_some_and(|dog| dog.bowel >= MUST_GO) {
-            goals.raise_to(GoalId::Defecate, SQUATTING);
+            // A bowel that must go breaks in, on a nap beside the owner too:
+            // the hold would otherwise keep a dog asleep (0.25) against it.
+            goals.break_in(GoalId::Defecate, SQUATTING);
         }
     }
 }
@@ -479,14 +491,17 @@ impl RoutineExecutor for OrdersRoutine {
 /// How much [`WorkRoutine`] wants a worker at its desk while the shift is
 /// due.
 ///
-/// **Over every need at the point it commits** — hunger, thirst and boredom
-/// at 1.2 ([`PECKISH`] / 50), a bursting bladder at 1.4 — so somebody only
-/// just peckish waits for the end of the shift, or an hour's break between
-/// two stretches does not happen at all. **Under every need once it is
-/// urgent**: past 75 any of them is worth more than 1.5 and takes the worker
-/// away from the desk, and work has it back once it is seen to. A nap at
-/// [`EXHAUSTED`] (75, so 1.5 exactly) ties, and the tie goes to sleep: ties
-/// go to the lower [`GoalId`], and work is the last.
+/// **Over every need at the point it commits** — hunger and thirst at 1.2
+/// ([`PECKISH`] / 50), a bursting bladder at 1.4; boredom never comes near
+/// ([`PLAYING`]) — so somebody only just peckish waits for the end of the
+/// shift, or an hour's break between two stretches does not happen at all.
+/// **Under every need once it is urgent**, for a fresh choice: past 75 any of
+/// them is worth more than 1.5. **But a shift under way holds**
+/// ([`HOLD`](super::goal::HOLD)): a worker at it leaves it only for a need
+/// past [`CALLED_AWAY`] (90) — starving, parched, bursting — or for danger,
+/// and work has it back once it is seen to. A nap at [`EXHAUSTED`] (75, so
+/// 1.5 exactly) ties with a shift not yet begun, and the tie goes to sleep:
+/// ties go to the lower [`GoalId`], and work is the last.
 pub const WORKING: f32 = 1.5;
 
 /// How urgent getting to work is the moment a shift starts with its worker
@@ -588,17 +603,21 @@ pub const TOPPED_UP: f32 = 5.0;
 /// How much [`ReadyRoutine`] wants the first need on its list seen to before
 /// a trip out: over [`WORKING`], so the trip waits for it, and under any need
 /// past 80. Each need after it on the list is [`IN_TURN`] less, all of them
-/// still over work.
+/// still over work. Raised to **break in** ([`Goals::break_in`]): the shift
+/// in charge at the bin does not hold against it, or nobody would ever stop
+/// to get ready.
 pub const GETTING_READY: f32 = 1.6;
 
 /// How far apart [`ReadyRoutine`] puts the needs on its list, so that they
 /// are seen to in the list's order rather than in the goals'.
 const IN_TURN: f32 = 0.01;
 
-/// A need worse than this takes a worker off its work ([`WORKING`] is the
-/// priority of a need at it): one that does, on a job worked out in the
-/// wasteland, has [`ReadyRoutine`] see to every need while it is about it.
-const CALLED_AWAY: f32 = WORKING * NEED_PER_PRIORITY;
+/// A need worse than this takes a worker off its work: a shift under way
+/// holds against anything wanted less than [`HOLD`] over it, so this is
+/// [`WORKING`] and the hold on the need scale — 90. One that does, on a job
+/// worked out in the wasteland, has [`ReadyRoutine`] see to every need while
+/// it is about it.
+pub const CALLED_AWAY: f32 = (WORKING + HOLD) * NEED_PER_PRIORITY;
 
 /// What [`ReadyNeed::top_up`] says of a need [`ReadyRoutine`] never sees to:
 /// boredom, which never takes a worker off its shift ([`PLAYING`]) and
@@ -794,11 +813,11 @@ impl RoutineExecutor for ReadyRoutine {
         }
         for (i, ready) in READY_NEEDS.iter().enumerate() {
             if self.pending & (1 << i) != 0 {
-                goals.raise_to(ready.need.goal, GETTING_READY - i as f32 * IN_TURN);
+                goals.break_in(ready.need.goal, GETTING_READY - i as f32 * IN_TURN);
             }
         }
         if self.pending & PROVISIONS_BIT != 0 {
-            goals.raise_to(GoalId::Provision, GETTING_READY - READY_NEEDS.len() as f32 * IN_TURN);
+            goals.break_in(GoalId::Provision, GETTING_READY - READY_NEEDS.len() as f32 * IN_TURN);
         }
     }
 
@@ -1102,16 +1121,22 @@ mod tests {
         );
     }
 
-    /// Being as bored as you are hungry is being equally in need of seeing to
-    /// — which is only true because boredom is fun read the same way up as
-    /// every other need.
+    /// Fun never interrupts: however bored, a go at something is wanted at
+    /// [`PLAYING`] — over wandering, under a chat, and so under every other
+    /// want there is: an order, a dog to feed, a night in bed, any need
+    /// committed to, a shift.
     #[test]
-    fn boredom_and_hunger_that_are_equally_bad_are_equally_urgent() {
-        let stats = Stats::calm().with_hunger(80.0).with_fun(20.0);
-        assert_eq!(
-            priority(&mut NeedRoutine::new(&HUNGER), stats),
-            priority(&mut NeedRoutine::new(&BOREDOM), stats)
-        );
+    fn boredom_however_bad_is_wanted_less_than_anything_but_wandering() {
+        for fun in [100.0 - BORED, 20.0, 0.0] {
+            let bored = priority(&mut NeedRoutine::new(&BOREDOM), Stats::calm().with_fun(fun));
+            assert_eq!(bored, PLAYING, "fun {fun}");
+        }
+        assert!(PLAYING > BUSY && PLAYING < CHATTING);
+        let lowest_other_want = [CHATTING, ORDERED, DOG_CARE, SLEEPY / NEED_PER_PRIORITY, PECKISH / NEED_PER_PRIORITY, WORKING];
+        assert!(lowest_other_want.iter().all(|&want| PLAYING < want), "{lowest_other_want:?}");
+        // As bored as it could be, and only just peckish: the meal.
+        let stats = Stats::calm().with_hunger(PECKISH).with_fun(0.0);
+        assert!(priority(&mut NeedRoutine::new(&HUNGER), stats) > priority(&mut NeedRoutine::new(&BOREDOM), stats));
     }
 
     #[test]
@@ -1396,7 +1421,7 @@ mod tests {
     /// need once it is urgent.
     #[test]
     fn work_outranks_every_need_at_its_commit_level_and_yields_to_an_urgent_one() {
-        for (need, commit) in [("hunger", PECKISH), ("thirst", THIRSTY), ("boredom", BORED), ("bladder", BURSTING)] {
+        for (need, commit) in [("hunger", PECKISH), ("thirst", THIRSTY), ("bladder", BURSTING)] {
             assert!(WORKING > commit / NEED_PER_PRIORITY, "{need} at {commit} would leave the desk");
             assert!(WORKING < 76.0 / NEED_PER_PRIORITY, "{need} at 76 would not");
         }
@@ -1414,10 +1439,32 @@ mod tests {
         assert_eq!(ranked(80.0), GoalId::Eat);
     }
 
-    /// Bored at work is bored at work: while its shift is due, boredom never
-    /// beats the job, however bad — and still comes before wandering about,
-    /// for when the work is held off. Off shift, or with no job, it is the
-    /// need it always was.
+    /// What a unit is doing counts: a shift in charge holds against hunger at
+    /// 80, which a shift not yet begun would lose to, and is left only for a
+    /// need past [`CALLED_AWAY`] — starving.
+    #[test]
+    fn a_shift_under_way_is_left_only_for_a_need_past_ninety() {
+        let job = crate::sim::job::Job::office(Point::new(3, 3));
+        let at_work_and = |hunger: f32| {
+            let mut goals = Goals::new();
+            goals.raise_to(GoalId::Work, work_priority(&mut WorkRoutine::new(), Some(&job), on(2, 11.0)));
+            assert_eq!(goals.settle(), Some((GoalId::Idle, GoalId::Work)), "at work");
+            goals.clear_priorities();
+            goals.raise_to(GoalId::Work, work_priority(&mut WorkRoutine::new(), Some(&job), on(2, 11.0)));
+            goals.raise_to(GoalId::Eat, priority(&mut NeedRoutine::new(&HUNGER), Stats::calm().with_hunger(hunger)));
+            goals.settle();
+            goals.top()
+        };
+        assert_eq!(at_work_and(80.0), GoalId::Work, "hungry, and still at it");
+        assert_eq!(at_work_and(CALLED_AWAY), GoalId::Work, "the hold is not broken by a tie");
+        assert_eq!(at_work_and(CALLED_AWAY + 1.0), GoalId::Eat, "starving");
+        assert_eq!(CALLED_AWAY, 90.0);
+    }
+
+    /// Bored at work is bored at work: boredom never beats the job, however
+    /// bad — and still comes before wandering about, for when the work is held
+    /// off. Off shift, or with no job, it is no more wanted: fun never
+    /// interrupts anything.
     #[test]
     fn boredom_never_takes_a_worker_off_its_shift() {
         let bored = |job: Option<&crate::sim::job::Job>, clock: Clock| {
@@ -1442,8 +1489,9 @@ mod tests {
         let job = crate::sim::job::Job::office(Point::new(3, 3));
         let on_shift = bored(Some(&job), on(2, 11.0));
         assert!(on_shift < WORKING && on_shift > BUSY, "{on_shift}");
-        assert_eq!(bored(Some(&job), on(2, 19.0)), 90.0 / NEED_PER_PRIORITY, "after work");
-        assert_eq!(bored(None, on(2, 11.0)), 90.0 / NEED_PER_PRIORITY, "no job");
+        assert_eq!(on_shift, PLAYING);
+        assert_eq!(bored(Some(&job), on(2, 19.0)), PLAYING, "after work");
+        assert_eq!(bored(None, on(2, 11.0)), PLAYING, "no job");
     }
 
     /// Exhausted is 1.5, the same as work, and the tie goes to the bed: work
@@ -1761,12 +1809,12 @@ mod tests {
         for ready in [false, true] {
             let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
             routine.set_state(ready, 0).unwrap();
-            let on_the_way = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, 76.0, 50.0, 0.0)) };
+            let on_the_way = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, CALLED_AWAY + 1.0, 50.0, 0.0)) };
             on_the_way.arrange(&mut routine, &mut goals);
             assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Relieve], "ready already: {ready}");
         }
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let not_yet = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, 74.0, 50.0, 0.0)) };
+        let not_yet = Readiness { cell: ACROSS_THE_SITE, ..Readiness::of(needs(40.0, CALLED_AWAY - 1.0, 50.0, 0.0)) };
         not_yet.arrange(&mut routine, &mut goals);
         assert!(raised(&goals).is_empty());
     }
@@ -1824,6 +1872,22 @@ mod tests {
         let last = GETTING_READY - (READY_NEEDS.len() - 1) as f32 * IN_TURN;
         assert!(last > WORKING && last > EXHAUSTED / NEED_PER_PRIORITY, "{last}");
         assert!(GETTING_READY < 81.0 / NEED_PER_PRIORITY);
+    }
+
+    /// The shift is in charge at the bin, and holds against anything wanted
+    /// less than the hold over it — getting ready is: it breaks in, or no
+    /// collector would ever stop to get ready.
+    #[test]
+    fn getting_ready_breaks_in_on_the_shift_it_could_not_outweigh_by_the_hold() {
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        goals.raise_to(GoalId::Collect, WORKING);
+        assert_eq!(goals.settle(), Some((GoalId::Idle, GoalId::Collect)));
+        Readiness::of(needs(40.0, 40.0, 0.0, 0.0)).arrange(&mut routine, &mut goals);
+        // ...and the work routine still wants the shift this tick.
+        goals.raise_to(GoalId::Collect, WORKING);
+        assert!(goals.priority(GoalId::Drink) < WORKING + HOLD, "not by the hold alone");
+        assert!(goals.is_breaking_in(GoalId::Drink));
+        assert_eq!(goals.settle(), Some((GoalId::Collect, GoalId::Drink)));
     }
 
     #[test]

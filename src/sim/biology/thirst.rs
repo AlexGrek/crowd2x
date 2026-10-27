@@ -65,14 +65,16 @@ mod tests {
         assert_eq!(stats.thirst(), 100.0);
     }
 
-    /// Hours, not seconds — and fewer of them than a meal is apart.
+    /// Hours, not seconds — six of them — and fewer of them than a meal is
+    /// apart.
     #[test]
     fn a_dry_mouth_takes_hours_to_become_thirsty() {
         let mut stats = Stats::calm().with_thirst(0.0);
-        Thirst.advance(&mut stats, 2.5 * HOUR);
+        Thirst.advance(&mut stats, 5.5 * HOUR);
         assert!(stats.thirst() < THIRSTY, "{}", stats.thirst());
         Thirst.advance(&mut stats, 1.0 * HOUR);
         assert!(stats.thirst() > THIRSTY, "{}", stats.thirst());
+        assert!(HOURS_TO_PARCHED >= 2.0 * 5.0, "at least twice as slow as it was");
     }
 
     #[test]

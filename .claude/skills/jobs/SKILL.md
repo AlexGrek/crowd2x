@@ -139,9 +139,11 @@ home and walks out from there.
 
 ### Getting ready (`ReadyRoutine`, `brain/routines.rs`)
 
-A trip out is far from any fridge or toilet, and a need past 75 (1.5, which beats work)
-calls a collector back in for that one need, then out, then back for the next. So before
-going out it **gets ready**: every need on `READY_NEEDS` 85% met (`READY` = 15).
+A trip out is far from any fridge or toilet, and a need past `CALLED_AWAY` (90: a shift under
+way holds, `goal::HOLD`, against anything less) calls a collector back in for that one need,
+then out, then back for the next. So before going out it **gets ready**: every need on
+`READY_NEEDS` 85% met (`READY` = 15). Its goals are raised to **break in**
+(`Goals::break_in`): the shift in charge beside the bin does not hold against them.
 
 - **Which jobs**: a `JobDef::goes_out_for` column, what a trip brings back — `Some(Scrap)`
   for the collector, `Some(Wheat)` for the farmer (a field is ten cells past the wall),
@@ -216,17 +218,26 @@ district tests that assert scrap is stored switch the collectors' needs off; `qa
 
 ### Where 1.5 sits
 
+A shift under way **holds** (`goal::HOLD` = 0.3, the `brain-engineer` skill): a rival takes it
+off only when wanted by more than 1.8. A shift not yet begun is a fresh choice.
+
 | vs | value | who wins |
 | --- | --- | --- |
-| hunger/thirst/boredom at commit (60) | 1.2 | work |
-| bladder at commit (`BURSTING` 70) | 1.4 | work (they hold it to 75) |
-| any need past 75 | > 1.5 | the need; work has the worker back afterwards |
-| nap at `EXHAUSTED` (75) | 1.5 | **sleep** (tie → lower `GoalId`) |
+| boredom, however bad | `PLAYING` 0.12 | work, always: fun never interrupts |
+| hunger/thirst at commit (60) | 1.2 | work |
+| bladder at commit (`BURSTING` 70) | 1.4 | work |
+| a need past 75, shift not yet begun | > 1.5 | the need |
+| a need past 75, shift under way | 1.5-1.8 | **work** — held; the worker hurries once it goes |
+| a need past `CALLED_AWAY` (90) | > 1.8 | the need; work has the worker back afterwards |
+| collapsing (`COLLAPSED` 95 tired) | 1.9 | sleep, where it stands |
+| nap at `EXHAUSTED` (75), shift not yet begun | 1.5 | **sleep** (tie → lower `GoalId`) |
 | night floor / orders / wander | 0.6 / 0.5 / 0.1 | work (a shift never overlaps its worker's own night, `Shift::is_bedtime`) |
+| danger (`FLEEING`) | 3.0 | flee, held or not |
 
-**Why 1.1 and not more**: a body up rested at 06:00 is 68.75 tired by 17:00 with no job at
-all. 8 hours at 1.1 adds 5 → 73.75, just short of `EXHAUSTED`; at 1.25 a worker would hit 75
-around 16:10 and the nap (which wins the tie) would walk them out of every afternoon shift.
+**Why 1.1 and not more**: needs are twice as slow as they were (energy: 32 h from rested to
+exhausted), so a body up rested at 06:00 is 34.4 tired by 17:00 with no job and 36.9 after 8
+hours at 1.1 — the ratio the old, tighter day was tuned to (68.75 and 73.75, just short of
+`EXHAUSTED`, where at 1.25 the nap would have walked them out of every afternoon shift).
 `a_rested_worker_is_worn_out_but_not_exhausted_at_the_end_of_a_shift` pins this. A collector
 is tired only while salvaging and storing, so less than an office worker over a shift.
 

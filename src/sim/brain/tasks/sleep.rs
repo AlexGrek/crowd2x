@@ -175,7 +175,10 @@ mod tests {
         let mut task = Task::sleep(Point::new(6, 6), watched(HOUR));
         assert_eq!(rig.run(&mut task, 5000), TaskResult::Success);
         let gained = rig.biology.stats().stamina() - 20.0;
-        assert!((gained - 100.0 / 8.0 - 100.0 / 16.0).abs() < 0.5, "gained {gained}");
+        // A whole night is eight hours; the drain the hour also ran is put
+        // back with it (`energy::RECOVERY_PER_SECOND`).
+        let drain = 100.0 / crate::sim::biology::energy::HOURS_TO_EXHAUSTED;
+        assert!((gained - 100.0 / 8.0 - drain).abs() < 0.5, "gained {gained}");
     }
 
     /// Woken half way through an hour: half an hour's rest, not none. Told
@@ -192,7 +195,7 @@ mod tests {
         assert_eq!(rig.biology.stats().stamina(), 20.0, "nothing until it is over or cut short");
         task.interrupted(&rig.action, Some(&mut rig.biology));
         let gained = rig.biology.stats().stamina() - 20.0;
-        let hour = 100.0 / 8.0 + 100.0 / 16.0;
+        let hour = 100.0 / 8.0 + 100.0 / crate::sim::biology::energy::HOURS_TO_EXHAUSTED;
         assert!((gained - hour / 2.0).abs() < 0.2, "gained {gained}, half an hour is {}", hour / 2.0);
     }
 

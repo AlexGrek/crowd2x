@@ -5,6 +5,10 @@
 //! drains away instead, and what the routine watching it reads is
 //! [`Stats::boredom`] — the same number the other way up, so every need is
 //! still on one scale.
+//!
+//! Fun run too low ([`JOYLESS`]) wears down **mental health**
+//! ([`Stats::mental_health`]): a body can go without entertainment for a
+//! while at no cost, and not for ever.
 
 use crate::sim::clock::HOUR;
 
@@ -49,6 +53,18 @@ pub const CHAT_FUN: f32 = 20.0;
 /// cures it.
 pub const SMALL_TALK_FUN: f32 = 2.0;
 
+/// Fun under this is **joyless**: mental health wears down for as long as it
+/// stays there ([`MENTAL_HEALTH_PER_SECOND`]). Eighteen world hours with
+/// nothing entertaining, from having a great time.
+pub const JOYLESS: f32 = 10.0;
+
+/// World hours of joylessness that wear mental health from whole to nothing.
+/// Two days: slow, like everything about the mind, and slower than any need.
+pub const HOURS_TO_BREAK_DOWN: f32 = 48.0;
+
+/// Mental health lost per **world** second while joyless.
+pub const MENTAL_HEALTH_PER_SECOND: f32 = 100.0 / (HOURS_TO_BREAK_DOWN * HOUR);
+
 /// How much of its pace boredom keeps asleep: none. Nobody gets bored in their
 /// sleep, and a sleeper who did was up at two in the morning for the computer.
 pub const ASLEEP_PACE: f32 = 0.0;
@@ -66,10 +82,14 @@ impl Process for Fun {
     }
 
     /// Fun drains. Nothing is entertaining for ever, and a body left alone
-    /// gets bored on its own — which is the whole of what this process does
-    /// by itself.
+    /// gets bored on its own. And fun run under [`JOYLESS`] wears mental
+    /// health down for every second it stays there — asleep, not at all,
+    /// since asleep this whole process stops.
     fn advance(&mut self, stats: &mut Stats, dt: f32) {
         stats.change_fun(-FUN_PER_SECOND * dt);
+        if stats.fun() < JOYLESS {
+            stats.change_mental_health(-MENTAL_HEALTH_PER_SECOND * dt);
+        }
     }
 
     /// Having done something entertaining puts [`AMUSEMENT`] back — all of
@@ -114,10 +134,11 @@ mod tests {
     #[test]
     fn a_person_with_nothing_to_do_takes_hours_to_get_bored() {
         let mut stats = Stats::calm().with_fun(100.0);
-        Fun.advance(&mut stats, 3.0 * HOUR);
+        Fun.advance(&mut stats, 11.0 * HOUR);
         assert!(stats.boredom() < BORED, "{}", stats.boredom());
-        Fun.advance(&mut stats, 3.5 * HOUR);
+        Fun.advance(&mut stats, 1.5 * HOUR);
         assert!(stats.boredom() > BORED, "{}", stats.boredom());
+        assert!(HOURS_TO_BORED >= 2.0 * 10.0, "at least twice as slow as it was");
     }
 
     #[test]
@@ -150,6 +171,35 @@ mod tests {
         Fun.handle(Event::Ingested(ItemKind::Food), FRESH, &mut stats);
         Fun.handle(Event::Relieved, FRESH, &mut stats);
         assert_eq!(stats.fun(), 30.0);
+    }
+
+    /// Fun under ten wears the mind down at its rate, and not at ten or over.
+    #[test]
+    fn joylessness_wears_mental_health_down_and_fun_does_not() {
+        let mut stats = Stats::calm().with_fun(JOYLESS - 1.0);
+        let before = stats.mental_health();
+        Fun.advance(&mut stats, HOUR);
+        assert!((before - stats.mental_health() - HOUR * MENTAL_HEALTH_PER_SECOND).abs() < 1e-3, "{}", stats.mental_health());
+
+        let mut stats = Stats::calm().with_fun(JOYLESS + 10.0);
+        Fun.advance(&mut stats, HOUR);
+        assert_eq!(stats.mental_health(), Stats::calm().mental_health(), "fun enough, no harm");
+
+        let mut stats = Stats::calm().with_fun(0.0);
+        Fun.advance(&mut stats, 10.0 * HOURS_TO_BREAK_DOWN * HOUR);
+        assert_eq!(stats.mental_health(), 0.0, "never past nothing");
+    }
+
+    /// A chat is a good deal of fun, a word in passing a little, and neither
+    /// is dulled by having had one lately.
+    #[test]
+    fn talking_to_somebody_is_fun() {
+        let mut stats = Stats::calm().with_fun(30.0);
+        Fun.handle(Event::Chatted, 0.25, &mut stats);
+        assert_eq!(stats.fun(), 30.0 + CHAT_FUN);
+        Fun.handle(Event::SmallTalk, 0.25, &mut stats);
+        assert_eq!(stats.fun(), 30.0 + CHAT_FUN + SMALL_TALK_FUN);
+        assert!(SMALL_TALK_FUN < CHAT_FUN && CHAT_FUN < AMUSEMENT);
     }
 
     /// The same computer, used for a living: no fun at all.

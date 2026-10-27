@@ -95,13 +95,18 @@ mod tests {
         assert_eq!(stats.tiredness(), 100.0);
     }
 
+    /// A day and a half awake, twice the waking day it used to be: a waking
+    /// day now tires a body half way.
     #[test]
-    fn a_waking_day_is_what_it_takes_to_be_exhausted() {
+    fn a_day_and_a_half_awake_is_what_it_takes_to_be_exhausted() {
         let mut stats = Stats::calm().with_stamina(100.0);
+        Energy.advance(&mut stats, 16.0 * HOUR);
+        assert!((stats.tiredness() - 50.0).abs() < 0.01, "a waking day: {}", stats.tiredness());
         Energy.advance(&mut stats, 15.0 * HOUR);
         assert!(stats.tiredness() < 100.0, "{}", stats.tiredness());
         Energy.advance(&mut stats, 1.5 * HOUR);
         assert_eq!(stats.tiredness(), 100.0);
+        assert!(HOURS_TO_EXHAUSTED >= 2.0 * 16.0, "at least twice as slow as it was");
     }
 
     /// The point of adding the drain back: sleep is judged by what is left

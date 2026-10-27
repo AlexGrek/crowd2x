@@ -51,9 +51,11 @@ means (the `Stats` setters are private to `biology`, so this is compiler-held).
    (eyes shut instead while Task::Sleep is current)
    -> the nights' loss off what it thinks of everybody (Relations::pass_nights)
    then every tick: social::tend (a chat taken up, agreed or let go) and
-   social::small_talk (small talk answered, kept up or over — no goal, no task)
+   social::small_talk (small talk answered, kept up or over — no goal, no task;
+   true on the tick it is had, and the brain tells the body Event::SmallTalk)
 1-2. every routine arranges the list (zeroed first, so a routine raises EVERY tick)
-3. top changed? old.deprioritized -> current task abandoned, walk halted
+3. Goals::settle: the best goal takes charge — unless the goal in charge HOLDS
+   (below). top changed? old.deprioritized -> current task abandoned, walk halted
                 -> queue cleared -> new.prioritized
 3b. otherwise, a task going on: top.keep_up(ctx, current) — what will not
                 wait for the task to end (a cleaner's look over the district every
@@ -76,6 +78,32 @@ This order has consequences:
 - When a handover happens the tick after a task ended, the old goal never gets `process` for
   that ending. It gets it in **`deprioritized`** (`ctx.tasks.result()`, `ctx.finished`).
   `EatGoal` logs a meal there because the last bite is what makes hunger let go.
+
+## What it is doing counts: the hold
+
+**The goal in charge holds** (`goal::HOLD` = 0.3, `Goals::settle` → `holds_against`): a rival
+takes over only when it is wanted by **more than `HOLD` over** the goal in charge — a tie with
+the hold holds. So a meal is not dropped for a drink wanted a little more, a night in bed not
+for a dog to feed, a chat not for the TV, and a shift (1.5) is left only for a need past
+`CALLED_AWAY` = (`WORKING` + `HOLD`) × 50 = **90** — starving, parched, bursting — or for
+danger (`FLEEING` 3.0 beats anything held). `Goals::best` stays the plain argmax (a fresh
+choice); only `settle` holds.
+
+- **Only while it is still wanted, not held off, and holds at all** (`GoalId::holds`): a goal
+  its routine let go of (priority 0), one on a cooldown (`Blocked`), or one whose priority is
+  NaN holds nothing. **The floors never hold** — `Idle`, `Wander`, a dog's `Follow`, a
+  deathdog's `Prowl` — they are what a unit does with nothing to do.
+- **Breaking in** (`Goals::break_in(goal, at_least)`): a routine whose whole point is to stop
+  something going on raises its goal this way, and the hold does not keep it out — it takes
+  over the moment it is wanted more at all. `ReadyRoutine` (getting ready beside the bin
+  stops the shift it could never outweigh by the hold) and a dog's full bowel
+  (`HeelRoutine`, over its nap beside its sleeping owner) are the only ones. A bit per goal,
+  cleared with the priorities every tick, saved (`pb::GoalSlot.breaking_in`, tag 6) so a
+  loaded brain settles exactly as the saved one would. Never for an ordinary want.
+- Tests: `goal::tests` (holds against a little more, a tie holds, the floors hold nothing,
+  let go / held off / NaN hold nothing, breaking in, the save), `routines::tests::
+  a_shift_under_way_is_left_only_for_a_need_past_ninety`,
+  `getting_ready_breaks_in_on_the_shift_it_could_not_outweigh_by_the_hold`.
 
 ## Where does my change go?
 
@@ -238,17 +266,17 @@ Priorities are unitless `f32`s compared only against each other.
 | Source | Value |
 | --- | --- |
 | `StayBusyRoutine` (wander) | `BUSY = 0.1`, the floor everything should beat when it matters |
-| `ChatRoutine` → chat | `CHATTING = 0.15` while a chat both sides agreed to (or this side has finished) is in memory: over wandering, under everything else. The `relationships` skill |
-| a pet dog's `HeelRoutine` → follow / defecate | `FOLLOWING = 0.2` while it has an owner (over wandering, which is what a stray does), `SQUATTING = 0.3` once its bowel is `MUST_GO`. `Brain::dog`; `GoalId::Follow`, `Defecate` have no catalogue executor. The `pets` skill |
+| `NeedRoutine(BOREDOM)` → play | `PLAYING = 0.12` however bored (`Need::at_most`), committed at `BORED` (60), released at `AMUSED` (20): over wandering and under a chat, so **fun never interrupts anything** — it is what a unit does with nothing better to do, never what takes it off something. No bedtime or shift cap is needed: everything else is over it. `Stats::boredom` is `fun` turned over — the one need that falls on its own. A chat (`CHAT_FUN` 20) and small talk (`SMALL_TALK_FUN` 2) are fun too (`Event::Chatted` from a `Talk` that ran its time, `Event::SmallTalk`); fun under `JOYLESS` (10) wears `mental_health` down over `HOURS_TO_BREAK_DOWN` (48 h) |
+| `ChatRoutine` → chat | `CHATTING = 0.15` while a chat both sides agreed to (or this side has finished) is in memory: over wandering and a go at something, under everything else. The `relationships` skill |
+| a pet dog's `HeelRoutine` → follow / sleep / defecate | `FOLLOWING = 0.2` while it has an owner (over wandering, which is what a stray does); `GoalId::Sleep` at 0.25 while the owner is asleep (`DogSleepGoal`); `SQUATTING = 0.3` once its bowel is `MUST_GO`, **raised to break in** so it gets up from a nap. `Brain::dog`; `GoalId::Follow`, `Defecate` have no catalogue executor. The `pets` skill |
 | `KeepRoutine` → dog care | `DOG_CARE = 0.55` while the dog a person keeps is hungry (its bond): over wandering, a chat and an order (0.5), under a night in bed (0.6), every need committed to and a shift. The `pets` skill |
 | `NeedRoutine(HUNGER)` → eat | `hunger / 50`: 1.2 at `PECKISH` (60), released at `SATED` (25) |
 | `NeedRoutine(THIRST)` → drink | `thirst / 50`: 1.2 at `THIRSTY` (60), released at `QUENCHED` (25) |
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
-| `NeedRoutine(BOREDOM)` → play | `boredom / 50`: 1.2 at `BORED` (60), released at `AMUSED` (20). `Stats::boredom` is `fun` turned over — the one stat that falls on its own, read the same way up as every other need |
-| `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night — **the unit's own night**, `job::is_bedtime(job, clock)`: the clock's 22-06, or the 8 hours ending 3 before a worker's shift (the night watch sleeps 13-21), see `jobs` — the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90) |
-| `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk or a guard post, `Collect` for a scrap collector) while the job is due (`Job::is_due`: 09:00-17:00 Mon-Fri from 08:30 for the walk in; a guard's watch from two hours before), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
+| `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night — **the unit's own night**, `job::is_bedtime(job, clock)`: the clock's 22-06, or the 8 hours ending 3 before a worker's shift (the night watch sleeps 13-21), see `jobs` — the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90), and **none at `COLLAPSED` (95)**: it sleeps where it stands (a `Sleep` task whose bed is its own cell), goes down mid-walk to a bed (`SleepGoal::keep_up`), and stays down a stretch at a time while past `EXHAUSTED`; logged `slept on the floor at` (`World::floor_sleeps`) and drawn lying with zzz like any sleeper |
+| `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk or a guard post, `Collect` for a scrap collector) while the job is due (`Job::is_due`: 09:00-17:00 Mon-Fri from 08:30 for the walk in; a guard's watch from two hours before), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75 on a fresh choice — **but a shift under way holds** (`HOLD`) until a need past `CALLED_AWAY` (90); boredom never comes near; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
 | `ReadyRoutine` → provision | the last thing on its list: once the needs are met, `GETTING_READY` less four places while the pocket is short of a meal and a drink (`goals::provision`). The `jobs` skill, "Getting ready" |
-| `ReadyRoutine` → eat / drink / play / relieve | before a trip out for a job that goes out (`JobDef::goes_out_for`: the collector): `GETTING_READY = 1.6` less 0.01 per place on its list (drink, eat, play, toilet), so over work and under any need past 80, for each need it is seeing to until every one is 85% met. Starts beside the bin or back in with a half trip, keeps a list (no need joins it mid-way) and a `ready` latch until it goes out; tells `CollectGoal` through `GoalCtx::ready_to_go_out`; reads the pack through `RoutineCtx::inventory` and held-off goals through `Goals::cooldown`. The `jobs` skill, "Getting ready" |
+| `ReadyRoutine` → eat / drink / play / relieve | before a trip out for a job that goes out (`JobDef::goes_out_for`: the collector): `GETTING_READY = 1.6` less 0.01 per place on its list (drink, eat, play, toilet), **raised to break in** (`Goals::break_in`) so the shift in charge does not hold against it, so over work and under any need past 80, for each need it is seeing to until every one is 85% met. Starts beside the bin or back in with a half trip, keeps a list (no need joins it mid-way) and a `ready` latch until it goes out; tells `CollectGoal` through `GoalCtx::ready_to_go_out`; reads the pack through `RoutineCtx::inventory` and held-off goals through `Goals::cooldown`. The `jobs` skill, "Getting ready" |
 | `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |
 | `FleeRoutine` → flee | `FLEEING = 3.0`, urgency 1, over everything, for `FEAR` (30 world min) after `Memory::spotted` (a deathdog seen, somebody seen panicking, a bite). Flat out at `PANIC_SPEED` (step 7, `Walker::panic`). The `deathdogs` skill |
 | a deathdog's `DepartRoutine` / `HuntRoutine` / `ProwlRoutine` | 2.0 by day / 1.0 (urgency 1) while its quarry was seen outside in the last 10 world min / `BUSY`. `Brain::deathdog`; `GoalId::Hunt`, `Prowl`, `Depart` have no catalogue executor |
@@ -256,7 +284,8 @@ Priorities are unitless `f32`s compared only against each other.
 
 **Urgency is a second number, not the priority** (`Goals::urgency`, 0-1): how much of a
 hurry the unit walks in while that goal is on top, up to `HURRY` (1.75x) its own pace. A need
-past `URGENT` (75) — `(level - 75) / 25`; boredom never. Late for a desk, post or panel
+past `URGENT` (75) — `(level - 75) / 25`; boredom never. (Urgency is not the hold: a need
+past 75 is hurried for, and takes a worker off a shift under way only past 90.) Late for a desk, post or panel
 (`GoalId::Work`, more than a cell away once the hours begin): `LATE` 0.5, rising to 1 an hour
 late. Getting ready (1.6) and a shift on time (1.5) are wanted badly and are no hurry, which is
 why urgency is not read off the priority. "How fast it walks" in [architecture.md](architecture.md).

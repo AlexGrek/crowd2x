@@ -150,7 +150,10 @@ name: no schema change but the one field. The test fingerprint (`save/tests.rs`)
 map's planted cells. Test: `a_farm_saved_mid_week_carries_on_exactly`. **With paces and
 hurrying**: a person's own pace is the walker's `speed` (tag 2, always saved, so an older save's
 people keep the 4.0 everybody walked at); `pb::Walker.hurry` (tag 6, 0-1, absent = 0, refused
-outside it) and `pb::GoalSlot.urgency` (tag 5, 0-1, absent = 0, refused outside it). Test:
+outside it) and `pb::GoalSlot.urgency` (tag 5, 0-1, absent = 0, refused outside it).
+**With the hold**: `pb::Goals.top` (the goal in charge, which holds, `goal::HOLD`) and
+`pb::GoalSlot.breaking_in` (tag 6, absent = no), so a loaded brain settles as the saved one
+would; `goal::tests::the_hold_and_what_breaks_in_come_back_from_a_save`. Test:
 `a_crowd_saved_as_it_breaks_into_a_run_carries_on_exactly` (seen failing with either not
 restored). `steel_works_fixture()` sets every walker's pace back to `kinds::HUMAN_SPEED`
 (`Walker::set_speed`, test-only) to build the world the fixture was written from. **With the
@@ -244,8 +247,9 @@ side-by-side tests.
 
 ## Relationships
 
-`pb::Memory.chat` (tag 5, `pb::Chat { with, phase: ChatPhase, leads, since }`, absent = in no
-chat), `pb::Memory.relations` (6, `pb::Relation { who, points, chatted? }`, empty = nobody known)
+`pb::Memory.chat` (tag 5, `pb::Chat { with, phase: ChatPhase, leads, since, talk }`, absent =
+in no chat; `talk` tag 5, the drawn length in watched seconds, 0 in an older save = the rules'
+`most minutes of talk`, which an older save's one `minutes of talk` is read as), `pb::Memory.relations` (6, `pb::Relation { who, points, chatted? }`, empty = nobody known)
 and `pb::Memory.night` (7, 0 = not yet noted), `pb::Memory.smalltalk` (8, `pb::Smalltalk { with,
 since, answered }`, absent = none) and `pb::Memory.smalltalked` (9, optional, when it last started
 one); `pb::Body.family` (8, the spawn house's property,
