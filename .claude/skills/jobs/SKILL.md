@@ -10,7 +10,9 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
 - the **office worker**: their own computer, worked an hour at a time, nine to five, Monday to
   Friday;
 - the **scrap collector**: their own scrap bin in the district's warehouse — out to the heaps
-  of scrap in the wasteland, salvage a packful, back to the bin and store it; office hours;
+  of scrap in the wasteland, salvage a packful, back to the bin and store it; **seven to six**,
+  Monday to Friday (`COLLECTOR_HOURS`: most of a trip is the walk, and both ends are in
+  daylight, so a collector is home before the deathdogs come out at dusk);
 - the **guard**: their own watch at a guard post set into the district's perimeter wall beside
   a gate — stood at an hour at a time like a desk — on one of the three `WATCHES` (08-16,
   16-24, 00-08) **every day of the week**. Three guards to a post keep it round the clock; a
@@ -101,6 +103,16 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
   `"was let go from the computer at x, y"` / `"... from the scrap bin at x, y"`).
   `Input::hire`/`dismiss`.
 - `despawn` releases the workplace too.
+- **The dead are replaced.** `effect::died` dismisses the dead and queues its job on
+  `Facilities::vacancies`; at the end of the same processing pass (`comings_and_goings`)
+  `GameState::fill_vacancy` hands **that very workplace and shift** to the living, jobless,
+  unfrozen human nearest it who may use it (`Properties::may_use`), one not on sick leave
+  while there is any such, the lower uid on a tie. Logged `"... was hired as a scrap collector
+  at the scrap bin at x, y, 07:00-18:00, in place of {dead}"`, or `"nobody is free to take on
+  the {workplace} at x, y that {dead} left"` and the post stands empty. One walk of the crowd a
+  death; the list is empty between ticks, so nothing new is saved. Before it, a post emptied by
+  a death stayed empty with dozens jobless, and the last steelworker or courier dying stopped
+  steel for good (the `lab` skill). Test: `sim::tests::the_job_somebody_dies_in_goes_to_the_nearest_jobless`.
 
 ## The brain
 
@@ -153,7 +165,10 @@ then out, then back for the next. So before going out it **gets ready**: every n
   done** (called in by a need — it tops everything up at that fridge, instead of in and out
   per need). Not at home, not out in the wasteland.
 - **What**: when any need is worse than `READY`, a list taken there and then of every need
-  worse than its `ReadyNeed::top_up` — `TOPPED_UP` (5) for thirst, hunger and the bladder, so
+  worse than its `ReadyNeed::top_up` **that its pocket will not meet out there**
+  (`ReadyNeed::pocket`: a meal stowed answers hunger, a drink thirst — **no stop at a fridge for
+  what it carries**; it eats and drinks it where it stands in the wasteland, and the next trip
+  restocks it) — `TOPPED_UP` (5) for thirst, hunger and the bladder, so
   a second round does not put a drink after the toilet; `READY` for fun, since a half-hour
   go drains while it lasts and topping it to 95% meant a second go worth less. Raised at
   `GETTING_READY` (1.6) less `IN_TURN` (0.01) per place, in list order **drink, eat, play,

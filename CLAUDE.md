@@ -28,12 +28,13 @@ least of its wants and never interrupts anything; a chat or a word in passing is
 fun run under 10 wears its mental health down. Too spent to go on (95 tired) it lies down and
 sleeps where it stands; anybody asleep is drawn lying, like the dead, with zzz rising from it.
 Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
-an office worker keeps its own desk in the bank; a scrap collector brings scrap metal in from
-the heaps in the wasteland and stores it in its own bin in the district's warehouse, and
-before every trip out gets ready — eats, drinks, plays and uses the toilet until every need is
-85% met, and puts a meal and a drink in its pocket (farmers and fishermen go out too) — so that no
+an office worker keeps its own desk in the bank; a scrap collector, seven to six, brings scrap
+metal in from the heaps in the wasteland and stores it in its own bin in the district's warehouse,
+and before every trip out gets ready — eats, drinks, plays and uses the toilet until every need is
+85% met, but never at a fridge for what its pocket already carries, and puts a meal and a drink
+in its pocket (farmers and fishermen go out too) — so that no
 need calls it back in from the far end of a trip, where it eats and drinks from the pocket where it
-stands. A
+stands. A worker who dies is replaced at once by the nearest jobless resident. A
 district is walled in, with eight gates, and each gate's guard post is kept round the clock by
 three guards on eight-hour watches, every day, each sleeping by its watch; undertakers on the
 same watches carry the dead to the crematoria in the district's crematorium. Four public
@@ -100,6 +101,8 @@ cargo build
 cargo test             # the plain-Rust parts: map, coordinates, navigation, scripts
 uv run tools/qa.py    # the scripted QA tests in qa/, against the real binary
 uv run tools/qa.py --release   # ...optimised, which is the only profile to quote a timing from
+uv run tools/lab.py batch --seed 7 --for 28d --keep-going   # a district month headless, watched for anomalies
+uv run tools/lab.py start --seed 7   # ...held behind a socket: run, wait, units, unit, trace, stop
 ```
 
 **Always run through `cargo`, never the raw binary** (`./target/debug/crowd2x`) — Bevy
@@ -141,6 +144,7 @@ to `screenshots/`.
 | Drawing new art: hair, dresses, outfits, work uniforms, sprites, tiles; where art files go | `pixel-artist` (+ `renderer`) |
 | Seeing what is actually drawn; capturing frames | `debugger` |
 | Writing, running or diagnosing `qa/*.json` tests, perf numbers | `qa` |
+| How a world behaves over days or weeks: long headless runs, metrics, anomaly watches, pausing to look into a world and resuming, snapshots, a long-run bug (production stalls, deaths) | `lab` (+ the owning skill) |
 | Money, budget, wages, taxes, care, fridge prices, timesheets, payroll, accountant, economy.yaml or economy menu | `economy` (+ `jobs`, `savegame` as needed) |
 | Relationships: families, colleagues, chats between wanderers, small talk and its sparks, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
@@ -236,6 +240,7 @@ src/save/               the .savegame: Protobuf schema (pb/), zip, store    [sav
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]
 src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]
+src/lab/, lab/, tools/lab.py  long headless runs, watches, the paused world  [lab]
 src/debug.rs            env-var driven capture harness                      [debugger]
 src/awake.rs            macOS: hold the display awake during a run
 tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wiring
@@ -255,6 +260,6 @@ tools/power_plant_art.py draws the generator and the control panel              
 tools/palace_art.py     draws the palace's throne                               [pixel-artist]
 tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and the administrator's uniform [pixel-artist]
 tools/deathdog_art.py   recolours the dog's sheets into the deathdog's                [deathdogs, pixel-artist]
-qa-screenshots/, qa-perf/, qa-observe/, maps/, screenshots/, .saves/   gitignored output
+qa-screenshots/, qa-perf/, qa-observe/, lab-runs/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

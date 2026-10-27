@@ -24,6 +24,7 @@ const QUARTERS: [(i32, i32); RESTAURANTS] = [(1, 1), (3, 1), (1, 3), (3, 3)];
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: RESTAURANTS,
+    whole_block: false,
     wanted: |_| true,
     rank: |_, index, lot| {
         let (qx, qy) = QUARTERS[index];

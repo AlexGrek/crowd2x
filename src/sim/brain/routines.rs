@@ -635,6 +635,11 @@ pub struct ReadyNeed {
     /// [`READY`] for a need that does not stay topped up long enough to be
     /// worth it.
     pub top_up: f32,
+    /// What in the pocket meets it out there (`goals::pocket_has`): a need
+    /// whose provision is stowed is **not** seen to at a fridge before a trip
+    /// — it is eaten or drunk where the worker stands, out in the wasteland,
+    /// and the walk to the fridge and the meal there are saved.
+    pub pocket: Option<ItemKind>,
 }
 
 /// The needs a worker sees to before it sets out, in the order it sees to
@@ -648,10 +653,10 @@ pub struct ReadyNeed {
 /// worker who got up rested ends its shift short of [`EXHAUSTED`] by design
 /// (the `jobs` skill), so tiredness never calls one back from a trip.
 pub const READY_NEEDS: [ReadyNeed; 4] = [
-    ReadyNeed { need: &THIRST, top_up: TOPPED_UP },
-    ReadyNeed { need: &HUNGER, top_up: TOPPED_UP },
-    ReadyNeed { need: &BOREDOM, top_up: NOT_BEFORE_A_TRIP },
-    ReadyNeed { need: &BLADDER, top_up: TOPPED_UP },
+    ReadyNeed { need: &THIRST, top_up: TOPPED_UP, pocket: Some(ItemKind::Water) },
+    ReadyNeed { need: &HUNGER, top_up: TOPPED_UP, pocket: Some(ItemKind::Food) },
+    ReadyNeed { need: &BOREDOM, top_up: NOT_BEFORE_A_TRIP, pocket: None },
+    ReadyNeed { need: &BLADDER, top_up: TOPPED_UP, pocket: None },
 ];
 
 /// The bit of [`ReadyRoutine`]'s list of things to see to that is not a need
@@ -689,7 +694,10 @@ const READY_BITS: u8 = (PROVISIONS_BIT << 1) - 1;
 ///   and then, of every need worse than its top-up level
 ///   ([`ReadyNeed::top_up`]: [`TOPPED_UP`]; fun never) whose process is
 ///   running and whose goal is not held off — a need nothing in reach can
-///   meet (no fridge) is not waited for — raised over [`WORKING`] in the
+///   meet (no fridge) is not waited for, and **nor is one its pocket will
+///   meet out there** ([`ReadyNeed::pocket`]: a meal stowed for hunger, a
+///   drink for thirst; no stop at the fridge on the way out for what it is
+///   carrying) — raised over [`WORKING`] in the
 ///   list's order. A need leaves the list once it is topped up, and
 ///   **nothing joins it meanwhile**: thirst creeping up during the meal does
 ///   not turn the worker round on its way to the toilet. When the list is
@@ -741,12 +749,18 @@ impl ReadyRoutine {
     }
 
     /// A bit for each need on [`READY_NEEDS`] worse than `level` says,
-    /// whose process is running, and whose goal is not held off.
-    fn worse_than(level: impl Fn(&ReadyNeed) -> f32, biology: &Biology, goals: &Goals) -> u8 {
+    /// whose process is running, and whose goal is not held off — and, given
+    /// the `pocket`, that nothing in it will meet out there.
+    fn worse_than(level: impl Fn(&ReadyNeed) -> f32, biology: &Biology, goals: &Goals, pocket: Option<&Inventory>) -> u8 {
         let mut worse = 0;
         for (i, ready) in READY_NEEDS.iter().enumerate() {
             let need = ready.need;
-            if biology.is_running(need.process) && (need.stat)(biology.stats()) > level(ready) && goals.cooldown(need.goal) == 0 {
+            let packed = ready.pocket.is_some_and(|item| pocket.is_some_and(|pack| pack.count(item) > 0));
+            if !packed
+                && biology.is_running(need.process)
+                && (need.stat)(biology.stats()) > level(ready)
+                && goals.cooldown(need.goal) == 0
+            {
                 worse |= 1 << i;
             }
         }
@@ -781,7 +795,9 @@ impl RoutineExecutor for ReadyRoutine {
             return;
         };
         let carrying = pack.count(item) > 0;
-        let called_away = Self::worse_than(|ready| ready.top_up.max(CALLED_AWAY), biology, goals) != 0;
+        // Called away by any need, the pocket or not: on the site its meal
+        // and drink are the trip's, and the need walks it to a fridge anyway.
+        let called_away = Self::worse_than(|ready| ready.top_up.max(CALLED_AWAY), biology, goals, None) != 0;
         if called_away && self.pending == 0 {
             // Stopped by a need, ready or not: everything else while it is
             // about it.
@@ -795,9 +811,9 @@ impl RoutineExecutor for ReadyRoutine {
         }
         // A need stays on the list until it is topped up; a fresh list is
         // taken when anything is worse than ready, and tops up everything.
-        let short = Self::worse_than(|ready| ready.top_up, biology, goals);
+        let short = Self::worse_than(|ready| ready.top_up, biology, goals, Some(pack));
         self.pending &= short | PROVISIONS_BIT;
-        if self.pending == 0 && Self::worse_than(|ready| ready.top_up.max(READY), biology, goals) != 0 {
+        if self.pending == 0 && Self::worse_than(|ready| ready.top_up.max(READY), biology, goals, Some(pack)) != 0 {
             self.pending = short;
         }
         // The needs seen to, the pocket: stocked for the trip, or no fridge
@@ -1412,8 +1428,9 @@ mod tests {
             (goals.priority(GoalId::Collect), goals.priority(GoalId::Work))
         };
         assert_eq!(wanted(on(2, 10.0)), (WORKING, 0.0));
-        assert_eq!(wanted(on(2, 8.75)), (WORKING, 0.0), "setting off at a quarter to nine");
-        assert_eq!(wanted(on(2, 17.5)), (0.0, 0.0), "home time");
+        assert_eq!(wanted(on(2, 6.75)), (WORKING, 0.0), "setting off at a quarter to seven");
+        assert_eq!(wanted(on(2, 17.5)), (WORKING, 0.0), "a long day: still out at half past five");
+        assert_eq!(wanted(on(2, 18.5)), (0.0, 0.0), "home time");
         assert_eq!(wanted(on(6, 10.0)), (0.0, 0.0), "Saturday");
     }
 
@@ -1550,13 +1567,25 @@ mod tests {
         pack: Inventory,
         cell: Point,
         clock: Clock,
+        /// Whether a fridge is there to stock the pocket at. Off, the
+        /// provisions are held off ([`GoalId::Provision`]) and never waited
+        /// for, which keeps them out of the tests about the needs.
+        provisions: bool,
     }
 
     impl Readiness {
         /// A collector beside its bin on a Monday morning, nothing in its
-        /// pack, with `biology`.
+        /// pack — not even a meal or a drink, which it would eat out there
+        /// instead of at a fridge — and nowhere to stock it, with `biology`.
         fn of(biology: Biology) -> Readiness {
-            Readiness { biology, job: Some(collector()), pack: pack(0), cell: BESIDE_THE_BIN, clock: on(1, 10.0) }
+            Readiness {
+                biology,
+                job: Some(collector()),
+                pack: bare_pack(0),
+                cell: BESIDE_THE_BIN,
+                clock: on(1, 10.0),
+                provisions: false,
+            }
         }
 
         /// Arrange `goals` afresh with `routine`, and say what the log was
@@ -1567,6 +1596,9 @@ mod tests {
             let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, self.clock);
             let body = Body::at_cell(Uid::new(EntityType::Human, 1), self.cell);
             goals.clear_priorities();
+            if !self.provisions && goals.cooldown(GoalId::Provision) == 0 {
+                goals.block(GoalId::Provision);
+            }
             routine.arrange(
                 &RoutineCtx {
                     think: &think,
@@ -1593,8 +1625,7 @@ mod tests {
     #[test]
     fn a_collector_with_its_needs_met_stocks_its_pocket_before_it_is_ready() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
-        collector.pack = bare_pack(0);
+        let mut collector = Readiness { provisions: true, ..Readiness::of(needs(0.0, 0.0, 0.0, 0.0)) };
         let said = collector.arrange(&mut routine, &mut goals);
         assert_eq!(raised(&goals), [GoalId::Provision]);
         assert!(goals.priority(GoalId::Provision) > WORKING, "before the trip, like a need");
@@ -1627,8 +1658,7 @@ mod tests {
     #[test]
     fn the_pocket_is_stocked_after_every_need_is_seen_to() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let mut collector = Readiness::of(needs(30.0, 40.0, 4.0, 0.0));
-        collector.pack = bare_pack(0);
+        let mut collector = Readiness { provisions: true, ..Readiness::of(needs(30.0, 40.0, 4.0, 0.0)) };
         collector.arrange(&mut routine, &mut goals);
         assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat], "no provisions yet");
         collector.biology = needs(0.0, 0.0, 4.0, 0.0);
@@ -1636,13 +1666,39 @@ mod tests {
         assert_eq!(raised(&goals), [GoalId::Provision]);
     }
 
+    /// A need its pocket meets out there is no stop at a fridge on the way
+    /// out: hungry and thirsty with a meal and a drink stowed, it sees to the
+    /// toilet and goes, and eats and drinks where it stands, in the
+    /// wasteland. Without them, the fridge first as ever.
+    #[test]
+    fn a_need_its_pocket_will_meet_out_there_is_no_stop_at_a_fridge() {
+        let stocked = |bladder: f32| Readiness { pack: pack(0), provisions: true, ..Readiness::of(needs(40.0, 40.0, bladder, 0.0)) };
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        stocked(30.0).arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Relieve]);
+        // Relieved: ready, hungry and thirsty as it is.
+        stocked(0.0).arrange(&mut routine, &mut goals);
+        assert_eq!((raised(&goals), routine.state()), (vec![], (true, 0)));
+
+        // A drink stowed and no meal: the meal at the fridge, not the drink.
+        let mut half = bare_pack(0);
+        assert!(half.stow(ItemKind::Water));
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        Readiness { pack: half, ..Readiness::of(needs(40.0, 40.0, 0.0, 0.0)) }.arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Eat]);
+
+        // Nothing stowed: both, as ever.
+        let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
+        Readiness::of(needs(40.0, 40.0, 0.0, 0.0)).arrange(&mut routine, &mut goals);
+        assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat]);
+    }
+
     /// Like a need, it is on the list until it is done: the worker leaving the
     /// bin for the fridge does not drop it.
     #[test]
     fn stocking_the_pocket_goes_on_wherever_the_fridge_is() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
-        collector.pack = bare_pack(0);
+        let mut collector = Readiness { provisions: true, ..Readiness::of(needs(0.0, 0.0, 0.0, 0.0)) };
         collector.arrange(&mut routine, &mut goals);
         collector.cell = ACROSS_THE_SITE;
         collector.arrange(&mut routine, &mut goals);
@@ -1654,8 +1710,7 @@ mod tests {
     #[test]
     fn a_pocket_nothing_can_stock_is_not_waited_for() {
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let mut collector = Readiness::of(needs(0.0, 0.0, 0.0, 0.0));
-        collector.pack = bare_pack(0);
+        let collector = Readiness { provisions: true, ..Readiness::of(needs(0.0, 0.0, 0.0, 0.0)) };
         goals.block(GoalId::Provision);
         collector.arrange(&mut routine, &mut goals);
         assert!(raised(&goals).is_empty());
@@ -1794,7 +1849,7 @@ mod tests {
         // Called back for a drink with a piece in the pack: everything else
         // too, before it goes back out.
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        let called_back = Readiness { cell: ACROSS_THE_SITE, pack: pack(1), ..Readiness::of(needs(40.0, 80.0, 50.0, 0.0)) };
+        let called_back = Readiness { cell: ACROSS_THE_SITE, pack: bare_pack(1), ..Readiness::of(needs(40.0, 80.0, 50.0, 0.0)) };
         called_back.arrange(&mut routine, &mut goals);
         assert_eq!(raised(&goals), [GoalId::Drink, GoalId::Eat, GoalId::Relieve]);
         // Out there with it, nothing.
@@ -1844,17 +1899,17 @@ mod tests {
             (None, on(1, 10.0), "no job"),
             (Some(crate::sim::job::Job::office(Point::new(3, 3))), on(1, 10.0), "an office worker never goes out"),
             (Some(collector()), on(6, 10.0), "Saturday"),
-            (Some(collector()), on(1, 17.5), "home time"),
-            (Some(collector()), on(1, 8.25), "not set off yet"),
+            (Some(collector()), on(1, 18.5), "home time"),
+            (Some(collector()), on(1, 6.25), "not set off yet"),
         ] {
             let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
             let said = Readiness { job, clock, ..Readiness::of(thirsty()) }.arrange(&mut routine, &mut goals);
             assert_eq!((raised(&goals), said.len()), (vec![], 0), "{why}");
             assert_eq!(routine.state(), (false, 0), "{why}");
         }
-        // Setting off at half past eight: getting ready at home.
+        // Setting off at half past six: getting ready at home.
         let (mut routine, mut goals) = (ReadyRoutine::new(), Goals::new());
-        Readiness { clock: on(1, 8.75), ..Readiness::of(thirsty()) }.arrange(&mut routine, &mut goals);
+        Readiness { clock: on(1, 6.75), ..Readiness::of(thirsty()) }.arrange(&mut routine, &mut goals);
         assert_eq!(raised(&goals), [GoalId::Drink]);
 
         // Thirst that cannot move is not waited on.
@@ -1897,7 +1952,7 @@ mod tests {
         let (occupancy, log, facilities) = (Occupancy::new(map.size()), Log::new(), Facilities::default());
         let think = Think::new(&map, &occupancy, &log, &facilities, 1.0 / 60.0, 0, on(1, 10.0));
         let body = Body::at_cell(Uid::new(EntityType::Human, 1), BESIDE_THE_BIN);
-        let (biology, job, pack) = (needs(30.0, 40.0, 0.0, 0.0), collector(), pack(0));
+        let (biology, job, pack) = (needs(30.0, 40.0, 0.0, 0.0), collector(), bare_pack(0));
         routine.arrange(
             &RoutineCtx {
                 think: &think,

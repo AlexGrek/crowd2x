@@ -209,7 +209,10 @@ impl Routine {
             Routine::Orders(routine) => routine.arrange(ctx, goals),
             Routine::Work(routine) => routine.arrange(ctx, goals),
             Routine::Ready(routine) => routine.arrange(ctx, goals),
-            Routine::Hospital => ctx.memory.medical.arrange(ctx.think.clock.day(), goals),
+            Routine::Hospital => {
+                let in_bed = ctx.think.hospital.bed_for(ctx.body.uid()).is_some();
+                ctx.memory.medical.arrange(ctx.think.clock.day(), in_bed, goals)
+            }
             Routine::Flee(routine) => routine.arrange(ctx, goals),
             Routine::Hunt(routine) => routine.arrange(ctx, goals),
             Routine::Depart(routine) => routine.arrange(ctx, goals),

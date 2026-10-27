@@ -5,14 +5,14 @@
 //! +---------------------------------------------------------------+
 //! | [-] x4 [+]              [slower] x1 [faster] [pause] [menu]    |
 //! |                          [save] [quick save] [statistics] [find] |
-//! | map, crowd, clock                       what the world is doing |
+//! | date and time                           what the world is doing |
 //! |                                                               |
 //! |                       the map                                 |
 //! +---------------------------------------------------------------+
 //! ```
 //!
 //! **Top left is the view** — the zoom, which changes what you are looking at
-//! and nothing about the world — with the map's own numbers beneath it.
+//! and nothing about the world — with the world's date and time beneath it.
 //! **Top right is the world** — how fast it runs, whether it runs, and the way
 //! out, then keeping it (`save`, `quick save`: [`super::saving`]) — with the
 //! log of what it has been doing beneath *that*, because the
@@ -40,8 +40,8 @@
 
 use bevy::prelude::*;
 
-use crate::editor::grids::{GridOverlay, LayerView};
-use crate::editor::{background, CurrentMap};
+use crate::editor::grids::LayerView;
+use crate::editor::background;
 use crate::map::{Map, Point};
 use crate::render::{CameraPan, PixelZoom, WorldCamera};
 use crate::sim::{Clock, EntityType, GameState};
@@ -76,20 +76,6 @@ const MIN_SPAWN_COUNT: u32 = 1;
 /// that many distinct cells is still the one-off cost per click
 /// [`spawn_points`] is written to be.
 const MAX_SPAWN_COUNT: u32 = 50;
-
-/// Every control has a key and a gamepad button of its own, since the
-/// highlight the rest of the game navigates with cannot live on this screen.
-///
-/// Kept narrow: this is the widest thing in the left corner, and the two
-/// corners have to fit either side of a window that is only `width / 4` canvas
-/// pixels across.
-const KEY_HINTS: &str = "wasd/arrows/dpad/stick  move
-            q/e or A/B  zoom
-          -/+ or L1/R1  speed
-                p or Y  pause
-               o or R3  x-ray
-                    f5  quick save
-             esc/start  menu";
 
 /// A button in one of the corners, and what pressing it asks for.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -159,8 +145,8 @@ enum Readout {
     Speed,
     /// The pause button's own label, which flips to `resume`.
     Pause,
-    /// The map, the size of the crowd, the tick count and the time of day.
-    Stats,
+    /// The world's day, weekday and time of day.
+    DateTime,
     /// The x-ray button's own label: which layer it is showing.
     XRay,
 }
@@ -205,7 +191,7 @@ fn reset_spawn_menu(mut menu: ResMut<SpawnMenu>, mut scope: ResMut<Scope>, mut c
 /// decision about the screen, and a screen laid out from three `OnEnter`
 /// systems has no order between them to lay it out *in*.
 fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>) {
-    // The view: what you are looking at, and the numbers about it.
+    // The view controls, with the world's date and time below them.
     commands.spawn((
         Name::new("view controls"),
         corner(px(4), Val::Auto),
@@ -217,19 +203,14 @@ fn spawn_hud(mut commands: Commands, zoom: Res<PixelZoom>, speed: Res<GameSpeed>
                 (Control::ZoomIn, plain_button("+", px(11))),
             ]),
             (
-                Name::new("map stats"),
+                Name::new("world date and time"),
                 panel(),
                 children![
                     (
-                        Readout::Stats,
+                        Readout::DateTime,
                         Text::new(String::new()),
                         TextFont::from_font_size(FONT_BODY),
                         TextColor(TEXT),
-                    ),
-                    (
-                        Text::new(KEY_HINTS),
-                        TextFont::from_font_size(FONT_BODY),
-                        TextColor(TEXT_DIM),
                     ),
                 ],
             ),
@@ -705,20 +686,16 @@ pub(super) fn close_spawn_menu(commands: &mut Commands, menu: &mut SpawnMenu, sc
 
 /// Keep every readout saying what is true.
 ///
-/// Each asks its own source whether it changed, except the stats — the tick
-/// count and the clock move every fixed step, so there is nothing to ask.
+/// Each asks its own source whether it changed, except the date and time:
+/// the clock moves every fixed step.
 fn update_readouts(
     zoom: Res<PixelZoom>,
     speed: Res<GameSpeed>,
-    current: Res<CurrentMap>,
     sim: Option<Res<Sim>>,
     view: Res<LayerView>,
-    overlay: Res<GridOverlay>,
-    cameras: Query<&CameraPan, With<WorldCamera>>,
     mut texts: Query<(Ref<Readout>, &mut Text)>,
 ) {
     let world = sim.as_deref().map(|sim| &sim.0);
-    let looking_at = cameras.single().ok().map(|pan| background::point_of(background::cell_of(pan.0)));
 
     for (kind, mut text) in &mut texts {
         // `is_added` matters on a second visit: the HUD is respawned empty and
@@ -728,7 +705,7 @@ fn update_readouts(
             Readout::Zoom if fresh || zoom.is_changed() => format!("x{}", zoom.get()),
             Readout::Speed if fresh || speed.is_changed() => speed.label(),
             Readout::Pause if fresh || speed.is_changed() => speed.toggle_label().to_string(),
-            Readout::Stats => stats(&current, world, overlay.summary(), looking_at),
+            Readout::DateTime => world.map_or_else(|| Clock::after_watching(0.0), GameState::clock).to_string(),
             Readout::XRay if fresh || view.is_changed() => format!("x-ray {}", view.label()),
             // Nothing this readout is about has moved.
             _ => continue,
@@ -739,45 +716,4 @@ fn update_readouts(
             **text = wanted;
         }
     }
-}
-
-/// The map, the crowd, and what time it is in there.
-///
-/// The clock is the world's own — a second of watching is two minutes of it
-/// ([`crate::sim::clock`]) — and it sits under the tick count rather than
-/// replacing it: a tick is what a QA script and a profile count in, and the
-/// time of day is what somebody watching a crowd get hungry wants.
-///
-/// `where` is the cell the camera is over, and how many chunks of the
-/// wasteland the screen has loaded round it — on an endless map the one way
-/// to tell how far out into it the view has gone.
-fn stats(current: &CurrentMap, world: Option<&GameState>, connected: &str, at: Option<Point>) -> String {
-    let size = current.map.size();
-    let at = at.unwrap_or(Point::ORIGIN);
-    let mut stats = format!(
-        "map    {}  {}x{}\nactors {}  tick {}\ntime   {}\nwired  {}\nwhere  {}, {}  chunks {}",
-        current.title(),
-        size.width,
-        size.height,
-        world.map_or(0, GameState::len),
-        world.map_or(0, GameState::tick),
-        world.map_or_else(|| Clock::after_watching(0.0), GameState::clock),
-        connected,
-        at.x,
-        at.y,
-        current.map.loaded_chunks(),
-    );
-    // What the warehouse holds — the scrap the collectors have brought in,
-    // the steel the couriers have brought back — on a map with somewhere to
-    // keep it: every kind of store whose row gives the HUD a word for it.
-    if let Some(bins) = world.map(GameState::bins) {
-        for kind in crate::sim::FeatureKind::ALL {
-            if let Some(word) = kind.store().and_then(|store| store.hud)
-                && bins.count(kind) > 0
-            {
-                stats.push_str(&format!("\n{word}  {} stored", bins.total_in(kind)));
-            }
-        }
-    }
-    stats
 }

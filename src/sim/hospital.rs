@@ -49,12 +49,18 @@ impl Medical {
         }
     }
 
-    pub fn arrange(&self, day: u32, goals: &mut Goals) {
+    /// `in_bed`: whether a hospital bed is reserved for it.
+    pub fn arrange(&self, day: u32, in_bed: bool, goals: &mut Goals) {
         if self.recovering {
             // Only essential needs take a patient out of bed. Even when all
             // beds are full or unreachable, they wait rather than go to work.
-            for goal in [GoalId::Wander, GoalId::Play, GoalId::Sleep, GoalId::Salvage] {
+            for goal in [GoalId::Wander, GoalId::Play, GoalId::Salvage] {
                 goals.suppress(goal);
+            }
+            // A bed sleeps it (`HospitalRest` is sleep); waiting for one, it
+            // sleeps as anybody does, or it dies of exhaustion while it waits.
+            if in_bed {
+                goals.suppress(GoalId::Sleep);
             }
             for kind in super::JobKind::ALL {
                 goals.suppress(kind.goal());
@@ -306,6 +312,26 @@ mod tests {
             assert_ne!(human.current_goal(), Some(GoalId::Work));
             assert_eq!(human.biology().unwrap().stats().health(), 80.0, "no healing while waiting");
         }
+    }
+
+    /// Found by the lab (`src/lab/`): on seed 7 every unit that died of
+    /// exhaustion in a month had been bitten a day or two before, and waited
+    /// for one of the hospital's four beds without ever lying down.
+    #[test]
+    fn a_patient_with_no_bed_to_be_had_still_sleeps_rather_than_dying_of_exhaustion() {
+        let mut world = World::new(map());
+        assert!(world.hospital.admit(BED, Uid::new(super::super::EntityType::Human, 99)));
+        let mut human = wounded(50.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Energy, true);
+        human.biology_mut().unwrap().edit(|s| s.with_stamina(2.0));
+        let mut slept = false;
+        for _ in 0..2000 {
+            world.step(&mut human);
+            slept |= human.brain().is_asleep();
+        }
+        assert!(slept, "{:?}", human.brain().debug_fields());
+        assert!(human.brain().is_hospital_patient(), "still waiting for a bed");
+        assert!(world.hospital.bed_for(human.uid()).is_none());
     }
 
     #[test]

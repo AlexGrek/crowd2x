@@ -116,6 +116,11 @@ pub struct Facilities {
     /// (`sim::comings_and_goings`), once the table it may not change is let
     /// go. Empty between ticks, so never saved.
     pub leaving: Vec<Uid>,
+    /// The jobs the dead left this tick (`Effect::Died`), each with who left
+    /// it: given to somebody jobless at the end of the processing pass
+    /// (`sim::comings_and_goings`, `GameState::fill_vacancy`). Empty between
+    /// ticks, so never saved.
+    pub vacancies: Vec<(Uid, super::Job)>,
 }
 
 impl Facilities {
@@ -149,6 +154,7 @@ impl Facilities {
             bonds: Default::default(),
             feedings: Default::default(),
             leaving: Vec::new(),
+            vacancies: Vec::new(),
         }
     }
 }

@@ -593,7 +593,9 @@ fn spawn_prop(
     } else if item.posed {
         // Posed and not a door or a bin: a switch's plate, showing on.
         commands.entity(prop).insert(SwitchPlate { showing_on: true });
-    } else if item.art.frames > 1 {
+    } else if item.art.frames > 1 || item.in_use.is_some_and(|strip| strip.frames > 1) {
+        // A still idle picture can switch to a moving strip while in use.
+        // Keep an animator on it so that swap crops and advances one frame.
         commands.entity(prop).insert(StripAnimation::new(
             item.frame(),
             item.art.frames,
@@ -615,6 +617,34 @@ fn spawn_prop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cooker_with_a_still_idle_picture_can_animate_while_working() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>();
+        let assets = app.world().resource::<AssetServer>().clone();
+        let cooker = item_of(ObjectLayer::Props, &ObjectKind::new("food cooker")).unwrap();
+        let entity = spawn_prop(
+            &mut app.world_mut().commands(),
+            &assets,
+            ObjectLayer::Props,
+            Point::new(24, 24),
+            cooker,
+            Fit::Free,
+            AppState::Game,
+        );
+        app.world_mut().flush();
+
+        // The working strip must have an animator even though idle is a still.
+        let mut prop = app.world_mut().entity_mut(entity);
+        let (_, frames) = prop.get_mut::<Usable>().unwrap().show(true).unwrap();
+        let mut animation = prop
+            .get_mut::<StripAnimation>()
+            .expect("the cooker's working strip must animate");
+        animation.restart(frames);
+        assert_eq!(animation.rect(), Rect::new(0.0, 0.0, 16.0, 16.0));
+    }
 
     /// A prop is stored under its palette name, and found again by it. A name
     /// that did not round-trip would come back from a file undrawable.

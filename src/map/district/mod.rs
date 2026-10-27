@@ -36,9 +36,10 @@
 //!   off at each end;
 //! * **the shops** — one block, three of its lots a shop with a wide door and
 //!   nothing inside yet, the fourth left as a small park;
-//! * **the lot buildings** every district must have — a lot each, taken
+//! * **the lot buildings** every district must have — a lot each (the
+//!   warehouse reserves a whole block), taken
 //!   before any house, one module each, listed in [`LOT_BUILDINGS`]: the
-//!   [`warehouse`] on the edge lot nearest the scrap, a [`restaurant`] in each
+//!   [`warehouse`] on the edge block nearest the scrap, a [`restaurant`] in each
 //!   quarter, the [`crematorium`] on the edge, the [`steel_factory`] beside
 //!   the warehouse, the [`farm`] on the edge lot nearest the good soil, the
 //!   [`power_plant`] on the edge. **A new one is a module with a [`LotBuilding`] in it and
@@ -61,7 +62,7 @@
 //! pavement, so it is cut across when that saves enough and walked round
 //! when it does not.
 //!
-//! A building's door is always in a wall facing one of its lot's *outer*
+//! A building's door is always in a wall facing a street: one of its lot's *outer*
 //! sides. Every open cell in a lot lies in a row or a column the building
 //! does not cover, and that row or column runs out to the lot's outer side,
 //! which is street — so nothing generated can be sealed off, and a test walks
@@ -71,8 +72,9 @@
 //!
 //! Every building is roofed over, walls and all, and the streets and yards
 //! are open sky — so the sun lights the street and comes in by the doors
-//! (`crate::lighting`). A house, a shop and a lot building each get one warm
-//! [`HOUSE_LAMP`] in the middle of the room; the bank gets [`OFFICE_LAMP`]s in a grid every
+//! (`crate::lighting`). A house, a shop and a small lot building each get one warm
+//! [`HOUSE_LAMP`] in the middle of the room; the warehouse a grid of warm ones;
+//! the bank gets [`OFFICE_LAMP`]s in a grid every
 //! [`OFFICE_LAMP_SPACING`] cells, and the palace's hall a grid of warm ones.
 //! All are laid out from the buildings once
 //! they are built, drawing nothing from the seed, so adding them changed no
@@ -324,8 +326,10 @@ const TILES: &[&str] = &[
 pub struct LotBuilding {
     /// What [`District::the`] and [`District::all`] call it.
     pub name: &'static str,
-    /// How many of it a district has, a lot each.
+    /// How many of it a district has.
     pub count: usize,
+    /// Reserve all four lots of its block rather than just the chosen lot.
+    whole_block: bool,
     /// Which lots it may stand on.
     wanted: fn(&Lot) -> bool,
     /// How good a lot is for the `index`th of it, lowest best — ties to the
@@ -382,7 +386,7 @@ const fn lots_built() -> usize {
     let mut lots = 0;
     let mut i = 0;
     while i < LOT_BUILDINGS.len() {
-        lots += LOT_BUILDINGS[i].count;
+        lots += LOT_BUILDINGS[i].count * if LOT_BUILDINGS[i].whole_block { 4 } else { 1 };
         i += 1;
     }
     lots
@@ -552,6 +556,13 @@ struct Lot {
 }
 
 impl Lot {
+    /// The block containing this lot, regardless of which corner it is in.
+    fn block(self) -> Rect {
+        let x = self.origin.x - if self.outer.contains(&Side::East) { LOT_W } else { 0 };
+        let y = self.origin.y - if self.outer.contains(&Side::North) { LOT_H } else { 0 };
+        Rect::new(x, y, BLOCK_W, BLOCK_H)
+    }
+
     /// Whether its `side` faces the street round the edge of the district,
     /// with only the wasteland beyond it.
     const fn faces_the_edge(self, side: Side) -> bool {
@@ -690,7 +701,7 @@ pub fn generate(seed: u64) -> District {
 
     let mut lots: Vec<Lot> = blocks.iter().flat_map(|&(bx, by)| lots_of(bx, by)).collect();
     lots.shuffle(&mut rng);
-    // The buildings every district must have, a lot each, before a house is
+    // The buildings every district must have, before a house is
     // given one ([`LOT_BUILDINGS`]), in their order: each takes the lot it
     // ranks best and builds on it.
     let (heaps, soil, ways_out) = (heaps_round(seed), soil_round(seed), gate_layout());
@@ -699,6 +710,12 @@ pub fn generate(seed: u64) -> District {
         for index in 0..spec.count {
             let siting = Siting { heaps: &heaps, soil: &soil, gates: &ways_out, built: &lot_buildings };
             let lot = take_lot(&mut lots, spec.wanted, |lot| (spec.rank)(&siting, index, lot));
+            if spec.whole_block {
+                let area = lot.block();
+                let before = lots.len();
+                lots.retain(|other| !area.contains(other.origin));
+                assert_eq!(before - lots.len(), 3, "district: a whole-block building needs four free lots");
+            }
             let walls = (spec.build)(&mut rng, &mut map, &mut props, lot);
             lot_buildings.push((spec.name, walls));
         }
@@ -739,9 +756,15 @@ pub fn generate(seed: u64) -> District {
         .chain(shops.iter().copied())
         .chain(lot_buildings.iter().map(|&(_, walls)| walls))
         .collect();
-    let halls = [(bank, OFFICE_LAMP, OFFICE_LAMP_SPACING), (palace, HOUSE_LAMP, palace::LAMP_SPACING)];
+    let warehouse = lot_buildings.iter().find(|(name, _)| *name == warehouse::NAME).unwrap().1;
+    let rooms: Vec<Rect> = rooms.into_iter().filter(|&walls| walls != warehouse).collect();
+    let halls = [
+        (bank, OFFICE_LAMP, OFFICE_LAMP_SPACING),
+        (palace, HOUSE_LAMP, palace::LAMP_SPACING),
+        (warehouse, HOUSE_LAMP, OFFICE_LAMP_SPACING),
+    ];
     roof_and_light(&mut map, &rooms, &halls);
-    let buildings: Vec<Rect> = rooms.iter().copied().chain([bank, palace]).collect();
+    let buildings: Vec<Rect> = rooms.iter().copied().chain(halls.iter().map(|&(walls, _, _)| walls)).collect();
     for &walls in &buildings {
         glaze(&mut map, walls);
     }
@@ -1761,7 +1784,11 @@ mod tests {
                 assert_eq!(in_room(shop, HOUSE_LAMP), 1, "seed {seed}, shop at {shop:?}");
             }
             for &(name, walls) in &district.lot_buildings {
-                assert_eq!(in_room(walls, HOUSE_LAMP), 1, "seed {seed}: the {name} at {walls:?}");
+                if name == warehouse::NAME {
+                    assert_eq!(in_room(walls, HOUSE_LAMP), 9, "seed {seed}: the warehouse has a grid of lamps");
+                } else {
+                    assert_eq!(in_room(walls, HOUSE_LAMP), 1, "seed {seed}: the {name} at {walls:?}");
+                }
             }
             assert!(in_room(district.bank, OFFICE_LAMP) >= 12, "seed {seed}: {}", in_room(district.bank, OFFICE_LAMP));
             assert!(in_room(district.palace, HOUSE_LAMP) >= 9, "seed {seed}: {}", in_room(district.palace, HOUSE_LAMP));
@@ -2176,7 +2203,8 @@ mod tests {
         // to 9x5 blocks with a main street and the palace in the middle.
         // The food factory takes one more lot before houses are laid out.
         // The hospital takes another lot before the houses are laid out.
-        assert_eq!(generate(7).residents(), 178);
+        // The warehouse reserves a whole block, moving the remaining houses.
+        assert_eq!(generate(7).residents(), 183);
     }
 
     // --- the ground ---

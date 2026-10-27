@@ -27,6 +27,7 @@ const FLOOR: &str = "floor";
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
+    whole_block: false,
     wanted: |_| true,
     rank: |siting, _, lot| {
         let warehouse = siting.the(super::warehouse::NAME);

@@ -26,6 +26,7 @@ const FLOOR: &str = "tiles blue";
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
+    whole_block: false,
     wanted: |lot| lot.edge_sides().next().is_some(),
     rank: |_, _, _| 0,
     build: |_, map, props, lot| power_plant(map, props, lot),

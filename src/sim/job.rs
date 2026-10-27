@@ -233,7 +233,7 @@ catalogue! {
             workplace: FeatureKind::ScrapBin,
             goal: GoalId::Collect,
             commute: COMMUTE,
-            shifts: &[OFFICE_HOURS],
+            shifts: &[COLLECTOR_HOURS],
             uniform: "uniform scrap collector",
             now: |at_work, _| if at_work { "storing scrap" } else { "collecting scrap" },
             goes_out_for: Some(ItemKind::Scrap),
@@ -595,6 +595,16 @@ pub const OFFICE_HOURS: Shift = Shift {
     days: WEEKDAYS,
 };
 
+/// Seven to six, Monday to Friday: a scrap collector's day is long, since most
+/// of it is the walk out to the heaps and back. Light at both ends — the sun is
+/// up at six and down at eight (`sim::sun`) — so a collector sets out after
+/// the deathdogs have gone and has two hours to walk home before they come.
+pub const COLLECTOR_HOURS: Shift = Shift {
+    start: 7,
+    end: 18,
+    days: WEEKDAYS,
+};
+
 /// Nine to five, every day but Sunday: a field is tended every day it grows,
 /// and a farmer has one day off.
 pub const FARM_HOURS: Shift = Shift {
@@ -801,9 +811,10 @@ impl Job {
         Job::new(JobKind::OfficeWorker, desk, OFFICE_HOURS)
     }
 
-    /// A scrap collector storing in the bin in `bin`, keeping office hours.
+    /// A scrap collector storing in the bin in `bin`, keeping
+    /// [`COLLECTOR_HOURS`].
     pub const fn collector(bin: Point) -> Job {
-        Job::new(JobKind::ScrapCollector, bin, OFFICE_HOURS)
+        Job::new(JobKind::ScrapCollector, bin, COLLECTOR_HOURS)
     }
 
     /// A guard at the post in `post`, keeping `watch` (one of [`WATCHES`]).
@@ -1042,15 +1053,16 @@ mod tests {
         assert_eq!(weekend.days(), "Sat, Sun");
     }
 
-    /// A collector keeps office hours, at a bin, by its own goal; and the
-    /// desks are offered before the bins.
+    /// A collector keeps its long weekdays, at a bin, by its own goal; and
+    /// the desks are offered before the bins.
     #[test]
-    fn a_scrap_collector_works_office_hours_at_a_bin_and_is_hired_after_the_office() {
+    fn a_scrap_collector_works_seven_to_six_at_a_bin_and_is_hired_after_the_office() {
         let kind = JobKind::ScrapCollector;
         assert_eq!((kind.name(), kind.with_article()), ("scrap collector", "a scrap collector"));
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::ScrapBin, "scrap bin"));
         assert_eq!(kind.goal(), GoalId::Collect);
-        assert_eq!(kind.shifts(), [OFFICE_HOURS]);
+        assert_eq!(kind.shifts(), [COLLECTOR_HOURS]);
+        assert_eq!(COLLECTOR_HOURS, Shift::new(7, 18, WEEKDAYS).unwrap());
         assert_eq!(JobKind::OfficeWorker.goal(), GoalId::Work);
         assert_eq!(JobKind::OfficeWorker.with_article(), "an office worker");
         assert_eq!(
@@ -1078,7 +1090,7 @@ mod tests {
             "the office first, new professions last"
         );
         let job = Job::collector(Point::new(-4, 9));
-        assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), OFFICE_HOURS));
+        assert_eq!((job.kind, job.workplace, job.shift), (kind, Point::new(-4, 9), COLLECTOR_HOURS));
         assert_eq!(Job::restore(&job.save()), Ok(job));
     }
 

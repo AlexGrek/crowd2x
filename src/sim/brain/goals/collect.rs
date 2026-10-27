@@ -366,15 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn a_collector_sets_off_at_half_past_eight_fills_its_pack_and_stores_it_in_its_bin() {
-        let mut world = yard(at(1, 8.4));
+    fn a_collector_sets_off_at_half_past_six_fills_its_pack_and_stores_it_in_its_bin() {
+        let mut world = yard(at(1, 6.4));
         let mut human = collector(Point::new(2, 2), BIN);
         for _ in 0..ticks(&world, 0.05) {
             step(&mut world, &mut human);
         }
-        assert_ne!(human.brain().top_goal(), GoalId::Collect, "twenty past eight: not yet");
+        assert_ne!(human.brain().top_goal(), GoalId::Collect, "twenty past six: not yet");
 
-        world.clock = at(1, 8.55);
+        world.clock = at(1, 6.55);
         let mut out_there = false;
         for _ in 0..ticks(&world, 4.0) {
             step(&mut world, &mut human);
@@ -569,14 +569,15 @@ mod tests {
     /// them seen to sees to each before it leaves the site — a drink, a meal,
     /// the toilet last; not the TV, bored as it is, since boredom never takes
     /// a worker off its shift — and nothing calls it back in before the
-    /// packful is in the bin. Then again before the next trip, which starts
-    /// before the shift is out.
+    /// packful is in the bin. The next trip, which starts before the shift is
+    /// out, is no stop at the fridge: the meal and the drink stowed for the
+    /// first are still in its pocket, to be had out there.
     #[test]
     fn a_collector_sees_to_every_need_before_it_sets_out_and_nothing_calls_it_back() {
         use crate::sim::brain::routines::READY;
         // Begin when the shift is due. Before it, wandering may legitimately
         // leave this tiny site, which is not a work trip to test readiness on.
-        let mut world = yard_to_get_ready_in(at(1, 8.5));
+        let mut world = yard_to_get_ready_in(at(1, 6.5));
         let mut human = needy_human(Point::new(2, 2), 40.0, 50.0, 40.0);
         human.set_fun(50.0);
         assert!(human.hire(Job::collector(BIN)));
@@ -614,11 +615,14 @@ mod tests {
             assert!(line_after(&world, first_piece, need).is_none_or(|at| at > stored), "called back for {need:?}: {lines:?}");
         }
 
-        // The second trip is got ready for too: a trip's thirst is seen to
-        // at the fridge before it, not out at the heaps.
-        let (drink, ready, out) =
-            (line(stored, "drank at the fridge"), line(stored, "is ready to go out"), line(stored, "salvaged scrap metal"));
-        assert!(drink < ready && ready < out, "{lines:?}");
+        // The second trip is got ready for too, but with the pocket still
+        // stocked it is no stop at the fridge for a drink or a meal.
+        let (ready, out) = (line(stored, "is ready to go out"), line(stored, "salvaged scrap metal"));
+        assert!(ready < out, "{lines:?}");
+        assert_eq!(human.inventory_mut().count(ItemKind::Water) + human.inventory_mut().count(ItemKind::Food), 2, "still stowed");
+        for fridge in ["drank at the fridge", "ate at the fridge"] {
+            assert!(line_after(&world, stored, fridge).is_none_or(|at| at > out), "{fridge:?} before the second trip: {lines:?}");
+        }
     }
 
     /// A trip starts from the bin: a collector across the site, with nothing

@@ -22,6 +22,7 @@ const FLOOR: &str = "floor white";
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
+    whole_block: false,
     wanted: |lot| lot.edge_sides().next().is_some(),
     rank: |_, _, _| 0,
     build: crematorium,

@@ -25,6 +25,7 @@ const FLOOR: &str = "floor colorful";
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
+    whole_block: false,
     wanted: |_| true,
     rank: |_, _, lot| lot.origin.offset(LOT_W / 2, LOT_H / 2).manhattan_distance(Point::new(WIDTH / 2, HEIGHT / 2)),
     build: |_, map, props, lot| playzone(map, props, lot),

@@ -35,6 +35,7 @@ const FLOOR: &str = "wood cracked";
 pub const SPEC: LotBuilding = LotBuilding {
     name: NAME,
     count: 1,
+    whole_block: false,
     wanted: |lot| lot.edge_sides().next().is_some(),
     rank: |siting, _, lot| walk_to_the_fields(siting, lot.origin.offset(LOT_W / 2, LOT_H / 2)),
     build: |_, map, props, lot| farm(map, props, lot),

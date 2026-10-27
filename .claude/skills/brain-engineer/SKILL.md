@@ -166,6 +166,17 @@ carry it away (`jobs`, "The undertaker"); `GameState::hire` refuses the dead.
 Tests: `biology/health.rs` (heals, starving kills in a day, thirst faster, exhaustion, holds
 still between); the sim test `the_dead_are_carried_to_the_crematorium_and_leave_the_world`.
 
+**Hospital patients** (`sim/hospital.rs`): under `ADMISSION_HEALTH` (90) a human is a patient
+(`Medical::recovering`) until it is back to 100. A patient heals **only** by nurses' care in a
+hospital bed: `Biology::advance_hospital` hurts and never heals. A district has eight beds
+(`map/district/hospital.rs`, both side walls, each kept only if the room stays whole).
+`Medical::arrange` (the `get well` routine) raises `Recover` to 1 and suppresses wandering,
+play, salvage and every job's goal, so a patient is on sick leave. It suppresses **Sleep only
+for a patient with a bed reserved**, because `HospitalRest` is its sleep. A patient waiting for
+a bed sleeps as anybody does. Suppressing Sleep for every patient killed every bitten unit that
+found the beds full: twelve in a month on seed 7, found by the lab (`lab` skill). Test:
+`a_patient_with_no_bed_to_be_had_still_sleeps_rather_than_dying_of_exhaustion`.
+
 ## Rules that were each a bug, or would be
 
 <rules>

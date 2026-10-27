@@ -1309,18 +1309,69 @@ impl GameState {
         if !entity.hire(job) {
             return false;
         }
+        self.took_on(uid, job, "");
+        true
+    }
+
+    /// The world's half of `uid` being hired as `job` once its brain has
+    /// it: the workplace claimed, its colleagues, the log line (`why` on the
+    /// end of it).
+    fn took_on(&mut self, uid: Uid, job: Job, why: &str) {
         let at = job.workplace;
         self.facilities.workplaces.claim(at, job.shift, uid);
         // Everybody doing the same is a colleague now.
         self.facilities.society.set_job(uid, Some(job.kind));
         self.log.unit(uid, format!(
-            "{uid} was hired as {} at the {} at {}, {}, {}",
+            "{uid} was hired as {} at the {} at {}, {}, {}{why}",
             job.kind.with_article(),
             job.kind.workplace_name(),
             at.x,
             at.y,
             job.shift.hours()
         ));
+    }
+
+    /// Give the job `dead` left — its very workplace and shift — to the
+    /// living, jobless human nearest that workplace who may use it: one not
+    /// on sick leave while there is any such, the lower uid on a tie. `false`
+    /// with nobody to take it on, and the post stands empty.
+    ///
+    /// One walk of the crowd **a death**, at the end of the tick it happened
+    /// in (`comings_and_goings`): never a scan a tick or a unit.
+    fn fill_vacancy(&mut self, dead: Uid, job: Job) -> bool {
+        if self.facilities.workplaces.is_taken(job.workplace, job.shift) {
+            return false;
+        }
+        let clock = self.clock();
+        let properties = &self.facilities.properties;
+        let chosen = self
+            .entities
+            .iter()
+            .filter(|entity| {
+                entity.kind() == Some(EntityType::Human)
+                    && !entity.is_dead()
+                    && !entity.is_frozen()
+                    && entity.job().is_none()
+                    && properties.may_use(job.workplace, entity.body().home())
+            })
+            .min_by_key(|entity| {
+                let sick = entity.is_on_sick_leave(clock);
+                (sick, entity.center_position().manhattan_distance(job.workplace), entity.uid().raw())
+            })
+            .map(|entity| entity.uid());
+        let Some(uid) = chosen else {
+            self.log.important(format!(
+                "nobody is free to take on the {} at {}, {} that {dead} left",
+                job.kind.workplace_name(),
+                job.workplace.x,
+                job.workplace.y
+            ));
+            return false;
+        };
+        if !self.entities.get_mut(uid).is_some_and(|entity| entity.hire(job)) {
+            return false;
+        }
+        self.took_on(uid, job, &format!(", in place of {dead}"));
         true
     }
 
@@ -1602,7 +1653,9 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 ///    undertakers took up this tick ([`Effect::TakeBody`], in a hand now as
 ///    an item) and the deathdogs gone back into the wasteland
 ///    ([`Effect::Depart`]).
-/// 2. On the tick it gets dark (`before` light, `now` dark), the night's
+/// 2. Every job the dead left this tick goes to somebody jobless
+///    ([`Facilities::vacancies`], [`GameState::fill_vacancy`]).
+/// 3. On the tick it gets dark (`before` light, `now` dark), the night's
 ///    deathdogs come out of the wasteland ([`deathdogs::arrive`]).
 ///
 /// Inside [`process_pass`] and not round it: the game and the QA harness
@@ -1614,6 +1667,11 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
         state.despawn(uid);
     }
     state.facilities.leaving = leaving;
+    let mut vacancies = std::mem::take(&mut state.facilities.vacancies);
+    for (dead, job) in vacancies.drain(..) {
+        state.fill_vacancy(dead, job);
+    }
+    state.facilities.vacancies = vacancies;
     if deathdogs::is_dusk(before, now) {
         deathdogs::arrive(state);
     }
@@ -3291,6 +3349,52 @@ mod tests {
         assert!(!state.workplaces().is_taken(desk, job::OFFICE_HOURS));
         let next = state.spawn(EntityType::Human, Point::new(3, 3));
         assert_eq!(state.workplaces().worker(desk, job::OFFICE_HOURS), Some(next));
+    }
+
+    /// The job somebody dies in goes to somebody jobless before the tick is
+    /// out — its very workplace and shift, to the nearest — and the post
+    /// stands empty only when nobody is left to take it.
+    #[test]
+    fn the_job_somebody_dies_in_goes_to_the_nearest_jobless() {
+        let bin = Point::new(1, 1);
+        let mut map = Map::new(Size::new(16, 10), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
+        let mut state = GameState::new(map, 3);
+        let first = state.spawn(EntityType::Human, Point::new(2, 1));
+        let job = state.entities().get(first).unwrap().job().expect("hired");
+        let far = state.spawn(EntityType::Human, Point::new(14, 8));
+        let near = state.spawn(EntityType::Human, Point::new(4, 2));
+        assert_eq!(state.entities().get(near).unwrap().job(), None, "one bin, one job");
+        let mut lines = Vec::new();
+        let dies = |state: &mut GameState, uid: Uid, lines: &mut Vec<String>| {
+            state
+                .entity_mut(uid)
+                .unwrap()
+                .biology_mut()
+                .unwrap()
+                .edit(|stats| stats.with_health(0.5).with_hunger(100.0).with_thirst(100.0));
+            for _ in 0..1800 {
+                run(state, 1);
+                lines.extend(state.log.drain());
+                if state.entities().get(uid).unwrap().is_dead() {
+                    return;
+                }
+            }
+            panic!("{uid} never died");
+        };
+
+        dies(&mut state, first, &mut lines);
+        assert_eq!(state.entities().get(near).unwrap().job(), Some(job), "the nearest: {lines:?}");
+        assert_eq!(state.entities().get(far).unwrap().job(), None);
+        assert_eq!(state.workplaces().worker(bin, job.shift), Some(near));
+        assert!(lines.iter().any(|line| line.contains(&format!("{near} was hired as a scrap collector at the scrap bin at 1, 1, 07:00-18:00, in place of {first}"))), "{lines:?}");
+
+        dies(&mut state, near, &mut lines);
+        assert_eq!(state.entities().get(far).unwrap().job(), Some(job), "the next: {lines:?}");
+
+        dies(&mut state, far, &mut lines);
+        assert!(!state.workplaces().is_taken(bin, job.shift), "nobody left to take it");
+        assert!(lines.iter().any(|line| line.contains(&format!("nobody is free to take on the scrap bin at 1, 1 that {far} left"))), "{lines:?}");
     }
 
     /// The two commands the job menu sends: let somebody go, and the desk is

@@ -1154,11 +1154,11 @@ mod tests {
     fn a_scrap_collectors_job_menu_names_its_bin() {
         let mut person = human();
         assert!(GameEntity::hire(&mut person, crate::sim::Job::collector(Point::new(30, 2))));
-        let block = job_block(&person, on(2, 7.0));
+        let block = job_block(&person, on(2, 5.0));
         assert_eq!(field(&block, "job"), "scrap collector");
         assert_eq!(field(&block, "at"), "scrap bin at 30, 2");
-        assert_eq!(field(&block, "hours"), "09:00-17:00");
-        assert_eq!(field(&block, "now"), "off until 09:00");
+        assert_eq!(field(&block, "hours"), "07:00-18:00");
+        assert_eq!(field(&block, "now"), "off until 07:00");
     }
 
     /// Beside its bin and thirsty: seeing to it before the trip is part of

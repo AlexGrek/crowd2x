@@ -410,7 +410,8 @@ fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
 /// [`Effect::Died`]: the unit's cell is let go, so the crowd walks over the
 /// body rather than round it and nobody sees it there; its bed goes back to
 /// be given to the next arrival, and its workplace and job with it, as a
-/// despawn's do. The body stays where it fell, filed with the
+/// despawn's do — the job to somebody jobless before the tick is out
+/// ([`Facilities::vacancies`]). The body stays where it fell, filed with the
 /// [`Corpses`](super::Corpses) for an undertaker to find, and is counted.
 fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mut Occupancy, log: &Log, cause: &'static str) {
     facilities.hospital.release(entity.uid());
@@ -423,7 +424,9 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
     facilities.economy.died(uid);
-    let _ = entity.dismiss();
+    if let Some(job) = entity.dismiss() {
+        facilities.vacancies.push((uid, job));
+    }
     log.important(format!("{uid} died of {cause}"));
 }
 

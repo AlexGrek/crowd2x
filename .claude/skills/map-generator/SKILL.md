@@ -147,6 +147,14 @@ different afterwards; a seed's resident count is re-read, never assumed.)
      is at the computer (`sim::playzone`, `jobs`). Draws no RNG; took a lot from the parks
      (`EMPTY_LOTS` one fewer) and **seed 7's resident count did not change** (177). The constant
      is `PLAYZONE_COMPUTER`, not `COMPUTER`: the bank's `COMPUTER` is in the module above it.
+   - **`hospital`** (`hospital.rs`): one lot, the whole of it, `wall purple` round `floor white`,
+     a two-cell door in the middle of its first street side, laid out with `Room`: a `"nurse
+     station"` in each corner beside the door (`STATIONS` = 2), the `"fridge"` and the `"toilet"`
+     in the middle of the far wall, and **`BEDS` = 8 `"hospital bed"`s** down both side walls
+     from the row past the stations (`beds`), each kept only if the room stays whole with it
+     (`whole`: every free cell reached from the doorway, every prop with a free side). A 6x5
+     room takes the eight in four rows; a 5x6 one skips the corner the fridge would shut in for
+     the one past it. Four beds until the lab showed a bite victim a night outgrowing them.
 
    History: adding the restaurants and the crematorium changed every seed's houses (the lots
    and the draws after the warehouse); the steel factory, drawing nothing, moved only which

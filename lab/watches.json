@@ -1,0 +1,8 @@
+[
+  { "name": "steel stopped reaching the warehouse", "metric": "in.steel rack", "grows_less_than": 1, "within_hours": 72, "after_hours": 48 },
+  { "name": "steel trickles into the warehouse", "metric": "in.steel rack", "grows_less_than": 20, "within_hours": 168, "after_hours": 168 },
+  { "name": "nothing smelted", "metric": "in.steel pallet", "grows_less_than": 1, "within_hours": 72, "after_hours": 48 },
+  { "name": "scrap stopped coming in", "metric": "in.scrap bin", "grows_less_than": 1, "within_hours": 72, "after_hours": 24 },
+  { "name": "somebody died", "metric": "died", "rises_by": 1, "within_hours": 1 },
+  { "name": "the budget is in the red", "metric": "budget", "below": 0 }
+]

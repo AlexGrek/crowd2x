@@ -452,6 +452,11 @@ refresh interval.
 
 ## Watching a world go by
 
+For **days or weeks** of a whole district — production that stalls, deaths that pile up, a
+bug that needs a week to show — use the `lab` skill instead: the same simulation headless at
+about 7000 ticks a second, with anomaly watches, snapshots and a paused world to look into.
+`observe` is for a few units over a day, asserted on in a test.
+
 A measurement says how long ticks took; an **observation** says what they did to the people
 in them. `observe` runs ticks exactly as `tick` does — one spawn pass, then the processing
 passes — and samples every unit with a body at tick 0, every `every` ticks and at the end.

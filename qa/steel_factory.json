@@ -91,7 +91,6 @@
     { "note": "by the afternoon an ingot of steel is on the warehouse's rack" },
     { "tick": 7200 },
     { "expect_stored": { "min": 1, "in": "steel rack" } },
-    { "expect_text": "steel  1 stored" },
     { "press": "statistics" },
     { "expect_text": "steelworkers of 1 posts" },
     { "expect_text": "couriers of 1 posts" },

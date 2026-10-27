@@ -7,6 +7,7 @@ mod characters;
 mod debug;
 mod editor;
 mod game;
+mod lab;
 mod lighting;
 mod map;
 mod menu;
@@ -28,6 +29,16 @@ use crate::render::PIXEL_SCALE;
 // Returning the exit status rather than discarding it: a scripted QA run
 // reports its result that way, and `App::run` is the only thing that knows it.
 fn main() -> AppExit {
+    // `crowd2x lab ...` lives a world through headless (`src/lab/`): no
+    // window, no Bevy app at all, so it is decided before one is built.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("lab") {
+        return match lab::main(&args[2..]) {
+            0 => AppExit::Success,
+            code => AppExit::from_code(code.clamp(1, 255) as u8),
+        };
+    }
+
     // A QA script chooses the screen it starts on, so it is read before the
     // app is built; without one this is the ordinary debug/default choice.
     let script = qa::script_from_env();
