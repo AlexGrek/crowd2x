@@ -198,6 +198,23 @@ catalogue! {
         /// of [`TOWN_HOMES`] homes or more, at the public ground nearest the
         /// middle of the site.
         District = 29 => FeatureDef { props: &[], ..BESIDE },
+        /// The store's superfridge: the district's food, which every fridge
+        /// in the world is stocked from ([`crate::sim::superfridge`]). A store
+        /// of meals with a capacity, filled a unit at a time by couriers the
+        /// dispatch sends to the warehouse ([`crate::sim::dispatch`]), and
+        /// falling with every meal anybody takes out of a fridge. Empty, no
+        /// fridge has food in it — only water. The store courier's workplace.
+        Superfridge = 30 => FeatureDef {
+            props: &["superfridge"],
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "superfridge", site: "store", hud: Some("food") }),
+            ..BESIDE
+        },
+        /// Where a shopkeeper minds the store, stood at from beside it. A
+        /// shopkeeper's workplace; needs no power.
+        ShopCounter = 31 => FeatureDef { props: &["shop counter"], ..BESIDE },
+        /// Two bookkeeping positions for special agents. Like the district
+        /// workplace, these have no prop and are never destinations.
+        Patrol = 32 => FeatureDef { props: &[], ..BESIDE },
     }
 }
 
@@ -296,6 +313,7 @@ impl FeatureKind {
         match self {
             Self::DistributionBox => "distribution box",
             Self::District => "district",
+            Self::Patrol => "district patrol",
             _ => self.def().props[0],
         }
     }
@@ -325,7 +343,7 @@ pub fn store_of(name: &str) -> Option<FeatureKind> {
 /// Built once in `GameState::new` by scanning the map's `Props` layer, so the
 /// per-tick cost of finding one is a scan of the fridges — a handful — and
 /// never of the crowd or the map.
-#[derive(Clone, Default, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Features {
     /// Water outside the site with a walkable bank, indexed once for fishing.
     fishing_water: Vec<Point>,
@@ -336,6 +354,17 @@ pub struct Features {
     /// [`Access::Entered`] feature. Entry bypasses that prop alone, never a
     /// wall, the map boundary, or another piece of furniture stacked on it.
     entered: Vec<Point>,
+}
+
+impl Default for Features {
+    fn default() -> Self {
+        Self {
+            fishing_water: Vec::new(),
+            green_plots: Vec::new(),
+            cells: std::array::from_fn(|_| Vec::new()),
+            entered: Vec::new(),
+        }
+    }
 }
 
 impl Features {
@@ -412,6 +441,15 @@ impl Features {
                 .min_by_key(|&cell| (cell.manhattan_distance(middle), cell))
             {
                 features.cells[FeatureKind::District as usize].push(cell);
+                // Two different passable cells reserve the two agents'
+                // positions at the same hours. No props or per-tick scan.
+                features.cells[FeatureKind::Patrol as usize].extend(
+                    std::iter::once(cell).chain(
+                        map.size().points().filter(|&other| {
+                            other != cell && map.is_passable(other) && properties.of(other).is_none()
+                        }).min_by_key(|&other| (other.manhattan_distance(cell), other))
+                    ).take(super::job::SPECIAL_AGENTS)
+                );
             }
         }
         // Sorted, so nothing that picks among them depends on the order the

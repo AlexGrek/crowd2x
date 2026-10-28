@@ -1,4 +1,4 @@
-//! Sow permanent flower beds in the city's public green zones.
+//! Sow and replace flower beds in the city's public green zones.
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::{Seek, Stand, stand_beside};
@@ -172,6 +172,35 @@ mod tests {
     }
     fn at(day: u32) -> Clock {
         Clock::after_watching(((day - 1) as f64 * DAY as f64 + HOUR as f64) / TIME_SCALE as f64)
+    }
+
+    #[test]
+    fn a_decorator_replants_a_bed_after_its_flowers_decay() {
+        let mut map = Map::new(Size::new(6, 5), FLOOR);
+        let plot = Point::new(2, 2);
+        map.set_terrain(plot, grass());
+        prop_at(&mut map, "flower supplies", BASE);
+        let mut world = World::new(map);
+        let mut human = decorator();
+        let planted = Clock::after_watching(0.0);
+        assert!(world.facilities.flowers.sow(&world.map, plot, 0, planted));
+        world.clock = at(1);
+        for _ in 0..500 {
+            world.step(&mut human);
+        }
+        assert_eq!(world.flowers.at(plot).unwrap().sown, planted.elapsed());
+        // Day six is Saturday, at work: the old bed is five days old.
+        world.clock = at(6);
+        for _ in 0..1000 {
+            world.step(&mut human);
+        }
+        let bed = world
+            .flowers
+            .at(plot)
+            .expect("decorator replanted the only plot");
+        assert_eq!(bed.sown, world.clock.elapsed());
+        assert_eq!(bed.stage(world.clock), crate::sim::flowers::Stage::Seedling);
+        assert!(world.log_contains("planted"));
     }
 
     #[test]

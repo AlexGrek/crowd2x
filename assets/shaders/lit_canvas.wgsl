@@ -6,9 +6,8 @@
 // the same colour, and the upscale stays an exact integer one however smooth
 // the light is between texels.
 //
-// The one exception is the vignette, decided per *screen pixel*: it belongs
-// to the camera's view rather than to the world, so it is smooth across the
-// window at any zoom and deliberately not on the pixel grid.
+// The vignette and temporary zoom blink are screen-space effects. Outside
+// the blink there is no blur, filtering, or fractional scaling.
 
 #import bevy_sprite::mesh2d_vertex_output::VertexOutput
 #import bevy_sprite::mesh2d_view_bindings::view
@@ -34,6 +33,8 @@ struct CanvasParams {
     lit: f32,
     // How much of the light the corners lose: 0 is no vignette.
     vignette: f32,
+    blink: f32,
+    screen_size: vec2<f32>,
 }
 
 // Where the vignette starts and ends, as a distance from the middle of the
@@ -71,15 +72,25 @@ fn vignette_at(frag_coord: vec2<f32>) -> f32 {
     return 1.0 - params.vignette * smoothstep(VIGNETTE_INNER, VIGNETTE_OUTER, length(from_middle));
 }
 
-@fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+fn canvas_at(uv: vec2<f32>, blurred: bool) -> vec3<f32> {
     let size = params.canvas_size;
-    let texel = min(floor(in.uv * size), size - 1.0);
-    let albedo = textureLoad(canvas, vec2<i32>(texel), 0);
-    // Exactly 1 with no vignette, so an unlit canvas is drawn as rendered.
-    let vignette = vignette_at(in.position.xy);
+    let texel = clamp(floor(uv * size), vec2<f32>(0.0), size - 1.0);
+    var albedo = textureLoad(canvas, vec2<i32>(texel), 0).rgb;
+    if (blurred) {
+        // Explicit bilinear reconstruction only during a blink; the image
+        // sampler stays nearest-neighbour for every other rendering path.
+        let p = clamp(uv * size - 0.5, vec2<f32>(0.0), size - 1.0);
+        let lo = vec2<i32>(floor(p));
+        let hi = min(lo + 1, vec2<i32>(size) - 1);
+        let f = fract(p);
+        let a = textureLoad(canvas, lo, 0).rgb;
+        let b = textureLoad(canvas, vec2<i32>(hi.x, lo.y), 0).rgb;
+        let c = textureLoad(canvas, vec2<i32>(lo.x, hi.y), 0).rgb;
+        let d = textureLoad(canvas, hi, 0).rgb;
+        albedo = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
     if (params.lit == 0.0) {
-        return vec4<f32>(albedo.rgb * vignette, albedo.a);
+        return albedo;
     }
 
     // uv runs down the canvas; world Y runs up.
@@ -97,5 +108,39 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Capped at full brightness: daylight is the canvas exactly as drawn,
     // and a lamp lights the dark rather than bleaching the day. The vignette
     // after the cap, so a lamp at the edge of the view is darkened with it.
-    return vec4<f32>(albedo.rgb * min(light, vec3<f32>(1.0)) * vignette, albedo.a);
+    return albedo * min(light, vec3<f32>(1.0));
+}
+
+@fragment
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let closed = params.blink;
+    if (closed >= 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let vignette = vignette_at(in.position.xy);
+    if (closed <= 0.0) {
+        return vec4<f32>(canvas_at(in.uv, false) * vignette, 1.0);
+    }
+
+    // Two curved lids meet at the middle: the corners close first, leaving
+    // a narrow horizontal opening. A soft edge suggests eyelashes/defocus.
+    let p = frag_coord_to_uv(in.position.xy, view.viewport) * 2.0 - 1.0;
+    let aperture = (1.0 - closed) * 1.3 - 0.3 * p.x * p.x;
+    let opening = 1.0 - smoothstep(aperture - 0.025, aperture + 0.025, abs(p.y));
+    if (opening <= 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    // A small Gaussian kernel defocuses the visible slit as the lids close.
+    // Radius is in window pixels, so it feels the same at every zoom level.
+    let radius = vec2<f32>(18.0 * closed) / params.screen_size;
+    var color = vec3<f32>(0.0);
+    for (var y = -1; y <= 1; y += 1) {
+        for (var x = -1; x <= 1; x += 1) {
+            let weight = select(1.0, 2.0, x == 0) * select(1.0, 2.0, y == 0) / 16.0;
+            color += canvas_at(in.uv + vec2<f32>(f32(x), f32(y)) * radius, true) * weight;
+        }
+    }
+    let fade = pow(1.0 - closed, 1.2);
+    return vec4<f32>(color * vignette * opening * fade, 1.0);
 }

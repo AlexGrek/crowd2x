@@ -291,6 +291,11 @@ impl Brain {
         // take in what is news. Asleep, its eyes are shut: it sees nobody, and
         // whoever it had in mind fades as the night goes on.
         perception.turn(walk.heading());
+        if social && due.elapsed(Priority::Low).is_some() && !is_asleep(task, action)
+            && let Some(biology) = biology.as_deref_mut()
+        {
+            biology.handle(Event::Smelled { value: perception.smell(ctx, &body) });
+        }
         if let Some(elapsed) = due.elapsed(Priority::Med) {
             // Faces first, before the look: see `Attention::age`.
             attention.age(elapsed);

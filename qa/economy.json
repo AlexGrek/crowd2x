@@ -529,7 +529,10 @@
       "press": "close"
     },
     {
-      "select": 4
+      "note": "The fixed-seed noble at arrival 3 takes the accountant role; commoner arrival 4 keeps the remaining guard watch."
+    },
+    {
+      "select": 3
     },
     {
       "press": "job"

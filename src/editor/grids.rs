@@ -82,7 +82,7 @@ pub struct LayerView {
 }
 
 impl LayerView {
-    const MODES: usize = GridLayer::COUNT + 2;
+    const MODES: usize = GridLayer::COUNT + 3;
 
     pub fn cycle(&mut self) {
         self.mode = (self.mode + 1) % Self::MODES;
@@ -92,12 +92,15 @@ impl LayerView {
         self.mode == GridLayer::COUNT + 1 || self.mode == layer as usize + 1
     }
 
+    pub fn shows_smell(&self) -> bool { self.mode == GridLayer::COUNT + 2 }
+
     /// What the readouts call it: `off`, a layer's name, or `all`.
     pub fn label(&self) -> &'static str {
         match self.mode {
             0 => "off",
             mode if mode <= GridLayer::COUNT => GridLayer::ALL[mode - 1].name(),
-            _ => "all",
+            mode if mode == GridLayer::COUNT + 1 => "all",
+            _ => "smell",
         }
     }
 
@@ -489,7 +492,7 @@ mod tests {
             labels.push(view.label());
             view.cycle();
         }
-        assert_eq!(labels, ["off", "ceiling", "power", "water", "all"]);
+        assert_eq!(labels, ["off", "ceiling", "power", "water", "all", "smell"]);
         assert_eq!(view.label(), "off", "and round again");
         assert!(view.set("power") && view.shows(GridLayer::Power) && !view.shows(GridLayer::Water));
         assert!(view.set("all") && GridLayer::ALL.into_iter().all(|layer| view.shows(layer)));

@@ -18,7 +18,9 @@
 //! ([`crate::sim::world_step`]), sequentially, in slot order — so two units
 //! at the last piece get one between them.
 //!
-//! **A store never fills.** It holds whatever is put in it.
+//! **A store never fills.** It holds whatever is put in it — all but the
+//! store's superfridge, whose capacity the world keeps to as food comes in
+//! (`effect::restock`, [`super::superfridge`]).
 
 use crate::map::{Map, ObjectLayer, Point};
 use crate::save::{invalid, pb, Invalid};
@@ -132,6 +134,20 @@ impl Bins {
         let i = self.index(cell)?;
         self.stored[i] = self.stored[i].saturating_add(pieces);
         Some(self.stored[i])
+    }
+
+    /// Make the store in `cell` hold exactly `pieces`: a new game's supplies
+    /// ([`super::superfridge::Superfridge::stock`]). `false`, and nothing
+    /// changed, where there is no store.
+    #[must_use = "a cell with no store in it refuses this"]
+    pub fn set(&mut self, cell: Point, pieces: u32) -> bool {
+        match self.index(cell) {
+            Some(i) => {
+                self.stored[i] = pieces;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Take one piece out of the store in `cell`. `false`, and nothing

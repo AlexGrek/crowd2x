@@ -108,6 +108,8 @@ pub struct Human {
     /// Name and gender, rolled once at spawn — see [`Identity`] for why the
     /// two need not agree.
     identity: Identity,
+    /// Social class, assigned by the world’s one-in-ten arrival lottery.
+    noble: bool,
     /// What it is carrying: one hand, and what it has stowed away. Inline and
     /// `Copy`, like the biology — see [`Inventory`] for which of its two
     /// limits counts the hand.
@@ -135,6 +137,7 @@ impl Human {
             brain: Brain::human(),
             biology,
             identity,
+            noble: false,
             inventory: Inventory::human(),
             talents,
             schedule,
@@ -211,6 +214,8 @@ impl Human {
 }
 
 impl GameEntity for Human {
+    fn is_noble(&self) -> bool { self.noble }
+
     fn clothing(&self) -> Option<Clothing> {
         Some(self.clothing)
     }
@@ -329,6 +334,7 @@ impl GameEntity for Human {
         let mut fields = vec![
             ("name", self.identity.name().to_string()),
             ("gender", self.identity.gender().label().to_string()),
+            ("class", if self.noble { "noble" } else { "commoner" }.to_string()),
             ("condition", if self.is_dead() { "dead" } else { "alive" }.to_string()),
             ("clothing", self.clothing.name().to_string()),
             ("goal", self.brain.top_goal().name().to_string()),
@@ -385,6 +391,7 @@ impl GameEntity for Human {
     /// The job goes in the brain, and how the job has it walk
     /// ([`Bearing::gait`](super::job::Bearing)) into the walker.
     fn hire(&mut self, job: Job) -> bool {
+        if self.noble && !job.kind.is_noble_role() { return false; }
         self.brain.hire(job);
         self.walk.set_gait(gait(Some(&job)));
         true
@@ -471,7 +478,7 @@ impl GameEntity for Human {
     }
 
     fn save(&self) -> pb::Kind {
-        let Human { walk, brain, biology, identity, inventory, talents, schedule, clothing } = self;
+        let Human { walk, brain, biology, identity, inventory, talents, schedule, clothing, noble } = self;
         pb::Kind::Human(pb::Human {
             walker: Some(walk.save()),
             brain: Some(brain.save()),
@@ -481,6 +488,7 @@ impl GameEntity for Human {
             talents: talents.save(),
             schedule: Some(schedule.save()),
             clothing: Some(clothing.name().to_string()),
+            noble: *noble,
         })
     }
 }
@@ -498,6 +506,9 @@ impl Human {
     fn restore(saved: &pb::Human, revision: u64) -> Result<Human, Invalid> {
         let mut brain = Brain::human();
         brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        if saved.noble && brain.job().is_some_and(|job| !job.kind.is_noble_role()) {
+            return invalid("a noble employed in an ordinary role");
+        }
         let mut walk = Walker::restore(pb::required(&saved.walker, "walker")?, revision)?;
         walk.set_gait(gait(brain.job()));
         Ok(Human {
@@ -515,6 +526,7 @@ impl Human {
             brain,
             biology: Biology::restore(pb::required(&saved.biology, "biology")?)?,
             identity: Identity::restore(pb::required(&saved.identity, "identity")?)?,
+            noble: saved.noble,
             inventory: Inventory::restore(pb::required(&saved.inventory, "inventory")?)?,
             talents: Talents::restore(&saved.talents)?,
             schedule: Schedule::restore(pb::required(&saved.schedule, "schedule")?)?,
@@ -912,9 +924,14 @@ pub(super) fn build(
     kind: EntityType,
     cell: Point,
     rng: &mut SmallRng,
+    noble: bool,
 ) -> Box<dyn GameEntity> {
     match kind {
-        EntityType::Human => Box::new(Human::new(uid, cell, rng)),
+        EntityType::Human => {
+            let mut human = Human::new(uid, cell, rng);
+            human.noble = noble;
+            Box::new(human)
+        },
         EntityType::Dog => Box::new(Dog::new(
             uid,
             cell,

@@ -155,7 +155,16 @@ fn update_text(menu: Res<StatisticsMenu>, sim: Option<Res<Sim>>, mut texts: Quer
         return;
     }
     let Some(sim) = sim else { return };
-    let wanted = describe(&GameState::statistics(&sim.0));
+    let mut wanted = describe(&GameState::statistics(&sim.0));
+    let reserve = sim.0.superfridge();
+    if reserve.exists() {
+        let dispatch = sim.0.dispatch();
+        wanted.push_str(&format!(
+            "\n\nreserve    {:.4} / {:.4} ({:.1}%)\ndispatch   {} waiting  {} delivering",
+            reserve.level(sim.0.bins()), reserve.capacity(), reserve.percent(sim.0.bins()),
+            dispatch.waiting(), dispatch.orders().len() - dispatch.waiting()
+        ));
+    }
     let (left, jobs) = columns(&wanted);
     for (column, mut text) in &mut texts {
         let wanted = if column.0 { &jobs } else { &left };

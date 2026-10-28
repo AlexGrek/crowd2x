@@ -90,6 +90,7 @@ impl World {
 
     /// One tick for `entity`: think, the move step's rules, react.
     pub fn step(&mut self, entity: &mut dyn GameEntity) {
+        self.facilities.flowers.advance(self.clock);
         self.tick += 1;
         let uid = entity.uid();
         let from = entity.center_position();
@@ -146,6 +147,9 @@ impl World {
         self.facilities.wounds.begin_tick();
         self.facilities.feedings.begin_tick();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
+        // The courier dispatch, over the one unit there is.
+        let (one, uid): (&dyn GameEntity, _) = (&*entity, entity.uid());
+        self.facilities.dispatch.send(std::iter::once(one), |asked| (asked == uid).then_some(one), &self.facilities.bins, &self.facilities.superfridge, self.clock, &self.log);
         self.facilities.doors.advance(self.dt, &self.occupancy);
         self.facilities.fridges.advance(self.dt * super::clock::TIME_SCALE);
         self.lines.extend(self.log.drain());
@@ -314,9 +318,9 @@ pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     }
     crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
     let mut state = super::GameState::new(map, seed);
-    let collector = state.spawn(EntityType::Human, Point::new(8, 12));
-    let smelter = state.spawn(EntityType::Human, Point::new(10, 12));
-    let courier = state.spawn(EntityType::Human, Point::new(12, 12));
+    let collector = state.spawn_commoner(Point::new(8, 12));
+    let smelter = state.spawn_commoner(Point::new(10, 12));
+    let courier = state.spawn_commoner(Point::new(12, 12));
     let kind = |state: &super::GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| job.kind);
     assert_eq!(kind(&state, collector), Some(super::JobKind::ScrapCollector), "the bin is offered first");
     assert_eq!(kind(&state, smelter), Some(super::JobKind::Steelworker));
@@ -349,9 +353,9 @@ pub fn food_works(wheat: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     }
     crate::map::utilities::serve_everything(&mut map, Point::new(0, 16), Point::new(23, 16));
     let mut state = super::GameState::new(map, seed);
-    let farmer = state.spawn(EntityType::Human, Point::new(8, 12));
-    let worker = state.spawn(EntityType::Human, Point::new(10, 12));
-    let courier = state.spawn(EntityType::Human, Point::new(12, 12));
+    let farmer = state.spawn_commoner(Point::new(8, 12));
+    let worker = state.spawn_commoner(Point::new(10, 12));
+    let courier = state.spawn_commoner(Point::new(12, 12));
     assert_eq!(state.entities().get(worker).unwrap().job().unwrap().kind, super::JobKind::FoodFactoryWorker);
     assert_eq!(state.entities().get(courier).unwrap().job().unwrap().kind, super::JobKind::FoodCourier);
     let mut input = super::Input::new();
@@ -364,4 +368,26 @@ pub fn food_works(wheat: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     super::process_game_state(&mut state, 1.0 / 60.0, &input);
     let _ = state.facilities.bins.add(Point::new(2, 2), wheat);
     (state, worker, courier)
+}
+
+/// A stocked warehouse and shop, its four keepers and courier, with needs
+/// disabled. The morning keeper is first, the courier last.
+pub fn store_world(stock: u32, meals: u32, seed: u64) -> (super::GameState, [Uid; 5]) {
+    let mut map = Map::new(crate::map::Size::new(18, 14), crate::map::FLOOR);
+    for (name, cell) in [("meal rack", Point::new(2, 5)), ("superfridge", Point::new(12, 5)),
+        ("shop counter", Point::new(12, 2)), ("fridge", Point::new(5, 10))] {
+        prop_at(&mut map, name, cell);
+    }
+    assert!(map.set_initial_stock(Point::new(12, 5), stock));
+    assert!(map.set_initial_stock(Point::new(2, 5), meals));
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 13), Point::new(17, 13));
+    let mut state = super::GameState::new(map, seed);
+    let people = std::array::from_fn(|i| state.spawn_commoner(Point::new(7 + i as i32, 8)));
+    let mut input = super::Input::new();
+    for uid in people {
+        for process in super::ProcessId::ALL { input.set_process(uid, process, false); }
+    }
+    skip_to(&mut state, 1, 10.0);
+    super::spawn_pass(&mut state, &input);
+    (state, people)
 }

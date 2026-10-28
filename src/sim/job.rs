@@ -60,6 +60,9 @@
 //!   (`CleanGoal`). Two shifts a day, each kept by two cleaners who take turns
 //!   by the day ([`CLEANER_SHIFTS`]): four days a week or three, two cleaners
 //!   every day, one at a time.
+//! * the **special agent**: two positions in the district, walking randomly
+//!   (`WanderGoal`) nine to five every day, including Saturday and Sunday.
+//!   No commute or fixed post; normal needs may interrupt the patrol.
 //!
 //! **Every job is paid** (`sim::economy`): a wage a shift, by its tier in
 //! `economy.yaml`, paid by the office workers, whose paperwork is the payroll
@@ -184,6 +187,13 @@ pub struct JobDef {
     /// and goes out only when a box fails. Every other job is paid for the
     /// shifts it was on duty for.
     pub on_call: bool,
+    /// A courier, whatever it carries: one the courier dispatch may send to
+    /// the warehouse for a unit of food for the store's superfridge, when it
+    /// is on duty, free and nearest ([`super::dispatch`]). Between
+    /// dispatches it does its own job.
+    pub courier: bool,
+    /// Restricted to nobles while any noble is alive.
+    pub noble: bool,
 }
 
 /// What a job stood at a computer does at it when there is something to do
@@ -223,6 +233,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: Some(Paperwork::Payroll),
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -240,6 +252,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -258,6 +272,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -274,6 +290,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -291,6 +309,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -316,6 +336,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: true,
+            noble: false,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -334,6 +356,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Stands by at the power plant's control panel for one of the three
         /// [`WATCHES`] of the day, an hour at a time like a guard at a post
@@ -352,6 +376,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Holds court at the throne in the district's palace, an hour at a
         /// time like a guard at a post (`WorkGoal`), every day but Sunday —
@@ -371,6 +397,8 @@ catalogue! {
             bearing: ROYAL,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: true,
         },
         /// Repairs failed boxes across the map, one worker per watch at
         /// the public service box indexed by Features.
@@ -387,6 +415,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: true,
+            courier: false,
+            noble: false,
         },
         /// Makes meals from wheat at the factory's powered cooker.
         FoodFactoryWorker = 10 => JobDef {
@@ -402,6 +432,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Brings wheat from the farm and takes meals to the warehouse.
         FoodCourier = 11 => JobDef {
@@ -425,6 +457,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: true,
+            noble: false,
         },
         /// Runs the playzone from its central computer, one of four: a day shift
         /// and an evening shift, each kept by two administrators who take
@@ -444,6 +478,8 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
         },
         /// Keeps the district's books at the computer beside the palace's
         /// throne, office hours: closes them a day at a time, saying how the
@@ -463,25 +499,27 @@ catalogue! {
             bearing: WORKER,
             paperwork: Some(Paperwork::Books),
             on_call: false,
+            courier: false,
+            noble: true,
         },
         Nurse = 14 => JobDef {
             name: "nurse", article: "a nurse", workplace: FeatureKind::NurseStation,
             goal: GoalId::Care, commute: COMMUTE, shifts: &NURSE_SHIFTS,
             uniform: "uniform nurse", now: |_, _| "taking care of patients",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
         },
         Fisherman = 15 => JobDef {
             name: "fisherman", article: "a fisherman", workplace: FeatureKind::FishBin,
             goal: GoalId::Fish, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform fisherman",
             now: |at_work, _| if at_work { "storing fish" } else { "fishing at the water" },
-            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false,
+            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
         },
         CityDecorator = 16 => JobDef {
             name: "city decorator", article: "a city decorator", workplace: FeatureKind::FlowerSupplies,
             goal: GoalId::Decorate, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform city decorator", now: |_, _| "planting flowers in the city",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
         },
         /// Keeps the district clean: looks over it for dirt on public
         /// ground, mops it up a cell at a time, and walks round when there
@@ -500,11 +538,88 @@ catalogue! {
             bearing: WORKER,
             paperwork: None,
             on_call: false,
+            courier: false,
+            noble: false,
+        },
+        /// Keeps the store: minds the shop at its counter and checks the
+        /// superfridge every quarter of an hour, and calls the courier
+        /// dispatch when it is down to the call level (`ShopGoal`,
+        /// [`super::superfridge`]). Four to a counter, a quarter of the day
+        /// each ([`SHOP_SHIFTS`]), so the store always has somebody.
+        Shopkeeper = 18 => JobDef {
+            name: "shopkeeper",
+            article: "a shopkeeper",
+            workplace: FeatureKind::ShopCounter,
+            goal: GoalId::Shopkeep,
+            commute: COMMUTE,
+            shifts: &SHOP_SHIFTS,
+            uniform: "uniform shopkeeper",
+            now: |at_work, _| if at_work { "minding the shop" } else { "seeing to the store" },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
+        },
+        /// The store's own courier, one to its superfridge: a courier like
+        /// the rest — hauls wheat to the food factory and meals to the
+        /// warehouse (`HaulGoal`) — and the one the dispatch most often sends
+        /// for the store's food, every day ([`STORE_COURIER_HOURS`]), so the
+        /// superfridge is stocked at the weekend too.
+        StoreCourier = 19 => JobDef {
+            name: "store courier",
+            article: "a store courier",
+            workplace: FeatureKind::Superfridge,
+            goal: GoalId::Haul,
+            commute: COMMUTE,
+            shifts: &[STORE_COURIER_HOURS],
+            uniform: "uniform store courier",
+            now: |_, pack| {
+                if pack.is_some_and(|pack| pack.count(ItemKind::Meal) > 0) {
+                    "carrying meals to the warehouse"
+                } else if pack.is_some_and(|pack| pack.count(ItemKind::Wheat) > 0) {
+                    "carrying wheat to the food factory"
+                } else {
+                    "fetching a load"
+                }
+            },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: true,
+            noble: false,
+        },
+        /// Walks randomly around the district, with two positions and no
+        /// weekends. The workplace only reserves a position, never a post
+        /// the agent must travel to.
+        SpecialAgent = 20 => JobDef {
+            name: "special agent",
+            article: "a special agent",
+            workplace: FeatureKind::Patrol,
+            goal: GoalId::Wander,
+            commute: 0.0,
+            shifts: &[SPECIAL_AGENT_HOURS],
+            uniform: "uniform special agent",
+            now: |_, _| "walking around the district",
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
         },
     }
 }
 
 impl JobKind {
+    pub const fn is_noble_role(self) -> bool { self.def().noble }
+
+    pub const fn permits_class(self, noble: bool, nobles_alive: bool) -> bool {
+        if noble { self.is_noble_role() } else { !self.is_noble_role() || !nobles_alive }
+    }
+
     pub const fn name(self) -> &'static str {
         self.def().name
     }
@@ -577,6 +692,12 @@ impl JobKind {
     pub const fn is_on_call(self) -> bool {
         self.def().on_call
     }
+
+    /// Whether the courier dispatch may send somebody in it for the store's
+    /// food ([`JobDef::courier`]).
+    pub const fn is_courier(self) -> bool {
+        self.def().courier
+    }
 }
 
 /// Monday to Friday, as a [`Shift::days`] mask.
@@ -584,6 +705,10 @@ pub const WEEKDAYS: u8 = 0b001_1111;
 
 /// Every day of the week, as a [`Shift::days`] mask.
 pub const EVERY_DAY: u8 = 0b111_1111;
+
+/// Two special agents per district, both walking the daily nine-to-five.
+pub const SPECIAL_AGENTS: usize = 2;
+pub const SPECIAL_AGENT_HOURS: Shift = Shift { start: 9, end: 17, days: EVERY_DAY };
 
 /// Every day but Sunday, as a [`Shift::days`] mask.
 pub const MONDAY_TO_SATURDAY: u8 = 0b011_1111;
@@ -653,6 +778,24 @@ pub const CLEANER_SHIFTS: [Shift; 4] = [
     Shift { start: 15, end: 23, days: FIRST_GROUP },
     Shift { start: 15, end: 23, days: SECOND_GROUP },
 ];
+
+/// The store's four shifts, every day, a quarter of the day each, in the
+/// order they are handed out: the morning, the afternoon, the evening and
+/// the night. Between them a shopkeeper is at the counter round the clock.
+pub const SHOP_SHIFTS: [Shift; 4] = [
+    Shift { start: 6, end: 12, days: EVERY_DAY },
+    Shift { start: 12, end: 18, days: EVERY_DAY },
+    Shift { start: 18, end: 24, days: EVERY_DAY },
+    Shift { start: 0, end: 6, days: EVERY_DAY },
+];
+
+/// The store courier's day: eight to four, every day, so the store's food
+/// comes in at the weekend, when the other couriers are off.
+pub const STORE_COURIER_HOURS: Shift = Shift {
+    start: 8,
+    end: 16,
+    days: EVERY_DAY,
+};
 
 /// A guard post's three watches, every day: the day, the evening and the
 /// night, in the order they are handed out. Between them, round the clock.
@@ -1009,6 +1152,85 @@ mod tests {
     }
 
     #[test]
+    fn special_agents_walk_nine_to_five_every_day_without_a_commute() {
+        let kind = JobKind::SpecialAgent;
+        assert_eq!(kind.number(), 20);
+        assert_eq!(kind.goal(), GoalId::Wander);
+        assert_eq!(kind.commute(), 0.0);
+        assert_eq!(kind.shifts(), [SPECIAL_AGENT_HOURS]);
+        assert_eq!(kind.uniform().name(), "uniform special agent");
+        let job = Job::new(kind, Point::new(2, 3), SPECIAL_AGENT_HOURS);
+        for day in 1..=14 {
+            for (hour, due) in [(8.99, false), (9.0, true), (12.0, true), (16.99, true), (17.0, false)] {
+                assert_eq!(job.is_due(at(day, hour)), due, "day {day}, {hour}");
+            }
+        }
+        assert_eq!(Job::restore(&job.save()), Ok(job));
+    }
+
+    #[test]
+    fn special_agents_keep_walking_on_both_weekend_days_and_clock_their_shift() {
+        use crate::map::{Map, Size, FLOOR};
+        use crate::sim::biology::ProcessId;
+        use crate::sim::brain::routines::{BUSY, WORKING};
+        use crate::sim::entity::GameEntity;
+        use crate::sim::testing::{needy_human, World};
+
+        for day in [6, 7] {
+            let mut world = World::new(Map::new(Size::new(40, 40), FLOOR));
+            let start = Point::new(20, 20);
+            let mut human = needy_human(start, 0.0, 0.0, 0.0);
+            for process in ProcessId::ALL {
+                human.biology_mut().unwrap().set_running(process, false);
+            }
+            // There is no prop or patrol feature to visit: work starts
+            // wherever the agent is standing.
+            assert!(human.hire(Job::new(JobKind::SpecialAgent, Point::ORIGIN, SPECIAL_AGENT_HOURS)));
+            world.clock = at(day, 10.0);
+            let mut visited = std::collections::BTreeSet::new();
+            for _ in 0..1200 {
+                world.step(&mut human);
+                assert_eq!(human.brain().top_goal(), GoalId::Wander);
+                assert_eq!(human.brain().goals().priority(GoalId::Wander), WORKING);
+                visited.insert(human.center_position());
+            }
+            assert!(visited.len() > 6, "day {day}: the agent must actually walk around");
+            assert_eq!(human.brain().timesheet().on_duty(), Some(JobKind::SpecialAgent));
+            world.clock = at(day, 17.0);
+            world.step(&mut human);
+            assert_eq!(human.brain().goals().priority(GoalId::Wander), BUSY);
+            assert_eq!(human.brain().timesheet().on_duty(), None);
+        }
+    }
+
+    #[test]
+    fn special_agents_have_only_two_positions_and_a_vacancy_can_be_refilled() {
+        use crate::sim::{GameState, EntityType};
+        use crate::sim::feature::Features;
+        use crate::map::{Map, Size, FLOOR};
+        use crate::map::utilities::Supply;
+
+        let small = Map::new(Size::new(10, 10), FLOOR);
+        assert_eq!(Features::from_map(&small, &Supply::from_map(&small)).count(FeatureKind::Patrol), 0);
+        let mut state = GameState::new(crate::map::district::generate(7).map, 7);
+        state.spawn_from_spawners();
+        let agents = |state: &GameState| state.entities().iter()
+            .filter(|entity| entity.job().is_some_and(|job| job.kind == JobKind::SpecialAgent))
+            .map(|entity| entity.uid()).collect::<Vec<_>>();
+        let original = agents(&state);
+        assert_eq!(original.len(), 2);
+        assert_eq!(state.features().count(FeatureKind::Patrol), SPECIAL_AGENTS);
+        let applicant = state.entities().iter().find(|entity| {
+            entity.kind() == Some(EntityType::Human) && !entity.is_noble() && entity.job().is_none()
+        }).unwrap().uid();
+        assert!(!state.hire(applicant), "all positions are already taken");
+        assert!(state.dismiss(original[0]));
+        assert!(state.hire(applicant));
+        assert_eq!(agents(&state).len(), 2);
+        assert_eq!(state.entities().get(applicant).unwrap().job().unwrap().kind, JobKind::SpecialAgent);
+    }
+
+    #[test]
     fn office_hours_are_nine_to_five_on_weekdays() {
         let shift = OFFICE_HOURS;
         assert!(!shift.is_working_hours(at(1, 8.99)));
@@ -1085,7 +1307,10 @@ mod tests {
                 JobKind::Nurse,
                 JobKind::Fisherman,
                 JobKind::CityDecorator,
-                JobKind::Cleaner
+                JobKind::Cleaner,
+                JobKind::Shopkeeper,
+                JobKind::StoreCourier,
+                JobKind::SpecialAgent
             ],
             "the office first, new professions last"
         );
@@ -1229,7 +1454,7 @@ mod tests {
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::AccountantComputer, "accountant computer"));
         assert_eq!(kind.goal(), GoalId::Work);
         assert_eq!(kind.shifts(), [OFFICE_HOURS]);
-        assert_eq!(*JobKind::ALL.last().unwrap(), JobKind::Cleaner, "new jobs keep existing stable numbers");
+        assert_eq!(JobKind::Cleaner.number(), 17, "existing jobs keep their stable numbers");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("keeping the books", "on the way to the palace"));
         assert_eq!(kind.uniform().name(), "uniform accountant");
         assert_eq!(kind.paperwork(), Some(Paperwork::Books));
@@ -1319,7 +1544,7 @@ mod tests {
         assert_eq!((kind.name(), kind.with_article()), ("cleaner", "a cleaner"));
         assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::District, "district"));
         assert_eq!(kind.goal(), GoalId::Clean);
-        assert_eq!(*JobKind::ALL.last().unwrap(), kind, "hired last");
+        assert_eq!(JobKind::ALL[17], kind, "the cleaner keeps its hiring order");
         assert_eq!(kind.uniform().name(), "uniform cleaner");
         assert_eq!(kind.commute(), 0.0);
         assert_eq!(kind.shifts(), CLEANER_SHIFTS);

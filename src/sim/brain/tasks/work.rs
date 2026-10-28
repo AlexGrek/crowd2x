@@ -43,14 +43,17 @@ pub struct Work {
 /// `WorkGoal` — and how a stretch there reads: what it is, which is also the
 /// name it is saved under (`"keep watch"`), and what it was, for the log
 /// (`"kept watch"`). A new job of the kind needs its workplace here; a test
-/// holds every such job to it.
-pub const STRETCHES: [(FeatureKind, &str, &str); 6] = [
+/// holds every such job to it. The shop counter's is a shopkeeper's, whose
+/// own goal (`ShopGoal`) puts a stretch at it between looks in the
+/// superfridge.
+pub const STRETCHES: [(FeatureKind, &str, &str); 7] = [
     (FeatureKind::Workstation, "work", "worked"),
     (FeatureKind::AccountantComputer, "keep the books", "kept the books"),
     (FeatureKind::GuardPost, "keep watch", "kept watch"),
     (FeatureKind::ControlPanel, "stand by", "stood by"),
     (FeatureKind::Throne, "hold court", "held court"),
     (FeatureKind::PlayzoneComputer, "run the playzone", "ran the playzone"),
+    (FeatureKind::ShopCounter, "mind the shop", "minded the shop"),
 ];
 
 impl Work {

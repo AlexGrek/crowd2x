@@ -122,6 +122,11 @@ pub const PROPS: &[Prop] = &[
     // beside it.
     Prop::blocking("grain bin"),
     Prop::blocking("fish bin"),
+    // The store: its superfridge, the district's food, which a courier the
+    // dispatch sends fills a unit at a time (`sim::superfridge`), and the
+    // counter its shopkeepers mind. Both used from beside them.
+    Prop::blocking("superfridge"),
+    Prop::blocking("shop counter"),
     Prop::blocking("flower supplies"),
     // The power plant: its generators, which feed the power line under them
     // like a transformer (`super::utilities`), and the control panel its

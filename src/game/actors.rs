@@ -280,6 +280,12 @@ fn build_world(
                 warn!("{warning}");
                 state.log.important(warning);
             }
+            let (rules, warning) = super::store::load_rules();
+            state.set_store_rules(rules);
+            if let Some(warning) = warning {
+                warn!("{warning}");
+                state.log.important(warning);
+            }
             state.spawn_from_spawners();
             state
         }

@@ -80,6 +80,77 @@ pub struct World {
     /// (`crate::sim::pets::Feedings`). Older saves have none.
     #[prost(message, repeated, tag = "22")]
     pub feedings: Vec<Feeding>,
+    /// The store's superfridge: the rules it is run by and the share of a
+    /// unit fallen since the last whole one (`crate::sim::superfridge`).
+    /// Absent in a save from before there were stores: the default rules,
+    /// nothing fallen.
+    #[prost(message, optional, tag = "23")]
+    pub store: Option<Store>,
+    /// The courier dispatch's orders not yet delivered
+    /// (`crate::sim::dispatch`). Older saves have none.
+    #[prost(message, repeated, tag = "24")]
+    pub orders: Vec<Order>,
+    /// Human arrival lottery, kept across saves, including partial groups.
+    #[prost(uint64, tag = "25")]
+    pub noble_draws: u64,
+    #[prost(uint32, tag = "26")]
+    pub noble_position: u32,
+    /// Signed airborne scent; older saves start with clean air.
+    #[prost(message, repeated, tag = "27")]
+    pub smell: Vec<SmellCell>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct SmellCell {
+    #[prost(message, optional, tag = "1")]
+    pub cell: Option<Cell>,
+    #[prost(float, tag = "2")]
+    pub value: f32,
+}
+
+/// The store's superfridge (`crate::sim::superfridge::Superfridge`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Store {
+    #[prost(message, optional, tag = "1")]
+    pub rules: Option<StoreRules>,
+    /// The share of a unit fallen since the last whole one came out, 0 to 1.
+    #[prost(double, tag = "2")]
+    pub fallen: f64,
+}
+
+/// What the store is run by, as `store.yaml` says it
+/// (`crate::sim::superfridge::StoreRules`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct StoreRules {
+    /// Capacity in delivery batches, for older readers.
+    #[prost(uint32, tag = "1")]
+    pub capacity: u32,
+    /// Percent of the capacity a meal out of a fridge takes.
+    #[prost(double, tag = "2")]
+    pub falls_per_meal: f64,
+    #[prost(double, tag = "3")]
+    pub call_at: f64,
+    #[prost(double, tag = "4")]
+    pub starts_at: f64,
+    /// Normalized reserve units; absent in saves using whole meal units.
+    #[prost(double, optional, tag = "5")]
+    pub normalized_capacity: Option<f64>,
+    #[prost(double, optional, tag = "6")]
+    pub delivery_size: Option<f64>,
+}
+
+/// One unit of food called for (`crate::sim::dispatch::Order`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Order {
+    /// The superfridge it is for.
+    #[prost(message, optional, tag = "1")]
+    pub store: Option<Cell>,
+    /// Who was sent; 0 while it waits.
+    #[prost(fixed64, tag = "2")]
+    pub courier: u64,
+    /// When it was given to the courier, world seconds since the world began.
+    #[prost(double, tag = "3")]
+    pub since: f64,
 }
 
 /// One dog food given to a dog (`crate::sim::pets::Feeding`).

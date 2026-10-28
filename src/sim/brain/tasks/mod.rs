@@ -55,6 +55,10 @@ pub mod wait;
 pub mod watch_tv;
 pub mod withdraw;
 pub mod work;
+pub mod check_stock;
+pub mod fetch;
+pub use check_stock::{CheckStock, CHECK_SECONDS};
+pub use fetch::Fetch;
 pub mod repair_box;
 pub mod plant_flowers;
 pub use plant_flowers::PlantFlowers;
@@ -131,6 +135,8 @@ tasks! {
     Feed,
     Unpack,
     Stow,
+    CheckStock,
+    Fetch,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a
@@ -241,7 +247,10 @@ pub(crate) mod rig {
                     crate::sim::effect::deposit(uid, &mut self.world.facilities.bins, &self.world.log, at, pieces)
                 }
                 Effect::Withdraw { at } => {
-                    crate::sim::effect::withdraw(uid, Some(&mut self.inventory), &mut self.world.facilities.bins, &self.world.log, at)
+                    crate::sim::effect::withdraw(uid, Some(&mut self.inventory), &mut self.world.facilities.bins, &self.world.log, at, u32::MAX)
+                }
+                Effect::Fetch { at } => {
+                    crate::sim::effect::withdraw(uid, Some(&mut self.inventory), &mut self.world.facilities.bins, &self.world.log, at, 1)
                 }
                 _ => {}
             }

@@ -8,6 +8,7 @@ use crate::characters::{ART_SCALE, depth_for, upscale};
 use crate::editor::background::cell_centre;
 use crate::map::{Bounds, Point, Size};
 use crate::render::WORLD_LAYER;
+use crate::sim::flowers::Stage;
 
 use crate::state::AppState;
 use crate::view::{ViewSystems, VisibleArea};
@@ -27,7 +28,7 @@ pub const ART: [[&str; 2]; 6] = [
 /// The flower beds on the canvas, with their variety and growth stage.
 #[derive(Resource, Default)]
 struct FlowerWindow {
-    drawn: HashMap<Point, (Entity, (u8, bool))>,
+    drawn: HashMap<Point, (Entity, (u8, Stage))>,
 }
 
 pub struct FlowersPlugin;
@@ -50,7 +51,7 @@ impl Plugin for FlowersPlugin {
     }
 }
 
-/// Keep a sprite on each visible bed, swapping its art as it blooms.
+/// Keep a sprite on each visible bed through growth, withering and decay.
 fn sync_flowers(
     mut commands: Commands,
     assets: Res<AssetServer>,
@@ -79,14 +80,20 @@ fn sync_flowers(
         .iter()
         .filter(|crop| canvas.contains(crop.cell))
     {
-        let stage = (crop.variety, crop.blooming(now));
-        let art = || assets.load(ART[stage.0 as usize][stage.1 as usize]);
+        let stage = (crop.variety, crop.stage(now));
+        let art = || assets.load(ART[stage.0 as usize][usize::from(stage.1 != Stage::Seedling)]);
+        let color = if stage.1 == Stage::Withered {
+            Color::srgb(0.45, 0.32, 0.18)
+        } else {
+            Color::WHITE
+        };
         seen.push(crop.cell);
         match window.drawn.get_mut(&crop.cell) {
             Some((_, shown)) if *shown == stage => {}
             Some((entity, shown)) => {
                 if let Ok(mut sprite) = sprites.get_mut(*entity) {
                     sprite.image = art();
+                    sprite.color = color;
                 }
                 *shown = stage;
             }
@@ -95,7 +102,10 @@ fn sync_flowers(
                 let entity = commands
                     .spawn((
                         Name::new("flower bed"),
-                        Sprite::from_image(art()),
+                        Sprite {
+                            color,
+                            ..Sprite::from_image(art())
+                        },
                         Transform::from_xyz(centre.x, centre.y, depth_for(centre.y))
                             .with_scale(upscale(ART_SCALE)),
                         WORLD_LAYER,

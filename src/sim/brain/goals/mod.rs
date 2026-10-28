@@ -29,6 +29,10 @@ pub use follow::FollowGoal;
 pub use provision::ProvisionGoal;
 pub mod collect;
 pub mod cook;
+pub mod deliver;
+pub mod shop;
+pub use deliver::DeliverGoal;
+pub use shop::ShopGoal;
 pub use cook::CookGoal;
 pub mod drink;
 pub mod eat;
@@ -115,6 +119,9 @@ pub(super) fn nearest_in_reach(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<P
 /// [`nearest_in_reach`], among only the features `works` says yes to — an
 /// arcade cabinet that is running, say ([`Playzones::runs`](crate::sim::Playzones::runs)).
 pub(super) fn nearest_in_reach_where(ctx: &GoalCtx<'_>, kind: FeatureKind, works: impl Fn(Point) -> bool) -> Option<Point> {
+    if !in_stock(ctx, kind) {
+        return None;
+    }
     let here = ctx.body.center_position();
     let now = ctx.think.clock.elapsed();
     let places = ctx.memory.out_of_reach();
@@ -122,6 +129,13 @@ pub(super) fn nearest_in_reach_where(ctx: &GoalCtx<'_>, kind: FeatureKind, works
     ctx.think
         .features
         .nearest_where(kind, here, |cell| works(cell) && ctx.think.may_use(cell, key) && !places.contains(cell, now))
+}
+
+/// Whether any feature of `kind` has what it is for: **no fridge is food
+/// while the store's superfridge is empty** ([`Think::food_in_fridges`](crate::sim::Think::food_in_fridges)) —
+/// only water. Every other kind always does.
+fn in_stock(ctx: &GoalCtx<'_>, kind: FeatureKind) -> bool {
+    kind != FeatureKind::Food || ctx.think.food_in_fridges()
 }
 
 /// The store of `kind` — a bin, a rack, a hopper, a pallet — nearest this
@@ -158,6 +172,9 @@ pub(super) fn choose_nearest(ctx: &GoalCtx<'_>, kind: FeatureKind) -> Option<Poi
 
 /// [`choose_nearest`], among only the features `works` says yes to.
 pub(super) fn choose_nearest_where(ctx: &GoalCtx<'_>, kind: FeatureKind, works: impl Fn(Point) -> bool) -> Option<Point> {
+    if !in_stock(ctx, kind) {
+        return None;
+    }
     nearest_in_reach_where(ctx, kind, &works).or_else(|| {
         let now = ctx.think.clock.elapsed();
         let places = ctx.memory.out_of_reach();

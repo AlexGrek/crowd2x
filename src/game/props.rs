@@ -159,7 +159,12 @@ pub fn bin_frame(stored: u32) -> u32 {
 fn fill_bins(sim: Res<Sim>, mut bins: Query<(&Prop, &mut BinFill, &mut Sprite)>) {
     let state = sim.0.bins();
     for (prop, mut fill, mut sprite) in &mut bins {
-        let frame = bin_frame(state.stored(prop.cell()));
+        let frame = if state.store(prop.cell()) == Some(crate::sim::feature::FeatureKind::Superfridge) {
+            let percent = sim.0.superfridge().percent_at(prop.cell(), state);
+            if percent <= 0.0 { 0 } else if percent <= 30.0 { 1 } else if percent <= 65.0 { 2 } else { 3 }
+        } else {
+            bin_frame(state.stored(prop.cell()))
+        };
         if frame == fill.showing {
             continue;
         }

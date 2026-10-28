@@ -1,0 +1,31 @@
+{
+  "name": "Smell diffuses on GPU and is visible only in its X-ray mode",
+  "state": "game",
+  "given": {"maps": [{"name": "air", "map": {
+    "version": 1, "wasteland": false, "size": {"width": 9, "height": 5},
+    "terrain": {"palette": ["floor white", "wall brown"], "layers": [{"rows": [
+      "1,1,1,1,1,1,1,1,1", "1,0,0,0,0,0,0,0,1", "1,0,0,0,1,0,0,0,1",
+      "1,0,0,0,0,0,0,0,1", "1,1,1,1,1,1,1,1,1"
+    ]}]}, "objects": {"props": [], "spawners": []}
+  }}]},
+  "open": "air",
+  "steps": [
+    {"key": "p"}, {"expect_speed": "paused"},
+    {"smell": {"x": 3, "y": 2, "value": 10.0}},
+    {"smell": {"x": 5, "y": 2, "value": -10.0}},
+    {"smell": {"x": 4, "y": 2, "value": 10.0}},
+    {"tick": 1},
+    {"expect_smell": {"x": 4, "y": 2, "min": 0, "max": 0}},
+    {"expect_smell_tiles": 0}, {"shot": "regular view hides smell"},
+    {"xray": "smell"}, {"wait": 0.2},
+    {"expect_smell_tiles": 2}, {"shot": "green good and red bad smell"},
+    {"tick": 32}, {"wait": 0.2},
+    {"expect_smell": {"x": 3, "y": 3, "min": 0.01, "max": 10}},
+    {"expect_smell": {"x": 5, "y": 3, "min": -10, "max": -0.01}},
+    {"expect_smell": {"x": 4, "y": 2, "min": 0, "max": 0}},
+    {"shot": "scent spreads around walls"},
+    {"xray": "all"}, {"wait": 0.2}, {"expect_smell_tiles": 0},
+    {"xray": "smell"}, {"wait": 0.2},
+    {"key": "o"}, {"wait": 0.2}, {"expect_smell_tiles": 0}
+  ]
+}

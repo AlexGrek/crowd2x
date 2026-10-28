@@ -136,6 +136,11 @@ pub const PALETTE: &[PaletteItem] = &[
     // Drawn by `tools/farm_art.py`.
     PaletteItem::posed("grain bin", "grain_bin.png", 4),
     PaletteItem::posed("fish bin", "fish_bin.png", 4),
+    // The store, drawn by `tools/store_art.py`: the superfridge, its glass
+    // doors showing it empty, low, half full and stocked as the simulation's
+    // count says ([`BinFill`]), and the shop counter with its till.
+    PaletteItem::posed("superfridge", "superfridge.png", 4),
+    PaletteItem::upscaled("shop counter", "shop_counter.png"),
     PaletteItem::upscaled("flower supplies", "flower_supplies.png"),
     // The power plant, drawn by `tools/power_plant_art.py`: a generator — a
     // source of power like the transformer (`map::utilities`), its flywheel

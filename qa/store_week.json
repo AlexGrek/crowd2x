@@ -1,0 +1,150 @@
+{
+  "name": "capacity one keeps the district supplied through a full week",
+  "state": "game",
+  "open": "district store",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "district store",
+        "district": 7
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "expect_superfridge": {
+        "min": 1,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 1",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 2",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 3",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 4",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 5",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 6",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "week balance day 7",
+        "ticks": 46080,
+        "every": 15360
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "press": "statistics"
+    },
+    {
+      "expect_text": "reserve"
+    },
+    {
+      "expect_text": "/ 1.0000"
+    },
+    {
+      "expect_text": "dispatch"
+    },
+    {
+      "shot": "district economy after a full week"
+    }
+  ]
+}

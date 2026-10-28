@@ -350,6 +350,7 @@ mod tests {
             human.brain_fields()
         );
         assert_eq!(human.center_position(), toilet, "should be standing inside it, not beside it");
+        assert_eq!(world.smell.at(&world.map, &world.doors, toilet), crate::sim::smell::TOILET_RELEASE);
         assert!(human.stats().bladder() <= RELIEVED, "bladder {}", human.stats().bladder());
 
         // ...and, relieved, back to wandering.

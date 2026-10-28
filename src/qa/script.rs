@@ -216,6 +216,9 @@ pub enum Step {
     UnitDirt(crate::sim::dirt::Dirt),
     ExpectDirt { x: i32, y: i32, value: crate::sim::dirt::Dirt },
     ExpectDirtTiles(usize),
+    Smell { x: i32, y: i32, value: f32 },
+    ExpectSmell { x: i32, y: i32, min: f32, max: f32 },
+    ExpectSmellTiles(usize),
 
     /// Do nothing for this many seconds.
     Wait(f32),
@@ -235,7 +238,7 @@ pub enum Step {
     /// Select a palette entry by name, on whichever layer it lives.
     Tool(String),
     /// Show the grid layers' x-ray: `off`, `ceiling`, `power`, `water` or
-    /// `all` — where pressing `o` would step to, without counting presses.
+    /// `all` or `smell` — where pressing `o` would step to, without counting presses.
     Xray(String),
     /// Put an entity in the world.
     ///
@@ -523,6 +526,8 @@ pub enum Step {
     },
     /// How many entities are alive in the simulation.
     ExpectEntities(usize),
+    /// Living noble humans; corpses and other kinds do not count.
+    ExpectNobles(usize),
     /// Whether a prop that shows whether it is being used is showing that
     /// right now — a computer with its screen on.
     ///
@@ -612,13 +617,17 @@ pub enum Step {
     /// (`sim::fields`). An outcome, not a moment — give the farmers ticks
     /// enough first.
     ExpectCrops { min: u32 },
-    /// Planted city beds, distinct varieties, and (optionally) fully grown beds.
+    /// Planted city beds, distinct varieties, and optional lifecycle filters.
     ExpectFlowers {
         min: u32,
+        #[serde(default)]
+        max: Option<u32>,
         #[serde(default)]
         varieties: u32,
         #[serde(default)]
         blooming: bool,
+        #[serde(default)]
+        withered: bool,
     },
     /// Switch the distribution box in a cell on or off, on the command queue
     /// the game uses — applied by the next tick, like `spawn`. The panel's
@@ -655,6 +664,19 @@ pub enum Step {
         min: u32,
         #[serde(rename = "in", default = "default_store")]
         store: String,
+    },
+    /// Exact dispatch counts; unlike the recent log this remains observable
+    /// after a long scripted tick.
+    ExpectDispatch { waiting: usize, assigned: usize },
+    /// The central food reserve and the availability seen by fridge users.
+    ExpectSuperfridge {
+        min: f64,
+        max: f64,
+        food_in_fridges: bool,
+        #[serde(default)]
+        capacity: Option<f64>,
+        #[serde(default)]
+        level: Option<f64>,
     },
     /// What kind of unit is selected — `"human"`, `"dog"` — or `null` for
     /// nobody.

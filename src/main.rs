@@ -17,6 +17,7 @@ mod save;
 mod saves;
 mod settings;
 mod sim;
+mod smell_compute;
 mod state;
 mod ui;
 mod view;

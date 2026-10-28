@@ -71,6 +71,7 @@ pub struct Facilities {
     pub fields: Fields,
     pub flowers: super::flowers::Flowers,
     pub dirt: super::dirt::DirtLayer,
+    pub smell: super::smell::Smell,
     /// Which arcade cabinets work: those whose playzone computer an
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
@@ -98,6 +99,14 @@ pub struct Facilities {
     /// think step, read by react ([`super::relationships::Chats`]). Rebuilt
     /// every tick, never saved.
     pub chats: Chats,
+    /// The store's superfridge: the rules it is run by and what has fallen
+    /// from it since the last whole unit ([`super::superfridge`]). Falls with
+    /// every meal out of a fridge (`Effect::Buy`); what it holds is `bins`'.
+    pub superfridge: super::superfridge::Superfridge,
+    /// The courier dispatch: the store's calls for food and who was sent
+    /// ([`super::dispatch`]). Called by `Effect::CallDispatch`, closed by a
+    /// delivery (`Effect::Deposit`), sent at the end of the processing pass.
+    pub dispatch: super::dispatch::Dispatch,
     /// Who is making small talk with whom this tick, gathered like `chats`
     /// ([`super::relationships::Smalltalks`]). Rebuilt every tick, never
     /// saved.
@@ -128,11 +137,16 @@ impl Facilities {
     /// bed or at a desk yet, nothing stored and nobody dead.
     pub fn new(map: &Map, supply: &Supply) -> Facilities {
         let properties = Properties::from_map(map);
+        let mut bins = Bins::from_map(map);
+        let mut superfridge = super::superfridge::Superfridge::from_map(map);
+        superfridge.stock(map, &mut bins);
         Facilities {
             electrical: Default::default(),
             features: Features::with_properties(map, supply, &properties),
             fridges: Fridges::from_map(map, supply),
-            bins: Bins::from_map(map),
+            bins,
+            superfridge,
+            dispatch: Default::default(),
             doors: Doors::from_map(map, &properties),
             properties,
             corpses: Corpses::new(),
@@ -143,6 +157,7 @@ impl Facilities {
             fields: Fields::new(),
             flowers: Default::default(),
             dirt: super::dirt::DirtLayer::new(map),
+            smell: Default::default(),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),

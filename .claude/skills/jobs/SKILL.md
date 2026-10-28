@@ -644,3 +644,22 @@ The accountant (job 13, hired last) uses the powered accountant computer beside 
 palace throne, Mon?Fri 09?17, a two-hour commute, and closes finished daily books.
 Wages are $60 office/accountant/scrap/farmer, $100 king and $40 all other jobs.
 Timesheets, care, tax and the job panel cash readout: see ../economy/SKILL.md.
+
+
+## Shop staff and shared courier dispatch
+
+See the [store contract](../store/SKILL.md) for the complete supply chain.
+`Shopkeeper` (18) uses a `shop counter`, four daily six-hour shifts, and
+`ShopGoal`: check the nearest superfridge, call at its low-stock threshold,
+then mind the counter for fifteen world minutes. `StoreCourier` (19) uses a
+`superfridge`, 08?16 every day, and `HaulGoal` for food-factory transport
+between dispatches. Both have named $40 wages and uniforms.
+
+`JobDef.courier` marks steel, food and store couriers as dispatch candidates.
+A free courier on duty may be assigned `DeliverGoal` instead of its ordinary
+hauling, fetching one warehouse meal for the store. Normal needs interrupt;
+the assignment and carried goods survive, and work can finish past shift end.
+Deliveries count toward timesheets. Unavailable couriers release their orders;
+full reserves keep excess food in the pack, and hauling returns orphaned meals
+to a warehouse meal rack even for a steel courier. The job panel describes an
+active dispatch as delivering food to the store.

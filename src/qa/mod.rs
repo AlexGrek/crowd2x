@@ -496,6 +496,7 @@ type DrawnInTheWorld = Or<(With<Sprite>, With<Text2d>)>;
 struct Checks<'w, 's> {
     assets: Res<'w, AssetServer>,
     dirt_tiles: Query<'w, 's, &'static crate::game::dirt::DirtTile>,
+    smell_tiles: Query<'w, 's, &'static crate::game::smell::SmellTile>,
     paperdolls: Query<'w, 's, (&'static Actor, &'static crate::characters::human::Paperdoll)>,
     clothing_sprites: Query<'w, 's, (&'static Sprite, &'static Visibility)>,
     clothing_portraits: Query<'w, 's, (&'static ImageNode, &'static Visibility), With<crate::game::unitpanel::ClothingPortrait>>,
@@ -1024,17 +1025,20 @@ fn perform(
             Ok(Next::Now)
         }
 
-        Step::ExpectFlowers { min, varieties, blooming } => {
+        Step::ExpectFlowers { min, max, varieties, blooming, withered } => {
             let world = &intents.sim.as_deref().ok_or("there is no simulation")?.0;
             let mut kinds = [false; crate::sim::flowers::VARIETIES];
             let mut count = 0;
-            for bed in world.flowers().iter().filter(|bed| !*blooming || bed.blooming(world.clock())) {
+            for bed in world.flowers().iter().filter(|bed| {
+                (!*blooming || bed.blooming(world.clock()))
+                    && (!*withered || bed.stage(world.clock()) == crate::sim::flowers::Stage::Withered)
+            }) {
                 count += 1;
                 kinds[bed.variety as usize] = true;
             }
             let distinct = kinds.into_iter().filter(|kind| *kind).count() as u32;
-            (count >= *min && distinct >= *varieties).then_some(Next::Now)
-                .ok_or(format!("expected {min} flower beds in {varieties} varieties (blooming: {blooming}); found {count} in {distinct} varieties"))
+            (count >= *min && max.is_none_or(|max| count <= max) && distinct >= *varieties).then_some(Next::Now)
+                .ok_or(format!("expected min {min}, max {max:?} flower beds in {varieties} varieties (blooming: {blooming}, withered: {withered}); found {count} in {distinct} varieties"))
         }
 
         Step::ExpectCrops { min } => {
@@ -1121,10 +1125,43 @@ fn perform(
             ))
         }
 
+        Step::ExpectDispatch { waiting, assigned } => {
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let dispatch = sim.0.dispatch();
+            let actual = (dispatch.waiting(), dispatch.orders().len() - dispatch.waiting());
+            (actual == (*waiting, *assigned)).then_some(Next::Now)
+                .ok_or(format!("expected dispatch ({waiting} waiting, {assigned} assigned), found {actual:?}"))
+        }
+        Step::ExpectSuperfridge { min, max, food_in_fridges, capacity, level } => {
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let fridge = sim.0.superfridge();
+            let percent = fridge.percent(sim.0.bins());
+            let food = fridge.feeds_fridges(sim.0.bins());
+            let actual_level = fridge.level(sim.0.bins());
+            (percent >= *min && percent <= *max && food == *food_in_fridges
+                && capacity.is_none_or(|want| (want - fridge.capacity()).abs() < 1e-9)
+                && level.is_none_or(|want| (want - actual_level).abs() < 1e-9)).then_some(Next::Now)
+                .ok_or(format!("expected superfridge {min}..={max}% with food={food_in_fridges}, capacity={capacity:?}, level={level:?}; found {percent}% with food={food}, capacity={}, level={actual_level}", fridge.capacity()))
+        }
         Step::Dirt { x, y, value } => {
             if !value.is_valid() { return Err("invalid dirt vector".into()); }
             intents.sim_input.0.set_dirt(crate::map::Point::new(*x, *y), *value);
             Ok(Next::Now)
+        }
+        Step::Smell { x, y, value } => {
+            if !value.is_finite() { return Err("smell must be finite".into()); }
+            intents.sim_input.0.release_smell(crate::map::Point::new(*x, *y), *value);
+            Ok(Next::Now)
+        }
+        Step::ExpectSmell { x, y, min, max } => {
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let value = sim.0.smell_at(crate::map::Point::new(*x, *y));
+            (value >= *min && value <= *max).then_some(Next::Now)
+                .ok_or(format!("expected smell in {min}..={max} at {x},{y}, found {value}"))
+        }
+        Step::ExpectSmellTiles(count) => {
+            let actual = checks.smell_tiles.iter().count();
+            (actual == *count).then_some(Next::Now).ok_or(format!("expected {count} smell tiles, found {actual}"))
         }
         Step::UnitDirt(value) => {
             if !value.is_valid() { return Err("invalid dirt vector".into()); }
@@ -1604,6 +1641,13 @@ fn perform(
             (actual == *wanted)
                 .then_some(Next::Now)
                 .ok_or(format!("expected {wanted} entities, found {actual}"))
+        }
+
+        Step::ExpectNobles(wanted) => {
+            let sim = intents.sim.as_deref().ok_or("there is no simulation")?;
+            let actual = sim.0.entities().iter().filter(|e| e.is_noble() && !e.is_dead()).count();
+            (actual == *wanted).then_some(Next::Now)
+                .ok_or(format!("expected {wanted} nobles, found {actual}"))
         }
 
         Step::ExpectWorldTime { hours } => {

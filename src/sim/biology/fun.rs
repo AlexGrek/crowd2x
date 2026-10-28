@@ -102,6 +102,10 @@ impl Process for Fun {
     /// happened to the body and the body decides what it comes to.
     fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
         match event {
+            Event::Smelled { value } if value.is_finite() => {
+                let change = if value > 0.0 { 1.0 } else if value < 0.0 { -1.0 } else { 0.0 };
+                stats.change_mental_health(change);
+            }
             Event::Entertained => stats.change_fun(AMUSEMENT * novelty),
             // Talking to somebody is fun, and a chat more than a word.
             Event::Chatted => stats.change_fun(CHAT_FUN),

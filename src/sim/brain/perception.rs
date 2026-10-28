@@ -386,6 +386,11 @@ pub struct Perception {
 }
 
 impl Perception {
+    /// Local air, independent of facing and sight. The caller schedules this
+    /// on Priority::Low rather than doing a crowd's worth of reads each tick.
+    pub fn smell(&self, ctx: &Think<'_>, body: &Body) -> f32 {
+        ctx.smell.at(ctx.map, ctx.doors, body.center_position())
+    }
     /// Read the current ground directly beneath the body, regardless of facing.
     /// This is a local sense, independent of the throttled visual cone.
     pub fn underfoot(&self, ctx: &Think<'_>, body: &Body) -> crate::sim::dirt::Dirt {

@@ -34,7 +34,7 @@ use crate::state::AppState;
 use super::actors::{world_pos, Sim, VisibleCrowd};
 
 /// Seconds between one talker's sparks.
-const SPARK_EVERY: f32 = 0.06;
+const SPARK_EVERY: f32 = 0.18;
 
 /// How long a spark flies, in seconds: between these two.
 const SHORTEST_FLIGHT: f32 = 0.55;
@@ -52,7 +52,7 @@ const GRAVITY: f32 = 160.0;
 const STRAY: f32 = 18.0;
 
 /// The most sparks in the air at once.
-const MOST_SPARKS: usize = 400;
+const MOST_SPARKS: usize = 120;
 
 /// In front of everything about a character — the paperdoll, the selection
 /// frame, a held item, the action bar (0.006) and the goal emoji (0.007) —

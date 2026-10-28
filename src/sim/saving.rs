@@ -65,6 +65,9 @@ impl GameState {
             Some(saved) => super::economy::Economy::restore(saved, &humans)?,
             None => super::economy::Economy::fresh(super::economy::Tariffs::default(), &humans),
         };
+        for entity in self.entities.iter().filter(|e| e.is_noble()) {
+            self.facilities.economy.set_noble(entity.uid(), true);
+        }
         Ok(())
     }
 
@@ -89,11 +92,16 @@ impl GameState {
             crops: self.facilities.fields.save(),
             flowers: self.facilities.flowers.save(),
             dirt: self.facilities.dirt.save(),
+            smell: self.facilities.smell.save(),
             playzones_run: self.facilities.playzones.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
             feedings: self.facilities.feedings.save(),
             relationship_rules: self.facilities.society.rules().save(),
+            store: Some(self.facilities.superfridge.save()),
+            orders: self.facilities.dispatch.save(),
+            noble_draws: self.noble_draws,
+            noble_position: self.noble_position,
         }
     }
 
@@ -147,6 +155,9 @@ impl GameState {
         debug_assert_eq!(state.map.navigation_revision(), revision);
 
         state.rng = rng::from_state(&world.rng)?;
+        if world.noble_position >= 10 { return invalid("noble lottery position outside 0..10"); }
+        state.noble_draws = world.noble_draws;
+        state.noble_position = world.noble_position;
         if !(world.elapsed.is_finite() && world.elapsed >= 0.0) {
             return invalid(format!("{} seconds since the world began", world.elapsed));
         }
@@ -177,6 +188,19 @@ impl GameState {
         state.refresh_supply();
         state.facilities.fridges.restore(&world.fridges)?;
         state.facilities.bins.restore(&world.bins)?;
+        // The superfridge's rules and what had fallen from it; what is in it
+        // is the bins'. And the courier dispatch's orders, for its
+        // superfridges.
+        state.facilities.superfridge.restore(world.store.as_ref())?;
+        for &cell in state.facilities.superfridge.cells() {
+            if state.facilities.bins.stored(cell) > state.facilities.superfridge.rules().batches() {
+                return invalid(format!("superfridge at {}, {} exceeds its capacity", cell.x, cell.y));
+            }
+        }
+        state.facilities.dispatch = super::dispatch::Dispatch::restore(&world.orders, &state.facilities.bins)?;
+        if state.facilities.dispatch.orders().iter().any(|order| order.since > state.clock().elapsed()) {
+            return invalid("a courier order assigned in the future".to_string());
+        }
         state.facilities.tally = crate::sim::statistics::Tally::restore(world.tally.as_ref());
         state.facilities.doors.restore(&world.doors)?;
         state.facilities.homes = Homes::restore(&world.homes)?;
@@ -192,10 +216,14 @@ impl GameState {
         // was found, and what stands in it is the fields'.
         state.facilities.fields = Fields::restore(&world.crops, &mut state.map)?;
         state.facilities.dirt = super::dirt::DirtLayer::restore(&state.map, &world.dirt)?;
+        state.facilities.smell = super::smell::Smell::restore(&world.smell, &state.map, &state.facilities.doors)?;
         state.facilities.flowers = super::flowers::Flowers::restore(&world.flowers, &state.map, state.clock())?;
         if state.facilities.flowers.iter().any(|bed| state.facilities.properties.of(bed.cell).is_some()) {
             return invalid("a flower bed on private property");
         }
+        // Old saves may contain eternal beds; validate them before decay.
+        let clock = state.clock();
+        state.facilities.flowers.advance(clock);
         if let Some(crop) = state.facilities.fields.iter().find(|crop| state.facilities.bins.store(crop.farm) != Some(FeatureKind::GrainBin)) {
             return invalid(format!("a crop at {}, {} sown for a farm with no grain bin", crop.cell.x, crop.cell.y));
         }
@@ -265,6 +293,10 @@ impl GameState {
             }
         }
         state.facilities.hospital.restore(&world.hospital, &state.entities)?;
+        // Whoever the dispatch sent is in the world.
+        if let Some(courier) = state.facilities.dispatch.couriers().find(|&uid| !state.entities.contains(uid)) {
+            return invalid(format!("the courier dispatch sent {courier}, who is not here"));
+        }
         Ok(state)
     }
 }

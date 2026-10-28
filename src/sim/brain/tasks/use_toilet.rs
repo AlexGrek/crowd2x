@@ -65,6 +65,7 @@ impl TaskExecutor for UseToilet {
                 if let Some(biology) = ctx.biology.as_deref_mut() {
                     biology.handle(Event::Relieved);
                 }
+                *ctx.effect = crate::sim::Effect::ToiletSmell { at: self.toilet };
                 TaskResult::Success
             }
             state => TaskResult::of(state),
@@ -135,8 +136,10 @@ mod tests {
         let mut task = Task::use_toilet(Point::new(6, 6), 0.5);
         assert_eq!(rig.tick(&mut task), TaskResult::Executing);
         assert_eq!(rig.biology.stats().bladder(), 90.0, "not yet");
+        assert_eq!(rig.effect, crate::sim::Effect::None);
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         assert_eq!(rig.biology.stats().bladder(), 0.0);
+        assert_eq!(rig.effect, crate::sim::Effect::ToiletSmell { at: Point::new(6, 6) });
     }
 
     #[test]
@@ -148,6 +151,7 @@ mod tests {
         rig.walk.body_mut().set_position((1.5, 1.5));
         assert_eq!(rig.tick(&mut task), TaskResult::Failed);
         assert_eq!(rig.biology.stats().bladder(), 90.0);
+        assert_eq!(rig.effect, crate::sim::Effect::None);
     }
 
     #[test]

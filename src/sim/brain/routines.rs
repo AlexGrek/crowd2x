@@ -565,7 +565,14 @@ impl RoutineExecutor for WorkRoutine {
         let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
             .filter(|job| !job.kind.is_on_call() || !ctx.think.electrical.damaged().is_empty());
         self.on_shift = due.is_some();
-        if let Some(job) = due {
+        // A courier the dispatch sent for the store's food brings it in, in
+        // place of its own hauling and past the end of its shift: the order
+        // is its until the food is in (`sim::dispatch`).
+        let sent = ctx.job.is_some_and(|job| job.kind.is_courier()) && ctx.think.dispatch.order_of(ctx.body.uid()).is_some();
+        if sent {
+            goals.raise_to(GoalId::Deliver, WORKING);
+        }
+        if let Some(job) = due.filter(|_| !sent) {
             goals.raise_to(job.kind.goal(), WORKING);
             let away = ctx.body.center_position().chebyshev_distance(job.workplace) > AT_WORK;
             if job.kind.goal() == GoalId::Work && away && job.shift.is_working_hours(ctx.think.clock) {

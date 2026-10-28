@@ -292,6 +292,34 @@
     },
     {
       "shot": "a city decorator and the planted parks"
-    }
+    },
+    { "note": "Freeze the decorators so aging beds cannot be replaced during the lifecycle checks." },
+    { "press": "life" },
+    { "press": "freeze" },
+    { "tick": 1 },
+    { "select": 1 },
+    { "press": "life" },
+    { "press": "freeze" },
+    { "tick": 1 },
+    { "select": 2 },
+    { "press": "life" },
+    { "press": "freeze" },
+    { "tick": 1 },
+    { "press": "close" },
+    { "tick": 130000 },
+    { "expect_flowers": { "min": 20, "withered": true } },
+    { "shot": "old flowers withered in the parks" },
+    { "note": "Five more world days exceed the lifetime of every remaining bed." },
+    { "tick": 216001 },
+    { "expect_flowers": { "min": 0, "max": 0 } },
+    { "shot": "decayed flowers leave the parks clear" },
+    { "note": "Resume one decorator and wait through the next working shift for replanting." },
+    { "select": 0 },
+    { "press": "life" },
+    { "press": "unfreeze" },
+    { "tick": 100000 },
+    { "expect_flowers": { "min": 10 } },
+    { "press": "close" },
+    { "shot": "decorator replanted the empty parks" }
   ]
 }

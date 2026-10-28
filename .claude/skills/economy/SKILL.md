@@ -53,6 +53,8 @@ CROWD2X_ECONOMY. A missing file uses built-ins; other read/parse errors also log
 warning. Loaded games retain their own tariffs. The full-screen modal has its own
 Scope, live values, row selection, lower/raise/defaults/close; escape closes it.
 It changes the running world's tariffs without rewriting YAML.
+The tariff rows are split evenly between the two columns, so adding jobs
+does not push the title or footer outside the standard 180-pixel UI canvas.
 Statistics counts money on demand, in two columns beside jobs; the job panel
 shows live cash, gross wage and unpaid shifts/care days.
 
@@ -70,3 +72,17 @@ test, targeted UI QA and release perf_simulation; inspect captured menu frames.
 
 The fixture wiring helper tools/wire_map.py also recognizes accountant computers;
 a QA map must actually connect its powered desk, as a district does.
+
+## Shop economy
+
+The [store contract](../store/SKILL.md) owns finite central food supply and
+courier replenishment. `shopkeeper` and `store courier` are named wages in
+`economy.yaml`, $40 gross per shift by default. A dispatched `Deliver` goal
+clocks in every courier kind under its normal job and wage. Retail purchases
+at ordinary fridges consume central food stock and charge the normal named
+price once; no food remains available when the reserve is empty. Simultaneous
+purchases settle in slot order and an unfulfilled take costs nothing.
+Warehouse fetches, deliveries and returned excess never create retail sales
+or charges. Shop rules are separate from tariffs, in `store.yaml` and world
+tags 23/24; money and wages retain their existing `economy.pb` representation.
+Coverage: `sim/store_tests.rs`, shop save tests and `qa/store.json`.

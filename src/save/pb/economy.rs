@@ -92,6 +92,8 @@ pub struct Tariffs {
     pub cash_max: i64,
     #[prost(uint32, tag = "8")]
     pub minutes_per_account: u32,
+    #[prost(sint64, optional, tag = "9")]
+    pub noble_care_package: Option<i64>,
 }
 
 /// A job's wage or an item's price: its name and the cents.

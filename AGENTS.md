@@ -1099,13 +1099,43 @@ the city. Paving, private gardens, interiors and wasteland are excluded.
 
 `Facilities.flowers` keeps beds sorted by cell; `Effect::PlantFlowers` validates
 and plants once in the world step. Flowers stay walkable, grow from seedlings
-to blooms after one world day, and persist without harvesting. Six varieties
+to blooms after one world day, bloom for three days, then wither for one day
+before decaying. Expired beds free their plots for decorators to replant;
+cleanup runs before brains and scans only when the next bed expires. Six varieties
 combine red, yellow, blue, pink, white and purple with poppy, daisy, cornflower,
 tulip and bellflower shapes. `tools/flower_art.py` draws the native 16px art and
 the decorator's apron; `game/flowers.rs` draws visible beds. World tag 19 keeps
-the variety and planting time; older saves have no beds. Tests cover planting,
+the variety and planting time, so reloads preserve age; expired beds from old
+saves decay on load. Tests cover planting, lifecycle boundaries and replanting,
 missing/unreachable grass, Sunday, dismissal and deterministic parallel save
-continuation. `qa/city_decorators.json` checks hiring, varieties and blooms.
+continuation. `qa/city_decorators.json` checks hiring, varieties, blooms,
+withering, decay and replanting.
+
+### Shop, shopkeepers and courier dispatch
+
+The shop contract is [.claude/skills/store/SKILL.md](.claude/skills/store/SKILL.md).
+Generated districts have one public store near the warehouse, with a
+`superfridge` and a `shop counter`. Four shopkeepers cover daily six-hour
+shifts. `ShopGoal` checks the reserve, then minds the counter for fifteen
+world minutes. At 30% or less a check calls the shared courier dispatch.
+Steel, food and store couriers can all be assigned while free and on duty;
+`DeliverGoal` fetches one warehouse meal and deposits it in the reserve.
+The store's own courier works 08–16 every day and hauls food-factory goods
+between dispatches. Both shop jobs earn $40 gross per shift by default;
+dispatch deliveries count toward normal timesheets and payroll.
+
+`store.yaml` controls normalized capacity (1), delivery size (0.01),
+consumption per fridge meal (0.018%
+of total capacity), call level (30%) and starting stock (40%). `CROWD2X_STORE`
+overrides the new-game file. Human food and dog food consume central stock;
+water does not. Empty reserves leave all fridges without food; maps without
+a reserve keep unlimited food. Retail fridge purchases use normal economy
+prices; warehouse transport is free. Stock commits in slot order, and excess
+deliveries stay in the pack and return to the warehouse. Orders survive needs
+and saves, and return to waiting when the courier becomes unavailable or
+times out. World tags 23/24 save rules, fractional consumption and dispatch;
+existing bins save stock. Coverage includes `sim/store_tests.rs`, dispatch,
+task, save and district tests, plus `qa/store.json`.
 
 ### Economy
 
@@ -1113,6 +1143,19 @@ The current economy is documented in [.claude/skills/economy/SKILL.md](.claude/s
 integer-cent cash and budget, worked shifts, office payroll, unemployment care,
 tax, fridge prices, accountant reports, economy.yaml defaults, a live economy
 menu and optional economy.pb saves. New jobs/items require named YAML entries.
+
+
+Humans have a saved noble class (`GameEntity::is_noble`, Human tag 9).
+The human arrival lottery picks one random position per ten arrivals; dogs
+do not draw. World tags 25/26 keep partial groups across saves. Nobles may
+only work jobs flagged `JobDef::noble` (king and accountant). While any noble
+is alive, commoners cannot take those jobs; a noble arrival releases
+provisional commoner appointments. Vacancy replacement uses the same rule,
+and dead noble bodies do not prevent commoner fallback. Unemployed nobles
+receive `noble care package` ($40/day by default versus $20), configurable in
+economy.yaml and the economy menu, saved in Tariffs tag 9. The account's class
+is derived from its human on load; older humans remain commoners. Coverage:
+`sim/noble_tests.rs`, save round trips and `qa/nobles.json` (`expect_nobles`).
 
 ### Hospital
 
@@ -1213,3 +1256,39 @@ A pet dog's droppings (`DROPPING`: 0.6 earth, 0.2 wet, left on public open groun
 Coverage: `sim/dirt.rs`, `sim/soiling/tests.rs`, `game/dirt.rs`, `save/tests.rs`,
 `brain/goals/clean.rs`, `brain/tasks/clean.rs`, `map/wasteland.rs`,
 `qa/dirt.json`, `qa/bladder_accident.json`, `qa/outdoor_toilet.json`.
+
+### Special agents
+
+Districts with at least `TOWN_HOMES` homes offer exactly two special agent
+positions (`JobKind::SpecialAgent`, stable job number 20). Their virtual
+`FeatureKind::Patrol` workplaces reserve positions without props or a commute.
+Both work 09:00–17:00 every day, including weekends, using the existing
+`WanderGoal` at work priority. Normal needs still interrupt them. They wear
+a charcoal suit (`tools/human_art.py`) and earn $40 per shift by default in
+`economy.yaml`. Existing job, workplace, wander and timesheet saves preserve
+their employment and routes. Coverage: `sim/job.rs`, district hiring and save
+tests, and `qa/special_agents.json`.
+
+### Smell field
+
+`sim/smell.rs` keeps sparse signed `f32` air cells, on the site and in the
+wasteland: -10 maximum bad, 0 neutral, +10 maximum good. Walls and closed
+door leaves contain no scent; fully open doors let it diffuse through.
+Furniture does not block air. Every 30 world seconds `smell_compute.rs`
+dispatches `assets/shaders/smell.wgsl`: four-neighbour diffusion, 5% loss
+to air, clamping and a 0.01 absolute cutoff. The completed GPU result is
+read before anybody thinks, independent of render frames and game speed.
+The backend retains its device, pipeline and growing buffers. Unit tests
+use a CPU reference; a separate test compares the actual GPU shader to it.
+Blooming flowers emit +1 per field step; a completed toilet use releases -6,
+and dog defecation releases -10 at the affected cell. Each awake human
+samples its local air on its staggered `Priority::Low` beat (every 17 ticks).
+`Event::Smelled` reaches the Fun process, which already owns mental health:
+positive scent gives exactly 1 point, negative scent removes 1, zero does
+nothing. Freezing or sleeping suppresses perception; disabling Fun also
+disables this mental-health response. The sparse float field persists in
+World Protobuf tag 27; older saves start with clean air.
+The existing X-ray selector (`O`, right-stick click, or the HUD button)
+includes `smell`: `game/smell.rs` draws only visible scented cells as green
+or red tiles with strength-dependent opacity above the world. Other views,
+including `all`, contain no smell overlay. QA: `qa/smell.json`.

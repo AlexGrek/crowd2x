@@ -1,0 +1,26 @@
+# The store (`src/sim/superfridge.rs`, the `store` skill): its superfridge,
+# which every fridge in the world is stocked from. Read when a new game is
+# built — `CROWD2X_STORE` names another file — and built into the game as its
+# defaults. A saved game keeps its own numbers.
+#
+# Nothing is carried from the superfridge to the fridges: it falls with every
+# meal anybody takes out of any fridge, and when it is empty no fridge has
+# food in it (water still). A shopkeeper checks it, and at the call level
+# calls the courier dispatch, which sends the nearest free courier on duty to
+# the warehouse for one unit of food.
+
+# Normalized food reserve: 1 is full. Starting at 40% means 0.4.
+capacity: 1
+# One warehouse meal is a delivery batch worth this much reserve.
+# 100 batches fill the shop; each batch supports about 56 retail meals at
+# the consumption below. This preserves production, courier and wage balance.
+delivery size: 0.01
+# How much it falls for every meal (or dog's dinner) taken out of any fridge,
+# in percent of its capacity.
+falls per meal: 0.018
+# A shopkeeper who finds it this full or less calls the courier dispatch, in
+# percent of its capacity.
+call at: 30
+# How full a new game's superfridge is, in percent of its capacity, unless the
+# map says how much is in it.
+starts at: 40

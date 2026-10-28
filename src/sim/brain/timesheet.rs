@@ -71,7 +71,7 @@ impl Timesheet {
             && let Some(job) = job
             && job.is_due(clock)
             && !sick
-            && (top == job.kind.goal() || job.kind.is_on_call())
+            && (top == job.kind.goal() || job.kind.is_on_call() || (top == GoalId::Deliver && job.kind.is_courier()))
         {
             self.clocked = Some(job.kind);
         }

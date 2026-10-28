@@ -2148,6 +2148,7 @@ name = "crowd2x"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytemuck",
  "chrono",
  "crossbeam-queue",
  "fake",
@@ -2157,6 +2158,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "wgpu",
  "zip",
 ]
 
@@ -5251,12 +5253,14 @@ dependencies = [
  "js-sys",
  "log",
  "naga",
+ "parking_lot",
  "portable-atomic",
  "profiling",
  "raw-window-handle",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu-core",
  "wgpu-hal",

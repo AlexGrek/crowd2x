@@ -1,0 +1,489 @@
+{
+  "name": "an empty shop receives food through courier dispatch",
+  "state": "game",
+  "open": "store",
+  "timeout": 180,
+  "gap": 0.05,
+  "given": {
+    "maps": [
+      {
+        "name": "store",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 18,
+            "height": 14
+          },
+          "wasteland": false,
+          "terrain": {
+            "palette": [
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "kind": "meal rack",
+                "at": {
+                  "x": 120,
+                  "y": 264
+                }
+              },
+              {
+                "kind": "superfridge",
+                "at": {
+                  "x": 600,
+                  "y": 264
+                }
+              },
+              {
+                "kind": "shop counter",
+                "at": {
+                  "x": 600,
+                  "y": 120
+                }
+              }
+            ],
+            "spawners": []
+          },
+          "initial_stock": [
+            {
+              "cell": {
+                "x": 12,
+                "y": 5
+              },
+              "pieces": 0
+            },
+            {
+              "cell": {
+                "x": 2,
+                "y": 5
+              },
+              "pieces": 10
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 6,
+        "y": 8
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 7,
+        "y": 8
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 8,
+        "y": 8
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 9,
+        "y": 8
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 10,
+        "y": 8
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 11,
+        "y": 8
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 6
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 3
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 4
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "select": 5
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "satisfaction",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "health",
+        "on": false
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "shopkeeper"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "look_at": {
+        "x": 12,
+        "y": 5
+      }
+    },
+    {
+      "wait": 0.5
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.0,
+        "max": 0.0,
+        "food_in_fridges": false,
+        "capacity": 1,
+        "level": 0.0
+      }
+    },
+    {
+      "shot": "the shopkeeper and store"
+    },
+    {
+      "select": 5
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "store courier"
+    },
+    {
+      "shot": "the store couriers shift"
+    },
+    {
+      "expect_superfridge": {
+        "min": 0,
+        "max": 0,
+        "food_in_fridges": false
+      }
+    },
+    {
+      "measure": {
+        "name": "shop courier dispatch",
+        "ticks": 1800
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 1,
+        "max": 10,
+        "food_in_fridges": true
+      }
+    },
+    {
+      "shot": "the replenished reserve makes fridge food available"
+    }
+  ]
+}

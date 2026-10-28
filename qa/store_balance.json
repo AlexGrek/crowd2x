@@ -1,0 +1,96 @@
+{
+  "name": "capacity one keeps a generated district supplied through its first harvest",
+  "state": "game",
+  "open": "district store",
+  "timeout": 360,
+  "given": {
+    "maps": [
+      {
+        "name": "district store",
+        "district": 7
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "expect_superfridge": {
+        "min": 1,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "shop balance day 1",
+        "ticks": 46080,
+        "every": 7680
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "shop balance day 2",
+        "ticks": 46080,
+        "every": 7680
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "observe": {
+        "name": "shop balance day 3",
+        "ticks": 46080,
+        "every": 7680
+      }
+    },
+    {
+      "expect_superfridge": {
+        "min": 0.001,
+        "max": 100,
+        "food_in_fridges": true,
+        "capacity": 1
+      }
+    },
+    {
+      "press": "statistics"
+    },
+    {
+      "expect_text": "reserve"
+    },
+    {
+      "expect_text": "/ 1.0000"
+    },
+    {
+      "expect_text": "dispatch"
+    },
+    {
+      "expect_text": "shopkeepers of 4 posts"
+    },
+    {
+      "expect_text": "store couriers of 1 posts"
+    },
+    {
+      "shot": "district shop economy after three days"
+    }
+  ]
+}

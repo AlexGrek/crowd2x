@@ -51,7 +51,7 @@ use bevy::prelude::*;
 use crate::characters::{dog, human};
 use crate::sim::brain::routines::READY_NEEDS;
 use crate::sim::clothing::Clothing;
-use crate::sim::{Clock, EntityType, GameEntity, ItemKind, MoveOutcome, Talent, Uid};
+use crate::sim::{Clock, EntityType, GameEntity, GoalId, ItemKind, MoveOutcome, Talent, Uid};
 use crate::state::AppState;
 use crate::ui::nav::{Activated, NavSystems};
 use crate::ui::{
@@ -790,6 +790,8 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
     let at_work = entity.interacting_with() == Some(job.workplace);
     let now = if entity.is_on_sick_leave(clock) {
         "sick leave".to_string()
+    } else if entity.current_goal() == Some(GoalId::Deliver) {
+        "delivering food to the store".to_string()
     } else if job.is_due(clock) {
         match entity.current_goal() {
             Some(goal) if goal == job.kind.goal() => job.kind.now(at_work, entity.inventory()).to_string(),

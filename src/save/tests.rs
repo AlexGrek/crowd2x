@@ -26,6 +26,145 @@ fn round_trip(state: &GameState) -> GameState {
 }
 
 #[test]
+fn a_shop_saved_during_stock_checks_fetches_and_deliveries_continues_exactly() {
+    use crate::sim::testing::store_world;
+    let (mut state, people) = store_world(30, 10, 7);
+    let courier = people[4];
+    let mut saw_check = false;
+    for _ in 0..2000 {
+        run(&mut state, 1);
+        saw_check = state.entities().get(people[0]).unwrap().brain_fields().iter()
+            .any(|(name, value)| *name == "task" && value.starts_with("check the superfridge"));
+        if saw_check { break; }
+    }
+    assert!(saw_check);
+    side_by_side(&mut state, 60, |_, _| Input::new());
+    let mut carrying = false;
+    for _ in 0..3000 {
+        run(&mut state, 1);
+        carrying = state.entities().get(courier).unwrap().inventory().unwrap().count(ItemKind::Meal) == 1;
+        if carrying { break; }
+    }
+    assert!(carrying, "the dispatch must actually fetch food");
+    assert!(state.dispatch().order_of(courier).is_some());
+    let copy = side_by_side(&mut state, 3000, |_, _| Input::new());
+    assert!(copy.bins().stored(Point::new(12, 5)) > 30);
+    assert!(copy.dispatch().orders().is_empty());
+}
+
+#[test]
+fn a_courier_despawned_while_paused_can_be_saved_with_its_order_waiting() {
+    let (mut state, people) = crate::sim::testing::store_world(30, 10, 7);
+    for _ in 0..2000 {
+        run(&mut state, 1);
+        if state.dispatch().order_of(people[4]).is_some() { break; }
+    }
+    assert!(state.dispatch().order_of(people[4]).is_some());
+    crate::sim::spawn_pass(&mut state, Input::new().despawn(people[4]));
+    let copy = round_trip(&state);
+    assert_eq!(copy.dispatch().waiting(), 1);
+    assert_eq!(fingerprint(&state), fingerprint(&copy));
+}
+
+#[test]
+fn fractional_food_rules_survive_a_save_and_old_saves_without_store_fields_load() {
+    let (mut state, _) = crate::sim::testing::store_world(30, 10, 7);
+    let rules = crate::sim::superfridge::StoreRules { capacity: 250.0, delivery_size: 1.0, falls_per_meal: 0.125, call_at: 12.5, starts_at: 60.0 };
+    state.set_store_rules(rules);
+    let mut files = snapshot(&state, &meta(), None);
+    let mut world = pb::World::decode(files.get(WORLD).unwrap()).unwrap();
+    world.store.as_mut().unwrap().fallen = 0.3125;
+    replace(&mut files, WORLD, world.encode_to_vec());
+    let mut restored = restore(&files).unwrap().state;
+    assert_eq!(restored.superfridge().rules(), rules);
+    assert_eq!(restored.superfridge().level(restored.bins()), 29.6875);
+    side_by_side(&mut restored, 600, |_, _| Input::new());
+    world.store = None;
+    world.orders.clear();
+    replace(&mut files, WORLD, world.encode_to_vec());
+    let old = restore(&files).unwrap().state;
+    assert_eq!(old.superfridge().rules(), Default::default());
+    assert!((old.superfridge().level(old.bins()) - 0.3).abs() < 1e-12);
+}
+
+#[test]
+fn two_special_agents_saved_while_walking_keep_their_jobs_and_routes() {
+    use crate::sim::job::{JobKind, SPECIAL_AGENT_HOURS};
+    use crate::sim::testing::skip_to;
+
+    let mut state = GameState::new(crate::map::district::generate(7).map, 7);
+    state.spawn_from_spawners();
+    let agents: Vec<Uid> = state.entities().iter()
+        .filter(|entity| entity.job().is_some_and(|job| job.kind == JobKind::SpecialAgent))
+        .map(|entity| entity.uid()).collect();
+    assert_eq!(agents.len(), 2);
+    // Keep the rest of the district still so both patrols can be watched
+    // without simulating an entire week of everybody else's work.
+    let mut input = Input::new();
+    for entity in state.entities().iter() {
+        if agents.contains(&entity.uid()) {
+            for process in ProcessId::ALL {
+                input.set_process(entity.uid(), process, false);
+            }
+        } else {
+            input.freeze(entity.uid(), true);
+        }
+    }
+    skip_to(&mut state, 7, 10.0);
+    process_game_state(&mut state, DT, &input);
+    run(&mut state, 120);
+    let copy = side_by_side(&mut state, 240, |_, _| Input::new());
+    for uid in agents {
+        let agent = copy.entities().get(uid).unwrap();
+        let job = agent.job().unwrap();
+        assert_eq!(job.kind, JobKind::SpecialAgent);
+        assert_eq!(job.shift, SPECIAL_AGENT_HOURS);
+        assert_eq!(agent.worn(copy.clock()), Some(JobKind::SpecialAgent.uniform()));
+    }
+}
+
+#[test]
+fn signed_float_smell_survives_archiving_and_continues_on_the_saved_clock() {
+    let mut state = GameState::new(Map::new(Size::new(9, 7), FLOOR).with_wasteland(5), 27);
+    let good = Point::new(2, 2);
+    let bad = Point::new(6, 4);
+    let mut input = Input::new();
+    input.release_smell(good, 3.125).release_smell(bad, -7.25);
+    process_game_state(&mut state, DT, &input);
+    let mut loaded = round_trip(&state);
+    assert_eq!(loaded.smell_at(good), 3.125);
+    assert_eq!(loaded.smell_at(bad), -7.25);
+    for _ in 0..100 {
+        process_game_state(&mut state, DT, &Input::new());
+        process_game_state(&mut loaded, DT, &Input::new());
+        assert_eq!(state.save_world().smell, loaded.save_world().smell);
+    }
+}
+
+#[test]
+fn noble_class_care_tariffs_and_the_partial_arrival_lottery_survive_a_save() {
+    use crate::sim::economy::{Money, Tariff};
+    let mut state = GameState::new(Map::new(Size::new(8, 8), FLOOR), 27);
+    for _ in 0..13 { state.spawn(EntityType::Human, Point::new(2, 2)); }
+    crate::sim::spawn_pass(&mut state, Input::new().set_tariff(Tariff::NobleCarePackage, 5500));
+    let mut loaded = round_trip(&state);
+    assert_eq!(loaded.economy().tariffs().noble_care_package, Money::dollars(55));
+    for entity in state.entities().iter() {
+        let copy = loaded.entities().get(entity.uid()).unwrap();
+        assert_eq!(entity.is_noble(), copy.is_noble());
+        assert_eq!(loaded.economy().account(entity.uid()).unwrap().noble, entity.is_noble());
+    }
+    for _ in 0..27 {
+        let uid = state.spawn(EntityType::Human, Point::new(2, 2));
+        let copy = loaded.spawn(EntityType::Human, Point::new(2, 2));
+        assert_eq!(uid, copy);
+        assert_eq!(state.entities().get(uid).unwrap().is_noble(), loaded.entities().get(uid).unwrap().is_noble());
+    }
+    assert_eq!(loaded.entities().iter().filter(|entity| entity.is_noble()).count(), 4);
+    assert_eq!(fingerprint(&state), fingerprint(&loaded));
+}
+
+#[test]
 fn a_saved_outdoor_toilet_trip_resumes_and_the_puddle_evaporates_on_the_saved_hour() {
     use crate::sim::clock::{HOUR, TIME_SCALE};
     let map = Map::new(Size::new(10, 10), FLOOR).with_wasteland(5);
@@ -1015,7 +1154,7 @@ fn a_collector_saved_while_it_gets_ready_for_a_trip_carries_on_exactly() {
     }
     crate::map::utilities::serve_everything(&mut map, Point::new(0, 6), Point::new(8, 6));
     let mut state = GameState::new(map, 3);
-    let collector = state.spawn(EntityType::Human, Point::new(1, 1));
+    let collector = state.spawn_commoner(Point::new(1, 1));
     assert_eq!(state.entities().get(collector).unwrap().job().map(|job| job.kind), Some(crate::sim::JobKind::ScrapCollector));
     let mut ticks = 0;
     while !state.entities().get(collector).unwrap().is_getting_ready() {
@@ -1357,6 +1496,15 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
         .filter_map(|e| e.biology().map(|b| (e.uid().raw(), b.stats().health()))).collect();
     let mut files = snapshot(&reference, &meta(), None);
     files.files.retain(|(name, _)| name != ECONOMY);
+    // The golden archive also predates the noble arrival lottery.
+    for (name, bytes) in &mut files.files {
+        if name != WORLD { continue; }
+        let mut world = pb::World::decode(bytes.as_slice()).unwrap();
+        world.noble_draws = 0;
+        world.noble_position = 0;
+        *bytes = world.encode_to_vec();
+    }
+
     for (name, bytes) in &mut files.files {
         if !name.starts_with(ENTITIES) { continue; }
         let mut shard = pb::EntityShard::decode(bytes.as_slice()).unwrap();

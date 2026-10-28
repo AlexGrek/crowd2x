@@ -504,6 +504,9 @@ pub trait GameEntity: Send + Sync {
         None
     }
 
+    /// Nobles are humans reserved for noble roles; other kinds return false.
+    fn is_noble(&self) -> bool { false }
+
     /// What it does for a living, if anything — for the job menu, and for
     /// whatever hires and lets go. `None` for a kind that cannot work and for
     /// somebody with no job alike; [`GameEntity::hire`] is what tells them
@@ -698,6 +701,7 @@ pub struct Think<'a> {
     pub fields: &'a super::fields::Fields,
     pub flowers: &'a super::flowers::Flowers,
     pub dirt: &'a super::dirt::DirtLayer,
+    pub smell: &'a super::smell::Smell,
     /// Which arcade cabinets work, as of the start of this tick, changed only
     /// by [`super::world_step`]: whether a playzone has an administrator at
     /// its computer ([`super::playzone`]).
@@ -735,6 +739,13 @@ pub struct Think<'a> {
     /// The dog foods given at the end of the last tick, each felt only by the
     /// dog fed, in its own react ([`super::pets::Feedings`]).
     pub feedings: &'a super::pets::Feedings,
+    /// The store's superfridge, which the fridges' food is
+    /// ([`super::superfridge`]): what a shopkeeper checks, and whether there
+    /// is food in any fridge at all ([`Think::food_in_fridges`]).
+    pub superfridge: &'a super::superfridge::Superfridge,
+    /// The courier dispatch's orders ([`super::dispatch`]): whether this
+    /// courier has been sent for the store's food, and where.
+    pub dispatch: &'a super::dispatch::Dispatch,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -782,6 +793,7 @@ impl<'a> Think<'a> {
             fields: &facilities.fields,
             flowers: &facilities.flowers,
             dirt: &facilities.dirt,
+            smell: &facilities.smell,
             playzones: &facilities.playzones,
             economy: &facilities.economy,
             panics: &facilities.panics,
@@ -792,6 +804,8 @@ impl<'a> Think<'a> {
             smalltalks: &facilities.smalltalks,
             bonds: &facilities.bonds,
             feedings: &facilities.feedings,
+            superfridge: &facilities.superfridge,
+            dispatch: &facilities.dispatch,
             electrical: &facilities.electrical,
             dt,
             tick,
@@ -850,6 +864,13 @@ impl Think<'_> {
             return None;
         }
         self.is_passable_with(cell, key).then(|| self.map.walk_cost(cell) as u32)
+    }
+
+    /// Whether there is food in the fridges: the store's superfridge has
+    /// some, or the map has none ([`super::superfridge::Superfridge::feeds_fridges`]).
+    /// With none, a fridge is water only.
+    pub fn food_in_fridges(&self) -> bool {
+        self.superfridge.feeds_fridges(self.bins)
     }
 
     /// Whether a body holding `key` may go to `cell` and use what is there:

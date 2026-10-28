@@ -500,6 +500,33 @@ UNIFORMS["cleaner"] = (
 )
 
 
+# A grocer's green apron over a white shirt, a gold name badge on the bib
+# and dark trousers: the shopkeeper's, at the store's counter.
+UNIFORMS["shopkeeper"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....wbwwbw.....", "....wwkddbww....", ".....wddddw.....",
+     ".....bddddb.....", "......dbbd......", "......qqqq......"],
+    {"w": (238, 238, 232), "k": (232, 196, 72), "d": (58, 128, 82),
+     "b": (36, 88, 56), "q": (44, 46, 54)},
+)
+
+# The courier's jacket and satchel in the store's red: the store courier's.
+UNIFORMS["store_courier"] = (
+    UNIFORMS["courier"][0],
+    {**UNIFORMS["courier"][1], "d": (150, 44, 42), "m": (204, 78, 64)},
+)
+
+
+# Charcoal suit, white shirt and black tie: the special agent's.
+UNIFORMS["special_agent"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....dwwdd......", "....ddwkbdd.....", ".....dwkdd......",
+     ".....ddddd......", "......dddd......", "......qqqq......"],
+    {"d": (48, 52, 62), "b": (34, 38, 46), "w": (238, 238, 232),
+     "k": (20, 22, 28), "q": (30, 32, 40)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

@@ -1,0 +1,163 @@
+{
+  "name": "one noble per ten humans and adjustable noble care packages",
+  "state": "game",
+  "open": "district office",
+  "timeout": 90,
+  "given": {
+    "maps": [
+      {
+        "name": "district office",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 18,
+            "height": 12
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "power": [
+            "B-------------....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "...-.........-....",
+            "..................",
+            "..................",
+            ".................."
+          ],
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 24,
+                  "y": 24
+                },
+                "kind": "transformer"
+              },
+              {
+                "at": {
+                  "x": 168,
+                  "y": 408
+                },
+                "kind": "computer"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 408
+                },
+                "kind": "guard post"
+              },
+              {
+                "at": {
+                  "x": 648,
+                  "y": 408
+                },
+                "kind": "accountant computer"
+              },
+              {
+                "at": {
+                  "x": 648,
+                  "y": 168
+                },
+                "kind": "fridge"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 20
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 20
+    },
+    {
+      "expect_nobles": 2
+    },
+    {
+      "select": 3
+    },
+    {
+      "press": "debug"
+    },
+    {
+      "expect_text": "noble"
+    },
+    {
+      "shot": "social class in the unit panel"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "press": "economy"
+    },
+    {
+      "press": "noble care package"
+    },
+    {
+      "expect_text": "noble care package: $40.00 a day"
+    },
+    {
+      "press": "raise"
+    },
+    {
+      "expect_text": "noble care package: $45.00 a day"
+    },
+    {
+      "shot": "noble care package"
+    },
+    {
+      "press": "lower"
+    },
+    {
+      "expect_text": "noble care package: $40.00 a day"
+    },
+    {
+      "key": "esc"
+    },
+    {
+      "expect_state": "game"
+    }
+  ]
+}

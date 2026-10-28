@@ -337,3 +337,16 @@ three watches, and the palace's king last) and
 The palace also places one powered accountant computer four cells along the far
 wall from its throne, off the carpet. It draws no RNG. The accountant is hired
 last at this desk; palace and district supply tests require it to be powered.
+
+
+### Working store
+
+`store::SPEC`, after the hospital in `LOT_BUILDINGS`, reserves one remaining
+lot nearest the warehouse. `map/district/store.rs` builds the public room with
+one `superfridge`, one `shop counter` and a two-leaf ordinary door. These create
+one store-courier job and four daily shopkeeper shifts. The existing three
+shops and their spare park remain separate. The building participates in
+landmarks, lighting, catalogues and generated employment totals. Default new
+games stock the reserve from `store.yaml`; authored `initial_stock` can also
+specify zero. Compare siting against eligible lot centres, excluding the spare
+park from the existing shops' block. See [store](../store/SKILL.md).

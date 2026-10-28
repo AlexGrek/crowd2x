@@ -356,14 +356,13 @@ impl Map {
         &self.initial_stock
     }
 
-    /// Set a store's new-game supplies. Refuse cells outside the site.
+    /// Set a store's new-game supplies, including an explicitly empty store.
+    /// Refuse cells outside the site. Absence lets a store use its defaults.
     pub fn set_initial_stock(&mut self, cell: Point, pieces: u32) -> bool {
         if self.size.index_of(cell).is_none() { return false; }
         self.initial_stock.retain(|stock| stock.cell != cell);
-        if pieces > 0 {
-            self.initial_stock.push(InitialStock { cell, pieces });
-            self.initial_stock.sort_unstable_by_key(|stock| stock.cell);
-        }
+        self.initial_stock.push(InitialStock { cell, pieces });
+        self.initial_stock.sort_unstable_by_key(|stock| stock.cell);
         true
     }
 

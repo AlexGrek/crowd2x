@@ -138,8 +138,10 @@ pub mod clock;
 pub mod clothing;
 pub mod corpses;
 pub mod deathdogs;
+pub mod dispatch;
 pub mod door;
 pub mod dirt;
+pub mod smell;
 mod soiling;
 pub mod economy;
 pub mod effect;
@@ -173,6 +175,9 @@ pub(crate) mod rng;
 mod saving;
 pub mod statistics;
 pub mod sun;
+pub mod superfridge;
+#[cfg(test)]
+mod store_tests;
 pub mod talents;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -291,6 +296,8 @@ pub enum Command {
     /// Replace ground or carried contamination; invalid fractions are refused.
     SetDirt { cell: Point, value: dirt::Dirt },
     SetUnitDirt { uid: Uid, value: dirt::Dirt },
+    /// Debug/QA scent impulse, applied through the world's command queue.
+    ReleaseSmell { cell: Point, value: f32 },
     /// Change what a person wears, independently of their identity.
     SetClothing { uid: Uid, clothing: clothing::Clothing },
     Spawn { kind: EntityType, at: Point },
@@ -377,6 +384,11 @@ pub struct Input {
 impl Input {
     pub fn set_dirt(&mut self, cell: Point, value: dirt::Dirt) -> &mut Input {
         self.commands.push(Command::SetDirt { cell, value }); self
+    }
+
+    pub fn release_smell(&mut self, cell: Point, value: f32) -> &mut Input {
+        self.commands.push(Command::ReleaseSmell { cell, value });
+        self
     }
 
     pub fn set_unit_dirt(&mut self, uid: Uid, value: dirt::Dirt) -> &mut Input {
@@ -559,6 +571,9 @@ pub struct GameState {
     /// Mints ids and seeds new entities. Seeded, so a run replays; and a
     /// named generator, so a save can keep its state ([`rng::WorldRng`]).
     rng: rng::WorldRng,
+    /// One randomly placed noble card in each ten human arrivals. Dogs do not draw.
+    noble_draws: u64,
+    noble_position: u32,
     tick: u64,
     elapsed: f64,
     /// The back buffer, reused between ticks so the processing pass allocates
@@ -630,6 +645,8 @@ impl GameState {
             entities: Entities::new(),
             log: Log::new(),
             rng: rng::WorldRng::seed_from_u64(seed),
+            noble_draws: 0,
+            noble_position: 0,
             tick: 0,
             elapsed: 0.0,
             intents: Vec::new(),
@@ -650,6 +667,9 @@ impl GameState {
     }
 
     pub fn dirt(&self) -> &dirt::DirtLayer { &self.facilities.dirt }
+    pub fn smell_at(&self, cell: Point) -> f32 {
+        self.facilities.smell.at(&self.map, &self.facilities.doors, cell)
+    }
 
     /// Bites dealt last tick, waiting for their victims to feel them.
     pub fn wounds(&self) -> &wounds::Wounds { &self.facilities.wounds }
@@ -963,6 +983,24 @@ impl GameState {
         &self.facilities.society
     }
 
+    /// The store's superfridge: its rules and how full it is, with
+    /// [`GameState::bins`] ([`superfridge`]).
+    pub fn superfridge(&self) -> &superfridge::Superfridge {
+        &self.facilities.superfridge
+    }
+
+    /// The courier dispatch's orders ([`dispatch`]).
+    pub fn dispatch(&self) -> &dispatch::Dispatch {
+        &self.facilities.dispatch
+    }
+
+    /// Run the store by `rules` — a new game's, from `store.yaml` — and stock
+    /// its superfridge as they say, before anybody arrives.
+    pub fn set_store_rules(&mut self, rules: superfridge::StoreRules) {
+        let Facilities { superfridge, bins, .. } = &mut self.facilities;
+        superfridge.set_rules(rules, &self.map, bins);
+    }
+
     /// Run relationships by `rules` — a new game's, from
     /// `relationships.yaml`.
     pub fn set_relationship_rules(&mut self, rules: relationships::Rules) {
@@ -1108,12 +1146,33 @@ impl GameState {
     /// legal spawn point should pick one, and silently moving an entity
     /// somewhere else would make a test that spawns at a known cell lie.
     pub fn spawn(&mut self, kind: EntityType, at: Point) -> Uid {
+        self.spawn_with_class(kind, at, None)
+    }
+
+    /// Job-specific fixtures must request commoners explicitly now that humans
+    /// include nobles. The normal arrival path always uses the lottery.
+    #[cfg(test)]
+    pub(crate) fn spawn_commoner(&mut self, at: Point) -> Uid {
+        self.spawn_with_class(EntityType::Human, at, Some(false))
+    }
+
+    fn spawn_with_class(&mut self, kind: EntityType, at: Point, class: Option<bool>) -> Uid {
         let uid = self.mint_uid(kind);
+        let noble = if kind == EntityType::Human {
+            // A separate stream preserves all existing identity, cash and id rolls.
+            if self.noble_draws.is_multiple_of(10) {
+                self.noble_position = rng::tick_rng(uid, 0).random_range(0..10);
+            }
+            let noble = self.noble_draws % 10 == self.noble_position as u64;
+            self.noble_draws += 1;
+            noble
+        } else { false };
+        let noble = class.unwrap_or(noble);
         let (entity, cash) = {
             // Split off a per-entity stream so the shape of an entity does not
             // depend on how many were made before it.
             let mut rng = SmallRng::seed_from_u64(self.rng.random());
-            let entity = kinds::build(uid, kind, at, &mut rng);
+            let entity = kinds::build(uid, kind, at, &mut rng, noble);
             // The stream's last draw, so every roll before it is the one it
             // was before there was money.
             let cash = (kind == EntityType::Human).then(|| self.facilities.economy.tariffs().roll_cash(&mut rng));
@@ -1158,11 +1217,20 @@ impl GameState {
         if let Some(cash) = cash {
             self.facilities.economy.roll(self.clock().day());
             self.facilities.economy.open(uid, cash);
+            self.facilities.economy.set_noble(uid, noble);
             self.log.unit(uid, format!("{uid} arrived with {cash}"));
         }
         self.give_a_bed(uid, at);
         // After the bed: the key that comes with it says which desks are
         // somewhere it may go.
+        if noble {
+            self.log.unit(uid, format!("{uid} is a noble"));
+            // Commoner appointments are provisional until a noble arrives.
+            let provisional: Vec<_> = self.entities.iter()
+                .filter(|e| !e.is_noble() && !e.is_dead() && e.job().is_some_and(|j| j.kind.is_noble_role()))
+                .map(|e| e.uid()).collect();
+            for worker in provisional { self.dismiss(worker); }
+        }
         self.give_a_job(uid, at);
         uid
     }
@@ -1279,6 +1347,10 @@ impl GameState {
         }
     }
 
+    fn nobles_alive(&self) -> bool {
+        self.entities.iter().any(|e| e.is_noble() && !e.is_dead())
+    }
+
     /// Hand somebody a job at the nearest free workplace it may use — one
     /// nobody else works at, and not one in somebody else's house — if it is
     /// the kind that works and there is one. **Jobs are offered in
@@ -1292,12 +1364,14 @@ impl GameState {
     /// One scan of the workplaces per arrival, like
     /// [`GameState::give_a_bed`]. `false` when no job was given.
     fn give_a_job(&mut self, uid: Uid, near: Point) -> bool {
+        let nobles_alive = self.nobles_alive();
         let Some(entity) = self.entities.get_mut(uid) else {
             return false;
         };
         let key = entity.body().home();
+        let noble = entity.is_noble();
         let (workplaces, properties) = (&self.facilities.workplaces, &self.facilities.properties);
-        let Some(job) = JobKind::ALL.into_iter().find_map(|kind| {
+        let Some(job) = JobKind::ALL.into_iter().filter(|kind| kind.permits_class(noble, nobles_alive)).find_map(|kind| {
             let free = |cell: Point| {
                 workplaces.free_shift(cell, kind.shifts()).is_some() && properties.may_use(cell, key)
             };
@@ -1343,6 +1417,7 @@ impl GameState {
             return false;
         }
         let clock = self.clock();
+        let nobles_alive = self.nobles_alive();
         let properties = &self.facilities.properties;
         let chosen = self
             .entities
@@ -1352,6 +1427,7 @@ impl GameState {
                     && !entity.is_dead()
                     && !entity.is_frozen()
                     && entity.job().is_none()
+                    && job.kind.permits_class(entity.is_noble(), nobles_alive)
                     && properties.may_use(job.workplace, entity.body().home())
             })
             .min_by_key(|entity| {
@@ -1414,6 +1490,7 @@ impl GameState {
         };
         self.facilities.workplaces.release(uid);
         self.facilities.society.set_job(uid, None);
+        self.facilities.dispatch.release(uid);
         self.log.unit(uid, format!(
             "{uid} was let go from the {} at {}, {}",
             job.kind.workplace_name(),
@@ -1425,6 +1502,7 @@ impl GameState {
 
     /// Remove an entity. Returns whether there was one.
     pub fn despawn(&mut self, uid: Uid) -> bool {
+        self.facilities.dispatch.release(uid);
         self.facilities.hospital.release(uid);
         if let Some(slot) = self.entities.slot_of(uid) {
             self.census.strike(slot);
@@ -1657,6 +1735,10 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 ///    ([`Facilities::vacancies`], [`GameState::fill_vacancy`]).
 /// 3. On the tick it gets dark (`before` light, `now` dark), the night's
 ///    deathdogs come out of the wasteland ([`deathdogs::arrive`]).
+/// 4. The courier dispatch takes back what its couriers cannot bring and
+///    sends the nearest free courier for every call still waiting
+///    ([`dispatch::Dispatch::send`]): once the crowd has settled, with
+///    whoever was hired in a dead courier's place.
 ///
 /// Inside [`process_pass`] and not round it: the game and the QA harness
 /// drive the two passes apart, and what happens on a tick has to happen on
@@ -1675,6 +1757,8 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
     if deathdogs::is_dusk(before, now) {
         deathdogs::arrive(state);
     }
+    let entities = &state.entities;
+    state.facilities.dispatch.send(entities.iter(), |uid| entities.get(uid), &state.facilities.bins, &state.facilities.superfridge, now, &state.log);
 }
 
 /// **The spawn pass: the only thing that changes which entities exist.**
@@ -1701,6 +1785,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
     }
     for command in &input.commands {
         match command {
+            Command::ReleaseSmell { cell, value } => {
+                state.facilities.smell.release(&state.map, &state.facilities.doors, *cell, *value);
+            }
             Command::SetDirt { cell, value } => {
                 if !state.facilities.dirt.set(*cell, *value) { state.log.important("invalid ground dirt vector"); }
             }
@@ -1804,6 +1891,8 @@ pub fn process_pass(state: &mut GameState, dt: f32) {
     // Read once, and shared by both rounds: the clock does not move inside a
     // tick, and every entity should see the same time.
     let clock = state.clock();
+    state.facilities.flowers.advance(clock);
+    state.facilities.smell.advance(&state.map, &state.facilities.doors, &state.facilities.flowers, before, clock);
     // Whole world hours, derived from the saved clock rather than a second
     // timer. Catch up every crossed hour even when a caller uses a large dt.
     let hours_before = (before.elapsed() / clock::HOUR as f64).floor() as u64;
@@ -2313,6 +2402,7 @@ fn world_step(
     }
     facilities.fridges.advance(dt * clock::TIME_SCALE);
     facilities.doors.advance(dt, occupancy);
+    facilities.smell.close_doors(&facilities.doors);
 }
 
 #[cfg(test)]
@@ -3360,10 +3450,10 @@ mod tests {
         let mut map = Map::new(Size::new(16, 10), FLOOR);
         crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
         let mut state = GameState::new(map, 3);
-        let first = state.spawn(EntityType::Human, Point::new(2, 1));
+        let first = state.spawn_commoner(Point::new(2, 1));
         let job = state.entities().get(first).unwrap().job().expect("hired");
-        let far = state.spawn(EntityType::Human, Point::new(14, 8));
-        let near = state.spawn(EntityType::Human, Point::new(4, 2));
+        let far = state.spawn_commoner(Point::new(14, 8));
+        let near = state.spawn_commoner(Point::new(4, 2));
         assert_eq!(state.entities().get(near).unwrap().job(), None, "one bin, one job");
         let mut lines = Vec::new();
         let dies = |state: &mut GameState, uid: Uid, lines: &mut Vec<String>| {
@@ -3542,10 +3632,10 @@ mod tests {
         let mut map = Map::new(Size::new(16, 10), FLOOR);
         crate::sim::testing::prop_at(&mut map, "crematorium", crematorium);
         let mut state = GameState::new(map, 3);
-        let undertaker = state.spawn(EntityType::Human, Point::new(2, 1));
+        let undertaker = state.spawn_commoner(Point::new(2, 1));
         let job = state.entities().get(undertaker).unwrap().job().expect("hired");
         assert_eq!((job.kind, job.shift.start()), (JobKind::Undertaker, 8));
-        let victim = state.spawn(EntityType::Human, Point::new(13, 7));
+        let victim = state.spawn_commoner(Point::new(13, 7));
         assert!(state.dismiss(victim));
         state
             .entity_mut(victim)
@@ -3602,13 +3692,13 @@ mod tests {
         }
         crate::sim::testing::prop_at(&mut map, "guard post", post);
         let mut state = GameState::new(map, 3);
-        let guards: Vec<Uid> = [2, 6, 10].into_iter().map(|x| state.spawn(EntityType::Human, Point::new(x, 13))).collect();
+        let guards: Vec<Uid> = [2, 6, 10].into_iter().map(|x| state.spawn_commoner(Point::new(x, 13))).collect();
         let watch = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| (job.kind, job.shift.start()));
         let watches: Vec<_> = guards.iter().map(|&uid| watch(&state, uid)).collect();
         assert_eq!(watches, [Some((JobKind::Guard, 8)), Some((JobKind::Guard, 16)), Some((JobKind::Guard, 0))]);
         let lines = state.log.drain();
         assert!(lines.iter().any(|line| line.contains("was hired as a guard at the guard post at 22, 8, 00:00-08:00")), "{lines:?}");
-        let fourth = state.spawn(EntityType::Human, Point::new(14, 13));
+        let fourth = state.spawn_commoner(Point::new(14, 13));
         assert_eq!(watch(&state, fourth), None, "three guards to a post");
         assert!(state.despawn(fourth));
 
@@ -4253,7 +4343,15 @@ mod tests {
             // The district itself, kept by four: two shifts of two.
             let cleaners = job::CLEANER_SHIFTS.len();
             let mut cleaning: Vec<(u8, u8)> = Vec::new();
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners;
+            // The store's counter, kept by four a quarter of the day each,
+            // and its superfridge's one courier.
+            let shopkeepers = crate::map::district::store::COUNTERS * job::SHOP_SHIFTS.len();
+            assert_eq!(shopkeepers, 4);
+            let store_couriers = crate::map::district::store::SUPERFRIDGES;
+            let mut shopkeeping: Vec<u8> = Vec::new();
+            let mut store_hauling = 0;
+            let mut agents = 0;
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4341,12 +4439,26 @@ mod tests {
                         assert!(state.features().has(feature::FeatureKind::District, job.workplace));
                         cleaning.push((job.shift.start(), job.shift.mask()));
                     }
+                    JobKind::Shopkeeper => {
+                        assert!(district.the(crate::map::district::store::NAME).contains(job.workplace), "seed {seed}: a counter outside the store");
+                        shopkeeping.push(job.shift.start());
+                    }
+                    JobKind::StoreCourier => {
+                        store_hauling += 1;
+                        assert!(district.the(crate::map::district::store::NAME).contains(job.workplace), "seed {seed}: a superfridge outside the store");
+                    }
+                    JobKind::SpecialAgent => {
+                        agents += 1;
+                        assert!(state.features().has(feature::FeatureKind::Patrol, job.workplace));
+                        assert_eq!(job.shift, job::SPECIAL_AGENT_HOURS);
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
             assert_eq!(nursing, nurses);
             assert_eq!(fishing, fishermen);
             assert_eq!(decorating, 3);
+            assert_eq!(agents, 2, "seed {seed}: exactly two special agents");
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
@@ -4358,8 +4470,13 @@ mod tests {
             shifts.sort_unstable();
             cleaning.sort_unstable();
             assert_eq!(cleaning, shifts, "seed {seed}");
+            // The store's: a shopkeeper on every quarter of the day and its
+            // courier, followed by the two special agents.
+            shopkeeping.sort_unstable();
+            assert_eq!(shopkeeping, [0, 6, 12, 18], "seed {seed}: the store's shopkeepers");
+            assert_eq!(store_hauling, store_couriers, "seed {seed}: the store's courier");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::Cleaner), "seed {seed}: cleaners hired last");
+            assert_eq!(last, Some(JobKind::SpecialAgent), "seed {seed}: special agents hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -4388,7 +4505,7 @@ mod tests {
             // In the order they arrived: every desk taken before the first
             // collector was hired, every bin before the first guard.
             let kinds: Vec<JobKind> =
-                state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).collect();
+                state.entities().iter().filter(|entity| !entity.is_noble()).filter_map(|entity| entity.job()).map(|job| job.kind).collect();
             let order = |kind: JobKind| JobKind::ALL.iter().position(|&k| k == kind).unwrap();
             assert!(kinds.windows(2).all(|pair| order(pair[0]) <= order(pair[1])), "seed {seed}: {kinds:?}");
 
@@ -4530,6 +4647,7 @@ mod tests {
                 "factory" => district.the(crate::map::district::steel_factory::NAME),
                 "farm" => district.the(crate::map::district::farm::NAME),
                 "food factory" => district.the(crate::map::district::food_factory::NAME),
+                "store" => district.the(crate::map::district::store::NAME),
                 _ => district.the(crate::map::district::warehouse::NAME),
             };
             assert!(building.contains(bin), "{store:?} at {bin:?}");
@@ -5402,7 +5520,9 @@ mod tests {
         let build = || {
             let mut map = Map::new(Size::new(24, 24), FLOOR).with_wasteland(3);
             // Rows of bins with a free row between, one a collector.
-            let bins: Vec<Point> = (0..PARALLEL_AT as i32 + 6).map(|i| Point::new(1 + i % 22, 1 + 2 * (i / 22))).collect();
+            // Leave room for the 10% nobles who cannot collect scrap, while
+            // retaining enough working collectors to exercise parallel rounds.
+            let bins: Vec<Point> = (0..PARALLEL_AT as i32 + 16).map(|i| Point::new(1 + i % 22, 1 + 2 * (i / 22))).collect();
             for &bin in &bins {
                 crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
             }
@@ -5589,3 +5709,6 @@ mod steel_probe {
 
 #[cfg(test)]
 mod economy_tests;
+
+#[cfg(test)]
+mod noble_tests;

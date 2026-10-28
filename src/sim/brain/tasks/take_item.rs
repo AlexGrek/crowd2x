@@ -50,6 +50,11 @@ impl TaskExecutor for TakeItem {
         if fridge.is_some_and(|state| !state.is_powered()) {
             return TaskResult::Failed;
         }
+        // Nothing to eat in a fridge while the store's superfridge is empty
+        // (`sim::superfridge`): water only.
+        if fridge.is_some() && matches!(self.item, ItemKind::Food | ItemKind::DogFood) && !ctx.think.food_in_fridges() {
+            return TaskResult::Failed;
+        }
         if ctx.action.is_none() {
             // Only the door is a start condition: another visitor closing
             // it must not continually interrupt everybody else's take.
@@ -153,6 +158,48 @@ mod tests {
         assert_eq!(rig.effect, crate::sim::Effect::None);
         assert_eq!(rig.run(&mut task, 100), TaskResult::Success);
         assert_eq!(rig.effect, crate::sim::Effect::Buy { item: ItemKind::Food });
+    }
+
+    #[test]
+    fn an_empty_central_reserve_refuses_food_and_dog_food_but_keeps_water_available() {
+        for item in [ItemKind::Food, ItemKind::DogFood, ItemKind::Water] {
+            let fridge = Point::new(5, 5);
+            let reserve = Point::new(2, 2);
+            let mut map = Map::new(Size::new(9, 9), FLOOR);
+            prop_at(&mut map, "fridge", fridge);
+            prop_at(&mut map, "superfridge", reserve);
+            assert!(map.set_initial_stock(reserve, 0));
+            // Authored zero must also survive the map's disk format.
+            let map = Map::from_json(&map.to_json().unwrap()).unwrap();
+            let mut rig = Rig::new(map, Point::new(4, 5));
+            assert!(rig.world.fridges.set_open(fridge, true));
+            let result = rig.run(&mut Task::take(fridge, item, 0.2), 100);
+            if item == ItemKind::Water {
+                assert_eq!(result, TaskResult::Success);
+                assert_eq!(rig.hand(), Some(ItemKind::Water));
+            } else {
+                assert_eq!(result, TaskResult::Failed);
+                assert_eq!(rig.hand(), None);
+                assert_eq!(rig.effect, crate::sim::Effect::None);
+            }
+        }
+    }
+
+    #[test]
+    fn central_stock_disappearing_during_a_take_leaves_the_hand_empty() {
+        let fridge = Point::new(5, 5);
+        let reserve = Point::new(2, 2);
+        let mut map = Map::new(Size::new(9, 9), FLOOR);
+        prop_at(&mut map, "fridge", fridge);
+        prop_at(&mut map, "superfridge", reserve);
+        let mut rig = Rig::new(map, Point::new(4, 5));
+        assert!(rig.world.fridges.set_open(fridge, true));
+        let mut task = Task::take(fridge, ItemKind::Food, 1.0);
+        assert_eq!(rig.tick(&mut task), TaskResult::Executing);
+        assert!(rig.world.bins.set(reserve, 0));
+        assert_eq!(rig.tick(&mut task), TaskResult::Failed);
+        assert_eq!(rig.hand(), None);
+        assert_eq!(rig.effect, crate::sim::Effect::None);
     }
 
     /// Its box switched off on the way there: open or not, a fridge with no

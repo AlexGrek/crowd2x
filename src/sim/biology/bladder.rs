@@ -104,6 +104,7 @@ impl Process for Bladder {
             // Nor does a day at the desk.
             Event::Worked { .. } | Event::Treated { .. } => {}
             Event::Bitten { .. } => {}
+            Event::Smelled { .. } => {}
         }
     }
 

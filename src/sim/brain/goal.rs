@@ -126,6 +126,14 @@ catalogue! {
         /// ([`ProvisionGoal`](super::goals::ProvisionGoal)): part of getting
         /// ready, for the jobs worked out in the wasteland.
         Provision = 29 => GoalDef { name: "provision", emoji: "🎒", executor: Some(|| Box::new(goals::ProvisionGoal::new())) },
+        /// Keep the store: mind the shop at the counter, check the
+        /// superfridge, and call the courier dispatch when it runs low
+        /// ([`ShopGoal`](super::goals::ShopGoal)). A shopkeeper's job.
+        Shopkeep = 30 => GoalDef { name: "keep shop", emoji: "🛒", executor: Some(|| Box::new(goals::ShopGoal::new())) },
+        /// Take a unit of food from the warehouse to the store's superfridge,
+        /// sent by the courier dispatch ([`DeliverGoal`](super::goals::DeliverGoal)):
+        /// a courier's, raised over its own job while the order is its.
+        Deliver = 31 => GoalDef { name: "deliver", emoji: "🚚", executor: Some(|| Box::new(goals::DeliverGoal::new())) },
     }
 }
 
@@ -852,7 +860,9 @@ mod tests {
                 (GoalId::DogCare, 0.0),
                 (GoalId::Follow, 0.0),
                 (GoalId::Defecate, 0.0),
-                (GoalId::Provision, 0.0)
+                (GoalId::Provision, 0.0),
+                (GoalId::Shopkeep, 0.0),
+                (GoalId::Deliver, 0.0)
             ]
         );
     }

@@ -18,7 +18,8 @@ the manifest under cargo, and relative to the executable otherwise.
 ## Screens
 
 The app starts on a **main menu** — click an entry, or use `up`/`down` and `enter`; `esc`
-quits. The world keeps rendering behind it. Its one entry opens the **map editor**.
+quits. The map browser creates, plays, edits and manages saved maps. Saved games
+load from the main menu; application preferences are under Settings.
 
 ### Map editor
 
@@ -43,10 +44,41 @@ does not need to know anything about the simulation for that to work.
 | left mouse | place |
 | right mouse | erase |
 | `WASD` / arrows | pan the camera |
-| `esc` | back to the menu |
+| `esc` | save and return to the map browser |
 
-The map is not despawned when you leave the editor, so visiting the menu never throws
-away your work. There is no save format yet.
+Maps save as JSON. Leaving the editor saves changes; a failed save keeps the
+editor open with the edits intact. `F5` retries a save.
+
+### The shop and economy
+
+Generated districts include a working store near the warehouse. Four shopkeepers
+cover six-hour shifts, checking its central food reserve and minding the counter.
+When the reserve reaches 30%, they call courier dispatch. A free steel, food or
+store courier fetches one warehouse meal and brings it to the reserve. The store's
+own courier works every day and helps the food factory between deliveries.
+
+Every meal or dog dinner taken from an ordinary fridge consumes a small share
+of this reserve. When it empties, fridges have water but no food until a delivery
+arrives. Maps without a central reserve keep unlimited fridge food. Warehouse
+transport is free; ordinary fridge purchases charge the buyer at the configured
+price. Shopkeepers and store couriers earn $40 gross per worked shift by default,
+paid through the district's normal payroll.
+
+The full reserve has normalized capacity `1`; its initial 40% is `0.4`. Each
+warehouse delivery adds `0.01`, supporting about 56 retail meals.
+
+Edit `store.yaml` before starting a new game to change reserve capacity,
+delivery size, consumption, starting fullness or the dispatch threshold. `CROWD2X_STORE` selects
+another rules file. `economy.yaml` sets named wages, food prices, tax and care;
+the in-game economy menu also changes these tariffs for the running world.
+Saved games retain their own stock, rules, money, jobs and outstanding deliveries.
+
+Select a worker and open **job** or **brains** to inspect its shift and current
+work. **Statistics** includes shop employment and stored food. A waiting dispatch
+needs a stocked warehouse meal rack and an available courier on duty. Needs can
+interrupt deliveries; excess food at a full reserve stays with the courier and
+returns to the warehouse. The full implementation contract is in
+[the store documentation](.claude/skills/store/SKILL.md).
 
 ## Development
 

@@ -1,7 +1,11 @@
 //! A courier's shift: carry input to its factory hopper and output from
 //! factory pallets to the warehouse. Steel couriers serve scrap/steel;
-//! food couriers serve farm wheat/meals. The route follows the job, so the
-//! two chains share transport behavior without exchanging their goods.
+//! food couriers serve farm wheat/meals, and so does the store's courier,
+//! whose own workplace is the store's superfridge: it carries its wheat to
+//! the nearest wheat hopper. The route follows the job, so the chains share
+//! transport behavior without exchanging their goods. Any of them the
+//! courier dispatch sends for the store's food puts this down for
+//! `DeliverGoal` until the food is in (`sim::dispatch`).
 //!
 //! Plans from the current pack after every handover. Empty couriers choose
 //! the nearer stocked source, favoring output on ties. One deposited load
@@ -11,6 +15,7 @@ use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::feature::FeatureKind;
 use crate::sim::item::ItemKind;
+use crate::sim::job::JobKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
@@ -30,7 +35,7 @@ struct Route {
 
 impl Route {
     fn of(ctx: &GoalCtx<'_>) -> Self {
-        if ctx.job.is_some_and(|job| job.kind == crate::sim::job::JobKind::FoodCourier) {
+        if ctx.job.is_some_and(|job| matches!(job.kind, JobKind::FoodCourier | JobKind::StoreCourier)) {
             Self { input: ItemKind::Wheat, output: ItemKind::Meal, source: FeatureKind::GrainBin,
                 hopper: FeatureKind::WheatHopper, pallet: FeatureKind::MealPallet, rack: FeatureKind::MealRack }
         } else {
@@ -51,17 +56,25 @@ impl HaulGoal {
         HaulGoal::default()
     }
 
-    /// The courier's own hopper, if it is there: the job's workplace.
+    /// Where its input goes: its own hopper, the job's workplace, if it is
+    /// one — or, for a courier whose workplace is no hopper (the store's),
+    /// the nearest of the route's.
     fn hopper(ctx: &GoalCtx<'_>) -> Option<Point> {
-        let at = ctx.job?.workplace;
-        ctx.think.features.has(Route::of(ctx).hopper, at).then_some(at)
+        let (at, route) = (ctx.job?.workplace, Route::of(ctx));
+        if ctx.think.features.has(route.hopper, at) {
+            Some(at)
+        } else if ctx.job?.kind == JobKind::StoreCourier {
+            nearest_store(ctx, route.hopper, false)
+        } else {
+            None
+        }
     }
 
     /// The work to do once beside `target`: a hopper or a rack is somewhere
     /// to unload, a bin or a pallet somewhere to fill up.
     fn work_at(ctx: &GoalCtx<'_>, target: Point) -> Task {
         let features = ctx.think.features;
-        if features.has(Route::of(ctx).hopper, target) || features.has(Route::of(ctx).rack, target) {
+        if features.has(Route::of(ctx).hopper, target) || features.has(Route::of(ctx).rack, target) || features.has(FeatureKind::MealRack, target) {
             Task::deposit(target, DEPOSIT_SECONDS)
         } else {
             Task::withdraw(target, WITHDRAW_SECONDS)
@@ -110,6 +123,8 @@ impl HaulGoal {
             Some(job) if job.workplace == target => Self::hopper(ctx).is_some(),
             _ => {
                 features.has(Route::of(ctx).rack, target)
+                    || (features.has(FeatureKind::MealRack, target) && ctx.inventory.is_some_and(|pack| pack.count(ItemKind::Meal) > 0))
+                    || (features.has(Route::of(ctx).hopper, target) && Self::hopper(ctx) == Some(target))
                     || ((features.has(Route::of(ctx).source, target) || features.has(Route::of(ctx).pallet, target))
                         && ctx.think.bins.stored(target) > 0)
             }
@@ -156,7 +171,7 @@ impl GoalExecutor for HaulGoal {
                 // next nearest of the same — but no other hopper is its own.
                 let features = ctx.think.features;
                 let retry = match self.seek.target {
-                    Some(target) if target == hopper => self.seek.setback(ctx, |_| None),
+                    Some(target) if target == hopper || Some(target) == Self::hopper(ctx) => self.seek.setback(ctx, |_| None),
                     Some(target) if features.has(Route::of(ctx).rack, target) => {
                         self.seek.setback(ctx, |ctx| nearest_store(ctx, Route::of(ctx).rack, false))
                     }
@@ -184,7 +199,11 @@ impl GoalExecutor for HaulGoal {
             return GoalProgress::Working;
         }
 
-        let next = if inventory.count(Route::of(ctx).output) > 0 {
+        // A recalled dispatch or a full superfridge can leave any courier
+        // with food. Return it before resuming its usual goods route.
+        let next = if inventory.count(ItemKind::Meal) > 0 {
+            nearest_store(ctx, FeatureKind::MealRack, false)
+        } else if inventory.count(Route::of(ctx).output) > 0 {
             nearest_store(ctx, Route::of(ctx).rack, false)
         } else if inventory.count(Route::of(ctx).input) > 0 {
             Self::hopper(ctx)

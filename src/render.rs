@@ -15,10 +15,9 @@
 //! sacrifices fine detail; the integer levels preserve every canvas pixel. Zooming
 //! in therefore makes the canvas *smaller* — fewer, bigger pixels — so the
 //! canvas is rebuilt at the new resolution exactly as it is on a resize. Only
-//! the canvas's *resolution* jumps, though: the quad blitting it to the
-//! window eases its scale up to the new factor over a few frames
-//! ([`ZoomQuadScale`]) rather than snapping there, so a zoom step still reads
-//! as one whole step but does not feel like a cut.
+//! the canvas's *resolution* jumps, though: a blurred blink closes curved
+//! eyelids over the previous frame, switches views under black, then opens
+//! onto the new zoom. The quad always uses the exact chosen scale.
 //!
 //! **The blit is also where the world is lit.** The canvas quad is drawn by
 //! [`CanvasMaterial`] rather than as a sprite: its shader fetches each canvas
@@ -26,7 +25,8 @@
 //! texel's world position — the ambient light of the time of day plus the
 //! lightmap `crate::lighting` bakes, sampled bilinearly. Both are worked out
 //! per *canvas texel*, so every screen pixel of a texel still gets one colour
-//! and the upscale stays exact. The one exception is the vignette that
+//! and the upscale stays exact. The vignette and temporary zoom blink are
+//! screen-space effects. The vignette
 //! darkens the edges of the view on the game screen: it belongs to the
 //! camera's view, not to the world, so it is worked out per screen pixel and
 //! is smooth at any zoom. With no [`CanvasLight`] lightmap (the editor, the
@@ -42,6 +42,9 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy::sprite_render::{Material2d, Material2dPlugin};
 use bevy::window::{PrimaryWindow, WindowResized};
+
+mod zoom;
+use zoom::ZoomBlink;
 
 /// Every world pixel becomes a PIXEL_SCALE x PIXEL_SCALE block on screen,
 /// unless something has zoomed — see [`PixelZoom`], which starts here.
@@ -85,8 +88,8 @@ impl Plugin for PixelRenderPlugin {
             .add_systems(
                 Update,
                 (
+                    animate_zoom_blink,
                     resize_canvas,
-                    ease_zoom_quad,
                     apply_camera_target,
                     snap_camera_to_pixels,
                     light_canvas,
@@ -186,8 +189,7 @@ pub struct CanvasLight {
     /// How much of the light the corners of the view lose: 0 is no
     /// vignette, 1 black corners. Worked out per *screen pixel* over the
     /// camera's whole view, not per canvas texel, so it is smooth at any zoom
-    /// and stays put as the camera pans — and it is the one thing on the
-    /// canvas quad that is not on the pixel grid ([`ShowVignette`]).
+    /// and stays put as the camera pans ([`ShowVignette`]).
     pub vignette: f32,
 }
 
@@ -243,6 +245,9 @@ struct CanvasParams {
     subtiles_per_unit: f32,
     lit: f32,
     vignette: f32,
+    /// Zero when idle, one with the eyelids fully shut.
+    blink: f32,
+    screen_size: Vec2,
 }
 
 impl Material2d for CanvasMaterial {
@@ -292,41 +297,6 @@ struct CanvasQuad;
 /// see `editor::pan_camera`.
 #[derive(Component, Default)]
 pub struct CameraPan(pub Vec2);
-
-/// The scale the canvas quad is actually drawn at, easing toward
-/// [`PixelZoom`]'s factor rather than jumping to it.
-///
-/// The canvas itself still snaps to the new resolution the instant the zoom
-/// changes — only a whole-number canvas keeps every texel the same size, and
-/// that is still true at every point during the ease — so this is the *blit*
-/// catching up to a step that has already happened underneath it, not a
-/// second, fractional zoom. It lands exactly on the target (see
-/// [`ease_toward`]) rather than trailing forever, so a screenshot taken once
-/// the ease is done reaches the exact chosen scale, including the x0.5 overview.
-#[derive(Resource)]
-struct ZoomQuadScale(f32);
-
-/// How quickly [`ZoomQuadScale`] closes the distance to the target zoom, in
-/// closed-fraction-per-second: at this rate a step is visually settled well
-/// under 300ms, which is brisk enough not to lag behind repeated key presses.
-const ZOOM_EASE_RATE: f32 = 14.0;
-
-/// Exponential ease toward `target`, snapping once the gap is not worth
-/// another frame of interpolation.
-///
-/// Framerate-independent (the rate is continuous, not "a fraction per
-/// frame"), and it terminates: without the snap, an exponential ease only
-/// ever approaches its target and a screenshot taken after the game has been
-/// sitting idle would still find the quad a fraction of a pixel off the grid.
-fn ease_toward(current: f32, target: f32, dt: f32) -> f32 {
-    const SNAP_EPSILON: f32 = 0.01;
-    let eased = current + (target - current) * (1.0 - (-ZOOM_EASE_RATE * dt).exp());
-    if (target - eased).abs() < SNAP_EPSILON {
-        target
-    } else {
-        eased
-    }
-}
 
 /// Allocate an image usable as a render target.
 fn create_canvas_image(size: UVec2) -> Image {
@@ -449,10 +419,8 @@ fn setup_pipeline(
     ));
 
     commands.insert_resource(PixelCanvas { image, size });
-    // Starts at the initial zoom exactly, not `PIXEL_SCALE`: `CROWD2X_ZOOM`
-    // picks a starting zoom in `Plugin::build`, before this runs, and easing
-    // from the default would put the very first frame off the pixel grid.
-    commands.insert_resource(ZoomQuadScale(zoom.factor()));
+    // A chosen boot/save zoom is already open; only subsequent changes blink.
+    commands.insert_resource(ZoomBlink::new(*zoom));
 }
 
 /// Rebuild the canvas at the new resolution whenever the window changes size
@@ -467,10 +435,9 @@ fn resize_canvas(
     zoom: Res<PixelZoom>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<CanvasMaterial>>,
     mut canvas: ResMut<PixelCanvas>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut quads: Query<(&mut Mesh2d, &MeshMaterial2d<CanvasMaterial>, &mut Transform), With<CanvasQuad>>,
+    mut quads: Query<(&mut Mesh2d, &mut Transform), With<CanvasQuad>>,
     mut targets: Query<&mut RenderTarget, With<WorldCamera>>,
 ) {
     if resized.read().count() == 0 && !zoom.is_changed() {
@@ -486,40 +453,34 @@ fn resize_canvas(
 
     let offset = quad_offset(window_size(window), size, zoom.get());
     let image = images.add(create_canvas_image(size));
-    for (mut mesh, material, mut transform) in &mut quads {
+    for (mut mesh, mut transform) in &mut quads {
         let old = std::mem::replace(&mut mesh.0, meshes.add(Rectangle::from_size(size.as_vec2())));
         meshes.remove(&old);
-        if let Some(mut material) = materials.get_mut(&material.0) {
-            material.canvas = image.clone();
-            material.params.canvas_size = size.as_vec2();
-        }
+        // `light_canvas` retains the previous image and lighting while the
+        // eyelids close, and switches to this canvas only under black.
         transform.translation = offset.extend(0.0);
-        // Scale is not set here: the canvas resolution jumps to the new zoom
-        // immediately (a fractional one would break the pixel grid), but the
-        // quad's on-screen scale eases up to it in `ease_zoom_quad` instead
-        // of jumping too, which is the whole of the "smoothed" zoom.
+        transform.scale = Vec3::splat(zoom.factor());
     }
     for mut target in &mut targets {
         *target = RenderTarget::Image(image.clone().into());
     }
-    images.remove(&canvas.image);
+    // Let strong handles retire the old target: the closing blink may still
+    // be displaying it. Explicit removal would turn that frame into a fallback.
     canvas.image = image;
     canvas.size = size;
 }
 
-/// Ease the canvas quad's scale toward the current zoom instead of jumping to
-/// it, so a zoom step is felt as a brisk animation rather than a snap — while
-/// [`resize_canvas`] has already, in the same frame, rebuilt the canvas at the
-/// new resolution, so what is inside the quad is never itself stretched.
-fn ease_zoom_quad(
-    time: Res<Time>,
+/// Real time keeps a blink moving even when the simulation is paused.
+fn animate_zoom_blink(
+    time: Res<Time<Real>>,
     zoom: Res<PixelZoom>,
-    mut scale: ResMut<ZoomQuadScale>,
-    mut quads: Query<&mut Transform, With<CanvasQuad>>,
+    state: Res<State<crate::state::AppState>>,
+    mut blink: ResMut<ZoomBlink>,
 ) {
-    scale.0 = ease_toward(scale.0, zoom.factor(), time.delta_secs());
-    for mut transform in &mut quads {
-        transform.scale = Vec3::splat(scale.0);
+    if *state.get() != crate::state::AppState::Game {
+        *blink = ZoomBlink::new(*zoom);
+    } else {
+        blink.advance(*zoom, time.delta_secs());
     }
 }
 
@@ -567,6 +528,8 @@ fn light_canvas(
     light: Res<CanvasLight>,
     show_vignette: Res<ShowVignette>,
     canvas: Res<PixelCanvas>,
+    blink: Res<ZoomBlink>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<&Transform, With<WorldCamera>>,
     quads: Query<&MeshMaterial2d<CanvasMaterial>, With<CanvasQuad>>,
     mut materials: ResMut<Assets<CanvasMaterial>>,
@@ -582,15 +545,34 @@ fn light_canvas(
         subtiles_per_unit: light.subtiles_per_unit,
         lit: if light.lightmap.is_some() { 1.0 } else { 0.0 },
         vignette: if show_vignette.0 { light.vignette } else { 0.0 },
+        blink: blink.closure(),
+        screen_size: windows.single()
+            .map(|w| window_size(w).as_vec2().max(Vec2::ONE))
+            .unwrap_or(Vec2::ONE),
     };
     for quad in &quads {
         let Some(current) = materials.get(&quad.0) else { continue };
-        if current.params == params && current.lightmap == light.lightmap {
+        // A frozen view closes without showing the zoom jump underneath it.
+        let params = if blink.closing() {
+            CanvasParams {
+                blink: params.blink,
+                screen_size: params.screen_size,
+                ..current.params
+            }
+        } else {
+            params
+        };
+        if current.params == params
+            && (blink.closing() || (current.lightmap == light.lightmap && current.canvas == canvas.image))
+        {
             continue;
         }
         if let Some(mut material) = materials.get_mut(&quad.0) {
             material.params = params;
-            material.lightmap.clone_from(&light.lightmap);
+            if !blink.closing() {
+                material.lightmap.clone_from(&light.lightmap);
+                material.canvas.clone_from(&canvas.image);
+            }
         }
     }
 }
@@ -764,28 +746,4 @@ mod tests {
         assert_eq!(PixelZoom::new(f32::NAN), PixelZoom::default());
     }
 
-    /// Repeated small steps reach the target and stop there, rather than
-    /// creeping toward it forever — a screenshot taken any time after the game
-    /// has been idle a moment must find the quad on an exact zoom.
-    #[test]
-    fn easing_toward_a_zoom_arrives_and_stops() {
-        let mut scale = 4.0_f32;
-        let target = 6.0_f32;
-        for _ in 0..120 {
-            let next = ease_toward(scale, target, 1.0 / 60.0);
-            assert!(
-                (next - target).abs() <= (scale - target).abs(),
-                "must not overshoot or oscillate"
-            );
-            scale = next;
-        }
-        assert_eq!(scale, target);
-    }
-
-    /// A target already reached is a no-op, not a divide-by-zero or a tiny
-    /// oscillation around it.
-    #[test]
-    fn easing_toward_the_current_value_does_nothing() {
-        assert_eq!(ease_toward(5.0, 5.0, 1.0 / 60.0), 5.0);
-    }
 }

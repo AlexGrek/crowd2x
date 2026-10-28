@@ -59,6 +59,7 @@ pub mod croppanel;
 pub mod crops;
 mod flowers;
 pub mod dirt;
+pub mod smell;
 pub mod held;
 pub mod pool;
 pub mod hud;
@@ -71,6 +72,7 @@ pub mod speed;
 pub mod statistics;
 pub mod economy;
 pub mod relationships;
+pub mod store;
 pub mod smalltalk;
 mod snooze;
 pub mod unitpanel;
@@ -130,7 +132,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin))
+            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

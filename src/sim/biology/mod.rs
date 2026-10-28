@@ -167,6 +167,8 @@ pub enum Event {
     Treated { hp: f32 },
     /// A toilet was used.
     Relieved,
+    /// Ambient scent noticed on the low-priority perception beat.
+    Smelled { value: f32 },
     /// Something entertaining was done — a go on a computer.
     Entertained,
     /// Time was spent asleep. **How long**, in world seconds — not how much

@@ -68,6 +68,7 @@ impl Process for Satisfaction {
     /// worth [`ENJOYMENT`].
     fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
         match event {
+            Event::Smelled { .. } => {}
             Event::Ingested(item) => stats.change_satisfaction(item.taste() * novelty),
             Event::Entertained => stats.change_satisfaction(ENJOYMENT * novelty),
             Event::Met => stats.change_satisfaction(GLAD_TO_SEE * novelty),

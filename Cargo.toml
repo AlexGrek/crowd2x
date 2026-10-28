@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+wgpu = { version = "29.0.4", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "vulkan", "wgsl"] }
+bytemuck = "1"
 # `2d` is Bevy's curated 2D umbrella feature: app, platform, winit, sprite
 # rendering and picking, without pbr/gltf/audio/anti-alias/solari. `ui` is the
 # matching umbrella for bevy_ui: layout, widgets, input focus and the UI

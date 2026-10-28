@@ -159,6 +159,7 @@ pub struct Tariffs {
     pub tax_percent: u32,
     /// What a day out of work is paid, untaxed.
     pub care_package: Money,
+    pub noble_care_package: Money,
     /// A shift's wage, before tax, by [`JobKind`] number.
     pub wages: [Money; JobKind::COUNT],
     /// What a thing costs out of a fridge, by [`ItemKind`] number.
@@ -191,6 +192,8 @@ struct TariffFile {
     tax: u32,
     #[serde(rename = "care package")]
     care_package: f64,
+    #[serde(rename = "noble care package", default)]
+    noble_care_package: Option<f64>,
     #[serde(rename = "budget per arrival")]
     budget_per_arrival: f64,
     #[serde(rename = "starting cash")]
@@ -206,6 +209,7 @@ struct TariffFile {
 pub enum Tariff {
     Tax,
     CarePackage,
+    NobleCarePackage,
     Wage(JobKind),
     Price(ItemKind),
     BudgetPerArrival,
@@ -221,6 +225,7 @@ impl Tariff {
         let mut every: Vec<Tariff> = JobKind::ALL.into_iter().map(Tariff::Wage).collect();
         every.push(Tariff::Tax);
         every.push(Tariff::CarePackage);
+        every.push(Tariff::NobleCarePackage);
         every.extend(SOLD.into_iter().map(Tariff::Price));
         every.extend([Tariff::BudgetPerArrival, Tariff::CashMin, Tariff::CashMax, Tariff::MinutesPerAccount]);
         every
@@ -231,6 +236,7 @@ impl Tariff {
         match self {
             Tariff::Tax => "tax",
             Tariff::CarePackage => "care package",
+            Tariff::NobleCarePackage => "noble care package",
             Tariff::Wage(job) => job.name(),
             Tariff::Price(item) => item.name(),
             Tariff::BudgetPerArrival => "budget per arrival",
@@ -244,7 +250,7 @@ impl Tariff {
     /// ([`Tariffs::get`]).
     pub fn step(self) -> i64 {
         match self {
-            Tariff::Wage(_) | Tariff::CarePackage => 500,
+            Tariff::Wage(_) | Tariff::CarePackage | Tariff::NobleCarePackage => 500,
             Tariff::Price(_) => 50,
             Tariff::Tax | Tariff::MinutesPerAccount => 1,
             Tariff::BudgetPerArrival => 10_000,
@@ -276,6 +282,7 @@ impl Tariffs {
         Ok(Tariffs {
             tax_percent: file.tax,
             care_package: money("care package", file.care_package)?,
+            noble_care_package: money("noble care package", file.noble_care_package.unwrap_or(file.care_package * 2.0))?,
             wages: wages.try_into().expect("one a job"),
             prices: prices.try_into().expect("one an item"),
             budget_per_arrival: money("budget per arrival", file.budget_per_arrival)?,
@@ -308,6 +315,7 @@ impl Tariffs {
         match tariff {
             Tariff::Tax => self.tax_percent as i64,
             Tariff::CarePackage => self.care_package.0,
+            Tariff::NobleCarePackage => self.noble_care_package.0,
             Tariff::Wage(job) => self.wage(job).0,
             Tariff::Price(item) => self.price(item).0,
             Tariff::BudgetPerArrival => self.budget_per_arrival.0,
@@ -326,6 +334,7 @@ impl Tariffs {
         match tariff {
             Tariff::Tax => self.tax_percent = value.min(100) as u32,
             Tariff::CarePackage => self.care_package = Money(value),
+            Tariff::NobleCarePackage => self.noble_care_package = Money(value),
             Tariff::Wage(job) => self.wages[job as usize] = Money(value),
             Tariff::Price(item) => self.prices[item as usize] = Money(value),
             Tariff::BudgetPerArrival => self.budget_per_arrival = Money(value),
@@ -342,7 +351,7 @@ impl Tariffs {
         match tariff {
             Tariff::Tax => format!("{value}%"),
             Tariff::Wage(_) => format!("{} a shift", Money(value)),
-            Tariff::CarePackage => format!("{} a day", Money(value)),
+            Tariff::CarePackage | Tariff::NobleCarePackage => format!("{} a day", Money(value)),
             Tariff::MinutesPerAccount if value == 1 => "1 minute".to_string(),
             Tariff::MinutesPerAccount => format!("{value} minutes"),
             _ => Money(value).to_string(),
@@ -356,6 +365,7 @@ impl Tariffs {
         match tariff {
             Tariff::Tax => format!("the tax is now {value}"),
             Tariff::CarePackage => format!("the care package is now {value}"),
+            Tariff::NobleCarePackage => format!("the noble care package is now {value}"),
             Tariff::Wage(job) => format!("the wage of {} is now {value}", job.with_article()),
             Tariff::Price(item) => format!("the price of {} is now {value}", item.name()),
             Tariff::BudgetPerArrival => format!("the budget per arrival is now {value}"),
@@ -368,11 +378,12 @@ impl Tariffs {
     // --- saving ---
 
     fn save(&self) -> pb::Tariffs {
-        let Tariffs { tax_percent, care_package, wages, prices, budget_per_arrival, starting_cash, minutes_per_account } = self;
+        let Tariffs { tax_percent, care_package, noble_care_package, wages, prices, budget_per_arrival, starting_cash, minutes_per_account } = self;
         let priced = |name: &str, money: &Money| pb::Priced { name: name.to_string(), cents: money.0 };
         pb::Tariffs {
             tax_percent: *tax_percent,
             care_package: care_package.0,
+            noble_care_package: Some(noble_care_package.0),
             wages: JobKind::ALL.iter().zip(wages).map(|(job, wage)| priced(job.name(), wage)).collect(),
             prices: ItemKind::ALL.iter().zip(prices).map(|(item, price)| priced(item.name(), price)).collect(),
             budget_per_arrival: budget_per_arrival.0,
@@ -412,6 +423,9 @@ impl Tariffs {
         }
         tariffs.tax_percent = saved.tax_percent;
         tariffs.care_package = Money(saved.care_package);
+        let noble_care = saved.noble_care_package.unwrap_or_else(|| saved.care_package.saturating_mul(2));
+        if noble_care < 0 { return invalid("negative noble care package"); }
+        tariffs.noble_care_package = Money(noble_care);
         tariffs.budget_per_arrival = Money(saved.budget_per_arrival);
         tariffs.starting_cash = (Money(saved.cash_min), Money(saved.cash_max));
         tariffs.minutes_per_account = saved.minutes_per_account;
@@ -453,13 +467,14 @@ pub struct Account {
     pub job: Option<JobKind>,
     /// Days gone by out of work, and not paid a care package for yet.
     pub care_days: u16,
+    pub noble: bool,
     /// Dead: owed nothing, paid nothing, until the body leaves the world.
     pub dead: bool,
 }
 
 impl Account {
     fn new(uid: Uid, cash: Money) -> Account {
-        Account { uid, cash, shifts: 0, job: None, care_days: 0, dead: false }
+        Account { uid, cash, shifts: 0, job: None, care_days: 0, noble: false, dead: false }
     }
 
     /// Whether a clerk has something to pay it.
@@ -610,6 +625,10 @@ impl Economy {
             .find(|&day| day > self.closed_through && day < today && day + CLOSES_BACK >= today)
     }
 
+    pub(crate) fn set_noble(&mut self, uid: Uid, noble: bool) {
+        if let Some(at) = self.find(uid) { self.accounts[at].noble = noble; }
+    }
+
     fn find(&self, uid: Uid) -> Option<usize> {
         self.accounts.binary_search_by_key(&uid, |account| account.uid).ok()
     }
@@ -707,7 +726,7 @@ impl Economy {
         let (payee, shifts, job, days) = (account.uid, account.shifts, account.job, account.care_days);
         let gross = job.map_or(Money::ZERO, |job| tariffs.wage(job)) * shifts as i64;
         let tax = gross.percent(tariffs.tax_percent);
-        let care = tariffs.care_package * days as i64;
+        let care = if account.noble { tariffs.noble_care_package } else { tariffs.care_package } * days as i64;
         let paid = gross - tax + care;
         account.cash += paid;
         *account = Account { shifts: 0, job: None, care_days: 0, ..*account };
@@ -759,7 +778,7 @@ impl Economy {
             budget: budget.0,
             accounts: accounts
                 .iter()
-                .map(|&Account { uid, cash, shifts, job, care_days, dead }| pb::Account {
+                .map(|&Account { uid, cash, shifts, job, care_days, dead, noble: _ }| pb::Account {
                     uid: uid.raw(),
                     cash: cash.0,
                     shifts: shifts as u32,
@@ -810,7 +829,7 @@ impl Economy {
             if (shifts > 0 && job.is_none()) || (account.dead && (shifts > 0 || care_days > 0)) {
                 return invalid(format!("{uid} has an invalid unpaid timesheet"));
             }
-            accounts.push(Account { uid, cash: Money(account.cash), shifts, job, care_days, dead: account.dead });
+            accounts.push(Account { uid, cash: Money(account.cash), shifts, job, care_days, dead: account.dead, noble: false });
         }
         if accounts.len() != humans.len() {
             return invalid(format!("{} accounts for {} humans", accounts.len(), humans.len()));

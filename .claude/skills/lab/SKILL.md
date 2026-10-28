@@ -142,8 +142,21 @@ been bitten a day or two before:
 
 Then, by the owner's call: the dead are replaced from the jobless (`GameState::fill_vacancy`),
 a collector skips the fridge for a need its pocket meets (`ReadyNeed::pocket`), collectors work
-07:00-18:00 (`COLLECTOR_HOURS`) and the hospital has eight beds. Still open: heaps that never
-grow back, where the warehouse is against the heaps, and deathdog lethality.
+07:00-18:00 (`COLLECTOR_HOURS`) and the hospital has eight beds. The same month again:
+
+| seed 7, 28 days | before | exhaustion fixed | all four |
+| --- | --- | --- | --- |
+| steel racked a week | 26, 32, 26, 27 | 25, 33, 36, 22 | 43, 59, 61, 25 |
+| steel / scrap in the month | 111 / 264 | 116 / 240 | 188 / 393 |
+| humans alive at the end (of 178) | 139 | 155 | 158 |
+| dead workers replaced | 0 | 0 | 11 |
+| nearest heap from the bins at the end | | 145 cells | 278 cells |
+
+The fourth week is the next limit: faster collecting empties the near heaps sooner, and by
+then the nearest is 278 cells from the bins (`scrap.nearest`), more than four hours' walk.
+Still open: heaps that never grow back, where the warehouse is against the heaps, deathdog
+lethality, and two bitten undertakers who died of thirst in the hospital, one after failing to
+reach a bed again and again (one in the first month too).
 
 ## Code
 

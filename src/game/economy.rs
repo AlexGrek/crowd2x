@@ -2,7 +2,6 @@
 
 use bevy::prelude::*;
 use crate::sim::economy::{Tariff, Tariffs};
-use crate::sim::JobKind;
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
@@ -79,7 +78,9 @@ fn open(
     commands.spawn((label("economy", FONT_TITLE, TEXT), ChildOf(root)));
     let columns = commands.spawn((Node { column_gap: px(4), ..default() }, ChildOf(root))).id();
     let tariffs = Tariff::every();
-    let split = JobKind::COUNT;
+    // Keep both columns balanced as jobs are added, leaving room for the
+    // title, selected amount and controls on a 180-pixel UI canvas.
+    let split = tariffs.len().div_ceil(2);
     let mut selected = None;
     for (column, rows) in [&tariffs[..split], &tariffs[split..]].into_iter().enumerate() {
         let col = commands.spawn((Node { flex_direction: FlexDirection::Column, ..default() }, ChildOf(columns))).id();

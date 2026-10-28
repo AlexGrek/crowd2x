@@ -12,6 +12,7 @@
 tax: 20
 # What somebody with no job is paid for every day it goes by, untaxed.
 care package: 20
+noble care package: 40
 # What the district's budget is granted for every arrival.
 budget per arrival: 1000
 # What an arrival has on it: a whole number of dollars, lowest to highest.
@@ -39,12 +40,18 @@ wages:
   fisherman: 40
   city decorator: 60
   cleaner: 40                 # low
+  shopkeeper: 40              # low
+  store courier: 40           # low
+  special agent: 40           # low
   accountant: 60              # mid
 
 # What a thing costs taken from a fridge, every item by name
 # (`src/sim/item.rs`). Only a fridge sells anything; the rest are never
 # bought, and cost nothing.
 prices:
+  # At capacity 1 / delivery size 0.01, each batch supplies ~56 meals.
+  # A human needs at most 2.5/day before sleep: $2.50 against $32 net
+  # from a low-tier shift, or $20 care. Internal transport is not a sale.
   food: 1           # a meal out of a fridge
   dog food: 1       # a pet's dinner out of a fridge
   water: 0          # a drink out of a fridge

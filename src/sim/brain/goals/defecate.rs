@@ -196,6 +196,7 @@ mod tests {
             "left nothing a cleaner would take notice of: {mess:?}"
         );
         assert_eq!(dog.gut().bowel(), 0.0, "relieved");
+        assert!(mess.iter().any(|&cell| world.smell.at(&world.map, &world.doors, cell) == crate::sim::smell::DOG_RELEASE));
     }
 
     /// Indoors is nobody's lavatory: it goes out to open ground and fouls

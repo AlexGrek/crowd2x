@@ -64,6 +64,16 @@ pub enum Effect {
     /// has any and the pack has room, so two at the last pieces share them
     /// out in slot order.
     Withdraw { at: Point },
+    /// Take **one** of what the store at `at` holds and stow it: a courier
+    /// sent by the dispatch has fetched its unit of food off the warehouse's
+    /// meal rack (`brain::tasks::Fetch`). Granted while the store has any and
+    /// the pack has room.
+    Fetch { at: Point },
+    /// A shopkeeper found the superfridge at `at` at its call level
+    /// (`brain::tasks::CheckStock`): the courier dispatch is called for a unit
+    /// of food for it ([`super::dispatch::Dispatch::call`]), unless an earlier
+    /// call for it still waits for a courier.
+    CallDispatch { at: Point },
     /// The unit died this tick, of `cause` (`biology::health`): it has
     /// already marked its own body dead, and the world gives back what it
     /// held — its cell, its bed, its workplace (with the job, so a worker is
@@ -119,6 +129,8 @@ pub enum Effect {
     Bite { at: Point, damage: u8 },
     /// Deliberate outdoor relief after walking away from one's work.
     Pee { at: Point },
+    /// A completed use of a toilet releases airborne scent.
+    ToiletSmell { at: Point },
     /// A cleaner has finished mopping the cell at `at`
     /// (`brain::tasks::Clean`): whatever dirt is on it goes. Granted to a
     /// cleaner within a step of a cell of the district.
@@ -148,6 +160,13 @@ pub(crate) fn apply(
     log: &Log,
 ) {
     match effect {
+        Effect::ToiletSmell { at } => {
+            if !entity.is_dead() && !entity.is_frozen() && entity.center_position() == at
+                && facilities.features.has(FeatureKind::Toilet, at)
+            {
+                facilities.smell.release(map, &facilities.doors, at, super::smell::TOILET_RELEASE);
+            }
+        }
         Effect::Pee { at } => {
             if entity.is_dead() || entity.is_frozen() || entity.center_position() != at
                 || map.site().contains(at) || !map.is_passable(at) {
@@ -188,6 +207,7 @@ pub(crate) fn apply(
                 && entity.defecate()
             {
                 facilities.dirt.soil(at, super::dirt::DROPPING);
+                facilities.smell.release(map, &facilities.doors, at, super::smell::DOG_RELEASE);
                 log.unit(entity.uid(), format!("{} fouled the street at {}, {}", entity.uid(), at.x, at.y));
             }
         }
@@ -236,10 +256,30 @@ pub(crate) fn apply(
             let _ = facilities.doors.want(at, key);
         }
         Effect::Salvage { at } => salvage(entity, map, log, at),
+        Effect::Deposit { at, pieces } if facilities.bins.store(at) == Some(FeatureKind::Superfridge) => {
+            restock(entity, facilities, log, at, pieces);
+        }
         Effect::Deposit { at, pieces } => deposit(entity.uid(), &mut facilities.bins, log, at, pieces),
         Effect::Withdraw { at } => {
             let uid = entity.uid();
-            withdraw(uid, entity.inventory_mut(), &mut facilities.bins, log, at);
+            withdraw(uid, entity.inventory_mut(), &mut facilities.bins, log, at, u32::MAX);
+        }
+        Effect::Fetch { at } => {
+            let uid = entity.uid();
+            withdraw(uid, entity.inventory_mut(), &mut facilities.bins, log, at, 1);
+        }
+        Effect::CallDispatch { at } => {
+            let uid = entity.uid();
+            let percent = facilities.superfridge.percent_at(at, &facilities.bins);
+            if facilities.bins.store(at) != Some(FeatureKind::Superfridge) {
+                log.unit(uid, format!("{uid} found no superfridge at {}, {}", at.x, at.y));
+            } else if !facilities.superfridge.wants_food_at(at, &facilities.bins) {
+                // Earlier effects may already have replenished this store.
+            } else if facilities.dispatch.call(at) {
+                log.unit(uid, format!("{uid} called the courier dispatch: the superfridge at {}, {} is {percent:.0}% full", at.x, at.y));
+            } else {
+                log.unit(uid, format!("{uid} found the courier dispatch has the superfridge's call already: {percent:.0}% full"));
+            }
         }
         Effect::Died { cause } => died(entity, facilities, occupancy, log, cause),
         Effect::TakeBody { at } => take_body(entity, facilities, log, at),
@@ -276,6 +316,17 @@ pub(crate) fn apply(
         }
         Effect::Buy { item } => {
             let uid = entity.uid();
+            // React reads one shared snapshot. If several people finish a
+            // take together, only purchases backed by stock may commit.
+            if matches!(item, ItemKind::Food | ItemKind::DogFood) && !facilities.superfridge.feeds_fridges(&facilities.bins) {
+                if let Some(pack) = entity.inventory_mut() {
+                    let _ = pack.set_hand(None);
+                }
+                return;
+            }
+            // A meal out of a fridge is the superfridge's: its share of the
+            // capacity falls.
+            facilities.superfridge.served(item, &mut facilities.bins, log);
             if let Some(price) = facilities.economy.buy(uid, item).filter(|price| *price != super::economy::Money::ZERO) {
                 let cash = facilities.economy.account(uid).map_or(price, |account| account.cash);
                 log.unit(uid, format!("{uid} paid {price} for {}: {cash} left", item.name()));
@@ -444,10 +495,41 @@ pub(crate) fn deposit(uid: Uid, bins: &mut Bins, log: &Log, at: Point, pieces: u
     }
 }
 
-/// [`Effect::Withdraw`], for the unit `uid` and its pack: pieces out of the
-/// store at `at` and into the pack, one at a time while the store has any and
-/// the pack has room. Logged once a packful, either way.
-pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut Bins, log: &Log, at: Point) {
+/// [`Effect::Deposit`] at a superfridge: a courier's food into the superfridge at `at`, as
+/// much as it has room for, and its order — if the dispatch sent it here —
+/// done. Logged once a delivery; the superfridge's coming back from empty is
+/// worth an important line.
+fn restock(entity: &mut dyn GameEntity, facilities: &mut Facilities, log: &Log, at: Point, pieces: u8) {
+    let uid = entity.uid();
+    let was_empty = !facilities.superfridge.feeds_fridges(&facilities.bins);
+    let room = facilities.superfridge.room(at, &facilities.bins);
+    let kept = (pieces as u32).min(room);
+    let _ = facilities.bins.add(at, kept);
+    // Deposit removed these pieces during react. Another delivery may have
+    // filled the fridge since that snapshot; keep the excess in the pack.
+    if let Some(pack) = entity.inventory_mut() {
+        for _ in kept..pieces as u32 {
+            let stowed = pack.stow(ItemKind::Meal);
+            debug_assert!(stowed, "a returned delivery fits the pack it came from");
+        }
+    }
+    let ordered = facilities.dispatch.delivered(uid, at);
+    let percent = facilities.superfridge.percent_at(at, &facilities.bins);
+    let order = if ordered { " for the courier dispatch" } else { "" };
+    log.unit(uid, format!("{uid} brought {kept} food into the superfridge at {}, {}{order}: {percent:.0}% full", at.x, at.y));
+    if kept < pieces as u32 {
+        log.unit(uid, format!("{uid} found the superfridge at {}, {} full: {} left over", at.x, at.y, pieces as u32 - kept));
+    }
+    if was_empty && kept > 0 {
+        log.important("the superfridge has food again: so have the fridges".to_string());
+    }
+}
+
+/// [`Effect::Withdraw`] and [`Effect::Fetch`], for the unit `uid` and its
+/// pack: pieces out of the store at `at` and into the pack, one at a time
+/// while the store has any, the pack has room and fewer than `most` have
+/// come out. Logged once a packful, either way.
+pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut Bins, log: &Log, at: Point, most: u32) {
     let Some(inventory) = inventory else {
         return;
     };
@@ -457,7 +539,7 @@ pub(crate) fn withdraw(uid: Uid, inventory: Option<&mut Inventory>, bins: &mut B
     };
     let (item, word) = (store.holds, store.called);
     let mut pieces = 0;
-    while inventory.room_for(item) && bins.take(at) {
+    while pieces < most && inventory.room_for(item) && bins.take(at) {
         let _ = inventory.stow(item);
         pieces += 1;
     }

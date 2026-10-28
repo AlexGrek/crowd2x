@@ -59,6 +59,9 @@ pub struct Human {
     /// Stable outfit name. Absent in older saves: recover the seeded outfit.
     #[prost(string, optional, tag = "8")]
     pub clothing: Option<String>,
+    /// Older humans remain commoners.
+    #[prost(bool, tag = "9")]
+    pub noble: bool,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
