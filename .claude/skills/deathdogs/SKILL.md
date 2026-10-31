@@ -17,7 +17,7 @@ nobody inside reacts to one. Everything here is plain simulation
 | The kind: `EntityType::Deathdog` (3), `keeps_off_the_site()` | `sim/uid.rs` |
 | The entity: `Deathdog { walk, brain, facing, schedule }`, `DEATHDOG_SPEED` (= `PANIC_SPEED / (1 + HURRY)`, 4), `DEATHDOG_BITES` cause | `sim/kinds.rs` |
 | Constants (`PACKS` 4, `PACK_SIZE` 3, `SPAWN_DISTANCE` / `DEPART_DISTANCE` 48, `LURK_NEAR` 3 / `LURK_FAR` 24, `BITE_DAMAGE` 20..=60, `BITE_INTERVAL` 1 watched s), `distance_from_site`, `is_dusk`, `arrive` | `sim/deathdogs.rs` |
-| Tests (arrivals, keeping out, bites, panic, spread, hunt, routes bounded, departure through the two passes, nobody inside bitten, determinism) | `sim/deathdogs/tests.rs` |
+| Tests (arrivals, keeping out, bites, panic, spread, hunt, routes bounded, departure through the two passes, departure round a lake across the way out, nobody inside bitten, determinism) | `sim/deathdogs/tests.rs` |
 | Save test (mid-chase at night, a wound pending) | `save/tests.rs` `a_chase_saved_at_night_with_a_bite_still_to_be_felt_carries_on_exactly` |
 
 ## Comings and goings
@@ -30,8 +30,14 @@ nobody inside reacts to one. Everything here is plain simulation
   `PACK_SPREAD` of its point and at least `SPAWN_DISTANCE` out. Endless maps
   only. The dice are `GameState`'s saved rng. Logged ("a pack of 3 deathdogs
   came out of the wasteland at x, y").
-- **Departure**: `Deathdog::react`, by day and `DEPART_DISTANCE` out, halts and
-  returns `Effect::Depart`; `effect::apply` puts it on `Facilities::leaving`,
+- **Departure**: `DepartGoal::pick` aims straight out first and, where a lake
+  lies across the line (every cell `JITTER` round it water), swings the line
+  round the site's middle until it clears the lake. Aiming only straight out
+  left a dog standing all day, since it never moved and so always drew the same
+  drowned line: seed 7 had 1–5 out at noon on 19 days of 28, and 145 daytime
+  panics (`a_lake_across_the_way_out_does_not_keep_a_deathdog_in_by_day`, which
+  finds a seed with such a lake). `Deathdog::react`, by day and
+  `DEPART_DISTANCE` out, halts and returns `Effect::Depart`; `effect::apply` puts it on `Facilities::leaving`,
   which `comings_and_goings` despawns. Bodies an undertaker took up
   (`Effect::TakeBody`) leave the same way — this replaced `bury()` in
   `process_game_state`, which the game (`game/actors.rs`) and QA never called.
@@ -48,7 +54,7 @@ one onto the site, with a log line.
 
 | Routine (`brain/routines.rs`) | Goal (`brain/goals/`) | Priority |
 | --- | --- | --- |
-| `DepartRoutine`, by day | `DepartGoal`: a cell on the ray from the site's middle, `DEPART_DISTANCE + 4` out | 2.0 |
+| `DepartRoutine`, by day | `DepartGoal`: a cell on the ray from the site's middle, `DEPART_DISTANCE + 4` out (`depart::way_out`); where that is all water, rays swung `SWING` (~10°) at a time either side, up to `SWINGS` (8) | 2.0 |
 | `HuntRoutine`, `spotted` younger than `SCENT` (10 world min) and outside | `HuntGoal`: `Chase` → `Bite` → `Chase` (resting) ... | 1.0, urgency 1 |
 | `ProwlRoutine`, always | `ProwlGoal`: random cells in the `LURK_NEAR..LURK_FAR` band | `BUSY` |
 

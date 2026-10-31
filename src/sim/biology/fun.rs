@@ -6,9 +6,8 @@
 //! [`Stats::boredom`] — the same number the other way up, so every need is
 //! still on one scale.
 //!
-//! Fun run too low ([`JOYLESS`]) wears down **mental health**
-//! ([`Stats::mental_health`]): a body can go without entertainment for a
-//! while at no cost, and not for ever.
+//! What fun does to **mental health** is [`Mind`](super::Mind)'s to say: run
+//! too low it wears the mind down, kept up it mends it.
 
 use crate::sim::clock::HOUR;
 
@@ -53,18 +52,6 @@ pub const CHAT_FUN: f32 = 20.0;
 /// cures it.
 pub const SMALL_TALK_FUN: f32 = 2.0;
 
-/// Fun under this is **joyless**: mental health wears down for as long as it
-/// stays there ([`MENTAL_HEALTH_PER_SECOND`]). Eighteen world hours with
-/// nothing entertaining, from having a great time.
-pub const JOYLESS: f32 = 10.0;
-
-/// World hours of joylessness that wear mental health from whole to nothing.
-/// Two days: slow, like everything about the mind, and slower than any need.
-pub const HOURS_TO_BREAK_DOWN: f32 = 48.0;
-
-/// Mental health lost per **world** second while joyless.
-pub const MENTAL_HEALTH_PER_SECOND: f32 = 100.0 / (HOURS_TO_BREAK_DOWN * HOUR);
-
 /// How much of its pace boredom keeps asleep: none. Nobody gets bored in their
 /// sleep, and a sleeper who did was up at two in the morning for the computer.
 pub const ASLEEP_PACE: f32 = 0.0;
@@ -82,14 +69,10 @@ impl Process for Fun {
     }
 
     /// Fun drains. Nothing is entertaining for ever, and a body left alone
-    /// gets bored on its own. And fun run under [`JOYLESS`] wears mental
-    /// health down for every second it stays there — asleep, not at all,
-    /// since asleep this whole process stops.
+    /// gets bored on its own — asleep, not at all, since asleep this whole
+    /// process stops.
     fn advance(&mut self, stats: &mut Stats, dt: f32) {
         stats.change_fun(-FUN_PER_SECOND * dt);
-        if stats.fun() < JOYLESS {
-            stats.change_mental_health(-MENTAL_HEALTH_PER_SECOND * dt);
-        }
     }
 
     /// Having done something entertaining puts [`AMUSEMENT`] back — all of
@@ -102,10 +85,6 @@ impl Process for Fun {
     /// happened to the body and the body decides what it comes to.
     fn handle(&mut self, event: Event, novelty: f32, stats: &mut Stats) {
         match event {
-            Event::Smelled { value } if value.is_finite() => {
-                let change = if value > 0.0 { 1.0 } else if value < 0.0 { -1.0 } else { 0.0 };
-                stats.change_mental_health(change);
-            }
             Event::Entertained => stats.change_fun(AMUSEMENT * novelty),
             // Talking to somebody is fun, and a chat more than a word.
             Event::Chatted => stats.change_fun(CHAT_FUN),
@@ -177,21 +156,14 @@ mod tests {
         assert_eq!(stats.fun(), 30.0);
     }
 
-    /// Fun under ten wears the mind down at its rate, and not at ten or over.
+    /// Fun is the mood of the moment; what it does to the mind is the
+    /// mind's (`mind.rs`).
     #[test]
-    fn joylessness_wears_mental_health_down_and_fun_does_not() {
-        let mut stats = Stats::calm().with_fun(JOYLESS - 1.0);
-        let before = stats.mental_health();
-        Fun.advance(&mut stats, HOUR);
-        assert!((before - stats.mental_health() - HOUR * MENTAL_HEALTH_PER_SECOND).abs() < 1e-3, "{}", stats.mental_health());
-
-        let mut stats = Stats::calm().with_fun(JOYLESS + 10.0);
-        Fun.advance(&mut stats, HOUR);
-        assert_eq!(stats.mental_health(), Stats::calm().mental_health(), "fun enough, no harm");
-
+    fn fun_leaves_mental_health_to_the_mind() {
         let mut stats = Stats::calm().with_fun(0.0);
-        Fun.advance(&mut stats, 10.0 * HOURS_TO_BREAK_DOWN * HOUR);
-        assert_eq!(stats.mental_health(), 0.0, "never past nothing");
+        Fun.advance(&mut stats, 10.0 * HOUR);
+        Fun.handle(Event::Entertained, FRESH, &mut stats);
+        assert_eq!(stats.mental_health(), Stats::calm().mental_health());
     }
 
     /// A chat is a good deal of fun, a word in passing a little, and neither

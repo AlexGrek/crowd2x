@@ -12,15 +12,21 @@
 # Normalized food reserve: 1 is full. Starting at 40% means 0.4.
 capacity: 1
 # One warehouse meal is a delivery batch worth this much reserve.
-# 100 batches fill the shop; each batch supports about 56 retail meals at
-# the consumption below. This preserves production, courier and wage balance.
+# 100 batches fill the shop; each batch supports about 71 retail meals at
+# the consumption below.
 delivery size: 0.01
 # How much it falls for every meal (or dog's dinner) taken out of any fridge,
-# in percent of its capacity.
-falls per meal: 0.018
+# in percent of its capacity. A district eats about 420 a day, six batches:
+# the warehouse's thirty and the farm's first wheat carry it through the first
+# weekend, when the food factory does not cook (at 0.018 the warehouse ran dry
+# that weekend and the shop fell from 40% to 26%).
+falls per meal: 0.014
 # A shopkeeper who finds it this full or less calls the courier dispatch, in
-# percent of its capacity.
-call at: 30
+# percent of its capacity. The same as it starts at, so it holds there all
+# month: seed 7 stayed between 36% and 45% for four weeks, a few points under
+# 40 overnight while no courier is on duty (at 30 it fell to 27 in two days
+# and stayed under the call level).
+call at: 40
 # How full a new game's superfridge is, in percent of its capacity, unless the
 # map says how much is in it.
 starts at: 40

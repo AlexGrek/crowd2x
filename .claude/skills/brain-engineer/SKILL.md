@@ -166,6 +166,38 @@ carry it away (`jobs`, "The undertaker"); `GameState::hire` refuses the dead.
 Tests: `biology/health.rs` (heals, starving kills in a day, thirst faster, exhaustion, holds
 still between); the sim test `the_dead_are_carried_to_the_crematorium_and_leave_the_world`.
 
+## The mind
+
+`Stats::mental_health` (0 broken, 100 well) is moved only by the **`Mind` process**
+(`ProcessId::Mind` = 7, the last bit of `Switches`' `u8`; `biology/mind.rs`; off for dogs). It
+is slow, in days, and it holds still asleep (`asleep_pace` 0). Its rates are points of 100:
+
+| Pressure | Told by | Rate |
+| --- | --- | --- |
+| fun under `JOYLESS` (10) | the stat, in `advance` | down, whole to nothing in `HOURS_TO_BREAK_DOWN` (48 h) |
+| fun at `CHEERFUL` (50) or over | the stat, in `advance` | up by what it lacks over `MENDING_HOURS` (48 h) an hour: fast from low, slow near whole |
+| work done rested | `Event::Worked` (every job's work task) | up `PURPOSE` (1) an hour worked |
+| work done past `STRAINED` (75 tired) | `Event::Worked` | down `STRAIN` (3) an hour worked |
+| a scare | `Event::Frightened`, from brain step 0: not afraid before `alarm::take_in`, afraid after (`FEAR`), so once a fright, outside only | down `FRIGHT` (8) at once |
+| a bite | `Event::Bitten` (also `Health`'s) | down `BITE_SHOCK` (0.3) a point of damage |
+| a debt | `Event::Worried { debt, world_seconds }`, step 0's low beat, awake, while `cash < 0` (`Think::economy`) | down, by `debt / DESPAIRING_DEBT` ($250, capped at 1), at worst whole to nothing in `HOURS_TO_DESPAIR` (48 h); half of it balances cheer |
+| the air | `Event::Smelled { value, world_seconds }`, the same beat | by `value / smell::MAXIMUM`, at most whole to nothing (or back) in `HOURS_OF_SCENT` (72 h) |
+
+Mending in proportion to the lack is what makes a steady pressure *settle* rather than lose
+the race to cheer: with `MENDING_HOURS` = `HOURS_TO_DESPAIR`, a cheerful mind under a debt
+settles at 100 less the debt's share of `DESPAIRING_DEBT` ($50 owed, 80; $125, 50). A flat
+mending rate (four days, nothing to whole) put a district's average at 94-99 within a week,
+with only the evening guards (joyless through a 16-24 watch) and the frightened below 20.
+The two beat events carry the world seconds the beat covers (`Due::elapsed(Priority::Low)`,
+about 32), so they are rates like the rest. Smell used to be a whole point a beat, about 110 an
+hour. It swung a district's average between 10 and 70 in a day and made the stat mean nothing.
+Nothing reads mental health to decide anything yet; the unit panel and the lab show it. The
+lab samples `mental_health.employed.avg`, `.jobless.avg`, `.in debt.avg` and
+`mental_health.low` (under 20). Tests: `biology/mind.rs` (each pressure),
+`brain::tests::a_debt_weighs_on_the_mind_through_the_low_beat`,
+`deathdogs::tests::a_scare_costs_the_mind_once_a_fright_and_nothing_inside`,
+`smell::tests::humans_breathe_scent_into_their_mind_by_its_strength_and_the_time_breathed`.
+
 **Hospital patients** (`sim/hospital.rs`): under `ADMISSION_HEALTH` (90) a human is a patient
 (`Medical::recovering`) until it is back to 100. A patient heals **only** by nurses' care in a
 hospital bed: `Biology::advance_hospital` hurts and never heals. A district has eight beds
@@ -277,7 +309,7 @@ Priorities are unitless `f32`s compared only against each other.
 | Source | Value |
 | --- | --- |
 | `StayBusyRoutine` (wander) | `BUSY = 0.1`, the floor everything should beat when it matters |
-| `NeedRoutine(BOREDOM)` → play | `PLAYING = 0.12` however bored (`Need::at_most`), committed at `BORED` (60), released at `AMUSED` (20): over wandering and under a chat, so **fun never interrupts anything** — it is what a unit does with nothing better to do, never what takes it off something. No bedtime or shift cap is needed: everything else is over it. `Stats::boredom` is `fun` turned over — the one need that falls on its own. A chat (`CHAT_FUN` 20) and small talk (`SMALL_TALK_FUN` 2) are fun too (`Event::Chatted` from a `Talk` that ran its time, `Event::SmallTalk`); fun under `JOYLESS` (10) wears `mental_health` down over `HOURS_TO_BREAK_DOWN` (48 h) |
+| `NeedRoutine(BOREDOM)` → play | `PLAYING = 0.12` however bored (`Need::at_most`), committed at `BORED` (60), released at `AMUSED` (20): over wandering and under a chat, so **fun never interrupts anything** — it is what a unit does with nothing better to do, never what takes it off something. No bedtime or shift cap is needed: everything else is over it. `Stats::boredom` is `fun` turned over — the one need that falls on its own. A chat (`CHAT_FUN` 20) and small talk (`SMALL_TALK_FUN` 2) are fun too (`Event::Chatted` from a `Talk` that ran its time, `Event::SmallTalk`); what fun does to `mental_health` is the `Mind` process's ("The mind", below) |
 | `ChatRoutine` → chat | `CHATTING = 0.15` while a chat both sides agreed to (or this side has finished) is in memory: over wandering and a go at something, under everything else. The `relationships` skill |
 | a pet dog's `HeelRoutine` → follow / sleep / defecate | `FOLLOWING = 0.2` while it has an owner (over wandering, which is what a stray does); `GoalId::Sleep` at 0.25 while the owner is asleep (`DogSleepGoal`); `SQUATTING = 0.3` once its bowel is `MUST_GO`, **raised to break in** so it gets up from a nap. `Brain::dog`; `GoalId::Follow`, `Defecate` have no catalogue executor. The `pets` skill |
 | `KeepRoutine` → dog care | `DOG_CARE = 0.55` while the dog a person keeps is hungry (its bond): over wandering, a chat and an order (0.5), under a night in bed (0.6), every need committed to and a shift. The `pets` skill |

@@ -325,7 +325,7 @@ fn an_economy_saved_mid_payroll_carries_on_exactly() {
     let before = state.economy().account(payee).unwrap().cash;
     let copy = side_by_side(&mut state, 600, |_, _| Input::new());
     assert_eq!(state.economy(), copy.economy());
-    assert_eq!(state.economy().account(payee).unwrap().cash, before + Money::dollars(20));
+    assert_eq!(state.economy().account(payee).unwrap().cash, before + Money::dollars(10));
     assert_eq!(copy.economy().tariffs().price(ItemKind::Food), Money(150));
 }
 
@@ -1516,6 +1516,9 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
                 human.brain.as_mut().unwrap().memory.as_mut().unwrap().night = 0;
                 let uid = human.walker.as_ref().unwrap().body.as_ref().unwrap().uid;
                 human.biology.as_mut().unwrap().stats.as_mut().unwrap().health = birth_health[&uid];
+                // And predates the mind: it lists as off only the processes
+                // it knew, so the mind comes back on, as in any older save.
+                human.biology.as_mut().unwrap().off.retain(|&off| off != pb::ProcessId::Mind as i32);
             }
         }
         *bytes = shard.encode_to_vec();
@@ -1650,4 +1653,26 @@ fn older_saves_default_to_clean_ground_and_clean_units() {
     let body = state.entities().get(uid).unwrap().body();
     let mut old = body.save(); old.dirt = None;
     assert_eq!(crate::sim::entity::Body::restore(&old).unwrap().dirt(), crate::sim::dirt::Dirt::CLEAN);
+}
+
+#[test]
+fn an_orphan_saved_while_waiting_is_adopted_and_keeps_its_new_bond() {
+    let mut state = GameState::new(Map::new(Size::new(20, 20), FLOOR), 7);
+    let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+    let dog = state.adopt_dog(owner).unwrap();
+    state.despawn(owner);
+    run(&mut state, 200);
+    assert_eq!(state.entities().get(dog).unwrap().companion(), Some(owner));
+    let mut copy = round_trip(&state);
+    let adopter = state.spawn(EntityType::Human, Point::new(8, 8));
+    assert_eq!(copy.spawn(EntityType::Human, Point::new(8, 8)), adopter);
+    for _ in 0..64 {
+        run(&mut state, 1);
+        run(&mut copy, 1);
+        assert_same(&state, &copy, "waiting for adoption after loading");
+    }
+    assert_eq!(copy.entities().get(dog).unwrap().companion(), Some(adopter));
+    let loaded = round_trip(&copy);
+    assert_eq!(loaded.entities().get(dog).unwrap().companion(), Some(adopter));
+    assert_eq!(loaded.entities().get(adopter).unwrap().companion(), Some(dog));
 }

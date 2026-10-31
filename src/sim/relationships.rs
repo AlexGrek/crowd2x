@@ -419,8 +419,9 @@ impl Rules {
     /// The chance of starting a small talk on one look round, `elapsed`
     /// world seconds after the last: the smalltalks an hour spread over the
     /// looks an hour of company holds, at most a certainty.
-    pub fn smalltalk_chance(&self, elapsed: f32) -> f32 {
-        (self.smalltalks_an_hour * elapsed / HOUR).min(1.0)
+    /// Mental health scales the configured rate linearly: none at 0, full at 100.
+    pub fn smalltalk_chance(&self, elapsed: f32, mental_health: f32) -> f32 {
+        (self.smalltalks_an_hour * (mental_health / 100.0).clamp(0.0, 1.0) * elapsed / HOUR).clamp(0.0, 1.0)
     }
 
     /// How close somebody has to be for small talk, in whole cells.

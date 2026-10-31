@@ -923,11 +923,13 @@ mod tests {
     fn the_economy_built_in_names_every_job_and_item_at_the_agreed_numbers() {
         let tariffs = Tariffs::default();
         assert_eq!(tariffs.tax_percent, 20);
-        assert_eq!(tariffs.care_package, Money::dollars(20));
+        assert_eq!(tariffs.care_package, Money::dollars(10));
+        assert_eq!(tariffs.noble_care_package, Money::dollars(20));
         assert_eq!(tariffs.budget_per_arrival, Money::dollars(1000));
         assert_eq!(tariffs.starting_cash, (Money::dollars(10), Money::dollars(90)));
         assert_eq!(tariffs.minutes_per_account, 5);
-        assert_eq!(tariffs.price(ItemKind::Food), Money::dollars(1));
+        assert_eq!(tariffs.price(ItemKind::Food), Money(300), "essentials fit inside the reduced care package");
+        assert_eq!(tariffs.price(ItemKind::DogFood), Money(50));
         assert_eq!(tariffs.price(ItemKind::Water), Money::ZERO);
         let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer, JobKind::CityDecorator];
         for job in JobKind::ALL {
@@ -957,7 +959,7 @@ mod tests {
         assert!(Tariffs::from_yaml(&backwards).is_err());
         let tax = DEFAULTS_YAML.replace("tax: 20", "tax: 120");
         assert!(Tariffs::from_yaml(&tax).is_err());
-        let cheap = DEFAULTS_YAML.replace("food: 1 ", "food: 1.5 ");
+        let cheap = DEFAULTS_YAML.replace("  food: 3 ", "  food: 1.5 ");
         assert_eq!(Tariffs::from_yaml(&cheap).unwrap().price(ItemKind::Food), Money(150));
     }
 
@@ -982,6 +984,7 @@ mod tests {
     #[test]
     fn an_arrival_brings_a_grant_and_leaves_its_estate_debt_and_all() {
         let mut economy = Economy::default();
+        economy.set_tariff(Tariff::Price(ItemKind::Food), 100);
         economy.roll(1);
         economy.open(human(1), Money::dollars(42));
         economy.open(human(2), Money::dollars(10));
@@ -1012,19 +1015,19 @@ mod tests {
         assert_eq!(economy.owing(), 1);
         let (payee, paid) = economy.pay_next(human(9), &log).unwrap();
         assert_eq!(payee, human(1));
-        assert_eq!(paid, Money::dollars(64 + 20), "$80 less $16 tax, and $20 care");
+        assert_eq!(paid, Money::dollars(64 + 10), "$80 less $16 tax, and $10 care");
         let account = economy.account(human(1)).unwrap();
-        assert_eq!(account.cash, Money::dollars(134));
+        assert_eq!(account.cash, Money::dollars(124));
         assert_eq!((account.shifts, account.job, account.care_days), (0, None, 0), "paid off");
         assert_eq!(economy.owing(), 0);
-        assert_eq!(economy.budget(), Money::dollars(1000 - 80 - 20 + 16));
+        assert_eq!(economy.budget(), Money::dollars(1000 - 80 - 10 + 16));
         let book = economy.today().unwrap();
-        assert_eq!((book.wages, book.taxes, book.care), (Money::dollars(80), Money::dollars(16), Money::dollars(20)));
-        assert_eq!(book.balance(), Money::dollars(-84));
+        assert_eq!((book.wages, book.taxes, book.care), (Money::dollars(80), Money::dollars(16), Money::dollars(10)));
+        assert_eq!(book.balance(), Money::dollars(-74));
         let lines = log.drain();
         assert_eq!(
             lines,
-            [format!("{} paid {} $84.00: 2 shifts as a guard, $80.00 less $16.00 tax, and a care package for 1 day, $20.00", human(9), human(1))]
+            [format!("{} paid {} $74.00: 2 shifts as a guard, $80.00 less $16.00 tax, and a care package for 1 day, $10.00", human(9), human(1))]
         );
         assert!(economy.pay_next(human(9), &log).is_none(), "nobody owed");
     }
@@ -1053,6 +1056,7 @@ mod tests {
     #[test]
     fn the_books_open_a_day_at_a_time_and_the_accountant_closes_a_week_back_at_most() {
         let mut economy = Economy::default();
+        economy.set_tariff(Tariff::Price(ItemKind::Food), 100);
         economy.roll(1);
         economy.open(human(1), Money::dollars(5));
         economy.roll(1);

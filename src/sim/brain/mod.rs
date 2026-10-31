@@ -291,10 +291,17 @@ impl Brain {
         // take in what is news. Asleep, its eyes are shut: it sees nobody, and
         // whoever it had in mind fades as the night goes on.
         perception.turn(walk.heading());
-        if social && due.elapsed(Priority::Low).is_some() && !is_asleep(task, action)
+        // On the low beat, awake: the air it breathes and the money it owes,
+        // each for the world time the beat covers (the body's `Mind`).
+        if social && !is_asleep(task, action)
+            && let Some(world_seconds) = due.elapsed(Priority::Low)
             && let Some(biology) = biology.as_deref_mut()
         {
-            biology.handle(Event::Smelled { value: perception.smell(ctx, &body) });
+            biology.handle(Event::Smelled { value: perception.smell(ctx, &body), world_seconds });
+            let cash = ctx.economy.account(body.uid()).map_or(0, |account| account.cash.as_cents());
+            if cash < 0 {
+                biology.handle(Event::Worried { debt: -cash as f32 / 100.0, world_seconds });
+            }
         }
         if let Some(elapsed) = due.elapsed(Priority::Med) {
             // Faces first, before the look: see `Attention::age`.
@@ -317,11 +324,22 @@ impl Brain {
                     }
                 });
                 attention.met_with(met);
-                // Danger, or prey, in what it saw (`alarm`).
+                // Danger, or prey, in what it saw (`alarm`) — and a person
+                // not afraid a moment ago has had a fright.
+                let afraid = |memory: &Memory| {
+                    memory.spotted().is_some_and(|spotted| spotted.age(ctx.clock.elapsed()) < routines::FEAR as f64)
+                };
+                let calm = social && !afraid(memory);
                 alarm::take_in(ctx, &body, &sightings, memory);
+                if calm && afraid(memory)
+                    && let Some(biology) = biology.as_deref_mut()
+                {
+                    biology.handle(Event::Frightened);
+                }
                 // A word with somebody close by, perhaps (`social`).
                 if social {
-                    social::strike_up(ctx, &body, memory, &sightings, elapsed);
+                    let mental_health = biology.as_deref().map_or(100.0, |b| b.stats().mental_health());
+                    social::strike_up(ctx, &body, memory, &sightings, elapsed, mental_health);
                 }
             }
             // A night gone by is a point off what it thinks of everybody:
@@ -584,6 +602,11 @@ impl Brain {
         self.memory.set_companion(Some(companion));
     }
 
+    /// Release the companion when its pet is adopted elsewhere.
+    pub fn clear_companion(&mut self) {
+        self.memory.set_companion(None);
+    }
+
     #[cfg(test)]
     pub(crate) fn memory_mut(&mut self) -> &mut Memory {
         &mut self.memory
@@ -765,6 +788,7 @@ impl Brain {
         let mut fields = vec![
             ("goal", top.name().to_string()),
             ("hospital patient", self.memory.medical.recovering.to_string()),
+            ("mental health leave", self.memory.medical.mental_leave.to_string()),
             ("last sick day", self.memory.medical.sick_day.map_or("none".into(), |d| d.to_string())),
             (
                 "priority",
@@ -1540,5 +1564,39 @@ mod tests {
         assert!(human.brain().attention().remembers(dog), "a dog is seen, and is no news to anybody");
         assert!(!human.brain().attention().remembers(behind));
         assert!(human.stats().satisfaction() < 50.0);
+    }
+
+    /// Money owed weighs on the mind, told on the low beat for the world time
+    /// the beat covers: a deep debt wears it down at the despairing rate, and
+    /// money in hand does nothing.
+    #[test]
+    fn a_debt_weighs_on_the_mind_through_the_low_beat() {
+        use crate::sim::biology::mind::HOURS_TO_DESPAIR;
+        use crate::sim::biology::{ProcessId, Stats};
+        use crate::sim::clock::{HOUR, TIME_SCALE};
+        use crate::sim::economy::Money;
+        use crate::sim::testing::needy_human;
+        for (cash, worried) in [(Money::dollars(5), false), (Money::dollars(-250), true)] {
+            let mut world = World::new(Map::new(Size::new(8, 8), FLOOR));
+            let mut human = needy_human(Point::new(3, 3), 0.0, 0.0, 0.0);
+            let biology = human.biology_mut().unwrap();
+            for process in ProcessId::ALL {
+                biology.set_running(process, process == ProcessId::Mind);
+            }
+            // Fun between joyless and cheerful: the debt is all that moves it.
+            biology.edit(|_| Stats::calm().with_fun(30.0));
+            world.economy.open(human.uid(), cash);
+            let ticks = 4 * Priority::Low.period() as u32;
+            for _ in 0..ticks {
+                world.step(&mut human);
+            }
+            let lost = 50.0 - human.stats().mental_health();
+            let most = 100.0 / (HOURS_TO_DESPAIR * HOUR) * ticks as f32 * world.dt * TIME_SCALE;
+            if worried {
+                assert!(lost > 0.5 * most && lost <= most + 1e-4, "lost {lost}, at most {most}");
+            } else {
+                assert_eq!(lost, 0.0, "no debt, no worry");
+            }
+        }
     }
 }

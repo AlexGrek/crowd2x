@@ -1,0 +1,67 @@
+{
+  "name": "critical mental health takes sick leave",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "recovery",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 8,
+            "height": 6
+          },
+          "wasteland": false,
+          "terrain": {
+            "palette": [
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "recovery",
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "populate": {
+        "kind": "human",
+        "count": 20
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "taking sick leave for mental health"
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "shot": "mental health leave readout"
+    }
+  ]
+}

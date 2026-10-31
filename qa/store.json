@@ -72,7 +72,7 @@
                 "x": 12,
                 "y": 5
               },
-              "pieces": 30
+              "pieces": 40
             },
             {
               "cell": {
@@ -440,11 +440,11 @@
     },
     {
       "expect_superfridge": {
-        "min": 30.0,
-        "max": 30.0,
+        "min": 40.0,
+        "max": 40.0,
         "food_in_fridges": true,
         "capacity": 1,
-        "level": 0.3
+        "level": 0.4
       }
     },
     {
@@ -467,8 +467,8 @@
     },
     {
       "expect_superfridge": {
-        "min": 31,
-        "max": 40,
+        "min": 41,
+        "max": 50,
         "food_in_fridges": true
       }
     },

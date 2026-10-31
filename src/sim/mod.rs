@@ -1754,6 +1754,7 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
         state.fill_vacancy(dead, job);
     }
     state.facilities.vacancies = vacancies;
+    state.rehome_pets();
     if deathdogs::is_dusk(before, now) {
         deathdogs::arrive(state);
     }
@@ -4533,11 +4534,11 @@ mod tests {
         state.spawn_from_spawners();
         let mut input = Input::new();
         for guard in state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::Guard)) {
-            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun] {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Mind] {
                 input.set_process(guard.uid(), process, false);
             }
         }
-        assert_eq!(input.commands.len(), 4 * 24);
+        assert_eq!(input.commands.len(), 5 * 24);
         process_game_state(&mut state, 1.0 / 60.0, &input);
         let posts: Vec<Point> = district.gates.iter().map(|gate| gate.post).collect();
         // 1800 ticks a world hour: to ten, then a look every quarter of an
@@ -4668,7 +4669,7 @@ mod tests {
         let farmers: Vec<Uid> = state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == JobKind::Farmer)).map(|e| e.uid()).collect();
         assert_eq!(farmers.len(), crate::map::district::farm::GRAIN_BINS);
         for &farmer in &farmers {
-            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy] {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy, ProcessId::Mind] {
                 input.set_process(farmer, process, false);
             }
         }
@@ -4864,10 +4865,10 @@ mod tests {
             }
         }
         let fed = said(&lines, &format!("{owner} fed {dog}"));
-        let paid = said(&lines, "paid $1.00 for dog food");
+        let paid = said(&lines, "paid $0.50 for dog food");
         assert!(fed >= 1, "never fed: {lines:?}");
-        assert_eq!(paid, fed, "a dollar a dinner");
-        assert_eq!(before - cash(&state), economy::Money::dollars(paid as i64));
+        assert_eq!(paid, fed, "one charge per dinner");
+        assert_eq!(before - cash(&state), state.economy().tariffs().price(ItemKind::DogFood) * paid as i64);
         assert!(said(&lines, "fouled the street") >= 1, "never fouled the street by {}", state.clock());
         let stained = state.map.size().points().any(|cell| state.dirt().at(cell).overall() > 0.15);
         assert!(stained, "the street is clean");

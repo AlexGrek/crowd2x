@@ -96,8 +96,8 @@ fn payroll_pays_the_noble_care_rate_for_every_unemployed_day() {
     for uid in [commoner, noble] { economy.record(uid, 0, None, 2); }
     let mut payments = std::collections::BTreeMap::new();
     while let Some((uid, amount)) = economy.pay_next(commoner, &state.log) { payments.insert(uid, amount); }
-    assert_eq!(payments[&commoner], Money::dollars(40));
+    assert_eq!(payments[&commoner], Money::dollars(20));
     assert_eq!(payments[&noble], Money::dollars(130));
-    assert_eq!(economy.budget(), before - Money::dollars(170));
-    assert_eq!(economy.today().unwrap().care, Money::dollars(170));
+    assert_eq!(economy.budget(), before - Money::dollars(150));
+    assert_eq!(economy.today().unwrap().care, Money::dollars(150));
 }

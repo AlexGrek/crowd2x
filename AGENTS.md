@@ -1152,7 +1152,7 @@ only work jobs flagged `JobDef::noble` (king and accountant). While any noble
 is alive, commoners cannot take those jobs; a noble arrival releases
 provisional commoner appointments. Vacancy replacement uses the same rule,
 and dead noble bodies do not prevent commoner fallback. Unemployed nobles
-receive `noble care package` ($40/day by default versus $20), configurable in
+receive `noble care package` ($20/day by default versus $10), configurable in
 economy.yaml and the economy menu, saved in Tariffs tag 9. The account's class
 is derived from its human on load; older humans remain commoners. Coverage:
 `sim/noble_tests.rs`, save round trips and `qa/nobles.json` (`expect_nobles`).
@@ -1292,3 +1292,16 @@ The existing X-ray selector (`O`, right-stick click, or the HUD button)
 includes `smell`: `game/smell.rs` draws only visible scented cells as green
 or red tiles with strength-dependent opacity above the world. Other views,
 including `all`, contain no smell overlay. QA: `qa/smell.json`.
+
+Mental health scales smalltalk initiation linearly (0: none, 100: configured rate).
+With Mind enabled, mental health <=20 starts sick leave until >=60, including
+the recovery day. Mental leave persists in Medical (protobuf tag 4; absent is
+false), suppresses all jobs without reserving a hospital bed, and seeks play
+when fun is below Mind::CHEERFUL so the existing Mind process can mend it.
+
+Orphaned pet dogs keep their former companion while awaiting adoption. After
+world settlement, `GameState::rehome_pets` transfers each living orphan to the
+nearest living human without a dog (Chebyshev distance, then uid). It tries on
+the death tick and every 64 ticks thereafter; strays are never assigned owners.
+Both companion links and the dog's house key change; its body and gut remain.
+The existing saved companion preserves pending adoption across save/load.

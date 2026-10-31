@@ -20,9 +20,15 @@ fn normalized_shop_balance_covers_startup_production_and_affordable_food() {
     let meals_per_day = 24.0 * 100.0 / super::biology::hunger::HOURS_TO_STARVING as f64 / ItemKind::Food.nutrition() as f64;
     assert_eq!(meals_per_day, 2.5);
     let net_wage = tariffs.wage(JobKind::StoreCourier) - tariffs.wage(JobKind::StoreCourier).percent(tariffs.tax_percent);
+    // Care must cover a full waking day's food, with headroom for a pet
+    // and meal timing; unemployment must not create ever-growing debt.
     let daily_food = tariffs.price(ItemKind::Food).as_cents() as f64 * meals_per_day;
-    assert!(daily_food < net_wage.as_cents() as f64 / 4.0, "food uses less than a quarter of a low wage");
-    assert!(daily_food < tariffs.care_package.as_cents() as f64 / 4.0, "unemployed humans can eat too");
+    assert!(daily_food <= net_wage.as_cents() as f64, "a low wage feeds its earner");
+    let generous_daily_food = tariffs.price(ItemKind::Food).as_cents() * 3
+        + tariffs.price(ItemKind::DogFood).as_cents();
+    assert!(generous_daily_food < tariffs.care_package.as_cents(),
+        "even three meals and a pet dinner leave some care money over");
+    assert_eq!(tariffs.price(ItemKind::Water), Money::ZERO, "drinking never adds debt");
     for seed in [7, 41, 97] {
         let district = crate::map::district::generate(seed);
         let mut state = GameState::new(district.map, seed);
@@ -161,7 +167,7 @@ fn purchases_finishing_together_charge_only_the_meal_backed_by_stock() {
     assert_eq!(state.entities().get(people[0]).unwrap().inventory().unwrap().hand(), Some(ItemKind::Food));
     assert_eq!(state.entities().get(people[1]).unwrap().inventory().unwrap().hand(), None);
     assert_eq!(state.economy().account(people[1]).unwrap().cash, before);
-    assert_eq!(state.economy().today().unwrap().sales, Money::dollars(1));
+    assert_eq!(state.economy().today().unwrap().sales, state.economy().tariffs().price(ItemKind::Food));
     assert_eq!(state.bins().stored(FRIDGE), 0);
 }
 

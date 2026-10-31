@@ -13,8 +13,9 @@
 //! aimed at a spot the owner has since left behind is cut short in
 //! [`keep_up`](GoalExecutor::keep_up) and aimed again.
 //!
-//! **An owner that is not in the world** — dead, or gone — is one the dog
-//! forgets: it keeps no company and is a stray, wandering as one.
+//! An owner who dies or leaves the world leaves an orphaned pet. The dog
+//! wanders while the world seeks an adopter, keeping its former owner's id
+//! in saved memory until a new bond can be made.
 
 use rand::rngs::SmallRng;
 use rand::RngExt;
@@ -141,8 +142,8 @@ impl GoalExecutor for FollowGoal {
             return GoalProgress::Blocked;
         };
         let Some(owner) = ctx.think.bonds.get(mine.with).copied() else {
-            // Not in the world any more: dead, or gone.
-            ctx.memory.set_companion(None);
+            // Keep the former owner until the world finds an adopter.
+            // The saved companion distinguishes an orphaned pet from a stray.
             return GoalProgress::Blocked;
         };
 
@@ -278,17 +279,16 @@ mod tests {
         assert!(furthest >= 1, "it did not even move");
     }
 
-    /// An owner that is not in the world any more - dead, or gone - is one
-    /// the dog forgets, and it wanders as a stray does.
+    /// An orphan keeps its former owner for adoption, but wanders meanwhile.
     #[test]
-    fn a_pet_forgets_an_owner_who_is_gone_and_wanders() {
+    fn an_orphan_remembers_its_owner_and_wanders_until_adopted() {
         let mut world = field();
         let mut dog = dog(Point::new(20, 22), 0.0);
         assert!(dog.companion().is_some());
         for _ in 0..200 {
             world.step(&mut dog);
         }
-        assert_eq!(dog.companion(), None);
+        assert_eq!(dog.companion(), Some(crate::sim::pets::rig::owner_uid()));
         assert_eq!(dog.brain().top_goal(), GoalId::Wander);
     }
 

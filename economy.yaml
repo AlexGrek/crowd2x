@@ -11,8 +11,8 @@
 # The share of every wage paid back into the district's budget, in percent.
 tax: 20
 # What somebody with no job is paid for every day it goes by, untaxed.
-care package: 20
-noble care package: 40
+care package: 10
+noble care package: 20
 # What the district's budget is granted for every arrival.
 budget per arrival: 1000
 # What an arrival has on it: a whole number of dollars, lowest to highest.
@@ -49,11 +49,13 @@ wages:
 # (`src/sim/item.rs`). Only a fridge sells anything; the rest are never
 # bought, and cost nothing.
 prices:
-  # At capacity 1 / delivery size 0.01, each batch supplies ~56 meals.
-  # A human needs at most 2.5/day before sleep: $2.50 against $32 net
-  # from a low-tier shift, or $20 care. Internal transport is not a sale.
-  food: 1           # a meal out of a fridge
-  dog food: 1       # a pet's dinner out of a fridge
+  # At 2.5 meals per waking day, food costs $7.50. Even three meals and
+  # a pet dinner fit inside the $10 daily care package, without growing
+  # debt and its mental-health pressure. Water remains free. These prices
+  # prioritize affordable essentials; retail sales alone do not fund wages.
+  # Internal transport is not a sale.
+  food: 3          # a meal out of a fridge
+  dog food: 0.5    # a pet's dinner out of a fridge
   water: 0          # a drink out of a fridge
   scrap metal: 0
   body: 0

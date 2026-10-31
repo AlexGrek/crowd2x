@@ -350,12 +350,16 @@ mod tests {
     fn store_yaml_is_the_defaults_and_refuses_what_it_does_not_know() {
         let rules = StoreRules::from_yaml(DEFAULTS_YAML).unwrap();
         assert_eq!(rules, StoreRules::default());
-        assert_eq!((rules.capacity, rules.delivery_size, rules.falls_per_meal, rules.call_at), (1.0, 0.01, 0.018, 30.0));
+        assert_eq!(
+            (rules.capacity, rules.delivery_size, rules.falls_per_meal, rules.call_at, rules.starts_at),
+            (1.0, 0.01, 0.014, 40.0, 40.0),
+            "called at what it starts at, so it holds there"
+        );
         let unknown = format!("{DEFAULTS_YAML}\nprice: 3\n");
         assert!(StoreRules::from_yaml(&unknown).is_err(), "a key nobody reads");
-        let missing = DEFAULTS_YAML.replace("call at: 30", "");
+        let missing = DEFAULTS_YAML.replace("call at: 40", "");
         assert!(StoreRules::from_yaml(&missing).is_err());
-        let over = DEFAULTS_YAML.replace("call at: 30", "call at: 130");
+        let over = DEFAULTS_YAML.replace("call at: 40", "call at: 140");
         assert!(StoreRules::from_yaml(&over).unwrap_err().contains("call at"));
         let empty = DEFAULTS_YAML.replace("capacity: 1", "capacity: 0");
         assert!(StoreRules::from_yaml(&empty).unwrap_err().contains("capacity"));
@@ -366,21 +370,22 @@ mod tests {
     }
 
     #[test]
-    fn normalized_capacity_one_starts_at_point_four_and_each_delivery_replaces_fifty_six_meals() {
+    fn normalized_capacity_one_starts_at_point_four_and_each_delivery_replaces_seventy_one_meals() {
         let (mut reserve, mut bins, _) = store(StoreRules::default());
         assert_eq!(reserve.capacity(), 1.0);
         assert_eq!(bins.stored(FRIDGE), 40, "warehouse batches");
         assert!((reserve.level(&bins) - 0.4).abs() < 1e-12);
         assert_eq!(reserve.percent(&bins), 40.0);
-        let log = Log::new();
-        for _ in 0..555 { reserve.served(ItemKind::Food, &mut bins, &log); }
-        assert!(!reserve.wants_food_at(FRIDGE, &bins));
-        reserve.served(ItemKind::DogFood, &mut bins, &log);
-        assert!(reserve.wants_food_at(FRIDGE, &bins));
+        assert!(reserve.wants_food_at(FRIDGE, &bins), "it starts at the call level");
         let before = reserve.level(&bins);
         let _ = bins.add(FRIDGE, 1);
         assert!((reserve.level(&bins) - before - 0.01).abs() < 1e-12);
         assert!(!reserve.wants_food_at(FRIDGE, &bins));
+        let log = Log::new();
+        for _ in 0..71 { reserve.served(ItemKind::Food, &mut bins, &log); }
+        assert!(!reserve.wants_food_at(FRIDGE, &bins), "a delivery is seventy-one meals' worth");
+        reserve.served(ItemKind::DogFood, &mut bins, &log);
+        assert!(reserve.wants_food_at(FRIDGE, &bins));
     }
 
     #[test]
@@ -388,7 +393,7 @@ mod tests {
         let saved = pb::StoreRules { capacity: 100, falls_per_meal: 0.018, call_at: 30.0, starts_at: 40.0,
             normalized_capacity: None, delivery_size: None };
         let rules = StoreRules::restore(&saved).unwrap();
-        assert_eq!(rules, StoreRules::default());
+        assert_eq!(rules, StoreRules { capacity: 1.0, delivery_size: 0.01, falls_per_meal: 0.018, call_at: 30.0, starts_at: 40.0 });
         assert_eq!(rules.batches(), 100);
         assert_eq!(rules.save().capacity, 100, "older readers still see the right batch capacity");
     }

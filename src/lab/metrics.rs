@@ -16,6 +16,7 @@
 //! | `asleep`, `outside` | asleep anywhere; off the site |
 //! | `<job>.on shift`, `<job>.<goal>` | workers whose shift is due, and what they are at |
 //! | `<stat>.avg`, `<stat>.min` | the living humans' bodies: `health.min`, `stamina.min`, `hunger.avg`... |
+//! | `mental_health.employed.avg`, `.jobless.avg`, `.in debt.avg`, `mental_health.low` | the mind by circumstance; how many are under 20 |
 
 use std::collections::BTreeMap;
 
@@ -24,6 +25,9 @@ use serde_json::json;
 use crate::sim::{Clock, EntityType, FeatureKind, GameState};
 
 use super::world::duration;
+
+/// Mental health under this counts as `mental_health.low`: in a bad way.
+const LOW_MIND: f64 = 20.0;
 
 /// The world at one moment.
 pub struct Sample {
@@ -266,6 +270,8 @@ pub fn sample(state: &GameState, flows: &BTreeMap<String, f64>) -> BTreeMap<Stri
     let mut humans = 0.0;
     let mut sums: BTreeMap<&'static str, f64> = BTreeMap::new();
     let mut lowest: BTreeMap<&'static str, f64> = BTreeMap::new();
+    // Mental health summed, and how many, by circumstance.
+    let mut minds: BTreeMap<&'static str, (f64, f64)> = BTreeMap::new();
     for entity in state.entities().iter() {
         if entity.is_dead() {
             continue;
@@ -290,6 +296,20 @@ pub fn sample(state: &GameState, flows: &BTreeMap<String, f64>) -> BTreeMap<Stri
                     let low = lowest.entry(name).or_insert(f64::MAX);
                     *low = low.min(value as f64);
                 }
+                // The mind by circumstance: with a job or without, in debt.
+                let mind = biology.stats().mental_health() as f64;
+                let mut tally = |group| {
+                    let (sum, count) = minds.entry(group).or_default();
+                    *sum += mind;
+                    *count += 1.0;
+                };
+                tally(if entity.job().is_some() { "employed" } else { "jobless" });
+                if state.economy().account(entity.uid()).is_some_and(|account| account.cash.as_cents() < 0) {
+                    tally("in debt");
+                }
+                if mind < LOW_MIND {
+                    add(&mut values, "mental_health.low".into(), 1.0);
+                }
             }
         }
     }
@@ -299,6 +319,9 @@ pub fn sample(state: &GameState, flows: &BTreeMap<String, f64>) -> BTreeMap<Stri
         }
         for (name, low) in lowest {
             values.insert(format!("{name}.min"), (low * 10.0).round() / 10.0);
+        }
+        for (group, (sum, count)) in minds {
+            values.insert(format!("mental_health.{group}.avg"), (sum / count * 10.0).round() / 10.0);
         }
     }
     values

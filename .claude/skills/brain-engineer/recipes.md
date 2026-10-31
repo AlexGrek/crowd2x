@@ -25,7 +25,7 @@ Contents:
 **Only a process writes a stat.** The `Stats` setters are `pub(super)` to `biology`, so a task
 cannot take hunger away itself; it reports an `Event` and the processes decide.
 
-Stats that already exist but never change: `health`, `mental_health`, `attention`. **Prefer making one of those move** over adding a new one.
+A stat that already exists but never changes: `attention`. **Prefer making it move** over adding a new one. (`health` is moved by the `Health` process, `mental_health` by `Mind`.)
 
 A new stat is, in `biology/stats.rs`: a field; a line in `Stats::random`; a getter; an entry in
 `Stats::fields()` (the debug menu reads it); an entry in `Stats::calm()`; a `with_<stat>` test

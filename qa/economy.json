@@ -9,6 +9,7 @@
         "name": "district office",
         "map": {
           "version": 1,
+          "wasteland": false,
           "size": {
             "width": 18,
             "height": 12
@@ -454,10 +455,10 @@
       "press": "raise"
     },
     {
-      "expect_text": "food: $1.50"
+      "expect_text": "food: $3.50"
     },
     {
-      "expect_log": "the price of food is now $1.50"
+      "expect_log": "the price of food is now $3.50"
     },
     {
       "shot": "economy settings"
@@ -466,25 +467,25 @@
       "press": "raise"
     },
     {
-      "expect_text": "food: $2.00"
+      "expect_text": "food: $4.00"
     },
     {
       "press": "defaults"
     },
     {
-      "expect_text": "food: $1.00"
+      "expect_text": "food: $3.00"
     },
     {
       "press": "raise"
     },
     {
-      "expect_text": "food: $1.50"
+      "expect_text": "food: $3.50"
     },
     {
       "press": "lower"
     },
     {
-      "expect_text": "food: $1.00"
+      "expect_text": "food: $3.00"
     },
     {
       "press": "tax"
@@ -520,7 +521,7 @@
       "expect_text": "budget"
     },
     {
-      "expect_text": "$20.00"
+      "expect_text": "$10.00"
     },
     {
       "shot": "economy statistics"

@@ -590,6 +590,9 @@ pub trait GameEntity: Send + Sync {
         false
     }
 
+    /// Release a former companion. Kinds without companions have nothing to do.
+    fn clear_companion(&mut self) {}
+
     /// A test's way to make a dog this hungry, with nothing eaten.
     #[cfg(test)]
     fn starve_to(&mut self, hunger: f32) {

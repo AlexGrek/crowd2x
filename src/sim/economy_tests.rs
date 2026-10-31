@@ -37,11 +37,11 @@ fn a_working_day_pays_wages_and_care_and_the_accountant_reports_it() {
     for _ in 0..46_801 { process_pass(&mut state, dt); }
     assert_eq!(state.economy().account(guard).unwrap().cash, starting + Money::dollars(32));
     assert_eq!(state.economy().account(guard).unwrap().shifts, 0);
-    assert_eq!(state.economy().account(jobless).unwrap().cash, unemployed_cash + Money::dollars(20));
+    assert_eq!(state.economy().account(jobless).unwrap().cash, unemployed_cash + Money::dollars(10));
     let book = state.economy().book(2).unwrap();
     assert!(book.wages >= Money::dollars(40));
     assert_eq!(book.taxes, book.wages.percent(20));
-    assert_eq!(book.care, Money::dollars(20));
+    assert_eq!(book.care, Money::dollars(10));
     assert_eq!(state.economy().budget(), Money::dollars(6000) + state.economy().books().iter().map(|book| book.balance()).sum::<Money>());
     assert_eq!(state.economy().closed_through(), 1);
     assert!(state.log.drain().iter().any(|line| line.contains("closed the books for day 1")));

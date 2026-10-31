@@ -95,7 +95,9 @@ impl Experience {
             Event::Ingested(_) | Event::Relieved | Event::Slept { .. } | Event::Worked { .. } | Event::Treated { .. } => None,
             // A bite is nothing a body gets used to.
             Event::Bitten { .. } => None,
-            Event::Smelled { .. } => None,
+            // Nor is the air, a debt or a scare: the tenth fright of a night
+            // is no easier than the first.
+            Event::Smelled { .. } | Event::Worried { .. } | Event::Frightened => None,
             // Nor is a talk an experience: it is always with somebody, and
             // what that is worth is the relationship's, not a treat's.
             Event::Chatted | Event::SmallTalk => None,

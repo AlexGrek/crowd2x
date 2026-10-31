@@ -124,21 +124,27 @@ mod tests {
         rig_at(Point::new(5, 6), stored)
     }
 
+    /// `store.yaml`'s call level, in whole batches of the 100.
+    fn call_level() -> u32 {
+        crate::sim::superfridge::StoreRules::default().call_at as u32
+    }
+
     #[test]
     fn a_superfridge_at_the_call_level_or_under_calls_the_dispatch() {
-        let mut low = rig(30);
+        let mut low = rig(call_level());
         let mut task = Task::check_stock(FRIDGE, 0.5);
         assert_eq!(low.run(&mut task, 600), TaskResult::Success);
-        assert_eq!(low.effect, Effect::CallDispatch { at: FRIDGE }, "30% is the call level");
+        assert_eq!(low.effect, Effect::CallDispatch { at: FRIDGE }, "{}% is the call level", call_level());
     }
 
     #[test]
     fn a_superfridge_with_food_enough_is_only_looked_at() {
-        let mut full = rig(31);
+        let mut full = rig(call_level() + 1);
         let mut task = Task::check_stock(FRIDGE, 0.5);
         assert_eq!(full.run(&mut task, 600), TaskResult::Success);
         assert_eq!(full.effect, Effect::None);
-        assert!(full.world.log.drain().iter().any(|line| line.contains("checked the superfridge at 6, 6: 31% full")));
+        let said = format!("checked the superfridge at 6, 6: {}% full", call_level() + 1);
+        assert!(full.world.log.drain().iter().any(|line| line.contains(&said)));
     }
 
     #[test]

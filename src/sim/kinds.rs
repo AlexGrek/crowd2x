@@ -472,6 +472,10 @@ impl GameEntity for Human {
         self.brain.companion()
     }
 
+    fn clear_companion(&mut self) {
+        self.brain.clear_companion();
+    }
+
     fn set_companion(&mut self, companion: Uid) -> bool {
         self.brain.set_companion(companion);
         true
@@ -655,6 +659,10 @@ impl GameEntity for Dog {
 
     fn biology_mut(&mut self) -> Option<&mut Biology> {
         Some(&mut self.biology)
+    }
+
+    fn clear_companion(&mut self) {
+        self.brain.clear_companion();
     }
 
     fn set_companion(&mut self, companion: Uid) -> bool {

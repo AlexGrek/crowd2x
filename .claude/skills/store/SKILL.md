@@ -32,8 +32,8 @@ percentages outside 0..100 and nonpositive capacity, or a delivery size that doe
 | --- | --- | --- |
 | `capacity` | 1 | Normalized full reserve per superfridge |
 | `delivery size` | 0.01 | Reserve supplied by one warehouse meal batch |
-| `falls per meal` | 0.018 | Percent of total reserve capacity consumed per fridge meal |
-| `call at` | 30 | A keeper calls at or below this percentage in its own reserve |
+| `falls per meal` | 0.014 | Percent of total reserve capacity consumed per fridge meal |
+| `call at` | 40 | A keeper calls at or below this percentage in its own reserve; equal to `starts at`, so the reserve holds at its starting level |
 | `starts at` | 40 | Initial percentage when the map supplies no explicit stock |
 
 The default initial level is 0.4: forty physical delivery batches at 0.01 each.
@@ -47,7 +47,8 @@ refer to availability across all reserves.
 
 The economy is separate: a successful ordinary fridge take charges the
 human account at `economy.yaml`'s named price through `Effect::Buy`, once.
-Food and dog food default to $1, water to $0. Debt is allowed. Dogs have no
+Food defaults to $12.50 (priced to keep the budget level, see the `economy`
+skill), dog food to $0.50, water to $0. Debt is allowed. Dogs have no
 account; their direct meals still consume reserve stock. A pet owner's dog
 food purchase charges the owner. Simultaneous takes commit in slot order;
 a take after the last stock has gone returns no item and incurs no charge.
@@ -146,28 +147,46 @@ checks total reserve fullness and fridge availability;
 
 ## Balance at capacity 1
 
-One retail meal consumes 0.00018 reserve; a 0.01 delivery batch supports about
-55.56 meals. Full stock covers about 5,556 retail servings, and starting stock
-0.4 covers about 2,222. The warehouse's initial thirty batches add roughly
-1,667 servings of startup supply. The farm's first harvest is after three
+One retail meal consumes 0.00014 reserve; a 0.01 delivery batch supports about
+71.4 meals. Full stock covers about 7,143 retail servings, and starting stock
+0.4 covers about 2,857. The warehouse's initial thirty batches add roughly
+2,143 servings of startup supply. The farm's first harvest is after three
 world days. Two cookers can produce 160 batches across five eight-hour shifts
-per week before travel and need breaks, about 8,889 retail servings.
+per week before travel and need breaks, about 11,429 retail servings.
+
+**Holding the level** (retuned 2026-10-31 against seed 7 months in the lab).
+A district eats about 380 meals and 44 dog dinners a day, about six batches at
+0.014. Since a call is one batch and `call at` equals `starts at`, the reserve
+holds at 40%: 36–45% for the whole month, a few points under overnight while
+no courier is on duty. The first weekend is the tight spot. The food factory
+does not cook on Saturday or Sunday, and in week one it has made only about a
+dozen batches, so the warehouse's thirty plus that dozen must carry the shop
+until Monday. At 0.018 (7.6 batches a day) with `call at` 40, the warehouse ran
+dry from Saturday morning to Monday noon and the reserve fell from 41% to 26%.
+With the old `call at` 30 the reserve fell from 40% to 27% in two days and then
+stayed just under the call level all month. From week two production (70 to 85
+batches a week) is well over consumption (about 42), so the meal rack grows.
 
 At the hunger process's conservative no-sleep rate a human needs 2.5 meals a
-day: $2.50 at the $1 price, versus $32 net from a $40 low-tier shift or $20
-unemployment care. This leaves room for other expenses and unpaid days.
+day: $31.25 at $12.50, within the $32 net of a $40 low-tier shift; the $20
+unemployment care covers most of it and the rest is debt (allowed; an estate
+pays it back). In the retuned month about 80 of 170 humans, mostly the jobless,
+were in debt at any time.
 `normalized_shop_balance_covers_startup_production_and_affordable_food` checks
 three generated districts against startup coverage and weekly production,
-using three servings per resident per day (dogs included) as a safety margin.
+using three servings per resident per day (dogs included) as a safety margin,
+and that a day's food fits a low wage and costs at most twice the care package.
 The production calculation is a capacity bound; actual deliveries still
-require staffed, supplied factories and available couriers.
+require staffed, supplied factories and available couriers. The mechanics tests'
+`testing::store_world` pins the old rules (0.018, call at 30), so a retune of
+`store.yaml` changes only the tests that check the defaults.
 
 
 The capacity-one verification ran 1,472 Rust tests, the shop/empty-stock/
 three-day-district/economy/food-factory/steel-factory/save UI scenarios, and a
 release full-week district scenario. All passed. In the week-long seed-7 run,
-food remained available at every daily checkpoint; the final reserve was
-0.2479 / 1 with five warehouse batches remaining and food-factory output in
+food remained available at every daily checkpoint; the final reserve (at the
+old 0.018 and call at 30) was 0.2479 / 1 with five warehouse batches remaining and food-factory output in
 stock. The release simulation scaling test also passed (about 0.40 ms median
 per tick for 4,000 humans on this machine). Performance numbers are local
 observations, not fixed budgets or guarantees.

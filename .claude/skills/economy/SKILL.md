@@ -15,8 +15,26 @@ Death forfeits unpaid shifts and care days. Grants are excluded from daily balan
 `economy.yaml` is the single source of built-in defaults, parsed once through
 `LazyLock`. Wages and prices use catalogue names; every job and item must be
 present, and unknown names fail. Starting wages: $60 office/accountant/scrap/farmer,
-$100 king, $40 other jobs. Tax 20%, care $20/day, arrival grant $1000, starting
-cash $10?90, food $1 (a meal an outside worker keeps in its pocket is paid for at the fridge too), dog food $1, water free, payroll five world minutes/account.
+$100 king, $40 other jobs. Tax 20%, care $10/day, arrival grant $1000, starting
+cash $10-90, food $3, dog food $0.50, water free, payroll five world minutes/account.
+Care is $10/day, or $20/day for nobles.
+
+**Essentials fit inside care.** A fully awake human needs 2.5 meals/day:
+$7.50 at the default price. Even three meals and one pet dinner cost $9.50,
+leaving a margin under the reduced $10 care package. Debt now pressures mental
+health, so pricing food above care creates long-term harm for the unemployed.
+Low-tier wages stay $40 gross ($32 net), with weekends covered by weekday income.
+These defaults prioritize resident solvency; fridge sales alone no longer cover
+wages and care, and the district budget can decline. The previous $12.50 food /
+$20 care calibration held the district budget roughly level in seed 7, but
+charged the jobless more for food than their income. Saved games retain their
+own tariffs; use the economy menu's defaults to apply these rates there.
+
+Validation (seed 7, 28 days, 2026-10-31): `lab-runs/care-package-rebalance`
+finished with 2 residents in debt, jobless mental health 97.3, overall 93.9,
+and budget $125,154.50 from $183,000. Prior `mind-b` at $12.50 food / $20
+care ended with 84 in debt and jobless mental health 49.5. No starvation
+deaths in the new run; 20 deaths from deathdog bites and one from thirst.
 
 `Facilities.economy` is read through `Think.economy`. The world applies `Record`,
 `Payroll`, `Buy`, `CloseBooks` in slot order, after parallel react. Never mutate the

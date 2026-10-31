@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn a_collector_packs_a_meal_and_a_drink_before_it_sets_out_and_the_meal_costs_a_dollar() {
+    fn a_collector_packs_a_meal_and_a_drink_before_it_sets_out_and_pays_for_the_meal() {
         let mut world = yard(true);
         let mut human = collector(&mut world);
         for _ in 0..4000 {
@@ -260,8 +260,9 @@ mod tests {
         assert_eq!(human.inventory().count(ItemKind::Food), 1);
         assert_eq!(human.inventory().count(ItemKind::Water), 1);
         assert_eq!(human.carried(), None, "stowed, not held");
-        assert_eq!(world.economy.account(human.uid()).unwrap().cash, Money::dollars(9), "a meal is a dollar, a drink free");
-        assert!(world.log_contains("paid $1.00 for food"), "{:?}", world.lines());
+        let meal = world.economy.tariffs().price(ItemKind::Food);
+        assert_eq!(world.economy.account(human.uid()).unwrap().cash, Money::dollars(10) - meal, "a meal is paid for, a drink free");
+        assert!(world.log_contains(&format!("paid {meal} for food")), "{:?}", world.lines());
     }
 
     #[test]

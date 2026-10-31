@@ -302,6 +302,7 @@ pub enum ProcessId {
     Energy = 4,
     Satisfaction = 5,
     Health = 6,
+    Mind = 7,
 }
 
 /// How used to one experience a body is.

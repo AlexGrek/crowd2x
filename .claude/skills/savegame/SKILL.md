@@ -116,8 +116,8 @@ stays `Salvage(Timed)` = 10), `pb::World.bins` = 12. With the guards: `pb::JobKi
 `pb::TaskKind::KeepWatch(Timed)` = 14 (`Work { watch: true }`), and `pb::Workplace.start`
 (tag 3, `optional uint32`: a post is three workplaces, told apart by the shift's start hour;
 absent = 9, office hours, all an older save held). With health, death and the undertakers:
-`pb::ProcessId::Health` = 6 (an older save's units come back with it running, since `off`
-lists the processes off), `pb::Body.dead` (tag 6, absent = alive), `pb::JobKind::Undertaker` =
+`pb::ProcessId::Health` = 6 and, with the mind, `pb::ProcessId::Mind` = 7 (an older save's units
+come back with each running, since `off` lists the processes off), `pb::Body.dead` (tag 6, absent = alive), `pb::JobKind::Undertaker` =
 3, `pb::GoalId::Bury` = 10 (`BuryGoal` is a `pb::Executor::Seek`), `pb::TaskKind::TakeBody(Timed)`
 = 15 and `Cremate(Timed)` = 16, and the item `"body"` by name. `sim::Corpses` is **not saved**:
 `GameState::restore` rebuilds it from the dead entities (`Corpses::of`), and a dead unit's

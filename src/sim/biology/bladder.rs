@@ -104,7 +104,8 @@ impl Process for Bladder {
             // Nor does a day at the desk.
             Event::Worked { .. } | Event::Treated { .. } => {}
             Event::Bitten { .. } => {}
-            Event::Smelled { .. } => {}
+            // Nor the mind's business: the air, a debt, a scare.
+            Event::Smelled { .. } | Event::Worried { .. } | Event::Frightened => {}
         }
     }
 

@@ -18,14 +18,15 @@ runs a simulation, saved games (`.saves/*.savegame`, a zip of Protobuf files, lo
 main menu), and a scripted QA harness that drives all of it. The simulation is one
 `GameState` advanced by one function; every unit runs a brain (routines, goals, tasks,
 actions) over a body of switchable biological processes (hunger, thirst, bladder, fun,
-energy, satisfaction, health). A need left at its worst — starving, parched, spent — drains
+energy, satisfaction, health, mind). A need left at its worst — starving, parched, spent — drains
 health, and at none a unit dies: it lies where it fell (drawn turned 90°), thinks and moves no
 more. Each walks at a pace of its own, a little faster or slower than the next, and breaks
 into a run when what it is after is urgent — a need past 75, or late for its desk or post.
 Needs are slow (a day holds two or three meals), and **what a unit is doing holds**: only
 something wanted clearly more takes it off it — a need past 90 at work, danger. Fun is the
-least of its wants and never interrupts anything; a chat or a word in passing is fun too, and
-fun run under 10 wears its mental health down. Too spent to go on (95 tired) it lies down and
+least of its wants and never interrupts anything; a chat or a word in passing is fun too.
+Mental health is slow (days): joylessness, work done exhausted, a scare or a bite, debt and a
+stench wear it down; cheer (fun 50 or more) and work done rested mend it. Too spent to go on (95 tired) it lies down and
 sleeps where it stands; anybody asleep is drawn lying, like the dead, with zzz rising from it.
 Some have a job, nine to five, Monday to Friday (day 1 is a Monday):
 an office worker keeps its own desk in the bank; a scrap collector, seven to six, brings scrap
@@ -88,7 +89,7 @@ district: each one's own brain looks it over every 27 minutes, mops up public gr
 than 0.15, nearest first, and walks round when there is none.
 
 One resident in eight of a district has a pet dog that stays within range of its owner and roams
-freely there. It cannot feed itself: its owner takes dog food out of a fridge, a dollar, and gives
+freely there. It cannot feed itself: its owner takes dog food out of a fridge, fifty cents, and gives
 it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
 the cleaners.
 
@@ -149,7 +150,7 @@ to `screenshots/`.
 | Relationships: families, colleagues, chats between wanderers, small talk and its sparks, their chances and rules (`relationships.yaml`, the QA `relationships` step), the relationship tab | `relationships` (+ `brain-engineer`) |
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 | Dirt: stains on the ground and bodies, footsteps, trails, work grime, the wasteland's puddles, blood and pee, drying, the dirt dots on screen; the cleaners and their look over the district | `dirt` (+ `jobs`) |
-| Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($1), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
+| Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($0.50), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere

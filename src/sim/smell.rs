@@ -288,20 +288,21 @@ mod tests {
         assert_eq!(Smell::restore(&saved, &map, &doors).unwrap().save(), saved);
     }
 
+    /// Scent moves the mind as a rate: by how strong it is and how long it is
+    /// breathed — a sliver a look, where it was once a whole point a look and
+    /// swung a crowd from one end to the other in a day (`biology::mind`).
     #[test]
-    fn humans_gain_or_lose_exactly_one_point_on_each_low_priority_smell_check() {
+    fn humans_breathe_scent_into_their_mind_by_its_strength_and_the_time_breathed() {
         use crate::sim::{
             GameEntity,
             background::Priority,
+            biology::mind::HOURS_OF_SCENT,
+            clock::{HOUR, TIME_SCALE},
             testing::{World, needy_human},
         };
-        for (scent, change) in [
-            (0.0, 0.0),
-            (0.125, 1.0),
-            (10.0, 1.0),
-            (-0.125, -1.0),
-            (-10.0, -1.0),
-        ] {
+        const BEATS: u32 = 4;
+        let mut moved = Vec::new();
+        for scent in [0.0, 0.125, 10.0, -0.125, -10.0] {
             let at = Point::new(2, 2);
             let mut map = map();
             for cell in at.cardinal_neighbours() {
@@ -309,31 +310,27 @@ mod tests {
             }
             let mut world = World::new(map);
             let mut human = needy_human(at, 0.0, 0.0, 0.0);
+            // Fun between joyless and cheerful: the air is all that moves it.
             human
                 .biology_mut()
                 .unwrap()
-                .edit(|_| crate::sim::Stats::calm());
+                .edit(|_| crate::sim::Stats::calm().with_fun(30.0));
             world
                 .facilities
                 .smell
                 .release(&world.map, &world.facilities.doors, at, scent);
-            let mut changed = 0;
-            let mut previous = human.stats().mental_health();
-            for _ in 0..Priority::Low.period() {
-                world.step(&mut human);
-                let current = human.stats().mental_health();
-                if current != previous {
-                    changed += 1;
-                    assert_eq!(current - previous, change);
-                }
-                previous = current;
-            }
-            assert_eq!(human.stats().mental_health(), 50.0 + change);
-            assert_eq!(changed, usize::from(change != 0.0));
-            for _ in 0..Priority::Low.period() {
+            let ticks = BEATS * Priority::Low.period() as u32;
+            for _ in 0..ticks {
                 world.step(&mut human);
             }
-            assert_eq!(human.stats().mental_health(), 50.0 + 2.0 * change);
+            let change = human.stats().mental_health() - 50.0;
+            let breathed = ticks as f32 * world.dt * TIME_SCALE;
+            let most = scent.abs() / MAXIMUM * 100.0 / (HOURS_OF_SCENT * HOUR) * breathed;
+            assert_eq!(change.signum() * f32::from(change != 0.0), scent.signum() * f32::from(scent != 0.0), "scent {scent}: {change}");
+            assert!(change.abs() <= most + 1e-4, "scent {scent}: {change} over {breathed} world seconds, at most {most}");
+            moved.push(change.abs());
         }
+        assert!(moved[2] > 10.0 * moved[1] && moved[4] > 10.0 * moved[3], "stronger moves it more: {moved:?}");
+        assert!(moved[4] < 0.2, "four looks at the worst stench are a sliver, not four points: {moved:?}");
     }
 }

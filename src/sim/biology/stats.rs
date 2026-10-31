@@ -202,6 +202,12 @@ impl Stats {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_mental_health(mut self, mental_health: f32) -> Stats {
+        self.mental_health = mental_health;
+        self
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_satisfaction(mut self, satisfaction: f32) -> Stats {
         self.satisfaction = satisfaction;
         self

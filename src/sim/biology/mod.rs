@@ -60,6 +60,7 @@ pub mod energy;
 pub mod fun;
 pub mod health;
 pub mod hunger;
+pub mod mind;
 pub mod recollection;
 pub mod satisfaction;
 pub mod stats;
@@ -70,6 +71,7 @@ pub use energy::Energy;
 pub use fun::Fun;
 pub use health::Health;
 pub use hunger::Hunger;
+pub use mind::Mind;
 pub use recollection::{Experience, Recollection};
 pub use satisfaction::Satisfaction;
 pub use stats::Stats;
@@ -94,10 +96,13 @@ pub enum ProcessId {
     Energy = 4,
     Satisfaction = 5,
     Health = 6,
+    /// Mental health ([`Mind`]): after fun, energy and health, so it reads
+    /// the fun and tiredness a tick or an event has just left.
+    Mind = 7,
 }
 
 impl ProcessId {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
     pub const ALL: [ProcessId; ProcessId::COUNT] = [
         ProcessId::Hunger,
         ProcessId::Thirst,
@@ -106,6 +111,7 @@ impl ProcessId {
         ProcessId::Energy,
         ProcessId::Satisfaction,
         ProcessId::Health,
+        ProcessId::Mind,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -117,6 +123,7 @@ impl ProcessId {
             ProcessId::Energy => "energy",
             ProcessId::Satisfaction => "satisfaction",
             ProcessId::Health => "health",
+            ProcessId::Mind => "mind",
         }
     }
 
@@ -167,8 +174,17 @@ pub enum Event {
     Treated { hp: f32 },
     /// A toilet was used.
     Relieved,
-    /// Ambient scent noticed on the low-priority perception beat.
-    Smelled { value: f32 },
+    /// Ambient scent breathed, told on the brain's low beat: how strong
+    /// (negative a stench, positive flowers) and the **world** seconds the
+    /// beat covers, so what it does is a rate ([`Mind`]).
+    Smelled { value: f32, world_seconds: f32 },
+    /// Money owed weighing on it, told on the brain's low beat while it is in
+    /// debt: how deep, in dollars, and the **world** seconds the beat covers
+    /// ([`Mind`]).
+    Worried { debt: f32, world_seconds: f32 },
+    /// A scare: a deathdog seen outside the site, or somebody seen running
+    /// from one — once a fright, when the fear begins (`brain::alarm`).
+    Frightened,
     /// Something entertaining was done — a go on a computer.
     Entertained,
     /// Time was spent asleep. **How long**, in world seconds — not how much
@@ -259,6 +275,7 @@ pub struct Biology {
     energy: Energy,
     satisfaction: Satisfaction,
     health: Health,
+    mind: Mind,
 }
 
 impl Biology {
@@ -285,6 +302,7 @@ impl Biology {
             energy: Energy,
             satisfaction: Satisfaction,
             health: Health,
+            mind: Mind,
         }
     }
 
@@ -397,14 +415,15 @@ impl Biology {
             energy,
             satisfaction,
             health,
+            mind,
             recent: _,
         } = self;
-        (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction, health])
+        (stats, *switches, [hunger, thirst, bladder, fun, energy, satisfaction, health, mind])
     }
 
     /// Every process, read-only. Slot `i` is `ProcessId` `i`.
     fn processes(&self) -> [&dyn Process; ProcessId::COUNT] {
-        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy, &self.satisfaction, &self.health]
+        [&self.hunger, &self.thirst, &self.bladder, &self.fun, &self.energy, &self.satisfaction, &self.health, &self.mind]
     }
 
     /// The stats, which processes are running, and what each running process
@@ -456,6 +475,7 @@ impl Biology {
             energy: Energy,
             satisfaction: Satisfaction,
             health: Health,
+            mind: Mind,
         } = self;
         pb::Biology {
             stats: Some(stats.save()),
@@ -493,6 +513,7 @@ impl From<ProcessId> for pb::ProcessId {
             ProcessId::Energy => pb::ProcessId::Energy,
             ProcessId::Satisfaction => pb::ProcessId::Satisfaction,
             ProcessId::Health => pb::ProcessId::Health,
+            ProcessId::Mind => pb::ProcessId::Mind,
         }
     }
 }
@@ -507,6 +528,7 @@ impl From<pb::ProcessId> for ProcessId {
             pb::ProcessId::Energy => ProcessId::Energy,
             pb::ProcessId::Satisfaction => ProcessId::Satisfaction,
             pb::ProcessId::Health => ProcessId::Health,
+            pb::ProcessId::Mind => ProcessId::Mind,
         }
     }
 }
@@ -650,7 +672,7 @@ mod tests {
                 .find(|(name, _)| *name == "processes")
                 .map(|(_, value)| value)
         };
-        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy, satisfaction, health"));
+        assert_eq!(processes(&biology).as_deref(), Some("hunger, thirst, bladder, fun, energy, satisfaction, health, mind"));
 
         biology.set_running(ProcessId::Hunger, false);
         biology.set_running(ProcessId::Bladder, false);
@@ -658,6 +680,7 @@ mod tests {
         biology.set_running(ProcessId::Energy, false);
         biology.set_running(ProcessId::Satisfaction, false);
         biology.set_running(ProcessId::Health, false);
+        biology.set_running(ProcessId::Mind, false);
         assert_eq!(processes(&biology).as_deref(), Some("thirst"));
         assert_eq!(names(&biology), before, "the unit panel lays these out once");
     }

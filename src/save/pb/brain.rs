@@ -604,4 +604,6 @@ pub struct Medical {
     pub sick_day: Option<u32>,
     #[prost(uint32, tag = "3")]
     pub care_seen: u32,
+    #[prost(bool, tag = "4")]
+    pub mental_leave: bool,
 }

@@ -211,7 +211,15 @@ impl Routine {
             Routine::Ready(routine) => routine.arrange(ctx, goals),
             Routine::Hospital => {
                 let in_bed = ctx.think.hospital.bed_for(ctx.body.uid()).is_some();
-                ctx.memory.medical.arrange(ctx.think.clock.day(), in_bed, goals)
+                ctx.memory.medical.arrange(ctx.think.clock.day(), in_bed, goals);
+                // Seek cheer before boredom's ordinary threshold: it is what
+                // lets the mind mend, even when work no longer occupies it.
+                if ctx.memory.medical.mental_leave && !ctx.memory.medical.recovering
+                    && ctx.biology.is_some_and(|b| b.is_running(crate::sim::biology::ProcessId::Fun)
+                        && b.stats().fun() < crate::sim::biology::mind::CHEERFUL)
+                {
+                    goals.raise_to(super::GoalId::Play, super::routines::PLAYING);
+                }
             }
             Routine::Flee(routine) => routine.arrange(ctx, goals),
             Routine::Hunt(routine) => routine.arrange(ctx, goals),

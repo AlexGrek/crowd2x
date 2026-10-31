@@ -46,7 +46,8 @@ Metrics (`src/lab/metrics.rs` has the table) are flat names:
 - Jobs: `jobs.<job>`.
 - Money: `budget`, `cash`, `in debt`.
 - Activity: `goal.<goal>`, `asleep`, `outside`, `<job>.on shift`, `<job>.<goal>` (workers whose shift is due).
-- Bodies: `<stat>.avg`, `<stat>.min` over the living humans.
+- Bodies: `<stat>.avg`, `<stat>.min` over the living humans; `mental_health.employed.avg`,
+  `.jobless.avg`, `.in debt.avg`, and `mental_health.low` (how many are under 20).
 
 `in.*` is the throughput to watch: a store's stock goes up and down as it is filled and
 emptied, and a flow only goes up.
@@ -157,6 +158,30 @@ then the nearest is 278 cells from the bins (`scrap.nearest`), more than four ho
 Still open: heaps that never grow back, where the warehouse is against the heaps, deathdog
 lethality, and two bitten undertakers who died of thirst in the hospital, one after failing to
 reach a bed again and again (one in the first month too).
+
+## Worked example: deathdogs by day, and the budget (seed 7, 2026-10-31)
+
+Only "somebody died" fired, so the finds came from reading the series and `log.txt`.
+- *Deathdogs that never left.* `alive.deathdog` at noon was 1-5 on 19 days of 28, and
+  `log.txt` had 145 `panicked` lines by daylight. At a snapshot by day, `units deathdogs` and
+  `unit` showed `depart / none`, `leaving for nowhere yet`, no task. To see why, a throwaway
+  `#[cfg(test)]` module in `src/lab/` loaded the snapshot (`world::load`, made `pub(super)`
+  for the probe and put back after) and printed
+  `map.is_passable` round each dog's way out: all water. Fixed in `DepartGoal::pick`
+  (`deathdogs` skill); the next month had none out by day.
+- *The budget.* `budget` fell $29k a week. Tallying `paid ... for food` and the payroll and care
+  lines a day in `log.txt` gave the loop (`economy` skill). Food at $12.50 held it level.
+- *The superfridge.* `store.superfridge` sat just under `call at` all month. Raising `call at`
+  to `starts at` held it at 40, but the hourly series showed the first weekend's dip: `store.meal
+  rack` at 0 while the food factory was off. Lowering `falls per meal` fixed that (`store` skill).
+- Still open: guards stand one cell outside the wall at their posts (89 bites on 18 of 24
+  guards a month, and their dogs follow), wanderers random-walk out through the gates at night
+  (`WanderGoal::pick` ignores the edge and the hour), undertakers fetch bodies off the site at
+  night, and a dog whose owner dies is never fed or adopted again.
+- Lab gaps: `in.superfridge` is always 0 (deliveries log "brought N food into the
+  superfridge", which `flow` does not read), and `out.superfridge` too (fridge meals log no
+  take). Timings: check for other heavy processes first. A local LLM server once made a month
+  run at a third of its speed.
 
 ## Code
 

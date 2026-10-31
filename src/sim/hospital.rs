@@ -9,21 +9,41 @@ use crate::map::{Map, ObjectLayer, Point};
 use crate::save::{Invalid, invalid, pb};
 
 pub const ADMISSION_HEALTH: f32 = 90.0;
+/// Start mental health leave at this level; stay off until substantially better.
+pub const CRITICAL_MENTAL_HEALTH: f32 = 20.0;
+pub const RETURN_MENTAL_HEALTH: f32 = 60.0;
 
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Medical {
     pub recovering: bool,
+    pub mental_leave: bool,
     pub sick_day: Option<u32>,
     care_seen: u32,
 }
 
 impl Medical {
     pub fn on_leave(&self, day: u32) -> bool {
-        self.recovering || self.sick_day == Some(day)
+        self.recovering || self.mental_leave || self.sick_day == Some(day)
     }
 
     pub fn update(&mut self, ctx: &Think<'_>, uid: Uid, biology: Option<&mut Biology>) {
         let Some(biology) = biology else { return };
+        if biology.is_running(super::biology::ProcessId::Mind) {
+            let mental_health = biology.stats().mental_health();
+            if !self.mental_leave && mental_health <= CRITICAL_MENTAL_HEALTH {
+                ctx.log.unit(uid, "taking sick leave for mental health");
+                self.mental_leave = true;
+            }
+            if self.mental_leave {
+                self.sick_day = Some(ctx.clock.day());
+                if mental_health >= RETURN_MENTAL_HEALTH {
+                    self.mental_leave = false;
+                    ctx.log.unit(uid, "mental health recovered; sick leave today");
+                }
+            }
+        } else {
+            self.mental_leave = false;
+        }
         if !biology.is_running(super::biology::ProcessId::Health) {
             self.recovering = false;
             self.care_seen = ctx.hospital.bed_for(uid).map_or(0, |bed| bed.care);
@@ -76,11 +96,13 @@ impl Medical {
     pub(crate) fn save(&self) -> pb::Medical {
         let Self {
             recovering,
+            mental_leave,
             sick_day,
             care_seen,
         } = *self;
         pb::Medical {
             recovering,
+            mental_leave,
             sick_day,
             care_seen,
         }
@@ -89,6 +111,7 @@ impl Medical {
     pub(crate) fn restore(saved: Option<&pb::Medical>) -> Self {
         saved.map_or(Self::default(), |s| Self {
             recovering: s.recovering,
+            mental_leave: s.mental_leave,
             sick_day: s.sick_day,
             care_seen: s.care_seen,
         })
@@ -225,6 +248,93 @@ mod tests {
             }
         }
         panic!("never reached bed: {:?}", h.brain().debug_fields());
+    }
+
+    fn distressed(mental_health: f32) -> Human {
+        let mut human = wounded(100.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Mind, true);
+        human.biology_mut().unwrap().edit(|s| s.with_mental_health(mental_health).with_fun(40.0));
+        assert!(human.hire(Job::office(Point::new(1, 1))));
+        human
+    }
+
+    #[test]
+    fn critical_mental_health_takes_leave_until_recovered_and_keeps_the_last_day_off() {
+        let mut world = World::new(map());
+        let mut human = distressed(CRITICAL_MENTAL_HEALTH + 1.0);
+        world.step(&mut human);
+        assert!(!human.is_on_sick_leave(world.clock));
+        human.biology_mut().unwrap().edit(|s| s.with_mental_health(CRITICAL_MENTAL_HEALTH));
+        world.step(&mut human);
+        assert!(human.is_on_sick_leave(world.clock));
+        assert_ne!(human.current_goal(), Some(GoalId::Work));
+        assert!(!human.brain().is_hospital_patient());
+        assert!(world.hospital.bed_for(human.uid()).is_none());
+        // Leave persists through midnight and through a partial recovery.
+        world.clock = Clock::after_watching(((DAY + 10.0 * HOUR) as f64 - OPENING_TIME) / TIME_SCALE as f64);
+        human.biology_mut().unwrap().edit(|s| s.with_mental_health(RETURN_MENTAL_HEALTH - 1.0));
+        world.step(&mut human);
+        assert!(human.brain().memory().medical.mental_leave);
+        assert_ne!(human.current_goal(), Some(GoalId::Work));
+        human.biology_mut().unwrap().edit(|s| s.with_mental_health(RETURN_MENTAL_HEALTH));
+        world.step(&mut human);
+        assert!(!human.brain().memory().medical.mental_leave);
+        assert!(human.is_on_sick_leave(world.clock));
+        world.clock = Clock::after_watching(((2.0 * DAY + 10.0 * HOUR) as f64 - OPENING_TIME) / TIME_SCALE as f64);
+        world.step(&mut human);
+        assert!(!human.is_on_sick_leave(world.clock));
+        assert_eq!(human.current_goal(), Some(GoalId::Work));
+    }
+
+    #[test]
+    fn mental_leave_survives_saving_and_older_medical_records_default_to_no_mental_leave() {
+        use prost::Message;
+        let mut world = World::new(map());
+        let mut human = distressed(10.0);
+        world.step(&mut human);
+        let medical = human.brain().memory().medical;
+        let saved = pb::Medical::decode(medical.save().encode_to_vec().as_slice()).unwrap();
+        let restored = Medical::restore(Some(&saved));
+        assert_eq!(restored, medical);
+        assert!(restored.on_leave(world.clock.day() + 1));
+        // Wire fields 1, 2 and 3 only, as in older saves.
+        let old = pb::Medical::decode(&[8u8, 0, 16, 3, 24, 0][..]).unwrap();
+        assert!(!Medical::restore(Some(&old)).mental_leave);
+        assert!(!Medical::restore(None).mental_leave);
+    }
+
+    #[test]
+    fn disabling_mind_releases_mental_leave_even_if_physical_health_is_disabled() {
+        let mut world = World::new(map());
+        let mut human = distressed(0.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Health, false);
+        world.step(&mut human);
+        assert!(human.brain().memory().medical.mental_leave);
+        human.biology_mut().unwrap().set_running(ProcessId::Mind, false);
+        world.step(&mut human);
+        assert!(!human.brain().memory().medical.mental_leave);
+        // The day already taken off still belongs to sick leave.
+        assert!(human.is_on_sick_leave(world.clock));
+    }
+
+    #[test]
+    fn mental_leave_seeks_cheer_before_normal_boredom_and_the_mind_recovers() {
+        let mut map = map();
+        prop_at(&mut map, "tv", Point::new(3, 3));
+        let mut world = World::new(map);
+        world.dt = 0.25;
+        let mut human = distressed(10.0);
+        human.biology_mut().unwrap().set_running(ProcessId::Fun, true);
+        human.biology_mut().unwrap().edit(|s| s.with_fun(49.0));
+        world.step(&mut human);
+        assert_eq!(human.current_goal(), Some(GoalId::Play));
+        for _ in 0..20000 {
+            world.step(&mut human);
+            if !human.brain().memory().medical.mental_leave { break; }
+        }
+        assert!(human.stats().mental_health() >= RETURN_MENTAL_HEALTH, "{:?}", human.brain_fields());
+        assert!(!human.brain().memory().medical.mental_leave);
+        assert!(world.log_contains("mental health recovered"));
     }
 
     #[test]

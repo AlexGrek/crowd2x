@@ -159,13 +159,13 @@ const SMALLTALK_STREAM: u64 = 0x736d_616c_6c74_616c;
 /// On a look round, awake: with somebody awake close by — within the small
 /// talk reach, a person, in no chat or small talk of its own — a person in
 /// neither may start a small talk, at the smalltalks an hour spread over the
-/// looks ([`Rules::smalltalk_chance`]), and not within the minutes between
+/// looks, scaled by mental health (zero at 0, full rate at 100), and not within the minutes between
 /// smalltalks of the last it started. Whatever it is doing: at work, on its
 /// way, waiting. One roll a look, however many are near; the first of them
 /// seen is who it talks to.
 ///
 /// [`Rules::smalltalk_chance`]: crate::sim::relationships::Rules::smalltalk_chance
-pub(super) fn strike_up(ctx: &Think<'_>, body: &Body, memory: &mut Memory, sightings: &Sightings, elapsed: f32) {
+pub(super) fn strike_up(ctx: &Think<'_>, body: &Body, memory: &mut Memory, sightings: &Sightings, elapsed: f32, mental_health: f32) {
     if memory.smalltalk().is_some() || memory.chat().is_some() {
         return;
     }
@@ -176,7 +176,7 @@ pub(super) fn strike_up(ctx: &Think<'_>, body: &Body, memory: &mut Memory, sight
         return;
     }
     let roll: f32 = tick_rng(me, ctx.tick ^ SMALLTALK_STREAM).random();
-    if roll >= rules.smalltalk_chance(elapsed) {
+    if roll >= rules.smalltalk_chance(elapsed, mental_health) {
         return;
     }
     let here = body.center_position();
@@ -483,10 +483,30 @@ mod tests {
             .filter(|_| {
                 world.tick += 1;
                 let mut memory = Memory::new();
-                strike_up(&world.ctx(), &me(), &mut memory, &seen(cell), 60.0);
+                strike_up(&world.ctx(), &me(), &mut memory, &seen(cell), 60.0, 100.0);
                 memory.smalltalk().is_some()
             })
             .count()
+    }
+
+    #[test]
+    fn poorer_mental_health_starts_fewer_smalltalks_and_zero_starts_none() {
+        let mut world = world(10.0, None);
+        world.society.change_rule(Rule::SmalltalksAnHour, 10.0);
+        let count = |world: &mut World, mental_health| {
+            (0..4000).filter(|tick| {
+                world.tick = *tick;
+                let mut memory = Memory::new();
+                strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0, mental_health);
+                memory.smalltalk().is_some()
+            }).count()
+        };
+        let well = count(&mut world, 100.0);
+        let low = count(&mut world, 25.0);
+        assert!((550..800).contains(&well), "{well}");
+        assert!((100..240).contains(&low), "{low}");
+        assert!(low < well / 2);
+        assert_eq!(count(&mut world, 0.0), 0);
     }
 
     #[test]
@@ -500,7 +520,7 @@ mod tests {
         let mut world = world(10.0, None);
         world.society.change_rule(Rule::SmalltalksAnHour, 1000.0);
         let mut memory = chatting(Phase::Talking, 10.0);
-        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0, 100.0);
         assert!(memory.smalltalk().is_none());
     }
 
@@ -510,10 +530,10 @@ mod tests {
         world.society.change_rule(Rule::SmalltalksAnHour, 1000.0);
         let mut memory = Memory::new();
         memory.started_smalltalk((20.0 * MINUTE) as f64);
-        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0, 100.0);
         assert!(memory.smalltalk().is_none(), "twenty minutes since the last");
         world.clock = Clock::after_watching((51.0 * MINUTE / TIME_SCALE) as f64);
-        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0);
+        strike_up(&world.ctx(), &me(), &mut memory, &seen(OTHER), 60.0, 100.0);
         assert_eq!(memory.smalltalk().map(|talk| (talk.with, talk.answered)), Some((other(), false)));
     }
 

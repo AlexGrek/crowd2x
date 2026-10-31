@@ -256,6 +256,43 @@ fn a_person_who_sees_a_deathdog_runs_in_flat_out_shelters_and_calms_down() {
     assert_ne!(human.brain().top_goal(), GoalId::Flee, "the fright is over");
 }
 
+/// A scare costs the mind `FRIGHT`, once a fright: the deathdog seen again
+/// look after look while it runs is the same fright. Somebody inside sees one
+/// and is not scared at all.
+#[test]
+fn a_scare_costs_the_mind_once_a_fright_and_nothing_inside() {
+    use crate::sim::biology::mind::FRIGHT;
+    use crate::sim::Stats;
+    for outside in [true, false] {
+        let mut map = endless(Size::new(12, 12), 6);
+        if !outside {
+            // Walled all round, so nobody inside wanders out.
+            for cell in map.site().points().collect::<Vec<_>>() {
+                if map.site().on_edge(cell) {
+                    map.set_terrain(cell, crate::map::WALL);
+                }
+            }
+        }
+        let mut world = World::new(map);
+        world.clock = at(23.0);
+        let cell = if outside { Point::new(-8, 6) } else { Point::new(6, 6) };
+        let mut human = needy_human(cell, 0.0, 0.0, 0.0);
+        let biology = human.biology_mut().unwrap();
+        for process in ProcessId::ALL {
+            biology.set_running(process, process == ProcessId::Mind);
+        }
+        // Fun between joyless and cheerful: the scare is all that moves it.
+        biology.edit(|_| Stats::calm().with_fun(30.0));
+        let _ = world.occupancy.claim(cell.offset(0, -3), Uid::new(EntityType::Deathdog, 11));
+        for _ in 0..600 {
+            world.step(&mut human);
+        }
+        let expected = if outside { 50.0 - FRIGHT } else { 50.0 };
+        assert_eq!(world.log_contains("panicked"), outside);
+        assert_eq!(human.stats().mental_health(), expected, "outside: {outside}");
+    }
+}
+
 /// Panic spreads by sight: somebody outside who sees only a person running
 /// in a panic panics too. Somebody inside sees a deathdog and stays calm.
 #[test]
@@ -365,6 +402,40 @@ fn by_day_a_deathdog_walks_off_and_leaves_driven_as_the_game_drives_it() {
     spawn_pass(&mut state, &input);
     process_pass(&mut state, DT);
     assert!(state.entities().get(human).is_none(), "a body taken up leaves with the two passes alone");
+}
+
+/// A lake across the way out does not keep a deathdog in by day: where every
+/// cell it would head for straight out is water, it swings round the site
+/// for a way past the lake's side, and is gone. (Seed 7's district, a month:
+/// one to five of them stood all day where a lake lay on the line out, 19
+/// days in 28, and frightened whoever was outside.)
+#[test]
+fn a_lake_across_the_way_out_does_not_keep_a_deathdog_in_by_day() {
+    use crate::sim::brain::goals::depart::{way_out, BEYOND, JITTER};
+    // A seed and a cell out in the wasteland whose line out lands in water,
+    // all of it, wherever the jitter puts it.
+    let found = (0..200u64).find_map(|seed| {
+        let map = endless(Size::new(10, 10), seed);
+        let site = map.site();
+        let ring = site.grown(16);
+        ring.points().filter(|&cell| ring.on_edge(cell)).find_map(|here| {
+            let away = way_out(site, here, DEPART_DISTANCE + BEYOND, 0.0);
+            let drowned = (-JITTER..=JITTER).all(|dy| (-JITTER..=JITTER).all(|dx| !map.is_passable(away.offset(dx, dy))));
+            (drowned && map.is_passable(here) && map.navigation().is_outside(here)).then_some((seed, here))
+        })
+    });
+    let (seed, here) = found.expect("no lake across a way out in 200 seeds");
+    let mut state = GameState::new(endless(Size::new(10, 10), seed), seed);
+    let dog = state.spawn(EntityType::Deathdog, here);
+    let input = Input::new();
+    let mut ticks = 0;
+    while state.entities().get(dog).is_some() {
+        spawn_pass(&mut state, &input);
+        process_pass(&mut state, DT);
+        ticks += 1;
+        assert!(ticks < 12_000, "seed {seed}: still here by day, from {here:?} to {:?}", state.position_of(dog));
+    }
+    assert!(state.log.drain().iter().any(|line| line.contains("went back into the wasteland")));
 }
 
 /// Nobody inside is ever bitten: a crowd wandering a site at night, with

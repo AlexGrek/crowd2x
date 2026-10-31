@@ -272,6 +272,7 @@ pub fn needy_human(cell: Point, hunger: f32, thirst: f32, bladder: f32) -> Human
     human.set_bladder(bladder);
     human.set_fun(100.0);
     human.set_stamina(100.0);
+    human.biology_mut().unwrap().edit(|s| s.with_mental_health(100.0));
     human
 }
 
@@ -382,6 +383,11 @@ pub fn store_world(stock: u32, meals: u32, seed: u64) -> (super::GameState, [Uid
     assert!(map.set_initial_stock(Point::new(2, 5), meals));
     crate::map::utilities::serve_everything(&mut map, Point::new(0, 13), Point::new(17, 13));
     let mut state = super::GameState::new(map, seed);
+    // The shop's workings, not its tuning: the rules these worlds' tests are
+    // written against, whatever `store.yaml` says now.
+    state.set_store_rules(super::superfridge::StoreRules {
+        capacity: 1.0, delivery_size: 0.01, falls_per_meal: 0.018, call_at: 30.0, starts_at: 40.0,
+    });
     let people = std::array::from_fn(|i| state.spawn_commoner(Point::new(7 + i as i32, 8)));
     let mut input = super::Input::new();
     for uid in people {

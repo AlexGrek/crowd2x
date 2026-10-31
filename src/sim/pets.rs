@@ -202,6 +202,50 @@ impl Bonds {
     }
 }
 
+/// Rehome orphaned pets after the world settles deaths, outside the parallel
+/// rounds. Bonds supply only pets, so a normal tick never searches the crowd.
+impl super::GameState {
+    pub(super) fn rehome_pets(&mut self) {
+        use super::uid::EntityType;
+
+        for index in 0..self.facilities.bonds.sorted.len() {
+            let bond = self.facilities.bonds.sorted[index];
+            if bond.who.kind() != Some(EntityType::Dog) {
+                continue;
+            }
+            let Some(dog) = self.entities.get(bond.who) else { continue };
+            if dog.is_dead() || dog.companion() != Some(bond.with) {
+                continue;
+            }
+            if self.entities.get(bond.with).is_some_and(|owner| !owner.is_dead()) {
+                continue;
+            }
+            // Try on the death tick, then periodically while nobody is free.
+            // The old companion is saved already: retries survive a reload.
+            if self.facilities.bonds.get(bond.with).is_none() && !self.tick.is_multiple_of(64) {
+                continue;
+            }
+            let at = dog.center_position();
+            let adopter = self.entities.iter()
+                .filter(|entity| entity.kind() == Some(EntityType::Human)
+                    && !entity.is_dead() && entity.companion().is_none())
+                .min_by_key(|entity| (at.chebyshev_distance(entity.center_position()), entity.uid()))
+                .map(|entity| (entity.uid(), entity.body().home()));
+            let Some((owner, key)) = adopter else { continue };
+            if let Some(former) = self.entities.get_mut(bond.with) {
+                if former.companion() == Some(bond.who) {
+                    former.clear_companion();
+                }
+            }
+            let dog = self.entities.get_mut(bond.who).unwrap();
+            dog.set_companion(owner);
+            dog.body_mut().set_home(key);
+            self.entities.get_mut(owner).unwrap().set_companion(bond.who);
+            self.log.related(owner, bond.who, format!("{owner} adopted the dog {}", bond.who));
+        }
+    }
+}
+
 /// A meal served: `by` gave `dog` a dog food.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Feeding {
@@ -308,6 +352,93 @@ pub(crate) mod rig {
 mod tests {
     use super::*;
     use crate::sim::uid::EntityType;
+
+    fn adoption_world() -> super::super::GameState {
+        use crate::map::{Map, Size, FLOOR};
+        super::super::GameState::new(Map::new(Size::new(20, 20), FLOOR), 7)
+    }
+
+    fn step(state: &mut super::super::GameState) {
+        super::super::process_pass(state, 1.0 / 60.0);
+    }
+
+    #[test]
+    fn a_dying_owners_dog_is_adopted_by_the_nearest_free_person() {
+        let mut state = adoption_world();
+        let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+        let dog = state.adopt_dog(owner).unwrap();
+        let far = state.spawn(EntityType::Human, Point::new(18, 18));
+        let near = state.spawn(EntityType::Human, Point::new(6, 5));
+        let occupied = state.spawn(EntityType::Human, Point::new(4, 5));
+        let other_dog = state.adopt_dog(occupied).unwrap();
+        let key = crate::sim::property::PropertyId::new(2);
+        state.entity_mut(near).unwrap().body_mut().set_home(key);
+        let health = state.entities().get(dog).unwrap().biology().unwrap().stats().health();
+        state.entity_mut(dog).unwrap().starve_to(77.0);
+        state.entity_mut(owner).unwrap().biology_mut().unwrap().edit(|s| s.with_health(0.0).with_hunger(100.0).with_thirst(100.0));
+        step(&mut state);
+        assert!(state.entities().get(owner).unwrap().is_dead());
+        assert_eq!(state.entities().get(owner).unwrap().companion(), None);
+        assert_eq!(state.entities().get(near).unwrap().companion(), Some(dog));
+        let pet = state.entities().get(dog).unwrap();
+        assert_eq!(pet.companion(), Some(near));
+        assert_eq!(pet.body().home(), key);
+        assert_eq!(pet.biology().unwrap().stats().health(), health);
+        assert!(pet.bond(&super::super::Think::new(&state.map, &state.occupancy, &state.log, &state.facilities, 0.0, state.tick, state.clock())).unwrap().hunger >= 77.0);
+        assert_eq!(state.entities().get(far).unwrap().companion(), None);
+        assert_eq!(state.entities().get(occupied).unwrap().companion(), Some(other_dog));
+        assert_eq!(state.len(), 6, "the same dogs, no replacements spawned");
+        assert!(state.log.drain().iter().any(|line| line.contains(&format!("{near} adopted the dog {dog}"))));
+    }
+
+    #[test]
+    fn adoption_ties_are_deterministic_in_the_parallel_rounds() {
+        let simulate = || {
+            let mut state = adoption_world();
+            let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+            let dog = state.adopt_dog(owner).unwrap();
+            let at = state.entities().get(dog).unwrap().center_position();
+            let a = state.spawn(EntityType::Human, at.offset(2, 0));
+            let b = state.spawn(EntityType::Human, at.offset(0, 2));
+            for _ in 0..70 { state.spawn(EntityType::Human, Point::new(18, 18)); }
+            state.entity_mut(owner).unwrap().biology_mut().unwrap()
+                .edit(|s| s.with_health(0.0).with_hunger(100.0).with_thirst(100.0));
+            step(&mut state);
+            assert_eq!(state.entities().get(dog).unwrap().companion(), Some(a.min(b)));
+            state.entities().iter().map(|e| (e.uid(), e.save())).collect::<Vec<_>>()
+        };
+        assert_eq!(simulate(), simulate());
+    }
+
+    #[test]
+    fn an_orphan_waits_for_an_adopter_and_strays_are_left_alone() {
+        let mut state = adoption_world();
+        let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+        let dog = state.adopt_dog(owner).unwrap();
+        let stray = state.spawn(EntityType::Dog, Point::new(12, 12));
+        state.despawn(owner);
+        for _ in 0..200 { step(&mut state); }
+        assert_eq!(state.entities().get(dog).unwrap().companion(), Some(owner));
+        let adopter = state.spawn(EntityType::Human, Point::new(8, 8));
+        for _ in 0..64 { step(&mut state); }
+        assert_eq!(state.entities().get(dog).unwrap().companion(), Some(adopter));
+        assert_eq!(state.entities().get(adopter).unwrap().companion(), Some(dog));
+        assert_eq!(state.entities().get(stray).unwrap().companion(), None);
+    }
+
+    #[test]
+    fn dead_dogs_are_never_adopted_and_living_owners_keep_their_pets() {
+        let mut state = adoption_world();
+        let owner = state.spawn(EntityType::Human, Point::new(5, 5));
+        let dog = state.adopt_dog(owner).unwrap();
+        let other = state.spawn(EntityType::Human, Point::new(6, 6));
+        for _ in 0..64 { step(&mut state); }
+        assert_eq!(state.entities().get(dog).unwrap().companion(), Some(owner));
+        state.entity_mut(dog).unwrap().body_mut().set_dead();
+        state.despawn(owner);
+        for _ in 0..64 { step(&mut state); }
+        assert_eq!(state.entities().get(other).unwrap().companion(), None);
+    }
 
     #[test]
     fn a_dog_gets_hungrier_with_the_hours_and_never_past_starving() {

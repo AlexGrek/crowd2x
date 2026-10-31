@@ -4,7 +4,7 @@
 //! ([`KeepRoutine`](super::super::routines::KeepRoutine)) this goal does what
 //! eating does for a person, with a different dinner: **walk beside the
 //! nearest fridge it may use, open it, take dog food out of it** — which costs
-//! what dog food costs (`economy.yaml`, a dollar), like any other thing taken
+//! what dog food costs (`economy.yaml`, fifty cents), like any other thing taken
 //! from a fridge — **close it, and give it to the dog**.
 //!
 //! The dog is not a place: it moves, so it is not planned for before the food
@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn an_owner_buys_dog_food_for_a_dollar_and_feeds_its_hungry_dog() {
+    fn an_owner_buys_dog_food_for_fifty_cents_and_feeds_its_hungry_dog() {
         let (mut world, mut owner, mut dog) = kennel(80.0);
         for _ in 0..4000 {
             tick(&mut world, &mut owner, &mut dog);
@@ -249,8 +249,8 @@ mod tests {
             }
         }
         assert!(world.log_contains(&format!("{} fed {}", owner_uid(), dog_uid())), "{:?}", world.lines());
-        assert!(world.log_contains("paid $1.00 for dog food"), "{:?}", world.lines());
-        assert_eq!(world.economy.account(owner_uid()).unwrap().cash, Money::dollars(9));
+        assert!(world.log_contains("paid $0.50 for dog food"), "{:?}", world.lines());
+        assert_eq!(world.economy.account(owner_uid()).unwrap().cash, Money::dollars(10) - world.economy.tariffs().price(ItemKind::DogFood));
         assert!(dog.gut().hunger() < 50.0, "still {} hungry", dog.gut().hunger());
         assert!(dog.gut().digesting() > 0.0, "the meal is inside it");
         assert_eq!(owner.carried(), None, "the dog food was given, not kept");
@@ -279,7 +279,7 @@ mod tests {
             tick(&mut world, &mut owner, &mut dog);
         }
         assert_eq!(world.lines().iter().filter(|line| line.contains("for dog food")).count(), 1, "{:?}", world.lines());
-        assert_eq!(world.economy.account(owner_uid()).unwrap().cash, Money::dollars(9));
+        assert_eq!(world.economy.account(owner_uid()).unwrap().cash, Money::dollars(10) - world.economy.tariffs().price(ItemKind::DogFood));
     }
 
     #[test]
