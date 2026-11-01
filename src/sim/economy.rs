@@ -148,7 +148,7 @@ impl Sum for Money {
 }
 
 /// The items a fridge sells: what the economy menu prices.
-pub const SOLD: [ItemKind; 3] = [ItemKind::Food, ItemKind::Water, ItemKind::DogFood];
+pub const SOLD: [ItemKind; 4] = [ItemKind::Food, ItemKind::Water, ItemKind::DogFood, ItemKind::FlowerVase];
 
 /// The numbers an economy is run by. Every one is a default in
 /// `economy.yaml` ([`Tariffs::default`]), and every one can be changed while
@@ -274,7 +274,9 @@ impl Tariffs {
             return Err("minutes per account: an account takes a minute at least".to_string());
         }
         let wages = by_name(&file.wages, "wages", &JobKind::ALL.map(JobKind::name), money)?;
-        let prices = by_name(&file.prices, "prices", &ItemKind::ALL.map(ItemKind::name), money)?;
+        let mut prices_file = file.prices.clone();
+        prices_file.entry("flower vase".to_string()).or_insert(20.0);
+        let prices = by_name(&prices_file, "prices", &ItemKind::ALL.map(ItemKind::name), money)?;
         let starting_cash = (money("starting cash", file.starting_cash.0)?, money("starting cash", file.starting_cash.1)?);
         if starting_cash.0 > starting_cash.1 {
             return Err(format!("starting cash: {} is more than {}", starting_cash.0, starting_cash.1));

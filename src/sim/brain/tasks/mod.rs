@@ -103,6 +103,9 @@ pub use work::Work;
 
 use crate::sim::biology::Experience;
 
+pub mod vase;
+pub use vase::{BuyVase, PlaceVase};
+
 use super::task::{tasks, TaskCtx};
 
 tasks! {
@@ -155,6 +158,8 @@ tasks! {
     Decree,
     WriteNews,
     Phone,
+    BuyVase,
+    PlaceVase,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

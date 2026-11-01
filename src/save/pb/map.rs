@@ -25,6 +25,9 @@ pub struct SiteMap {
     /// Authored supplies for a new game; current supplies are in world.pb.
     #[prost(message, repeated, tag = "8")]
     pub initial_stock: Vec<super::Bin>,
+    /// Preserve map changes relative to suspended route searches.
+    #[prost(uint64, optional, tag = "9")]
+    pub navigation_revision: Option<u64>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

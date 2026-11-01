@@ -142,6 +142,7 @@ pub mod dispatch;
 pub mod door;
 pub mod dirt;
 pub mod smell;
+pub mod decor;
 pub mod sound;
 pub mod news;
 mod soiling;
@@ -1308,6 +1309,7 @@ impl GameState {
         }
         // A town keeps pets, once everybody is in: after the last arrival, so
         // nobody's roll depends on whether somebody before it has a dog.
+        self.furnish_noble_homes();
         if self.facilities.properties.len() >= feature::TOWN_HOMES {
             self.adopt_pets();
         }
@@ -1578,6 +1580,7 @@ impl GameState {
                 self.occupancy.release(gone.center_position(), uid);
                 // Its bed goes back to be given to the next arrival, and its
                 // desk.
+                self.facilities.decor.release(uid);
                 self.facilities.homes.release(uid);
                 self.facilities.workplaces.release(uid);
                 self.facilities.outposts.release(uid);
@@ -2447,6 +2450,9 @@ fn world_step(
     // This also leaves the unit's own effect free for work or death.
     for (_, entity) in table.iter_slots_mut() {
         soiling::settle(entity, facilities, log);
+        if entity.is_dead() || facilities.decor.receipt(entity.uid()).is_some_and(|r| entity.body().home() != Some(r.home)) {
+            decor::rehome(entity, map, facilities, occupancy);
+        }
     }
     // Last tick's bites have been felt, in the reactions just run.
     facilities.wounds.begin_tick();
@@ -4900,7 +4906,13 @@ mod tests {
     #[test]
     fn a_district_s_morning_cleaner_mops_up_its_public_ground() {
         let district = crate::map::district::generate(7);
-        let mut state = GameState::new(district.map.clone(), 7);
+        // Keep this mop scheduling test independent of discretionary shopping traffic.
+        // Shopping and shared public routes have separate furnishing and crowd coverage.
+        let mut map = district.map.clone();
+        let shelves: Vec<_> = map.objects(ObjectLayer::Props).iter()
+            .filter(|p| p.kind.as_str() == decor::SECTION).cloned().collect();
+        for shelf in shelves { assert!(map.remove_object(ObjectLayer::Props, &shelf)); }
+        let mut state = GameState::new(map, 7);
         state.spawn_from_spawners();
         let mut input = Input::new();
         let cleaners: Vec<Uid> = state
@@ -4944,13 +4956,12 @@ mod tests {
         let cleaned_up = |cell: Point| {
             lines.iter().any(|line| line.contains("cleaned up") && line.ends_with(&format!(" at {}, {}", cell.x, cell.y)))
         };
-        // Measured: all twelve by noon, and two more stains that people had
-        // tracked in through a gate.
+        // Require every public stain to be cleaned by noon.
         let missed: Vec<Point> = stains.iter().copied().filter(|&cell| !cleaned_up(cell)).collect();
         assert!(missed.is_empty(), "not cleaned by {}: {missed:?}", state.clock());
         assert!(!cleaned_up(home), "nobody's home is cleaned");
-        // From eight to twelve, a look every 27 minutes on the minute: at
-        // 08:00, 08:27, ... 11:36. The evening cleaners are not on yet.
+        // From eight to twelve, a look every 27 minutes: 08:00, 08:27,
+        // ... 11:36. The evening cleaners are not on yet.
         let looks = lines.iter().filter(|line| line.contains("looked over the district")).count();
         assert_eq!(looks, 9);
     }
@@ -5150,6 +5161,16 @@ mod tests {
         assert_eq!(ItemKind::Meal.nutrition(), 0.0, "stored goods are outside the food chain");
         assert_eq!(state.features().count(feature::FeatureKind::Food), 0);
         assert_eq!(state.statistics().stock("warehouse", ItemKind::Meal), state.bins().total_in(feature::FeatureKind::MealRack));
+    }
+
+    #[test]
+    fn a_steel_courier_carries_the_food_chain_too() {
+        // One pool: whichever courier is hired, the wheat gets to the cooker
+        // and the meals to the warehouse.
+        let (mut state, _, courier) = crate::sim::testing::food_works(12, 3);
+        crate::sim::testing::rehire(&mut state, courier, JobKind::Courier, Point::new(16, 2), job::COURIER_HOURS);
+        run(&mut state, 8 * 1800);
+        assert!(state.bins().total_in(feature::FeatureKind::MealRack) >= 2, "{:?}", state.statistics());
     }
 
     #[test]

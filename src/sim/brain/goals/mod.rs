@@ -8,6 +8,8 @@
 //! wait for a gap — is here.
 
 pub mod hospital;
+pub mod furnish_home;
+pub use furnish_home::FurnishHomeGoal;
 pub mod decorate;
 pub use decorate::DecorateGoal;
 pub mod fish;

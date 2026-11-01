@@ -72,6 +72,7 @@ impl Map {
             .map(|layer| pb::TerrainLayer { tiles: layer.tiles.iter().map(|&tile| palette.index(tile)).collect() })
             .collect();
         pb::SiteMap {
+            navigation_revision: Some(self.navigation_revision()),
             initial_stock: self.initial_stock.iter().map(|stock| pb::Bin { cell: Some(stock.cell.into()), stored: stock.pieces }).collect(),
             width: self.size.width,
             height: self.size.height,
@@ -164,6 +165,7 @@ impl Map {
                 return invalid(format!("invalid or duplicate initial stock at {}, {}", cell.x, cell.y));
             }
         }
+        if let Some(revision) = saved.navigation_revision { map.navigation_revision = revision; }
         Ok(map)
     }
 

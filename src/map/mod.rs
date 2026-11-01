@@ -290,6 +290,7 @@ pub struct Map {
     passability: PassabilityMap,
     navigation: std::sync::OnceLock<Navigation>,
     navigation_revision: u64,
+    object_revision: u64,
     /// Which cells can be seen *through*: the terrain's half of passability
     /// alone — a wall hides what is behind it, a fridge or a bed does not.
     /// The same one-bit-per-cell shape, for the same reason: a unit looking
@@ -402,6 +403,7 @@ impl Map {
             passability: PassabilityMap::new(size),
             navigation: Default::default(),
             navigation_revision: 0,
+            object_revision: 0,
             sight: PassabilityMap::new(size),
             grids: GridLayer::ALL.map(|_| vec![0; size.area()]).into(),
             wasteland: None,
@@ -1017,7 +1019,10 @@ impl Map {
     /// floor tile. Clamping them to the terrain rectangle would move somebody's
     /// prop rather than protect anything. A blocking prop off the map blocks
     /// nothing, there being no cell there to block.
+    pub fn object_revision(&self) -> u64 { self.object_revision }
+
     pub fn add_object(&mut self, layer: ObjectLayer, object: Object) {
+        self.object_revision = self.object_revision.wrapping_add(1);
         if layer == ObjectLayer::Props && !object.kind.prop_passability().is_passable() {
             self.invalidate_navigation();
             self.passability.set(object.cell(), false);
@@ -1035,6 +1040,7 @@ impl Map {
         match objects.iter().position(|placed| placed == object) {
             Some(index) => {
                 objects.remove(index);
+                self.object_revision = self.object_revision.wrapping_add(1);
                 if layer == ObjectLayer::Props {
                     // Another prop may still stand in that cell.
                     self.refresh_passability(object.cell());

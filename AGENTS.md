@@ -1359,3 +1359,27 @@ A death story keeps its case (`news::Death`: name, job, cause, cell, time). Noth
 is let go: stories wait however long, every article stays in the archive, and the
 game screen's `news` menu (`game/news.rs`) pages through it newest first.
 Saved as World tag 30 and Memory tags 15-16. The `news` skill has the rest.
+
+
+### Household decoration
+
+`sim/decor.rs` indexes each flat's installed flower vases and pending purchases.
+The shared limit is two, including goods being brought home. Commoners shop at
+`decor section` shelves on scheduled days off (unemployed residents qualify),
+with a daily daylight opportunity, provided they have a home, pack space and
+cash for the $20 tariff. No decoration debt. `FurnishHomeGoal` queues movement,
+`BuyVase` and `PlaceVase`; their effects recheck and commit the purchase and
+placement in slot order. A purchased vase stays stowed through interruptions.
+Safe placement preserves the door, room connectivity and furniture approaches.
+A deterministic half of eligible noble flats starts with one vase after arrivals.
+Placed vases are ordinary saved map props, emitting +1 every smell field step
+without growing, withering or needing power. Pending receipts persist in World
+protobuf tag 32; the last shopping day is Memory tag 17. Old saves default to
+neither. The prop window reads the simulation map in game and refreshes on its
+object revision, so furniture appears even when the camera is stationary.
+QA: `qa/flower_vase.json`; its `expect_prop_count` asserts simulated map counts.
+
+Map snapshots retain their navigation revision (SiteMap protobuf tag 9), and
+suspended path searches retain theirs (PathSearch tag 10). This preserves
+invalidation across saves when a vase is placed during another unit's search;
+older archives use the reconstructed map revision as before.

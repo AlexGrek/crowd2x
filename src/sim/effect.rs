@@ -182,6 +182,8 @@ pub enum Effect {
     /// to stand empty for as long as the leave lasts. Recovered, it is jobless,
     /// and is hired again into the next post left empty.
     LeavePost,
+    BuyVase { at: Point, clock: Clock },
+    PlaceVase { at: Point },
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -197,6 +199,8 @@ pub(crate) fn apply(
     log: &Log,
 ) {
     match effect {
+        Effect::BuyVase { at, clock } => super::decor::buy(entity, map, facilities, occupancy, at, clock, log),
+        Effect::PlaceVase { at } => super::decor::place(entity, map, facilities, occupancy, at, log),
         Effect::ToiletSmell { at } => {
             if !entity.is_dead() && !entity.is_frozen() && entity.center_position() == at
                 && facilities.features.has(FeatureKind::Toilet, at)
@@ -643,6 +647,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     let uid = entity.uid();
     let cell = entity.center_position();
     occupancy.release(cell, uid);
+    facilities.decor.release(uid);
     facilities.homes.release(uid);
     facilities.workplaces.release(uid);
     facilities.outposts.release(uid);

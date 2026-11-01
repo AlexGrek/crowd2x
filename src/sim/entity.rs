@@ -734,6 +734,7 @@ pub struct Think<'a> {
     pub flowers: &'a super::flowers::Flowers,
     pub dirt: &'a super::dirt::DirtLayer,
     pub smell: &'a super::smell::Smell,
+    pub decor: &'a super::decor::Decor,
     /// Which arcade cabinets work, as of the start of this tick, changed only
     /// by [`super::world_step`]: whether a playzone has an administrator at
     /// its computer ([`super::playzone`]).
@@ -835,6 +836,7 @@ impl<'a> Think<'a> {
             flowers: &facilities.flowers,
             dirt: &facilities.dirt,
             smell: &facilities.smell,
+            decor: &facilities.decor,
             playzones: &facilities.playzones,
             economy: &facilities.economy,
             panics: &facilities.panics,

@@ -24,7 +24,6 @@ pub enum ItemArt {
     /// item: a 16x16 one is as big as a person, so an item's picture is drawn
     /// small. Whatever it is, [`centring_nudge`] keeps it centred on whole
     /// pixels.
-    #[expect(dead_code, reason = "no item is drawn from a texture yet; this stops being expected the day one is")]
     Texture(&'static str),
     /// One emoji, drawn as text in the bundled colour-emoji font.
     ///
@@ -38,7 +37,10 @@ pub enum ItemArt {
 /// How an item is drawn: the emoji its row in the catalogue names
 /// ([`ItemKind::emoji`]), which every kind must have — that is the guarantee.
 pub const fn art(kind: ItemKind) -> ItemArt {
-    ItemArt::Emoji(kind.emoji())
+    match kind {
+        ItemKind::FlowerVase => ItemArt::Texture("flower_vase.png"),
+        _ => ItemArt::Emoji(kind.emoji()),
+    }
 }
 
 /// How far to nudge a texture of this many texels, in canvas pixels, so that

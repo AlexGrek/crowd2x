@@ -26,7 +26,8 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   factory's pallets;
 - the **courier**: their own scrap hopper in the steel factory, office hours — scrap metal from
   the warehouse's bins to the hopper, and steel from the factory's pallets to the warehouse's
-  steel rack. See "The steel works" below;
+  steel rack. **One pool with the food courier and the store courier**: any courier carries
+  both chains, eight to four **every day** (`COURIER_HOURS`). See "The steel works" below;
 - the **farmer**: their own grain bin at the district's farm, nine to five **every day but
   Sunday** — a field of ten crops of wheat sown in the good soil out in the wasteland, tended
   every day, harvested when ripe and the wheat stored in the bin. See "The farm" below;
@@ -323,11 +324,11 @@ back one at a time (`Bins::take`). `Think::bins` hands it to every brain, read-o
 | Layer | What | File |
 | --- | --- | --- |
 | item | `ItemKind::Steel` (`"steel"`, 1 kg, 1 l: ten to a pack — a piece of scrap's 3 kg is three ingots, so a smelt never adds weight), a smelt takes `SCRAP_PER_SMELT` = 1 scrap for `STEEL_PER_SMELT` = 3 ingots, carried as ⛓ | `item.rs` |
-| kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), both `OFFICE_HOURS` and `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `"uniform steelworker"` (leather apron) and `"uniform courier"` (green jacket, satchel) | `job.rs`, `feature.rs` |
+| kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), the steelworker `OFFICE_HOURS`, the courier `COURIER_HOURS` (08-16, every day), both `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `"uniform steelworker"` (leather apron) and `"uniform courier"` (green jacket, satchel) | `job.rs`, `feature.rs` |
 | the world | `Effect::Deposit { at, pieces }` puts the pieces in whatever store is at `at` (`effect::deposit`, the log line names the item and the store: `"stored 3 scrap metal in the bin at"`, `"stored 1 steel in the steel pallet at"`); `Effect::Withdraw { at }` takes pieces out one at a time while the store has any and the pack has room (`effect::withdraw`, `"took 2 steel from the steel pallet at x, y: N left"`), in slot order | `sim/mod.rs` |
 | tasks | `Deposit` now empties the pack of **the store's item** into any store (checks `Think::bins`); `Withdraw { store, seconds }` (`WITHDRAW_SECONDS` = 5 world min) beside a store with stock and room in the pack → `Effect::Withdraw`; `Smelt { furnace, seconds }` (`SMELT_SECONDS` = 30 world min) beside a powered furnace with scrap in the pack and room for the ingots once it is out (`Smelt::fits`) → 1 scrap out, 3 steel in, all in the pack, the furnace lit (`Action::interact`). All `Event::Worked`, and for the part done when cut short | `brain/tasks/withdraw.rs`, `smelt.rs`, `deposit.rs` |
 | steelworker | `SmeltGoal` (a `Seek`): `Smelt::fits` the pack (scrap, and room for the ingots) → its own furnace, `Smelt` (a packful of 3 scrap is nine ingots, deposited at once); steel in the pack → the nearest pallet, `Deposit` (`Achieved`); else the nearest hopper with scrap (`goals::nearest_store`), `Withdraw`; none → `"found no scrap to smelt"`, `Blocked` | `brain/goals/smelt.rs` |
-| courier | `HaulGoal` (a `Seek`): steel in the pack → the nearest steel rack; scrap → its own hopper (`Deposit`, `Achieved` either way); empty → the nearer of the nearest stocked pallet and the nearest stocked scrap bin, `Withdraw`; neither → `"found nothing to carry"`, `Blocked`. **The trips alternate of themselves**: unloading scrap at the factory leaves it beside the pallets, unloading steel at the warehouse beside the bins | `brain/goals/haul.rs` |
+| courier | `HaulGoal` (a `Seek`), **the same for the steel, food and store couriers** (`ROUTES`: `FOOD` wheat/meals, `STEEL` scrap/steel; the job picks nothing, its workplace only reserves a place): steel or meals in the pack → the nearest rack; scrap or wheat → the nearest hopper (`Deposit`, `Achieved` either way); empty → the chain whose hoppers hold fewest pieces first (food on a tie, so neither factory starves), then the nearer of that chain's nearest stocked pallet and stocked source, `Withdraw`; nothing in either → `"found nothing to carry"`, `Blocked`. **The trips alternate of themselves**: unloading scrap at the factory leaves it beside the pallets, unloading steel at the warehouse beside the bins | `brain/goals/haul.rs` |
 | menu | `now` (the rows' `JobDef::now`): `smelting steel` at the furnace, `fetching scrap, storing steel`; `carrying steel to the warehouse`, `carrying scrap to the factory`, `fetching a load` (from the pack) | `job.rs` |
 | on screen | the hopper, pallet and rack fill like the scrap bin (`BinFill`, `fill_bins`); the furnace burns while worked (`used` strip, `"furnace"` emitter); the HUD's `steel  N stored` (the racks) | `game-screen`, `lighting` |
 
@@ -684,8 +685,9 @@ See the [store contract](../store/SKILL.md) for the complete supply chain.
 `Shopkeeper` (18) uses a `shop counter`, four daily six-hour shifts, and
 `ShopGoal`: check the nearest superfridge, call at its low-stock threshold,
 then mind the counter for fifteen world minutes. `StoreCourier` (19) uses a
-`superfridge`, 08?16 every day, and `HaulGoal` for food-factory transport
-between dispatches. Both have named $40 wages and uniforms.
+`superfridge`, 08?16 every day, and `HaulGoal` between dispatches. Every
+courier job (steel, food, store) has the same hours and the same `HaulGoal`: one pool of
+couriers with no day-offs, any of whom carries steel, food or the store's order. Both have named $40 wages and uniforms.
 
 `JobDef.courier` marks steel, food and store couriers as dispatch candidates.
 A free courier on duty may be assigned `DeliverGoal` instead of its ordinary

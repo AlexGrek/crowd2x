@@ -105,6 +105,7 @@ impl GameState {
             relationship_rules: self.facilities.society.rules().save(),
             store: Some(self.facilities.superfridge.save()),
             orders: self.facilities.dispatch.save(),
+            decor_purchases: self.facilities.decor.save(),
             noble_draws: self.noble_draws,
             noble_position: self.noble_position,
         }
@@ -254,6 +255,7 @@ impl GameState {
             }),
         )?;
 
+        state.facilities.decor.restore(&world.decor_purchases, &state.entities, &state.facilities.properties, &state.map)?;
         let capacity = state.entities.capacity();
         state.facilities.sound.reserve(capacity);
         state.intents = vec![Intent::Idle; capacity];

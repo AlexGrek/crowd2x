@@ -219,6 +219,7 @@ pub enum Step {
     Smell { x: i32, y: i32, value: f32 },
     ExpectSmell { x: i32, y: i32, min: f32, max: f32 },
     ExpectSmellTiles(usize),
+    ExpectPropCount { kind: String, min: usize, max: usize },
 
     /// Do nothing for this many seconds.
     Wait(f32),

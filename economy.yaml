@@ -65,3 +65,5 @@ prices:
   wheat: 0
   meal: 0
   fish: 0
+
+  flower vase: 20  # home decoration, bought at the decor section

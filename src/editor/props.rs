@@ -68,6 +68,8 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::new("crate tall", "untitledtallhd.png"),
     // Something to eat from: a brain finds it by this name (`sim::feature`).
     PaletteItem::upscaled("fridge", "fridge.png"),
+    PaletteItem::upscaled("flower vase", "flower_vase.png"),
+    PaletteItem::upscaled("decor section", "decor_section.png"),
     // Something to do. Two strips: the screen dark and idling, and the screen
     // on for as long as somebody is sitting at it — `game::props` is what
     // swaps between them, from what the simulation says that unit is doing.
@@ -470,11 +472,18 @@ pub fn sync_prop_window(
     assets: Res<AssetServer>,
     area: Res<VisibleArea>,
     current: Res<CurrentMap>,
+    sim: Option<Res<crate::game::actors::Sim>>,
+    mut revision: Local<Option<u64>>,
     state: Res<State<AppState>>,
     mut window: ResMut<PropWindow>,
 ) {
     if !area.ready {
         return;
+    }
+    let map = sim.as_ref().map_or(&current.map, |sim| &sim.0.map);
+    if *revision != Some(map.object_revision()) {
+        *revision = Some(map.object_revision());
+        window.touch();
     }
     if area.tiles == window.rect && !window.dirty {
         return;
@@ -492,7 +501,6 @@ pub fn sync_prop_window(
         window.dirty = false;
     }
 
-    let map = &current.map;
     let wanted = area.tiles;
     let on_canvas = |object: &Object| {
         let cell = object.cell();

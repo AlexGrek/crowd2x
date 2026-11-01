@@ -80,6 +80,7 @@ pub struct Facilities {
     pub flowers: super::flowers::Flowers,
     pub dirt: super::dirt::DirtLayer,
     pub smell: super::smell::Smell,
+    pub decor: super::decor::Decor,
     /// Which arcade cabinets work: those whose playzone computer an
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
@@ -163,6 +164,7 @@ impl Facilities {
             superfridge,
             dispatch: Default::default(),
             doors: Doors::from_map(map, &properties),
+            decor: super::decor::Decor::from_map(map, &properties),
             properties,
             corpses: Corpses::new(),
             homes: Homes::new(),
@@ -173,7 +175,7 @@ impl Facilities {
             fields: Fields::new(),
             flowers: Default::default(),
             dirt: super::dirt::DirtLayer::new(map),
-            smell: Default::default(),
+            smell: super::smell::Smell::from_map(map),
             playzones: Playzones::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),

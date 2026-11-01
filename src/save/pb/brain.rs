@@ -190,6 +190,8 @@ pub struct Memory {
     /// is not.
     #[prost(double, optional, tag = "16")]
     pub obedient_until: Option<f64>,
+    #[prost(uint32, tag = "17")]
+    pub decor_day: u32,
 }
 
 /// A small talk one person is in, as it remembers it.

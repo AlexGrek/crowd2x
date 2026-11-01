@@ -23,6 +23,7 @@ pub fn has_air(map: &Map, doors: &Doors, cell: Point) -> bool {
 
 #[derive(Default)]
 pub struct Smell {
+    vases: BTreeSet<Point>,
     cells: BTreeMap<Point, f32>,
     frontier: BTreeSet<Point>,
     upload: Vec<[f32; 8]>,
@@ -30,6 +31,11 @@ pub struct Smell {
 }
 
 impl Smell {
+    pub fn from_map(map: &Map) -> Self {
+        Self { vases: map.objects(crate::map::ObjectLayer::Props).iter().filter(|o| o.kind.as_str() == super::decor::VASE).map(|o| o.cell()).collect(), ..Self::default() }
+    }
+    pub(super) fn add_vase(&mut self, at: Point) { self.vases.insert(at); }
+
     pub fn at(&self, map: &Map, doors: &Doors, cell: Point) -> f32 {
         if has_air(map, doors, cell) {
             self.cells.get(&cell).copied().unwrap_or(0.0)
@@ -79,7 +85,7 @@ impl Smell {
     fn step(&mut self, map: &Map, doors: &Doors, flowers: &Flowers, now: Clock) {
         self.cells.retain(|cell, _| has_air(map, doors, *cell));
         self.frontier.clear();
-        for cell in self.cells.keys().copied().chain(
+        for cell in self.cells.keys().copied().chain(self.vases.iter().copied()).chain(
             flowers
                 .iter()
                 .filter(|bed| bed.blooming(now))
@@ -99,7 +105,7 @@ impl Smell {
                     c[5] += 1.0;
                 }
             }
-            c[6] = if flowers.at(cell).is_some_and(|bed| bed.blooming(now)) {
+            c[6] = if self.vases.contains(&cell) || flowers.at(cell).is_some_and(|bed| bed.blooming(now)) {
                 FLOWER_EMISSION
             } else {
                 0.0
@@ -133,7 +139,7 @@ impl Smell {
         map: &Map,
         doors: &Doors,
     ) -> Result<Self, Invalid> {
-        let mut field = Self::default();
+        let mut field = Self::from_map(map);
         for item in saved {
             let cell = pb::cell(item.cell, "smell")?;
             if !item.value.is_finite()
@@ -332,5 +338,27 @@ mod tests {
         }
         assert!(moved[2] > 10.0 * moved[1] && moved[4] > 10.0 * moved[3], "stronger moves it more: {moved:?}");
         assert!(moved[4] < 0.2, "four looks at the worst stench are a sliver, not four points: {moved:?}");
+    }
+}
+
+#[cfg(test)]
+mod vase_tests {
+    use super::*;
+    use crate::map::{Size, FLOOR};
+    #[test]
+    fn a_vase_emits_forever_without_blooming_and_rebuilds_its_source_on_load() {
+        let mut map=Map::new(Size::new(7,5),FLOOR);
+        let at=Point::new(3,2);
+        crate::sim::testing::prop_at(&mut map,"flower vase",at);
+        let doors=Doors::default();let flowers=Flowers::default();
+        let now=Clock::after_watching(20.0 * crate::sim::clock::DAY as f64 / crate::sim::clock::TIME_SCALE as f64);
+        let mut smell=Smell::from_map(&map);
+        smell.step(&map,&doors,&flowers,now);
+        assert_eq!(smell.at(&map,&doors,at),FLOWER_EMISSION);
+        smell.step(&map,&doors,&flowers,now);
+        assert!(smell.at(&map,&doors,at.offset(1,0))>0.0);
+        let mut copy=Smell::restore(&smell.save(),&map,&doors).unwrap();
+        for _ in 0..100 { smell.step(&map,&doors,&flowers,now);copy.step(&map,&doors,&flowers,now); }
+        assert_eq!(smell.save(),copy.save());assert!(copy.at(&map,&doors,at)>FLOWER_EMISSION);
     }
 }

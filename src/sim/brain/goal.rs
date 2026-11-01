@@ -144,6 +144,7 @@ catalogue! {
         /// while wandering ([`PhoneGoal`](super::goals::PhoneGoal)): over
         /// wandering, under everything else.
         Phone = 34 => GoalDef { name: "phone", emoji: "\u{1f4f1}", executor: Some(|| Box::new(goals::PhoneGoal::new())) },
+        FurnishHome = 35 => GoalDef { name: "furnish home", emoji: "\u{1f33a}", executor: Some(|| Box::new(goals::FurnishHomeGoal::new())) },
     }
 }
 
@@ -875,7 +876,8 @@ mod tests {
                 (GoalId::Deliver, 0.0),
                 (GoalId::Build, 0.0),
                 (GoalId::ReturnInside, 0.0),
-                (GoalId::Phone, 0.0)
+                (GoalId::Phone, 0.0),
+                (GoalId::FurnishHome, 0.0)
             ]
         );
     }

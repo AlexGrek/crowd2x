@@ -89,6 +89,7 @@ pub struct Memory {
     /// wants the building less meanwhile, so a meal or a drink out of the
     /// pocket gets a look in. Inline: read of every builder every tick.
     rest_until: Option<f64>,
+    pub decor_day: u32,
 }
 
 /// Somebody seen, where, and when — in **world** seconds
@@ -338,10 +339,11 @@ impl Memory {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion, rest_until, returning_inside, guard_warned_night, guard_warning_pending, news_read, obedient_until } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion, rest_until, returning_inside, guard_warned_night, guard_warning_pending, news_read, obedient_until, decor_day } = self;
         let OutOfReach { places } = **out_of_reach;
         let (relations, night) = relations.save();
         pb::Memory {
+            decor_day: *decor_day,
             returning_inside: *returning_inside,
             guard_warned_night: *guard_warned_night,
             guard_warning_pending: *guard_warning_pending,
@@ -391,6 +393,7 @@ impl Memory {
         memory.guard_warned_night = saved.guard_warned_night;
         memory.guard_warning_pending = saved.guard_warning_pending;
         memory.news_read = saved.news_read;
+        memory.decor_day = saved.decor_day;
         memory.obedient_until = match saved.obedient_until {
             Some(until) if !until.is_finite() => return invalid(format!("memory: obedient until {until}")),
             until => until,

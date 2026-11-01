@@ -78,6 +78,8 @@ pub const PROPS: &[Prop] = &[
     Prop::blocking("crate"),
     Prop::blocking("crate tall"),
     Prop::blocking("fridge"),
+    Prop::blocking("flower vase"),
+    Prop::blocking("decor section"),
     Prop::blocking("computer"),
     // Watched from across the room (`sim::feature::can_watch`): a set on
     // legs nobody walks through, though everybody sees over it.

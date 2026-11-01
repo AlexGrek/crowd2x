@@ -212,6 +212,7 @@ catalogue! {
         /// the dog (`brain::tasks::Feed`). Nothing a person can use: how much
         /// of a meal it is, is the dog's (`sim::pets::MEAL`).
         DogFood = 8 => ItemDef { name: "dog food", mass: MEAL_MASS, volume: MEAL_VOLUME, emoji: "🦴", ..CARRIED },
+        FlowerVase = 9 => ItemDef { name: "flower vase", mass: 1.0, volume: 2.0, emoji: "\u{1f33a}", ..CARRIED },
     }
 }
 

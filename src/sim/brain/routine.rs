@@ -106,6 +106,7 @@ pub enum Routine {
     Keep(KeepRoutine),
     /// Stay with the owner, and go when it must (a pet dog's).
     Heel(HeelRoutine),
+    FurnishHome,
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -195,6 +196,7 @@ impl Routine {
             Routine::Chat(routine) => routine.name(),
             Routine::Keep(routine) => routine.name(),
             Routine::Heel(routine) => routine.name(),
+            Routine::FurnishHome => "furnish home",
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -228,6 +230,7 @@ impl Routine {
             Routine::Chat(routine) => routine.arrange(ctx, goals),
             Routine::Keep(routine) => routine.arrange(ctx, goals),
             Routine::Heel(routine) => routine.arrange(ctx, goals),
+            Routine::FurnishHome => super::routines::furnish_home(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -249,6 +252,7 @@ impl Routine {
             Routine::Chat(routine) => routine.debug_fields(),
             Routine::Keep(routine) => routine.debug_fields(),
             Routine::Heel(routine) => routine.debug_fields(),
+            Routine::FurnishHome => Vec::new(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -263,7 +267,7 @@ impl Routine {
         let (committed, pending) = match self {
             Routine::Need(routine) => (routine.is_committed(), 0),
             Routine::Sleep(routine) => (routine.is_committed(), 0),
-            Routine::StayBusy(StayBusyRoutine) | Routine::Hospital => (false, 0),
+            Routine::StayBusy(StayBusyRoutine) | Routine::Hospital | Routine::FurnishHome => (false, 0),
             Routine::Orders(OrdersRoutine) => (false, 0),
             // Nothing to keep: what scared a person, or what a deathdog is
             // after, is in its memory.
@@ -301,7 +305,7 @@ impl Routine {
             Routine::Sleep(routine) => routine.set_committed(saved.committed),
             Routine::Work(routine) => routine.set_on_shift(saved.committed),
             Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
-            Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital => {}
+            Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital | Routine::FurnishHome => {}
             Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) | Routine::Chat(_) => {}
             Routine::Keep(_) | Routine::Heel(_) => {}
             #[cfg(test)]

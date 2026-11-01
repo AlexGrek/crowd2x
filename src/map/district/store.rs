@@ -34,7 +34,7 @@ pub const SPEC: LotBuilding = LotBuilding {
     },
     build: |_, map, props, lot| store(map, props, lot),
     tiles: &[WALL, FLOOR],
-    props: &[SUPERFRIDGE, SHOP_COUNTER],
+    props: &[SUPERFRIDGE, SHOP_COUNTER, "decor section"],
 };
 
 /// The store, on `lot`: the whole lot, `WALL` round `FLOOR`, a plain door —
@@ -68,6 +68,7 @@ fn store(map: &mut Map, props: &mut Vec<Object>, lot: Lot) -> Rect {
     };
     let room = Room { walls, side, wide, deep };
     props.push(object(SHOP_COUNTER, room.at(0, 1)));
+    props.push(object("decor section", room.at(wide - 1, 1)));
     props.push(object(SUPERFRIDGE, room.at(wide / 2, deep - 1)));
     walls
 }
@@ -90,10 +91,10 @@ mod tests {
             let store = district.the(NAME);
             let inside = map.objects(ObjectLayer::Props).iter().filter(|prop| store.interior().contains(prop.cell()));
             assert!(
-                inside.clone().all(|prop| [SUPERFRIDGE, SHOP_COUNTER].contains(&prop.kind.as_str())),
+                inside.clone().all(|prop| [SUPERFRIDGE, SHOP_COUNTER, "decor section"].contains(&prop.kind.as_str())),
                 "seed {seed}: the store holds its superfridge and counter only"
             );
-            for (name, count) in [(SUPERFRIDGE, SUPERFRIDGES), (SHOP_COUNTER, COUNTERS)] {
+            for (name, count) in [(SUPERFRIDGE, SUPERFRIDGES), (SHOP_COUNTER, COUNTERS), ("decor section", 1)] {
                 assert_eq!(props_in(map, store, name), count, "seed {seed}: {name}");
                 assert_eq!(props_in(map, Rect::new(0, 0, WIDTH, HEIGHT), name), count, "seed {seed}: {name} elsewhere");
             }

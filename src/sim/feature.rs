@@ -240,6 +240,7 @@ catalogue! {
         /// palace, worked from beside it. **Needs power**, and is nothing to
         /// play on ([`crate::sim::news`]).
         PropagandaComputer = 35 => FeatureDef { props: &["propaganda computer"], ..BESIDE },
+        DecorSection = 36 => FeatureDef { props: &["decor section"], ..BESIDE },
     }
 }
 

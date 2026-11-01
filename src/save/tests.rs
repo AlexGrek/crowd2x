@@ -1748,3 +1748,31 @@ fn the_news_saved_while_it_is_written_and_read_carries_on_exactly() {
 
     side_by_side(&mut state, 900, |_, _| Input::new());
 }
+
+#[test]
+fn a_vase_purchase_in_transit_and_its_placement_survive_saving_exactly() {
+    let mut map=crate::sim::decor::tests::flat();
+    prop_at(&mut map,"bed 2",Point::new(6,6));
+    let mut state=GameState::new(map,4);
+    let mut tariffs=crate::sim::economy::Tariffs::default();
+    tariffs.starting_cash=(crate::sim::economy::Money::dollars(100),crate::sim::economy::Money::dollars(100));
+    state.set_tariffs(tariffs);
+    for at in [Point::new(3,6),Point::new(5,6)] {
+        let uid=state.spawn_commoner(at);
+        for process in [ProcessId::Hunger,ProcessId::Thirst,ProcessId::Bladder,ProcessId::Fun,ProcessId::Energy,ProcessId::Mind] { state.set_process(uid,process,false); }
+    }
+    // Cross the parallel threshold without introducing unrelated crowd traffic.
+    // The two household shoppers still read shared counts and commit in slot order.
+    for _ in 0..64 {
+        let uid=state.spawn(EntityType::Dog,Point::new(15,9));
+        state.set_frozen(uid,true);
+    }
+    crate::sim::testing::skip_to(&mut state,6,15.0);
+    for _ in 0..3000 { run(&mut state,1);if !state.save_world().decor_purchases.is_empty() { break; } }
+    assert!(!state.save_world().decor_purchases.is_empty(),"must actually purchase before saving");
+    let copy=side_by_side(&mut state,3000,|_,_| Input::new());
+    assert!(copy.save_world().decor_purchases.is_empty());
+    assert_eq!(copy.map.objects(crate::map::ObjectLayer::Props).iter().filter(|p| p.kind.as_str()=="flower vase").count(),2);
+    let saved=round_trip(&copy);
+    assert_eq!(saved.map.objects(crate::map::ObjectLayer::Props),copy.map.objects(crate::map::ObjectLayer::Props));
+}

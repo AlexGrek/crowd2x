@@ -37,7 +37,9 @@
 //!   onto the factory's pallets (`SmeltGoal`). Office hours;
 //! * the **courier**: a scrap hopper in the steel factory — scrap metal from
 //!   the warehouse's bins to the hopper, and steel from the factory's
-//!   pallets to the warehouse's rack (`HaulGoal`). Office hours;
+//!   pallets to the warehouse's rack (`HaulGoal`). Every courier — steel,
+//!   food and the store's — is one pool that serves both chains, eight to
+//!   four every day ([`COURIER_HOURS`]);
 //! * the **farmer**: a grain bin at the farm, and a field of wheat out in
 //!   the wasteland's good soil — sown, tended every day, harvested ripe and
 //!   the wheat stored in the bin (`FarmGoal`, `sim::fields`). Nine to five,
@@ -343,7 +345,7 @@ catalogue! {
             workplace: FeatureKind::ScrapHopper,
             goal: GoalId::Haul,
             commute: COMMUTE,
-            shifts: &[OFFICE_HOURS],
+            shifts: &[COURIER_HOURS],
             uniform: "uniform courier",
             now: |_, pack| {
                 let carries = |item| pack.is_some_and(|pack| pack.count(item) > 0);
@@ -472,7 +474,7 @@ catalogue! {
             workplace: FeatureKind::WheatHopper,
             goal: GoalId::Haul,
             commute: COMMUTE,
-            shifts: &[OFFICE_HOURS],
+            shifts: &[COURIER_HOURS],
             uniform: "uniform food courier",
             now: |_, pack| {
                 if pack.is_some_and(|pack| pack.count(ItemKind::Meal) > 0) {
@@ -600,7 +602,7 @@ catalogue! {
         /// The store's own courier, one to its superfridge: a courier like
         /// the rest — hauls wheat to the food factory and meals to the
         /// warehouse (`HaulGoal`) — and the one the dispatch most often sends
-        /// for the store's food, every day ([`STORE_COURIER_HOURS`]), so the
+        /// for the store's food, every day ([`COURIER_HOURS`]), so the
         /// superfridge is stocked at the weekend too.
         StoreCourier = 19 => JobDef {
             name: "store courier",
@@ -608,7 +610,7 @@ catalogue! {
             workplace: FeatureKind::Superfridge,
             goal: GoalId::Haul,
             commute: COMMUTE,
-            shifts: &[STORE_COURIER_HOURS],
+            shifts: &[COURIER_HOURS],
             uniform: "uniform store courier",
             now: |_, pack| {
                 if pack.is_some_and(|pack| pack.count(ItemKind::Meal) > 0) {
@@ -905,9 +907,9 @@ pub const SHOP_SHIFTS: [Shift; 4] = [
     Shift { start: 0, end: 6, days: EVERY_DAY },
 ];
 
-/// The store courier's day: eight to four, every day, so the store's food
-/// comes in at the weekend, when the other couriers are off.
-pub const STORE_COURIER_HOURS: Shift = Shift {
+/// Every courier's day: eight to four, every day of the week, so the
+/// factories and the store are served at the weekend too.
+pub const COURIER_HOURS: Shift = Shift {
     start: 8,
     end: 16,
     days: EVERY_DAY,
@@ -1282,6 +1284,15 @@ mod tests {
             }
         }
         assert_eq!(Job::restore(&job.save()), Ok(job));
+    }
+
+    #[test]
+    fn every_courier_works_every_day_of_the_week() {
+        for kind in [JobKind::Courier, JobKind::FoodCourier, JobKind::StoreCourier] {
+            assert!(kind.is_courier());
+            assert_eq!(kind.shifts(), &[COURIER_HOURS], "{}", kind.name());
+        }
+        assert_eq!(COURIER_HOURS.days(), "Mon-Sun");
     }
 
     #[test]

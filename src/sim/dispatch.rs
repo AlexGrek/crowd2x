@@ -290,11 +290,11 @@ mod tests {
 
     #[test]
     fn dispatch_chooses_the_nearest_free_on_duty_courier_and_reassigns_a_frozen_one() {
-        use crate::sim::job::{Job, JobKind, STORE_COURIER_HOURS};
+        use crate::sim::job::{Job, JobKind, COURIER_HOURS};
         let (mut state, people) = store_world(30, 10, 7);
         let courier = people[4];
         let closer = state.spawn_commoner(Point::new(3, 5));
-        assert!(state.entities.get_mut(closer).unwrap().hire(Job::new(JobKind::Courier, Point::new(9, 9), STORE_COURIER_HOURS)));
+        assert!(state.entities.get_mut(closer).unwrap().hire(Job::new(JobKind::Courier, Point::new(9, 9), COURIER_HOURS)));
         state.facilities.dispatch.call(Point::new(12, 5));
         send(&mut state);
         assert!(state.dispatch().order_of(closer).is_some());

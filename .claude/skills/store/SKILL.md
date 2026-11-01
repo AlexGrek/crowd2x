@@ -72,9 +72,11 @@ cooldowns and bounded crowd retries. Every check and counter stretch tires
 the worker, including the elapsed portion of interrupted work.
 
 `JobKind::StoreCourier` (19) employs one person per superfridge, 08–16 every
-day, with the normal two-hour commute. Between dispatches it uses `HaulGoal`
-for wheat from grain bins to food-factory hoppers and meals from factory
-pallets to warehouse meal racks. Its workplace reserves the job; ordinary
+day, with the normal two-hour commute. Every courier job (steel, food, store) works the same hours (`COURIER_HOURS`)
+and the same `HaulGoal`, so they are one pool. Between dispatches a courier
+takes the chain whose factory hoppers hold fewer pieces: wheat from grain bins
+to food-factory hoppers and meals from factory pallets to warehouse meal racks,
+or scrap and steel. Its workplace reserves the job; ordinary
 hauling does not unload into the superfridge. Uniforms are `uniform shopkeeper`
 and `uniform store courier`.
 

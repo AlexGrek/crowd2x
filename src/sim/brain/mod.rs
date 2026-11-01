@@ -211,6 +211,7 @@ impl Brain {
                 Routine::flee(),
                 Routine::chat(),
                 Routine::keep(),
+                Routine::FurnishHome,
             ],
             GoalId::ALL.into_iter().filter_map(|goal| goal.def().executor).map(|executor| executor()),
         )
@@ -1489,7 +1490,7 @@ mod tests {
         for wanted in ["goal", "priority", "task", "queue", "result", "action", "routines", "memory"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
-        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety, keep company, look after the dog"));
+        assert!(fields.iter().any(|(name, value)| *name == "routines" && value == "keep fed, keep hydrated, stay comfortable, keep entertained, get some sleep, do as told, stay busy, go to work, get ready to go out, get well, run for safety, keep company, look after the dog, furnish home"));
         for wanted in ["facing", "sees", "in mind"] {
             assert!(names.contains(&wanted), "no {wanted} in {names:?}");
         }
@@ -1505,7 +1506,7 @@ mod tests {
         saved.hire(crate::sim::job::Job::office(Point::new(4, 2)));
         let mut saved = saved.save();
         let added = saved.routines.pop().expect("a routine to leave out");
-        assert_eq!(added.name, "look after the dog");
+        assert_eq!(added.name, "furnish home");
         saved.job = None;
 
         let mut brain = Brain::human();

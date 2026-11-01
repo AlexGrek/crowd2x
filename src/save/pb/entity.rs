@@ -230,6 +230,9 @@ pub struct PathSearch {
     /// Every cell this search has reached.
     #[prost(message, repeated, tag = "9")]
     pub seen: Vec<Visit>,
+    /// Older searches are rebased on load; new searches retain invalidation state.
+    #[prost(uint64, optional, tag = "10")]
+    pub navigation_revision: Option<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

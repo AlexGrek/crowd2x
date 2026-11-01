@@ -382,6 +382,9 @@ pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     assert_eq!(kind(&state, collector), Some(super::JobKind::ScrapCollector), "the bin is offered first");
     assert_eq!(kind(&state, smelter), Some(super::JobKind::Steelworker));
     assert_eq!(kind(&state, courier), Some(super::JobKind::Courier));
+    // The works runs on office hours, as it was written to; the real
+    // couriers' every-day hours are tested where they are hired.
+    rehire(&mut state, courier, super::JobKind::Courier, Point::new(16, 2), super::job::OFFICE_HOURS);
     let mut input = super::Input::new();
     input.despawn(collector);
     for uid in [smelter, courier] {
@@ -392,6 +395,14 @@ pub fn steel_works(scrap: u32, seed: u64) -> (super::GameState, Uid, Uid) {
     super::process_game_state(&mut state, 1.0 / 60.0, &input);
     let _ = state.facilities.bins.add(Point::new(2, 2), scrap);
     (state, smelter, courier)
+}
+
+/// Puts `uid` in a job of `kind` at `at` in `shift` instead of the one the
+/// allocator gave it, workplace bookkeeping and all.
+pub fn rehire(state: &mut super::GameState, uid: Uid, kind: super::JobKind, at: Point, shift: super::job::Shift) {
+    state.facilities.workplaces.release(uid);
+    assert!(state.facilities.workplaces.claim(at, shift, uid), "the workplace is free");
+    assert!(state.entities.get_mut(uid).unwrap().hire(super::job::Job::new(kind, at, shift)));
 }
 
 /// A farm's grain bin, powered food factory and warehouse, with workers

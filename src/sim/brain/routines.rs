@@ -2080,3 +2080,24 @@ mod tests {
         assert_eq!(routine.debug_fields(), [("sleepy", "no".to_string())]);
     }
 }
+
+/// Day-off shopping, underneath needs, work and sleep. Pending goods survive interruptions.
+pub(super) fn furnish_home(ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+    use crate::sim::decor;
+    let uid = ctx.body.uid();
+    if ctx.memory.medical.on_leave(ctx.think.clock.day()) { return; }
+    if ctx.think.decor.receipt(uid).is_some() {
+        goals.raise_to(GoalId::FurnishHome, 0.35);
+        return;
+    }
+    let Some(home) = ctx.body.home() else { return; };
+    let Some(account) = ctx.think.economy.account(uid) else { return; };
+    if account.noble || !decor::day_off(ctx.job, ctx.think.clock) || ctx.think.decor.count(home) >= decor::LIMIT
+        || !ctx.inventory.is_some_and(|p| p.count(ItemKind::FlowerVase) == 0 && p.room_for(ItemKind::FlowerVase))
+        || account.cash < ctx.think.economy.tariffs().price(ItemKind::FlowerVase)
+        || ctx.think.features.cells_of(crate::sim::FeatureKind::DecorSection).is_empty() { return; }
+    // A stable household member's slot spreads visits over eight daylight hours.
+    if ctx.think.clock.hours() < 8.0 + (uid.body().wrapping_add(ctx.think.clock.day() as u64) % 8) as f32 || ctx.think.clock.hours() >= 18.0 { return; }
+    if ctx.memory.decor_day >= ctx.think.clock.day() { return; }
+    goals.raise_to(GoalId::FurnishHome, 0.35);
+}

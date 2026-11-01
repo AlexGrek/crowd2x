@@ -283,9 +283,10 @@ impl PathFinder {
     /// What reached cells it remembers from earlier searches (an older
     /// generation) is scratch, and is left behind.
     pub(crate) fn save(&self) -> pb::PathSearch {
-        let PathFinder { open, seen, generation, window, start, goals, minimum, revision: _, .. } = self;
+        let PathFinder { open, seen, generation, window, start, goals, minimum, revision, .. } = self;
         let window = window.expect("a saved search has begun");
         pb::PathSearch {
+            navigation_revision: Some(*revision),
             window_x: window.origin.x,
             window_y: window.origin.y,
             window_width: window.size.width,
@@ -361,7 +362,7 @@ impl PathFinder {
             start: inside(start, "the start")?,
             goals: Some(goals),
             minimum: saved.minimum.max(MIN_WALK_COST as u32),
-            revision,
+            revision: saved.navigation_revision.unwrap_or(revision),
             #[cfg(test)]
             expanded: 0,
         })
@@ -1385,5 +1386,25 @@ mod tests {
             .find(|&cell| map.terrain(cell) == Some(crate::map::WATER))
             .expect("a lake somewhere in a big square");
         assert_eq!(search_once(&map, Point::new(1, 1), water).0, SearchStatus::Unreachable);
+    }
+}
+
+#[cfg(test)]
+mod furniture_save_tests {
+    use super::*;
+    #[test]
+    fn a_search_invalidated_by_new_furniture_stays_invalidated_after_loading() {
+        let mut map=Map::new(crate::map::Size::new(8,8),crate::map::FLOOR);
+        let mut finder=PathFinder::new();
+        finder.begin(map.size().into(),Point::new(1,1),Destinations::one(Point::new(6,6)),1);
+        finder.revision=map.navigation_revision();
+        let saved=finder.save();
+        crate::sim::testing::prop_at(&mut map,"flower vase",Point::new(3,3));
+        let copy=Map::restore_site(&map.save_site()).unwrap();
+        let restored=PathFinder::restore(&saved,copy.navigation_revision()).unwrap();
+        assert_eq!(copy.navigation_revision(),map.navigation_revision());
+        assert_ne!(restored.revision,copy.navigation_revision());
+        let mut old=saved;old.navigation_revision=None;
+        assert_eq!(PathFinder::restore(&old,copy.navigation_revision()).unwrap().revision,copy.navigation_revision());
     }
 }

@@ -88,6 +88,9 @@
   },
   "steps": [
     {
+      "note": "Spawn while paused, then disable all biological processes before the first processing pass so this staffing test is independent of random sick leave."
+    },
+    {
       "key": "p"
     },
     {
@@ -136,7 +139,7 @@
       }
     },
     {
-      "tick": 1
+      "wait": 0.3
     },
     {
       "expect_entities": 6
@@ -187,6 +190,12 @@
       }
     },
     {
+      "process": {
+        "name": "mind",
+        "on": false
+      }
+    },
+    {
       "select": 1
     },
     {
@@ -228,6 +237,12 @@
     {
       "process": {
         "name": "health",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "mind",
         "on": false
       }
     },
@@ -277,6 +292,12 @@
       }
     },
     {
+      "process": {
+        "name": "mind",
+        "on": false
+      }
+    },
+    {
       "select": 3
     },
     {
@@ -318,6 +339,12 @@
     {
       "process": {
         "name": "health",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "mind",
         "on": false
       }
     },
@@ -367,6 +394,12 @@
       }
     },
     {
+      "process": {
+        "name": "mind",
+        "on": false
+      }
+    },
+    {
       "select": 5
     },
     {
@@ -408,6 +441,12 @@
     {
       "process": {
         "name": "health",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "mind",
         "on": false
       }
     },

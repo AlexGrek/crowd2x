@@ -1174,6 +1174,11 @@ fn perform(
             (value >= *min && value <= *max).then_some(Next::Now)
                 .ok_or(format!("expected smell in {min}..={max} at {x},{y}, found {value}"))
         }
+        Step::ExpectPropCount { kind, min, max } => {
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let count = sim.0.map.objects(crate::map::ObjectLayer::Props).iter().filter(|p| p.kind.as_str() == kind).count();
+            (count >= *min && count <= *max).then_some(Next::Now).ok_or(format!("expected {min}..={max} {kind} props, found {count}"))
+        }
         Step::ExpectSmellTiles(count) => {
             let actual = checks.smell_tiles.iter().count();
             (actual == *count).then_some(Next::Now).ok_or(format!("expected {count} smell tiles, found {actual}"))

@@ -113,6 +113,8 @@ pub struct World {
     /// first. Older saves have none: the graphs start from the load.
     #[prost(message, repeated, tag = "31")]
     pub history: Vec<HourSample>,
+    #[prost(message, repeated, tag = "32")]
+    pub decor_purchases: Vec<DecorPurchase>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -484,4 +486,14 @@ pub struct Made {
     pub item: String,
     #[prost(uint32, tag = "2")]
     pub count: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct DecorPurchase {
+    #[prost(fixed64, tag = "1")]
+    pub owner: u64,
+    #[prost(uint32, tag = "2")]
+    pub home: u32,
+    #[prost(message, optional, tag = "3")]
+    pub cell: Option<Cell>,
 }

@@ -1,0 +1,233 @@
+{
+  "name": "Day-off shopping brings a twenty dollar vase home and scents the flat",
+  "state": "game",
+  "open": "decor",
+  "timeout": 900,
+  "given": {
+    "maps": [
+      {
+        "name": "decor",
+        "map": {
+          "version": 1,
+          "wasteland": false,
+          "size": {
+            "width": 16,
+            "height": 10
+          },
+          "terrain": {
+            "palette": [
+              "floor white",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0",
+                  "1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "kind": "house door",
+                "at": {
+                  "x": 408,
+                  "y": 216
+                }
+              },
+              {
+                "kind": "bed 1",
+                "at": {
+                  "x": 120,
+                  "y": 312
+                }
+              },
+              {
+                "kind": "bed 2",
+                "at": {
+                  "x": 312,
+                  "y": 312
+                }
+              },
+              {
+                "kind": "decor section",
+                "at": {
+                  "x": 600,
+                  "y": 216
+                }
+              }
+            ],
+            "spawners": [
+              {
+                "kind": "human",
+                "at": {
+                  "x": 168,
+                  "y": 312
+                }
+              },
+              {
+                "kind": "human",
+                "at": {
+                  "x": 264,
+                  "y": 312
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "key": "p"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "press": "close"
+    },
+    {
+      "shot": "decor section before shopping"
+    },
+    {
+      "measure": {
+        "name": "day-off home furnishing",
+        "ticks": 18000
+      }
+    },
+    {
+      "expect_log": "bought a flower vase for $20.00"
+    },
+    {
+      "expect_log": "placed a flower vase at"
+    },
+    {
+      "expect_prop_count": {
+        "kind": "flower vase",
+        "min": 1,
+        "max": 2
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "vase appeared without moving camera"
+    },
+    {
+      "xray": "smell"
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "pleasant scent from home decorations"
+    },
+    {
+      "xray": "off"
+    },
+    {
+      "tick": 50000
+    },
+    {
+      "expect_prop_count": {
+        "kind": "flower vase",
+        "min": 1,
+        "max": 2
+      }
+    }
+  ]
+}
