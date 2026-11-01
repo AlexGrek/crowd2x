@@ -93,6 +93,10 @@ impl Plugin for DebugPlugin {
         open_district_from_env(app);
         set_zoom_from_env(app);
         spawn_actors_from_env(app);
+        if let Ok(text) = std::env::var("CROWD2X_SPEECH_PREVIEW") {
+            app.insert_resource(SpeechPreview { text, last: -10.0 })
+                .add_systems(Update, preview_speech.run_if(in_state(AppState::Game)));
+        }
 
         if std::env::var(ENV_HIDE_UI).is_ok() {
             info!("debug: {ENV_HIDE_UI} set, hiding all UI and the vignette");
@@ -350,4 +354,17 @@ fn run_capture_script(
                   mut exit: MessageWriter<AppExit>| {
             exit.write(AppExit::Success);
         });
+}
+
+#[derive(Resource)]
+struct SpeechPreview { text: String, last: f32 }
+fn preview_speech(mut commands: Commands, time: Res<Time>, sim: Option<Res<crate::game::actors::Sim>>, mut preview: ResMut<SpeechPreview>) {
+    let Some(sim) = sim else {return;};
+    if time.elapsed_secs() - preview.last < 2.5 {return;}
+    if let Some(entity) = sim.0.entities().iter().next() {
+        let position = entity.position();
+        let origin = Vec2::new((position.0*48.0).round(), (position.1*48.0).round());
+        crate::game::speech::show(&mut commands, entity.uid(), origin, &preview.text, crate::sim::sound::Volume::Shout);
+        preview.last = time.elapsed_secs();
+    }
 }

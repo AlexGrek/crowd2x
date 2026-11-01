@@ -142,6 +142,8 @@ pub mod dispatch;
 pub mod door;
 pub mod dirt;
 pub mod smell;
+pub mod sound;
+pub mod news;
 mod soiling;
 pub mod economy;
 pub mod effect;
@@ -154,6 +156,7 @@ pub mod find;
 pub mod fields;
 pub mod flowers;
 pub mod fridge;
+pub mod history;
 pub mod homes;
 pub mod hospital;
 pub mod identity;
@@ -673,6 +676,11 @@ impl GameState {
     }
 
     /// Bites dealt last tick, waiting for their victims to feel them.
+    pub fn sound(&self) -> &sound::SoundField { &self.facilities.sound }
+
+    /// What is on the phones, and what waits for the propagandist.
+    pub fn news(&self) -> &news::News { &self.facilities.news }
+
     pub fn wounds(&self) -> &wounds::Wounds { &self.facilities.wounds }
 
     pub fn entities(&self) -> &Entities {
@@ -1080,6 +1088,12 @@ impl GameState {
         Statistics::of(&self.entities, &self.facilities, self.clock())
     }
 
+    /// The last week, a sample an hour, for the statistics menu's graphs.
+    /// See [`history`].
+    pub fn history(&self) -> &history::History {
+        &self.facilities.history
+    }
+
     /// Every door's leaf and lock. See [`door`].
     pub fn doors(&self) -> &Doors {
         &self.facilities.doors
@@ -1210,6 +1224,7 @@ impl GameState {
 
         // The buffers are indexed by slot, so they have to cover the new one.
         if self.intents.len() <= slot as usize {
+            self.facilities.sound.reserve(slot as usize + 1);
             self.intents.resize(slot as usize + 1, Intent::Idle);
             self.moves.resize(slot as usize + 1, MoveOutcome::Idle);
             self.effects.resize(slot as usize + 1, Effect::None);
@@ -1777,6 +1792,8 @@ pub fn process_game_state(state: &mut GameState, dt: f32, input: &Input) {
 ///    sends the nearest free courier for every call still waiting
 ///    ([`dispatch::Dispatch::send`]): once the crowd has settled, with
 ///    whoever was hired in a dead courier's place.
+/// 5. On the tick a world hour begins, the hour's sample goes into the
+///    week's [`history`], for the statistics menu's graphs.
 ///
 /// Inside [`process_pass`] and not round it: the game and the QA harness
 /// drive the two passes apart, and what happens on a tick has to happen on
@@ -1798,6 +1815,10 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
     }
     let entities = &state.entities;
     state.facilities.dispatch.send(entities.iter(), |uid| entities.get(uid), &state.facilities.bins, &state.facilities.superfridge, now, &state.log);
+    if state.facilities.history.due(before, now) {
+        let sample = history::Sample::of(now, &state.entities, &state.facilities.economy);
+        state.facilities.history.record(sample);
+    }
 }
 
 /// **The spawn pass: the only thing that changes which entities exist.**
@@ -2431,6 +2452,7 @@ fn world_step(
     facilities.wounds.begin_tick();
     // ...and so have last tick's meals served, by the dogs fed.
     facilities.feedings.begin_tick();
+    facilities.sound.clear();
     for (slot, effect) in effects.iter_mut().enumerate() {
         let asked = std::mem::take(effect);
         if asked != Effect::None
@@ -4495,6 +4517,9 @@ mod tests {
             assert_eq!(administrators, 4);
             // The accountant's one computer, beside the throne.
             let accountants = 1;
+            // ...and the propagandist's, on the throne's other side.
+            let propagandists = 1;
+            let mut propagandizing = 0;
             let nurses = crate::map::district::hospital::STATIONS * job::NURSE_SHIFTS.len();
             assert_eq!(nurses, 4);
             let mut nursing = 0;
@@ -4513,7 +4538,7 @@ mod tests {
             let mut store_hauling = 0;
             let mut agents = 0;
             let mut building = 0;
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS;
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4620,6 +4645,11 @@ mod tests {
                         assert!({ let w = district.the(crate::map::district::warehouse::NAME); crate::map::district::Rect::new(w.x - 6, w.y - 6, w.w + 12, w.h + 12).contains(job.workplace) }, "seed {seed}: a builder's yard by the warehouse");
                         assert_eq!(job.shift, job::BUILDER_HOURS);
                     }
+                    JobKind::Propagandist => {
+                        propagandizing += 1;
+                        assert!(district.palace.contains(job.workplace), "seed {seed}: the propagandist outside the palace");
+                        assert_eq!(job.shift, job::PROPAGANDA_HOURS);
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
@@ -4628,6 +4658,7 @@ mod tests {
             assert_eq!(decorating, 3);
             assert_eq!(agents, 2, "seed {seed}: exactly two special agents");
             assert_eq!(building, outposts::BUILDERS, "seed {seed}: the builders");
+            assert_eq!(propagandizing, propagandists, "seed {seed}: one propagandist");
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");

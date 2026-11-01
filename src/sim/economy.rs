@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(tariffs.price(ItemKind::Food), Money(300), "essentials fit inside the reduced care package");
         assert_eq!(tariffs.price(ItemKind::DogFood), Money(50));
         assert_eq!(tariffs.price(ItemKind::Water), Money::ZERO);
-        let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer, JobKind::CityDecorator];
+        let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer, JobKind::CityDecorator, JobKind::Propagandist];
         for job in JobKind::ALL {
             let wage = if job == JobKind::Builder {
                 // Paid only for the days it builds.

@@ -64,6 +64,7 @@ pub struct Body {
     family: Option<PropertyId>,
     /// Surface contaminants carried by this unit, independent of its needs.
     dirt: super::dirt::Dirt,
+    obedience: u8,
 }
 
 impl Body {
@@ -77,6 +78,7 @@ impl Body {
             panicking: false,
             family: None,
             dirt: super::dirt::Dirt::CLEAN,
+            obedience: super::sound::obedience(uid),
         }
     }
 
@@ -84,6 +86,10 @@ impl Body {
     pub fn at_cell(uid: Uid, cell: Point) -> Body {
         Body::new(uid, (cell.x as f32 + 0.5, cell.y as f32 + 0.5))
     }
+
+    pub fn obedience(&self) -> u8 { self.obedience }
+
+    pub fn set_obedience(&mut self, value: i32) { self.obedience = value.clamp(0, 100) as u8; }
 
     pub fn uid(&self) -> Uid {
         self.uid
@@ -168,7 +174,7 @@ impl Body {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home, dead, panicking, family, dirt } = *self;
+        let Body { uid, position: (x, y), frozen, home, dead, panicking, family, dirt, obedience } = *self;
         pb::Body {
             uid: uid.raw(),
             x,
@@ -179,6 +185,7 @@ impl Body {
             panicking,
             family: family.map(|family| family.get() as u32),
             dirt: Some(dirt.save()),
+            obedience: Some(obedience as u32),
         }
     }
 
@@ -196,11 +203,13 @@ impl Body {
                 None => invalid(format!("{uid}'s {what} is property {number}")),
             },
         };
+        if saved.obedience.is_some_and(|v| v > 100) { return invalid("obedience exceeds 100"); }
         let home = property(saved.home, "home")?;
         let family = property(saved.family, "family")?;
         Ok(Body {
             uid,
             position: (saved.x, saved.y),
+            obedience: saved.obedience.map_or_else(|| super::sound::obedience(uid), |v| v as u8),
             frozen: saved.frozen,
             home,
             dead: saved.dead,
@@ -507,6 +516,19 @@ pub trait GameEntity: Send + Sync {
     /// Nobles are humans reserved for noble roles; other kinds return false.
     fn is_noble(&self) -> bool { false }
 
+    /// What it is called — a person's first and last name — for the news;
+    /// `None` for a kind with no name.
+    fn name(&self) -> Option<&str> {
+        None
+    }
+
+    /// How obedient it is at `clock`: its own obedience, and for a person
+    /// more for a while after bad news (`sim::news::obedience`).
+    fn obedience(&self, clock: super::clock::Clock) -> u8 {
+        let _ = clock;
+        self.body().obedience()
+    }
+
     /// What it does for a living, if anything — for the job menu, and for
     /// whatever hires and lets go. `None` for a kind that cannot work and for
     /// somebody with no job alike; [`GameEntity::hire`] is what tells them
@@ -730,6 +752,10 @@ pub struct Think<'a> {
     /// Where on the site's edge there is a way in, and how far in from it
     /// is safe: where somebody fleeing runs to ([`super::refuge`]).
     pub ways_in: &'a super::refuge::WaysIn,
+    pub sound: &'a super::sound::SoundField,
+    /// What is on the phones, and what waits for the propagandist
+    /// ([`super::news`]).
+    pub news: &'a super::news::News,
     /// Everybody's family and job, as of the start of this tick, changed only
     /// by the spawn pass: what a wanderer asks about somebody it has just
     /// seen, for the floor of what it thinks of them
@@ -814,6 +840,8 @@ impl<'a> Think<'a> {
             panics: &facilities.panics,
             wounds: &facilities.wounds,
             ways_in: &facilities.ways_in,
+            sound: &facilities.sound,
+            news: &facilities.news,
             society: &facilities.society,
             chats: &facilities.chats,
             smalltalks: &facilities.smalltalks,

@@ -54,6 +54,7 @@
 
 pub mod actors;
 pub mod find;
+pub mod news;
 pub mod follow;
 pub mod croppanel;
 pub mod crops;
@@ -71,10 +72,12 @@ pub mod saving;
 pub mod selection;
 pub mod speed;
 pub mod statistics;
+pub mod graphs;
 pub mod economy;
 pub mod relationships;
 pub mod store;
 pub mod smalltalk;
+pub mod speech;
 mod snooze;
 pub mod unitpanel;
 pub mod boxpanel;
@@ -133,7 +136,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin))
+            .add_plugins((speech::SpeechPlugin, economy::EconomyPlugin, find::FindPlugin, news::NewsPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),
@@ -354,6 +357,7 @@ fn leave(
     mut statistics: ResMut<statistics::StatisticsMenu>,
     mut economy: ResMut<economy::EconomyMenu>,
     mut find: ResMut<find::FindMenu>,
+    mut news: ResMut<news::NewsMenu>,
     mut scope: ResMut<Scope>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -370,6 +374,8 @@ fn leave(
         economy::close_economy(&mut commands, &mut economy, &mut scope);
     } else if find.0.is_some() {
         find::close_find(&mut commands, &mut find, &mut scope);
+    } else if news.root.is_some() {
+        news::close_news(&mut commands, &mut news, &mut scope);
     } else if statistics.0.is_some() {
         statistics::close_statistics(&mut commands, &mut statistics, &mut scope);
     } else {

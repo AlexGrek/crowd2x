@@ -24,7 +24,8 @@ more. Each walks at a pace of its own, a little faster or slower than the next, 
 into a run when what it is after is urgent — a need past 75, or late for its desk or post.
 Needs are slow (a day holds two or three meals), and **what a unit is doing holds**: only
 something wanted clearly more takes it off it — a need past 90 at work, danger. Fun is the
-least of its wants and never interrupts anything; a chat or a word in passing is fun too.
+least of its wants and never interrupts anything; a chat or a word in passing is fun too, and so is a look at a mobile phone: a wanderer now and
+then stops and takes it out for a few minutes, never with fun over 80, and reads the news on it.
 Mental health is slow (days): joylessness, work done exhausted, a scare or a bite, debt and a
 stench wear it down; cheer (fun 50 or more) and work done rested mend it. Too spent to go on (95 tired) it lies down and
 sleeps where it stands; anybody asleep is drawn lying, like the dead, with zzz rising from it.
@@ -60,7 +61,8 @@ throne ten to four but Sundays, in purple robes and a crown always, walking at a
 the major decisions are the king's — where the outposts go, first. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
-the dead. Its `find` menu marks every unit of a job, every pet dog, the dirty squares and the broken
+the dead, and its `graphs` page draws the last week an hour a point: mental health, health,
+the budget and personal money. Its `find` menu marks every unit of a job, every pet dog, the dirty squares and the broken
 distribution boxes with gold squares, and centres the camera over a building every district has.
 
 Cash and a district budget now track wages, taxes, care packages and fridge purchases.
@@ -96,6 +98,14 @@ district, a fridge, a local warehouse and two beds — is every builder's to rea
 otherwise), each take a tile on (never two to one), fetch its steel, lay a building tile with all
 of it and work it two hours, an hour at a time with a rest between, then come back in before
 dark. Walls become wall terrain; built furniture works.
+
+The **news**: every death (bad news) and every 100 of anything made (a production record, good
+news) is a story; the palace's **propagandist**, a noble, noon to four every day at the propaganda
+computer beside the throne, writes each up into an article on everybody's phone for a day (a
+death with its case: who, what job, what of, where and when). Every article is kept for good,
+and the game screen's `news` menu pages through them all, newest first. A
+look at the phone reads one article not yet read — good news mends the mind, bad news wears it
+down and leaves the reader 10 more obedient for 12 hours — or, with none, is a little fun.
 
 One resident in eight of a district has a pet dog that stays within range of its owner and roams
 freely there. It cannot feed itself: its owner takes dog food out of a fridge, fifty cents, and gives
@@ -162,6 +172,7 @@ to `screenshots/`.
 | Dirt: stains on the ground and bodies, footsteps, trails, work grime, the wasteland's puddles, blood and pee, drying, the dirt dots on screen; the cleaners and their look over the district | `dirt` (+ `jobs`) |
 | Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($0.50), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
 | Outposts: the king's decree and its site, the building plan and its claims, builders (on demand, the yard, pay), building tiles, structures off the site, furniture installed into the indexes, the flag drawn | `outposts` (+ `jobs`, `brain-engineer`) |
+| The news: stories (deaths and their cases, production records), the propagandist and the propaganda computer, articles on the phones, reading them, good and bad news on the mind, obedience from bad news, the archive and the game screen's news menu | `news` (+ `jobs`, `brain-engineer`, `game-screen`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -245,10 +256,13 @@ src/game/dirt.rs        the dirt dots drawn over visible stained cells      [dir
 src/sim/brain/goals/clean.rs  the cleaners' look over the district and mopping  [dirt, jobs]
 src/sim/pets.rs         a dog's belly; who is bonded to whom; meals served    [pets]
 src/sim/brain/goals/follow.rs, defecate.rs, dog_care.rs  the dog stays near; the street; the owner feeds it  [pets]
+src/sim/news.rs, brain/tasks/write_news.rs  stories, articles, the propagandist, reading  [news]
+src/game/news.rs        the news menu: the archive, newest first, a page at a time  [news, game-screen]
 src/sim/outposts.rs     outposts: the plan, claims, tiles, the king's site  [outposts]
 src/sim/brain/goals/build.rs, tasks/{claim,lay,construct,decree}.rs  builders and the decree  [outposts]
 src/game/outposts.rs    the flag, building tiles and what is built, drawn   [outposts, game-screen]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
+src/sim/history.rs, src/game/graphs.rs  the last week an hour a sample; its graphs  [game-screen]
 src/sim/find.rs, src/game/find.rs  the find menu: searches; gold squares     [game-screen]
 src/map/landmarks.rs    a district's buildings found again from the props   [game-screen, map-generator]
 src/save/               the .savegame: Protobuf schema (pb/), zip, store    [savegame]

@@ -102,6 +102,39 @@ pub struct World {
     /// (`crate::sim::outposts`). Absent in an older save: none.
     #[prost(message, optional, tag = "28")]
     pub outposts: Option<Outposts>,
+    #[prost(message, repeated, tag = "29")]
+    pub sounds: Vec<Spoken>,
+    /// The news: stories waiting for the propagandist, articles on the
+    /// phones, what has been made towards the next record
+    /// (`crate::sim::news`). Absent in an older save: no news yet.
+    #[prost(message, optional, tag = "30")]
+    pub news: Option<News>,
+    /// The last week, a sample an hour (`crate::sim::history`), oldest
+    /// first. Older saves have none: the graphs start from the load.
+    #[prost(message, repeated, tag = "31")]
+    pub history: Vec<HourSample>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct HourSample {
+    /// Whole world hours since the world began.
+    #[prost(uint64, tag = "1")]
+    pub hour: u64,
+    /// Mean mental health of the living humans.
+    #[prost(float, tag = "2")]
+    pub mind: f32,
+    /// Mean health of the living humans.
+    #[prost(float, tag = "3")]
+    pub health: f32,
+    /// The district's budget, in cents.
+    #[prost(sint64, tag = "4")]
+    pub budget: i64,
+    /// The cash every living account holds, in cents.
+    #[prost(sint64, tag = "5")]
+    pub cash: i64,
+    /// The living humans the means are of.
+    #[prost(uint32, tag = "6")]
+    pub humans: u32,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -374,4 +407,81 @@ pub struct DirtCell {
     pub cell: Option<Cell>,
     #[prost(message, optional, tag = "2")]
     pub value: Option<Dirt>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Spoken {
+    #[prost(fixed64, tag = "1")]
+    pub speaker: u64,
+    #[prost(message, optional, tag = "2")]
+    pub at: Option<Cell>,
+    #[prost(fixed64, optional, tag = "3")]
+    pub recipient: Option<u64>,
+    #[prost(bool, tag = "4")]
+    pub shout: bool,
+    #[prost(string, tag = "5")]
+    pub text: String,
+}
+
+/// `crate::sim::news::News`.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct News {
+    /// Waiting for the propagandist, oldest first.
+    #[prost(message, repeated, tag = "1")]
+    pub stories: Vec<Story>,
+    /// Published and not yet a day old, oldest first.
+    #[prost(message, repeated, tag = "2")]
+    pub articles: Vec<Article>,
+    /// Pieces made so far, by item name; an item with none left out.
+    #[prost(message, repeated, tag = "3")]
+    pub made: Vec<Made>,
+    /// The number the next article is published under.
+    #[prost(uint32, tag = "4")]
+    pub next: u32,
+}
+
+/// One story: a death (`dead` and its case: `name`, `job`, `cause`, `at`,
+/// `when`) or a production record (`item`, `total`).
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Story {
+    #[prost(fixed64, optional, tag = "1")]
+    pub dead: Option<u64>,
+    #[prost(string, optional, tag = "2")]
+    pub item: Option<String>,
+    #[prost(uint32, tag = "3")]
+    pub total: u32,
+    /// What it died of.
+    #[prost(string, optional, tag = "4")]
+    pub cause: Option<String>,
+    /// Where it fell.
+    #[prost(message, optional, tag = "5")]
+    pub at: Option<Cell>,
+    /// Its name.
+    #[prost(string, optional, tag = "6")]
+    pub name: Option<String>,
+    /// Its job's catalogue number, if it had one.
+    #[prost(uint32, optional, tag = "7")]
+    pub job: Option<u32>,
+    /// When it died, in world seconds since the world began.
+    #[prost(double, optional, tag = "8")]
+    pub when: Option<f64>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Article {
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    #[prost(message, optional, tag = "2")]
+    pub story: Option<Story>,
+    /// When it went up, in world seconds since the world began.
+    #[prost(double, tag = "3")]
+    pub published: f64,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Made {
+    #[prost(string, tag = "1")]
+    pub item: String,
+    #[prost(uint32, tag = "2")]
+    pub count: u32,
 }

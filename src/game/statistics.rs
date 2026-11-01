@@ -9,6 +9,10 @@
 //! photograph of it. Worked out once a frame and only while the menu is
 //! open, one walk of the arena, which is nothing beside a tick.
 //!
+//! `graphs` turns it to the last week drawn ([`super::graphs`]): mental
+//! health, health, the budget and personal money, an hour a point;
+//! `numbers` turns it back. It opens on the numbers.
+//!
 //! A translucent modal: the world stays visible beneath it, with its
 //! own [`Scope`], so the corner buttons behind it stop taking the pointer
 //! and the highlight cannot be walked out of it.
@@ -24,6 +28,7 @@ use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
 use crate::ui::{button, hover_highlight, label, plain_button, FONT_BODY, FONT_TITLE, OVERLAY, TEXT};
 
 use super::actors::Sim;
+use super::graphs::{self, Chart, ChartTitle};
 
 /// The focus layer the menu occupies while it is open.
 const STATISTICS_MENU: u8 = 1;
@@ -46,15 +51,25 @@ struct CloseStatistics;
 #[derive(Component)]
 struct StatisticsText(bool);
 
+/// The menu's two pages: the numbers (`false`) and the graphs (`true`), and
+/// the buttons that turn to each.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct Page(bool);
+
+/// Which page the open menu is on.
+#[derive(Resource, Default)]
+struct OnPage(bool);
+
 pub struct StatisticsPlugin;
 
 impl Plugin for StatisticsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StatisticsMenu>()
+            .init_resource::<OnPage>()
             .add_systems(OnExit(AppState::Game), forget_the_menu)
             .add_systems(
                 Update,
-                (open, close, hover_highlight::<OpenStatistics>, update_text)
+                (open, close, turn_page, hover_highlight::<OpenStatistics>, update_text, update_graphs)
                     .chain()
                     .after(NavSystems)
                     .run_if(in_state(AppState::Game)),
@@ -84,6 +99,8 @@ fn open(
     mut menu: ResMut<StatisticsMenu>,
     mut scope: ResMut<Scope>,
     mut focus: ResMut<Focus>,
+    mut page: ResMut<OnPage>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let pressed = clicked.iter().any(|interaction| *interaction == Interaction::Pressed)
         | activated.read().any(|Activated(entity)| buttons.contains(*entity));
@@ -109,23 +126,51 @@ fn open(
             DespawnOnExit(AppState::Game),
             children![
                 label("statistics", FONT_TITLE, TEXT),
-                (Node { column_gap: px(6), ..default() }, children![
+                (Page(false), Node { column_gap: px(6), ..default() }, children![
                     (StatisticsText(false), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
                     (StatisticsText(true), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
                 ]),
             ],
         ))
         .id();
+    let charts = commands
+        .spawn((Page(true), Node { display: Display::None, ..default() }, ChildOf(overlay)))
+        .id();
+    graphs::spawn(&mut commands, &mut images, charts);
+    let row = commands.spawn((Node { column_gap: px(6), ..default() }, ChildOf(overlay))).id();
+    for (column, turn_to) in [false, true].into_iter().enumerate() {
+        let text = if turn_to { "graphs" } else { "numbers" };
+        commands.spawn((
+            Page(turn_to),
+            button(text, Focusable::new(column as i32, 0).in_scope(STATISTICS_MENU), px(40)),
+            ChildOf(row),
+        ));
+    }
     let close = commands
         .spawn((
             CloseStatistics,
-            button("close", Focusable::new(0, 0).in_scope(STATISTICS_MENU), px(40)),
-            ChildOf(overlay),
+            button("close", Focusable::new(2, 0).in_scope(STATISTICS_MENU), px(40)),
+            ChildOf(row),
         ))
         .id();
     focus.0 = Some(close);
     *scope = Scope(STATISTICS_MENU);
     menu.0 = Some(overlay);
+    page.0 = false;
+}
+
+/// `numbers` or `graphs` pressed: show that page and hide the other.
+fn turn_page(
+    mut activated: MessageReader<Activated>,
+    buttons: Query<&Page, With<Button>>,
+    mut pages: Query<(&Page, &mut Node), Without<Button>>,
+    mut page: ResMut<OnPage>,
+) {
+    let Some(turn_to) = activated.read().filter_map(|Activated(entity)| buttons.get(*entity).ok()).last() else { return };
+    page.0 = turn_to.0;
+    for (which, mut node) in &mut pages {
+        node.display = if which.0 == page.0 { Display::Flex } else { Display::None };
+    }
 }
 
 /// `close` pressed.
@@ -149,9 +194,30 @@ pub(super) fn close_statistics(commands: &mut Commands, menu: &mut StatisticsMen
     *scope = Scope(0);
 }
 
-/// Keep the menu saying what is true, while it is open.
-fn update_text(menu: Res<StatisticsMenu>, sim: Option<Res<Sim>>, mut texts: Query<(&StatisticsText, &mut Text)>) {
-    if menu.0.is_none() {
+/// Keep the graphs up with the hours, while they are shown.
+fn update_graphs(
+    menu: Res<StatisticsMenu>,
+    page: Res<OnPage>,
+    sim: Option<Res<Sim>>,
+    mut images: ResMut<Assets<Image>>,
+    mut charts: Query<&mut Chart>,
+    mut titles: Query<(&ChartTitle, &mut Text)>,
+) {
+    if menu.0.is_none() || !page.0 {
+        return;
+    }
+    let Some(sim) = sim else { return };
+    graphs::draw(&sim.0, &mut images, &mut charts, &mut titles);
+}
+
+/// Keep the menu saying what is true, while it is open on the numbers.
+fn update_text(
+    menu: Res<StatisticsMenu>,
+    page: Res<OnPage>,
+    sim: Option<Res<Sim>>,
+    mut texts: Query<(&StatisticsText, &mut Text)>,
+) {
+    if menu.0.is_none() || page.0 {
         return;
     }
     let Some(sim) = sim else { return };

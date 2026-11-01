@@ -538,6 +538,17 @@ UNIFORMS["builder"] = (
 )
 
 
+# A crimson tunic with a white collar, a black armband and a gold star on the
+# chest over charcoal trousers: the propagandist's, writing the news.
+UNIFORMS["propagandist"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....rrwwrr.....", "....arrsrrrr....", ".....rrrrrr.....",
+     ".....bbkbbb.....", "......pqqp......", "......pqqp......"],
+    {"r": (170, 38, 44), "w": (236, 236, 230), "a": (24, 24, 28), "s": (240, 200, 60),
+     "b": BELT, "k": BUCKLE, "p": TROUSERS["charcoal"][0], "q": TROUSERS["charcoal"][1]},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

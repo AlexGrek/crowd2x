@@ -286,6 +286,30 @@ on behind it** and the text is rebuilt every frame the menu is open and written 
 changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text
 (unit-tested); `qa/statistics.json` opens, reads and closes it.
 
+**The graphs page** (`game/graphs.rs`): `numbers` / `graphs` / `close` sit in one row under the
+menu (`Page(bool)` on the buttons and on the two page nodes, `OnPage` resource, reset to numbers
+on open). `graphs` shows four charts two by two, one measure each on its own scale (never two on
+one axis): the living humans' mean **mental health** and mean **health** (0-100), the district's
+**budget** and **personal money** (all living accounts' cash summed; from the week's lowest to
+highest, a dollar apart at least, a zero line when it crosses zero). Each is a 140x36 picture at
+one texel to the canvas pixel (`plot`, unit-tested: dark backing, grid at the quarters, a gold
+line with a solid wash down to zero), drawn again only when a new hour's sample has come in
+(`Chart::drawn`), not every frame; its title says where it stands now and the span
+(`mental health  62%   3 days`). The newest sample is at the right edge; the x axis covers the
+hours there are samples for, **at least a day and at most the week** (`window`), shared by all
+four. An hour with no human alive has no mental health or health and is not plotted as 0
+(`Sample::humans`). The samples are the simulation's: `sim::history` (below), read through
+`GameState::history`. The page fits the 180-pixel canvas with the title and button row; the
+numbers page does not quite (its title runs under the HUD). `qa/statistics.json` ticks half a
+day and reads `12 hours` off it.
+
+**The history** (`sim/history.rs`, `Facilities::history`): one `Sample { hour, humans, mind,
+health, budget, cash }` a world hour, the newest `HOURS` (168), taken in `comings_and_goings` on
+the tick a world hour begins (`hour_of`: whole hours of `Clock::elapsed`, so a world opened at
+08:00 starts at hour 8) and on the first tick of a world with none; one walk of the arena an
+hour. A `VecDeque` sized once, so the processing pass still allocates nothing. Read by nothing in
+a tick; saved (`pb::World.history`, tag 31) so a loaded game draws the week it had.
+
 ### The find menu (`game/find.rs`, `sim/find.rs`, `map/landmarks.rs`)
 
 `find`, last in the world's second corner row (after `save`, `quick save`, `statistics`, `economy`),
@@ -319,6 +343,12 @@ canvas (`VisibleArea::tiles`), dedupes them and moves that many pooled `Mark` sp
 (the rest hidden, not despawned, at most `MAX_MARKS`). The square is `follow`'s flash — gold fill
 0.20, a 2 px border 0.95, `LIFT` 500 — as one generated 48x48 image at one pixel to the pixel, one
 sprite each. The menu's status line reads `showing 3 guards` / `no guards found`.
+
+### The news menu (`game/news.rs`)
+
+`news`, last in the world's second corner row (after `find`), opens an opaque full-screen modal
+of every article ever published, newest first, eight a page (`newer` / `older` / `close`; `esc`
+closes it through `leave`), bad news red and good green, live while open. The `news` skill.
 
 ### Saving, and opening a loaded game (`game/saving.rs`)
 

@@ -100,7 +100,7 @@ impl Experience {
             Event::Smelled { .. } | Event::Worried { .. } | Event::Frightened => None,
             // Nor is a talk an experience: it is always with somebody, and
             // what that is worth is the relationship's, not a treat's.
-            Event::Chatted | Event::SmallTalk => None,
+            Event::Chatted | Event::SmallTalk | Event::Phoned | Event::News { .. } => None,
         }
     }
 

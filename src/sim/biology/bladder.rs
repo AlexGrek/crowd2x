@@ -100,7 +100,7 @@ impl Process for Bladder {
             // own clock.
             Event::Slept { .. } => {}
             // Nor does company, or a word with it.
-            Event::Met | Event::Chatted | Event::SmallTalk => {}
+            Event::Met | Event::Chatted | Event::SmallTalk | Event::Phoned | Event::News { .. } => {}
             // Nor does a day at the desk.
             Event::Worked { .. } | Event::Treated { .. } => {}
             Event::Bitten { .. } => {}

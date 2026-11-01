@@ -90,6 +90,7 @@ impl GameState {
             arena: Some(self.entities.save_arena()),
             workplaces: self.facilities.workplaces.save(),
             tally: Some(self.facilities.tally.save()),
+            history: self.facilities.history.save(),
             crops: self.facilities.fields.save(),
             outposts: Some(self.facilities.outposts.save()),
             flowers: self.facilities.flowers.save(),
@@ -98,6 +99,8 @@ impl GameState {
             playzones_run: self.facilities.playzones.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
+            sounds: self.facilities.sound.save(),
+            news: Some(self.facilities.news.save()),
             feedings: self.facilities.feedings.save(),
             relationship_rules: self.facilities.society.rules().save(),
             store: Some(self.facilities.superfridge.save()),
@@ -209,6 +212,7 @@ impl GameState {
             return invalid("a courier order assigned in the future".to_string());
         }
         state.facilities.tally = crate::sim::statistics::Tally::restore(world.tally.as_ref());
+        state.facilities.history = super::history::History::restore(&world.history)?;
         state.facilities.doors.restore(&world.doors)?;
         state.facilities.homes = Homes::restore(&world.homes)?;
         state.facilities.workplaces = Workplaces::restore(&world.workplaces)?;
@@ -216,6 +220,9 @@ impl GameState {
         // map but for that, which only the tick that ended it knew.
         state.facilities.playzones.restore(&world.playzones_run)?;
         // The bites dealt as the saved tick ended, still to be felt.
+        state.facilities.sound = super::sound::SoundField::restore(&world.sounds)?;
+        // The news waiting and on the phones.
+        state.facilities.news = super::news::News::restore(world.news.as_ref())?;
         state.facilities.wounds = super::wounds::Wounds::restore(&world.wounds)?;
         // ...and the dog foods given, still to be felt.
         state.facilities.feedings = super::pets::Feedings::restore(&world.feedings)?;
@@ -248,6 +255,7 @@ impl GameState {
         )?;
 
         let capacity = state.entities.capacity();
+        state.facilities.sound.reserve(capacity);
         state.intents = vec![Intent::Idle; capacity];
         state.moves = vec![MoveOutcome::Idle; capacity];
         state.effects = vec![Effect::None; capacity];

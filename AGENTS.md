@@ -1328,3 +1328,34 @@ Walls are `WALL` terrain off the site (`Map::build`, `Structure`); finished
 furniture is installed into the feature, fridge, store and door indexes
 (`Facilities::install`), so it works. Drawn by `game/outposts.rs`; saved as
 World tag 28. The `outposts` skill has the rest. QA: `qa/builders.json`.
+
+
+Unit talk (`sim::sound`) is broadcast or addressed to one person, with speech
+radius 4 and shout radius 10 cells. Sound commits after react, is heard through
+perception next tick, then expires. On-duty guards beside their post shout
+GET BACK IN! once per night when they see a human outside; they stay at the post.
+Humans outside with obedience > 60 obey via OrdersRoutine / ReturnInsideGoal,
+using existing refuge paths without panic. Every Body has deterministic rounded
+normal obedience N(70,15), clipped to 0..100 (median 70). Body obedience, guard
+warning memory, return orders and pending sounds persist in saves.
+
+Speech presentation (`game::speech`) uses real time: <=24 characters float up
+and fade over 1.8s; longer/multiline phrases get a wrapped, fitted bubble that
+follows the speaker, then fades. A bounded presentation ring catches emissions
+between rendered frames; it is independent of hearing and never affects decisions.
+CROWD2X_SPEECH_PREVIEW supplies preview text for debug captures with spawned units.
+
+Arbitrary utterances use inline UTF-8 (up to 256 bytes); unknown phrases are
+displayed and heard but never interpreted as GET BACK IN!. Saved speech keeps its text.
+
+News (`sim::news`): every human death (bad) and every 100 of anything made into a
+`StoreDef::made` store (a production record, good) is a story. The propagandist
+(job 22, a noble's, the palace's propaganda computer, 12-16 every day,
+`Paperwork::News`) writes each into an article (`Task::write_news`,
+`Effect::Publish`) on the phones for a world day. A phone look seen through reads
+the next unread article (`Brain::react` 6a, `news::read`): good news +3 mental
+health, bad -3 and +10 obedience for 12 h (`news::obedience`); none, `PHONE_FUN`.
+A death story keeps its case (`news::Death`: name, job, cause, cell, time). Nothing
+is let go: stories wait however long, every article stays in the archive, and the
+game screen's `news` menu (`game/news.rs`) pages through it newest first.
+Saved as World tag 30 and Memory tags 15-16. The `news` skill has the rest.

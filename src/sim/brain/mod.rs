@@ -46,6 +46,8 @@
 //! 5.   ...which manages the task queue
 //! 6. the current task's executor runs (the front of the queue, if none is
 //!      current), and writes the task's result
+//! 6a. a look at the phone just over reads the news on it, or is a little fun
+//!      (`sim::news::read`)
 //! 6b. a playzone administrator on duty at its computer runs it (`Operate`)
 //! 6c. with the effect still free, what the timesheet owes goes to the world
 //! 7. the walker is told how urgent the goal on top is, and hurries that much
@@ -291,6 +293,9 @@ impl Brain {
         // take in what is news. Asleep, its eyes are shut: it sees nobody, and
         // whoever it had in mind fades as the night goes on.
         perception.turn(walk.heading());
+        if social && !is_asleep(task, action) {
+            super::sound::take_in(ctx, &body, perception, memory);
+        }
         // On the low beat, awake: the air it breathes and the money it owes,
         // each for the world time the beat covers (the body's `Mind`).
         if social && !is_asleep(task, action)
@@ -310,6 +315,7 @@ impl Brain {
                 perception.close_eyes();
             } else {
                 let sightings = perception.look(ctx, &body);
+                super::sound::guard_notice(ctx, &body, job, goals.top(), &sightings, memory);
                 let mut met = 0;
                 attention.take_in(sightings.iter(), |notice| {
                     if notice.uid.kind() == Some(EntityType::Human) {
@@ -523,6 +529,12 @@ impl Brain {
                 *finished = task.take();
                 *action = Action::None;
                 walk.halt();
+                // 6a. A look at the phone seen through: the news on it, or
+                // with none a little fun (`sim::news`). Here, where the
+                // memory of what was read and the body are both to hand.
+                if result == TaskResult::Success && matches!(finished, Some(Task::Phone(_))) {
+                    super::news::read(ctx, body.uid(), memory, biology.as_deref_mut());
+                }
             }
         }
 
@@ -555,6 +567,14 @@ impl Brain {
             && ctx.outposts.claim_of(body.uid()).is_some()
         {
             effect = Effect::GiveUpTile;
+        }
+
+        if effect == Effect::None && memory.guard_warning_pending {
+            memory.guard_warning_pending = false;
+            if job.is_some_and(|job| job.kind == JobKind::Guard && job.is_due(ctx.clock)) && ctx.clock.sun().is_dark() && goals.top() == GoalId::Work {
+                memory.guard_warned_night = Some(super::sound::night_id(ctx.clock));
+                effect = Effect::Talk { audience: super::sound::Audience::Broadcast, volume: super::sound::Volume::Shout, phrase: super::sound::Phrase::GetBackIn };
+            }
         }
 
         // 6c. What it is owed, told the world with the first tick nothing

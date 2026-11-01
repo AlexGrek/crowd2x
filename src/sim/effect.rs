@@ -37,6 +37,7 @@ pub enum Effect {
     /// Nothing. What every entity that never touches a fridge returns.
     #[default]
     None,
+    Talk { audience: super::sound::Audience, volume: super::sound::Volume, phrase: super::sound::Phrase },
     Admit { at: Point },
     ReleaseBed { at: Point },
     Discharge,
@@ -77,8 +78,9 @@ pub enum Effect {
     /// The unit died this tick, of `cause` (`biology::health`): it has
     /// already marked its own body dead, and the world gives back what it
     /// held — its cell, its bed, its workplace (with the job, so a worker is
-    /// not left on the books) — and says so in the log.
-    Died { cause: &'static str },
+    /// not left on the books) — and says so in the log. `when` it died, for
+    /// the news ([`super::news::Death`]).
+    Died { cause: &'static str, when: Clock },
     /// Take up the body lying at `at`: the unit, an undertaker, has finished
     /// lifting it (`brain::tasks::TakeBody`). Granted to a free hand while
     /// the body is still there, so two undertakers at one body get one
@@ -150,6 +152,11 @@ pub enum Effect {
     /// and its plan is laid out ([`super::outposts::Outposts::found`]) — or,
     /// `None`, it found nowhere, and does not look again that day.
     Decree { at: Option<Point>, day: u32 },
+    /// The propagandist's article written (`brain::tasks::WriteNews`, at the
+    /// propaganda computer): the oldest story waiting goes up on everybody's
+    /// phone at `when` ([`super::news::News::publish`]) — none, if another
+    /// took it first.
+    Publish { when: Clock },
     /// A builder takes on the tile of the outpost going up at `at`
     /// (`brain::tasks::Claim`): granted while nobody has it, so two asking
     /// in one tick get it in slot order, the lower first.
@@ -279,6 +286,12 @@ pub(crate) fn apply(
                 log.related(entity.uid(), patient, format!("{} took care of {patient}: +1% health", entity.uid()));
             }
         }
+        Effect::Talk { audience, volume, phrase } => {
+            if !entity.is_dead() {
+                facilities.sound.emit(super::sound::Utterance { speaker: entity.uid(), at: entity.center_position(), audience, volume, phrase });
+                log.unit(entity.uid(), format!("{} said: {}", entity.uid(), phrase.text()));
+            }
+        }
         Effect::None => {}
         Effect::Fridge { at, open } => {
             let _ = facilities.fridges.set_open(at, open);
@@ -292,7 +305,19 @@ pub(crate) fn apply(
         Effect::Deposit { at, pieces } if facilities.bins.store(at) == Some(FeatureKind::Superfridge) => {
             restock(entity, facilities, log, at, pieces);
         }
-        Effect::Deposit { at, pieces } => deposit(entity.uid(), &mut facilities.bins, log, at, pieces),
+        Effect::Deposit { at, pieces } => {
+            deposit(entity.uid(), &mut facilities.bins, log, at, pieces);
+            // Into the store its trade keeps its work in: made, towards the
+            // next production record in the news.
+            if let Some(store) = facilities.bins.store(at).and_then(FeatureKind::store)
+                && store.made
+            {
+                facilities.news.made(store.holds, pieces as u32);
+            }
+        }
+        Effect::Publish { when } => {
+            let _ = facilities.news.publish(when.elapsed(), log);
+        }
         Effect::Withdraw { at } => {
             let uid = entity.uid();
             withdraw(uid, entity.inventory_mut(), &mut facilities.bins, log, at, u32::MAX);
@@ -314,7 +339,7 @@ pub(crate) fn apply(
                 log.unit(uid, format!("{uid} found the courier dispatch has the superfridge's call already: {percent:.0}% full"));
             }
         }
-        Effect::Died { cause } => died(entity, facilities, occupancy, log, cause),
+        Effect::Died { cause, when } => died(entity, facilities, occupancy, log, cause, when),
         Effect::TakeBody { at } => take_body(entity, facilities, log, at),
         Effect::Cremate { at } => {
             facilities.tally.cremated += 1;
@@ -613,7 +638,7 @@ fn salvage(entity: &mut dyn GameEntity, map: &mut Map, log: &Log, at: Point) {
 /// despawn's do — the job to somebody jobless before the tick is out
 /// ([`Facilities::vacancies`]). The body stays where it fell, filed with the
 /// [`Corpses`](super::Corpses) for an undertaker to find, and is counted.
-fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mut Occupancy, log: &Log, cause: &'static str) {
+fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mut Occupancy, log: &Log, cause: &'static str, when: Clock) {
     facilities.hospital.release(entity.uid());
     let uid = entity.uid();
     let cell = entity.center_position();
@@ -625,6 +650,19 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
     facilities.economy.died(uid);
+    // A person's death is news: bad news, for the propagandist to write up —
+    // who it was, what it did, what it died of, where and when.
+    if uid.kind() == Some(super::uid::EntityType::Human) {
+        let death = super::news::Death {
+            dead: uid,
+            name: entity.name().unwrap_or_default().to_string(),
+            job: entity.job().map(|job| job.kind),
+            cause: cause.to_string(),
+            at: cell,
+            when: when.elapsed(),
+        };
+        facilities.news.report(super::news::Story::Death(death));
+    }
     if let Some(job) = entity.dismiss() {
         facilities.vacancies.push((uid, job));
     }

@@ -19,6 +19,10 @@ pub const HOME_BED: &str = "home bed";
 /// it out once there is nothing more it can do there.
 pub const SALVAGE_ORDER: &str = "salvage order";
 
+/// When it last looked at its phone ([`Recall::Time`], world seconds), so that
+/// the next look is a while off (`StayBusyRoutine`, `PhoneGoal`).
+pub const PHONED: &str = "phoned";
+
 /// How long a place found out of reach is remembered as out of reach, in
 /// **world** seconds: an hour of the world, half a minute of watching. Long
 /// enough for the crowd round a toilet to clear, short enough that a doorway
@@ -42,6 +46,15 @@ pub const OUT_OF_REACH_SLOTS: usize = 8;
 /// few runs. Both allocate nothing while empty, which is today and for a while.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Memory {
+    pub returning_inside: bool,
+    pub guard_warned_night: Option<u32>,
+    pub guard_warning_pending: bool,
+    /// The last article it read on its phone (`sim::news`, numbered from 1):
+    /// the next it reads is the first after it. 0 is none yet.
+    pub news_read: u32,
+    /// Until when bad news keeps it more obedient, in world seconds
+    /// (`sim::news::obedience`).
+    pub obedient_until: Option<f64>,
     keyed: BTreeMap<String, Recall>,
     pub medical: crate::sim::hospital::Medical,
     /// Boxed, out of line: allocated once with the brain in the spawn pass,
@@ -325,10 +338,15 @@ impl Memory {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion, rest_until } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion, rest_until, returning_inside, guard_warned_night, guard_warning_pending, news_read, obedient_until } = self;
         let OutOfReach { places } = **out_of_reach;
         let (relations, night) = relations.save();
         pb::Memory {
+            returning_inside: *returning_inside,
+            guard_warned_night: *guard_warned_night,
+            guard_warning_pending: *guard_warning_pending,
+            news_read: *news_read,
+            obedient_until: *obedient_until,
             chat: chat.map(|chat| chat.save()),
             relations,
             night,
@@ -369,6 +387,14 @@ impl Memory {
         memory.chat = saved.chat.as_ref().map(Chat::restore).transpose()?;
         *memory.relations = Relations::restore(&saved.relations, saved.night)?;
         memory.smalltalk = saved.smalltalk.as_ref().map(Smalltalk::restore).transpose()?;
+        memory.returning_inside = saved.returning_inside;
+        memory.guard_warned_night = saved.guard_warned_night;
+        memory.guard_warning_pending = saved.guard_warning_pending;
+        memory.news_read = saved.news_read;
+        memory.obedient_until = match saved.obedient_until {
+            Some(until) if !until.is_finite() => return invalid(format!("memory: obedient until {until}")),
+            until => until,
+        };
         memory.smalltalked = match saved.smalltalked {
             Some(when) if !when.is_finite() => return invalid(format!("memory: small talk started at {when}")),
             when => when,

@@ -1533,6 +1533,8 @@ fn a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly() {
         let mut world = pb::World::decode(bytes.as_slice()).unwrap();
         world.noble_draws = 0;
         world.noble_position = 0;
+        // ...and the week's history for the statistics graphs.
+        world.history.clear();
         *bytes = world.encode_to_vec();
     }
 
@@ -1706,4 +1708,43 @@ fn an_orphan_saved_while_waiting_is_adopted_and_keeps_its_new_bond() {
     let loaded = round_trip(&copy);
     assert_eq!(loaded.entities().get(dog).unwrap().companion(), Some(adopter));
     assert_eq!(loaded.entities().get(adopter).unwrap().companion(), Some(dog));
+}
+
+/// The news saved while the propagandist writes it up and a crowd reads it
+/// on their phones — some through an article, some shaken by bad news into
+/// obedience, a story still waiting — carries on exactly.
+#[test]
+fn the_news_saved_while_it_is_written_and_read_carries_on_exactly() {
+    use crate::sim::news::Story;
+    use crate::sim::testing::{a_death, report, skip_to};
+    use crate::sim::JobKind;
+
+    let mut map = Map::new(Size::new(24, 14), FLOOR);
+    prop_at(&mut map, "propaganda computer", Point::new(12, 1));
+    crate::map::utilities::serve_everything(&mut map, Point::new(0, 13), Point::new(23, 13));
+    let mut state = GameState::new(map, 5);
+    state.spawn(EntityType::Human, Point::new(12, 2));
+    let readers: Vec<Uid> = (0..10).map(|n| state.spawn(EntityType::Human, Point::new(2 + 2 * n, 8))).collect();
+    for &uid in &readers {
+        set_stats(&mut state, uid, Stats::calm().with_fun(20.0));
+    }
+    skip_to(&mut state, 1, 11.5);
+    report(&mut state, a_death(900), true);
+    report(&mut state, Story::Record { item: ItemKind::Scrap, total: 100 }, true);
+    for n in 0..4 {
+        report(&mut state, a_death(901 + n), false);
+    }
+    // To noon and on, until the propagandist has written some up and the
+    // crowd has read some.
+    let (mut ticks, mut read) = (0, false);
+    while state.news().articles().len() < 4 || !read {
+        run(&mut state, 30);
+        read |= state.log.drain().iter().any(|line| line.contains("read the news"));
+        ticks += 30;
+        assert!(ticks < 8000, "no news by {}: {} waiting", state.clock(), state.news().waiting());
+    }
+    assert!(state.entities().iter().any(|entity| entity.job().is_some_and(|job| job.kind == JobKind::Propagandist)));
+    assert!(state.news().waiting() > 0, "a story still waiting as it is saved");
+
+    side_by_side(&mut state, 900, |_, _| Input::new());
 }

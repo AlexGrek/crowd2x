@@ -89,6 +89,9 @@ impl WorkGoal {
             Some(Paperwork::Decrees) if crate::sim::outposts::decree_due(ctx.think) => {
                 Task::decree(desk, super::super::tasks::DECREE_SECONDS)
             }
+            Some(Paperwork::News) if ctx.think.news.waiting() > 0 => {
+                Task::write_news(desk, super::super::tasks::NEWS_SECONDS)
+            }
             _ => Task::work_at(job.kind.workplace(), desk, WORK_SECONDS),
         };
         let _ = ctx.tasks.push_back(task);
@@ -182,7 +185,7 @@ impl GoalExecutor for WorkGoal {
                 self.worked(ctx, task);
                 return GoalProgress::Achieved;
             }
-            (TaskResult::Success, Some(Task::Payroll(_) | Task::CloseBooks(_) | Task::Decree(_))) => {
+            (TaskResult::Success, Some(Task::Payroll(_) | Task::CloseBooks(_) | Task::Decree(_) | Task::WriteNews(_))) => {
                 self.forget();
                 return GoalProgress::Achieved;
             }

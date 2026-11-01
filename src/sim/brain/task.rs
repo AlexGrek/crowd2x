@@ -589,6 +589,8 @@ mod tests {
             Task::lay(at, 31.0),
             Task::construct(at, 32.0),
             Task::decree(at, 33.0),
+            Task::write_news(at, 35.0),
+            Task::phone(at, 34.0),
         ]
     }
 

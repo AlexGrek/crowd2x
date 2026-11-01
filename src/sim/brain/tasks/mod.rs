@@ -50,6 +50,8 @@ pub mod use_arcade;
 pub mod use_computer;
 pub mod use_toilet;
 pub mod pee;
+pub mod phone;
+pub use phone::{Phone, PHONE_SECONDS};
 pub use pee::Pee;
 pub mod wait;
 pub mod watch_tv;
@@ -62,10 +64,12 @@ pub use fetch::Fetch;
 pub mod claim;
 pub mod construct;
 pub mod decree;
+pub mod write_news;
 pub mod lay;
 pub use claim::Claim;
 pub use construct::Construct;
 pub use decree::{Decree, DECREE_SECONDS};
+pub use write_news::{WriteNews, NEWS_SECONDS};
 pub use lay::{Lay, LAY_SECONDS};
 pub mod repair_box;
 pub mod plant_flowers;
@@ -149,6 +153,8 @@ tasks! {
     Lay,
     Construct,
     Decree,
+    WriteNews,
+    Phone,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

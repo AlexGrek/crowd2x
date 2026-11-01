@@ -206,6 +206,13 @@ pub enum Event {
     /// A word in passing, to somebody close by whatever either was doing
     /// (`brain::social`). A small thing: [`Fun`] gives a fraction of a chat.
     SmallTalk,
+    /// A look at a mobile phone, stood through to its end (`brain::tasks::phone`),
+    /// with no news on it (`sim::news::read`). [`Fun`] gives a little;
+    /// nothing else cares.
+    Phoned,
+    /// An article read on the phone (`sim::news::read`): good news or bad.
+    /// [`Mind`](mind::Mind) mends for the one and wears down for the other.
+    News { good: bool },
     /// A deathdog's teeth: `damage` health gone at once
     /// ([`Health`](health::Health)'s to take, so a body with it switched off
     /// shrugs a bite off). Felt by the one bitten in its own react

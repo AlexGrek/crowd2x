@@ -130,6 +130,7 @@ pub const PALETTE: &[PaletteItem] = &[
     PaletteItem::upscaled("hospital bed", "hospital_bed.png"),
     PaletteItem::animated("nurse station", "computer_idle.png", 10).used("computer.png", 11),
     PaletteItem::animated("accountant computer", "computer_idle.png", 10).used("computer.png", 11),
+    PaletteItem::animated("propaganda computer", "computer_idle.png", 10).used("computer.png", 11),
     PaletteItem::animated("arcade cabinet", "arcade_cabinet_idle.png", 2).used("arcade_cabinet.png", 4),
     // The farm's wooden grain bin, a farmer's workplace and store of wheat
     // (`sim::bins`), filling up on screen like the scrap bin ([`BinFill`]).

@@ -80,7 +80,8 @@ it are four steps:
    table is let go — the four steps add and remove nobody): everybody on
    `Facilities::leaving` is despawned — bodies taken up (`Effect::TakeBody`) and deathdogs
    gone back into the wasteland (`Effect::Depart`) — and on the tick it gets dark the night's
-   deathdogs arrive (`deathdogs::arrive`). Inside `process_pass`, so the game and QA, which
+   deathdogs arrive (`deathdogs::arrive`); on the tick a world hour begins the hour's sample
+   goes into `Facilities::history` (`sim::history`, the statistics graphs' week). Inside `process_pass`, so the game and QA, which
    drive the two passes apart, get it too (`bury` in `process_game_state` never ran there).
    `Effect::Bite { at, damage }` files a wound (`sim::wounds`) for the bitten to feel next
    tick. The move step also rebuilds `Facilities::panics` (who is seen running in a panic,

@@ -63,6 +63,9 @@
 //! * the **special agent**: two positions in the district, walking randomly
 //!   (`WanderGoal`) nine to five every day, including Saturday and Sunday.
 //!   No commute or fixed post; normal needs may interrupt the patrol.
+//! * the **propagandist**: the propaganda computer in the palace, noon to four
+//!   every day ([`PROPAGANDA_HOURS`]) — every story waiting made into the news
+//!   on everybody's phone ([`Paperwork::News`], [`super::news`]). A noble's.
 //!
 //! **Every job is paid** (`sim::economy`): a wage a shift, by its tier in
 //! `economy.yaml`, paid by the office workers, whose paperwork is the payroll
@@ -217,6 +220,10 @@ pub enum Paperwork {
     /// ([`super::outposts::decree_due`]): steel enough on the warehouse's
     /// racks, and none going up. The king's, from the throne.
     Decrees,
+    /// Make the oldest story waiting into an article on everybody's phone
+    /// (`Task::write_news`), while one is waiting
+    /// ([`super::news::News::waiting`]). The propagandist's.
+    News,
 }
 
 catalogue! {
@@ -672,6 +679,29 @@ catalogue! {
             noble: false,
             on_demand: true,
         },
+        /// Writes the news at the propaganda computer beside the palace's
+        /// throne, four hours a day ([`PROPAGANDA_HOURS`]): every story
+        /// waiting — a death, a production record — made into an article
+        /// that is on everybody's phone for a day ([`Paperwork::News`],
+        /// [`super::news`]), and an hour's plain work between. One computer,
+        /// so one propagandist: a noble's post.
+        Propagandist = 22 => JobDef {
+            name: "propagandist",
+            article: "the propagandist",
+            workplace: FeatureKind::PropagandaComputer,
+            goal: GoalId::Work,
+            commute: GUARD_COMMUTE,
+            shifts: &[PROPAGANDA_HOURS],
+            uniform: "uniform propagandist",
+            now: |at_work, _| if at_work { "writing the news" } else { "on the way to the palace" },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: Some(Paperwork::News),
+            on_call: false,
+            courier: false,
+            noble: true,
+            on_demand: false,
+        },
     }
 }
 
@@ -821,6 +851,15 @@ pub const COURT_HOURS: Shift = Shift {
     start: 10,
     end: 16,
     days: MONDAY_TO_SATURDAY,
+};
+
+/// The propagandist's four hours: noon to four, every day — the dead do not
+/// wait for the weekend, and a story written within the day it happened is on
+/// the phones while it is still news.
+pub const PROPAGANDA_HOURS: Shift = Shift {
+    start: 12,
+    end: 16,
+    days: EVERY_DAY,
 };
 
 /// The first group's days at the playzone: Monday, Wednesday, Friday and
@@ -1388,7 +1427,8 @@ mod tests {
                 JobKind::Shopkeeper,
                 JobKind::StoreCourier,
                 JobKind::SpecialAgent,
-                JobKind::Builder
+                JobKind::Builder,
+                JobKind::Propagandist
             ],
             "the office first, new professions last"
         );
@@ -1539,14 +1579,18 @@ mod tests {
         assert_eq!(JobKind::OfficeWorker.paperwork(), Some(Paperwork::Payroll));
         assert_eq!(JobKind::OfficeWorker.now(true, None), "doing the payroll");
         assert_eq!(JobKind::King.paperwork(), Some(Paperwork::Decrees), "the king decrees the outposts");
-        let others = JobKind::ALL.into_iter().filter(|&job| ![kind, JobKind::OfficeWorker, JobKind::King].contains(&job));
+        assert_eq!(JobKind::Propagandist.paperwork(), Some(Paperwork::News), "the propagandist writes the news");
+        let others = JobKind::ALL
+            .into_iter()
+            .filter(|&job| ![kind, JobKind::OfficeWorker, JobKind::King, JobKind::Propagandist].contains(&job));
         assert!(others.clone().all(|job| job.paperwork().is_none()));
         let on_call: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_call()).collect();
         assert_eq!(on_call, [JobKind::Electrician]);
     }
 
     /// A builder works by day, every day there is building, out of its yard
-    /// beside the warehouse's steel rack, and only on demand; hired last.
+    /// beside the warehouse's steel rack, and only on demand; the last of the
+    /// commoners' jobs hired.
     #[test]
     fn a_builder_builds_by_day_on_demand_out_of_its_yard_and_is_hired_last() {
         let kind = JobKind::Builder;
@@ -1560,10 +1604,30 @@ mod tests {
         assert_eq!(kind.uniform().name(), "uniform builder");
         let on_demand: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_demand()).collect();
         assert_eq!(on_demand, [JobKind::Builder]);
-        assert_eq!(JobKind::ALL.last(), Some(&kind), "hired last");
+        assert_eq!(JobKind::ALL.into_iter().filter(|job| !job.is_noble_role()).last(), Some(kind), "hired last");
         let job = Job::new(kind, Point::new(0, 0), BUILDER_HOURS);
         assert!(job.is_due(at(1, 7.0)) && !job.is_due(at(1, 6.9)), "sets off at seven");
         assert!(job.is_due(at(7, 17.9)) && !job.is_due(at(7, 18.0)), "every day, till six");
+    }
+
+    /// The propagandist: the propaganda computer in the palace, four hours a
+    /// day every day, a noble's, writing the news between hours of copy.
+    #[test]
+    fn the_propagandist_writes_the_news_in_the_palace_four_hours_every_day() {
+        let kind = JobKind::Propagandist;
+        assert_eq!(kind.number(), 22);
+        assert_eq!((kind.name(), kind.with_article()), ("propagandist", "the propagandist"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::PropagandaComputer, "propaganda computer"));
+        assert_eq!(kind.goal(), GoalId::Work);
+        assert_eq!(kind.shifts(), [PROPAGANDA_HOURS]);
+        assert_eq!(PROPAGANDA_HOURS, Shift::new(12, 16, EVERY_DAY).unwrap(), "four hours, every day");
+        assert!(kind.is_noble_role());
+        assert_eq!(kind.uniform().name(), "uniform propagandist");
+        assert_eq!((kind.now(true, None), kind.now(false, None)), ("writing the news", "on the way to the palace"));
+        assert_eq!(JobKind::ALL.last(), Some(&kind), "hired last");
+        let job = Job::new(kind, Point::new(0, 0), PROPAGANDA_HOURS);
+        assert!(job.is_due(at(7, 10.0)) && !job.is_due(at(7, 9.9)), "sets off two hours before, Sunday too");
+        assert!(job.is_due(at(3, 15.9)) && !job.is_due(at(3, 16.0)), "till four");
     }
 
     /// The king: the palace's throne, held court at like a post, ten to four

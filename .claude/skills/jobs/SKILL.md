@@ -64,6 +64,12 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   unemployed — never on duty, a care package for the day — and still a builder, so nobody hires
   it into another job; out in the wasteland it comes back in before dark. $150 a shift built.
   Hired **last**. The `outposts` skill has all of it.
+- the **propagandist** (`JobKind::Propagandist`, 22, a noble's): the `"propaganda computer"`
+  beside the palace's throne (`FeatureKind::PropagandaComputer`, needs power), noon to four
+  every day (`PROPAGANDA_HOURS`), `GoalId::Work` with `paperwork: Some(Paperwork::News)` — every
+  story waiting (a death, a production record) written up into an article on everybody's phone
+  (`Task::write_news`), and `"write copy"` stretches between. Hired after the builders. The
+  `news` skill has all of it.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 

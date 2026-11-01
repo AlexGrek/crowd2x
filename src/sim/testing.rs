@@ -146,6 +146,7 @@ impl World {
         super::soiling::settle(entity, &mut self.facilities, &self.log);
         self.facilities.wounds.begin_tick();
         self.facilities.feedings.begin_tick();
+        self.facilities.sound.clear();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         // The courier dispatch, over the one unit there is.
         let (one, uid): (&dyn GameEntity, _) = (&*entity, entity.uid());
@@ -283,6 +284,29 @@ pub fn skip_to(state: &mut super::GameState, day: u32, hours: f32) {
     let world = (day - 1) as f64 * DAY as f64 + hours as f64 * HOUR as f64 - OPENING_TIME;
     assert!(world >= state.clock().elapsed(), "the clock only goes forward");
     state.elapsed = world / TIME_SCALE as f64;
+}
+
+/// The death of human `n`, Ann Lee, a guard, of thirst at 4, 2 at noon on
+/// day 1: a story for a test.
+pub fn a_death(n: u64) -> super::news::Story {
+    super::news::Story::Death(super::news::Death {
+        dead: Uid::new(EntityType::Human, n),
+        name: "Ann Lee".to_string(),
+        job: Some(super::JobKind::Guard),
+        cause: "thirst".to_string(),
+        at: Point::new(4, 2),
+        when: 4.0 * super::clock::HOUR as f64,
+    })
+}
+
+/// File `story` with `state`'s news, as a death or a record would, and with
+/// `publish` make it into an article on the phones there and then.
+pub fn report(state: &mut super::GameState, story: super::news::Story, publish: bool) {
+    state.facilities.news.report(story);
+    if publish {
+        let now = state.clock().elapsed();
+        let _ = state.facilities.news.publish(now, &state.log);
+    }
 }
 
 /// A farm on good soil: a 24x14 site of meadow with a grain bin at (1, 7),

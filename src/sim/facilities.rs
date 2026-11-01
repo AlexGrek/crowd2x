@@ -34,6 +34,10 @@ use super::wounds::Wounds;
 
 #[derive(Default)]
 pub struct Facilities {
+    pub sound: super::sound::SoundField,
+    /// The stories waiting for the propagandist and the articles on the
+    /// phones ([`super::news`]). Changed in the world step only.
+    pub news: super::news::News,
     /// Where the props a brain can use are. Derived from the map, and again
     /// whenever the power changes (`GameState::refresh_supply`): a fridge or
     /// computer on a dead box is not somewhere to go.
@@ -66,6 +70,9 @@ pub struct Facilities {
     /// The dead, counted as they die and as they are cremated: what the world
     /// no longer shows once a body has gone ([`super::statistics`]).
     pub tally: Tally,
+    /// The last week, a sample an hour ([`super::history`]): for the
+    /// statistics menu's graphs, read by nothing in a tick.
+    pub history: super::history::History,
     /// Every crop in the fields ([`super::fields`]): sown, tended and
     /// harvested through `Effect::Sow`, `Tend` and `Harvest`, which plant and
     /// unplant the map with it.
@@ -147,6 +154,8 @@ impl Facilities {
         let mut superfridge = super::superfridge::Superfridge::from_map(map);
         superfridge.stock(map, &mut bins);
         Facilities {
+            sound: Default::default(),
+            news: Default::default(),
             electrical: Default::default(),
             features: Features::with_properties(map, supply, &properties),
             fridges: Fridges::from_map(map, supply),
@@ -160,6 +169,7 @@ impl Facilities {
             hospital: super::hospital::Hospital::from_map(map),
             workplaces: Workplaces::new(),
             tally: Tally::default(),
+            history: Default::default(),
             fields: Fields::new(),
             flowers: Default::default(),
             dirt: super::dirt::DirtLayer::new(map),

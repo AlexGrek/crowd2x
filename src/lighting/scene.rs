@@ -131,6 +131,11 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "accountant computer",
         Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
     ),
+    // ...and the propagandist's, the other side of the throne.
+    (
+        "propaganda computer",
+        Emission { color: [0.35, 0.6, 0.9], radius: 2.5, always_on: false },
+    ),
     // A TV's picture: a bigger, softer glow than a monitor's, on while
     // anybody is watching.
     (

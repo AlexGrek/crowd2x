@@ -1,0 +1,436 @@
+{
+  "name": "an on-duty guard shouts once at a human outside and keeps watch",
+  "state": "game",
+  "given": {
+    "maps": [
+      {
+        "name": "talk",
+        "map": {
+          "version": 1,
+          "wasteland": 6,
+          "size": {
+            "width": 12,
+            "height": 12
+          },
+          "terrain": {
+            "palette": [
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0",
+                  "0,0,0,0,0,0,0,0,0,0,0,0"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "kind": "guard post",
+                "at": {
+                  "x": 72,
+                  "y": 264
+                }
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "talk",
+  "timeout": 120,
+  "steps": [
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 2,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "mind",
+        "on": false
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "mind",
+        "on": false
+      }
+    },
+    {
+      "tick": 27000
+    },
+    {
+      "note": "Remove the twelve night-pack deathdogs so this tests speech without predation or panic."
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "deathdog"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "despawn"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 2
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": -1,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 2
+    },
+    {
+      "expect_selected": "human"
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "freeze"
+    },
+    {
+      "tick": 1
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "life"
+    },
+    {
+      "press": "unfreeze"
+    },
+    {
+      "tick": 80
+    },
+    {
+      "expect_log": "said: GET BACK IN!"
+    },
+    {
+      "look_at": {
+        "x": 1,
+        "y": 5
+      }
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "expect_text": "keep watch at the guard post at 1, 5"
+    },
+    {
+      "shot": "the guard shouts while staying at the post"
+    },
+    {
+      "tick": 80
+    },
+    {
+      "expect_text": "keep watch at the guard post at 1, 5"
+    },
+    {
+      "shot": "the guard keeps watch instead of following the listener"
+    }
+  ]
+}

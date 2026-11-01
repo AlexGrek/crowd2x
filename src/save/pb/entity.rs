@@ -145,6 +145,8 @@ pub struct Body {
     /// Missing in older saves means clean.
     #[prost(message, optional, tag = "9")]
     pub dirt: Option<super::Dirt>,
+    #[prost(uint32, optional, tag = "10")]
+    pub obedience: Option<u32>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

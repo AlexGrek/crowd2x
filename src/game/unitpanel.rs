@@ -916,6 +916,10 @@ fn debug_block(sim: &Sim, entity: &dyn GameEntity) -> String {
                 None => "-".to_string(),
             },
         ),
+        ("obedience", match (entity.obedience(sim.0.clock()), entity.body().obedience()) {
+            (now, own) if now > own => format!("{now} / 100 (bad news, own {own})"),
+            (now, _) => format!("{now} / 100"),
+        }),
         ("frozen", yes_no(entity.is_frozen())),
         ("move", describe_move(sim.0.last_move(entity.uid()))),
     ];

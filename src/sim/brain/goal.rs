@@ -139,6 +139,11 @@ catalogue! {
         /// — and come back in once there is nothing left to build today
         /// ([`BuildGoal`](super::goals::BuildGoal)): a builder's.
         Build = 32 => GoalDef { name: "build", emoji: "🏗", executor: Some(|| Box::new(goals::BuildGoal::new())) },
+        ReturnInside = 33 => GoalDef { name: "get back in", emoji: "?", executor: Some(|| Box::new(goals::ReturnInsideGoal::new())) },
+        /// Stop where one stands and look at the phone, from time to time
+        /// while wandering ([`PhoneGoal`](super::goals::PhoneGoal)): over
+        /// wandering, under everything else.
+        Phone = 34 => GoalDef { name: "phone", emoji: "\u{1f4f1}", executor: Some(|| Box::new(goals::PhoneGoal::new())) },
     }
 }
 
@@ -868,7 +873,9 @@ mod tests {
                 (GoalId::Provision, 0.0),
                 (GoalId::Shopkeep, 0.0),
                 (GoalId::Deliver, 0.0),
-                (GoalId::Build, 0.0)
+                (GoalId::Build, 0.0),
+                (GoalId::ReturnInside, 0.0),
+                (GoalId::Phone, 0.0)
             ]
         );
     }

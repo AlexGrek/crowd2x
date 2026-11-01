@@ -67,6 +67,11 @@ pub struct StoreDef {
     /// The word the HUD counts what it holds under (`scrap  12 stored`),
     /// for the stores the HUD counts; `None` for the rest.
     pub hud: Option<&'static str>,
+    /// Whether what goes into it was **made** — the store a trade puts its
+    /// work in (the collectors' bins, the factory's steel pallets, the farm's
+    /// grain bins), not one it is carried on to — and so counts towards the
+    /// production records the news reports ([`crate::sim::news`]).
+    pub made: bool,
 }
 
 /// Used from a cell beside it, and nothing kept in it: most features.
@@ -106,7 +111,7 @@ catalogue! {
         /// worker's. Needs no power.
         ScrapBin = 7 => FeatureDef {
             props: &["scrap bin"],
-            store: Some(StoreDef { holds: ItemKind::Scrap, called: "bin", site: "warehouse", hud: Some("scrap") }),
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "bin", site: "warehouse", hud: Some("scrap"), made: true }),
             ..BESIDE
         },
         /// Somewhere to keep watch: a guard post by a gate in the district's
@@ -119,7 +124,7 @@ catalogue! {
         /// with what the steel factory makes.
         SteelRack = 10 => FeatureDef {
             props: &["steel rack"],
-            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel rack", site: "warehouse", hud: Some("steel") }),
+            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel rack", site: "warehouse", hud: Some("steel"), made: false }),
             ..BESIDE
         },
         /// The steel factory's store of scrap metal to be smelted: filled by a
@@ -127,14 +132,14 @@ catalogue! {
         /// courier's workplace.
         ScrapHopper = 11 => FeatureDef {
             props: &["scrap hopper"],
-            store: Some(StoreDef { holds: ItemKind::Scrap, called: "scrap hopper", site: "factory", hud: None }),
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "scrap hopper", site: "factory", hud: None, made: false }),
             ..BESIDE
         },
         /// The steel factory's store of steel it has made: filled by a
         /// steelworker, emptied by a courier taking it to the warehouse.
         SteelPallet = 12 => FeatureDef {
             props: &["steel pallet"],
-            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel pallet", site: "factory", hud: None }),
+            store: Some(StoreDef { holds: ItemKind::Steel, called: "steel pallet", site: "factory", hud: None, made: true }),
             ..BESIDE
         },
         /// Where scrap metal is smelted into steel: a steelworker's workplace,
@@ -145,7 +150,7 @@ catalogue! {
         /// goes in it.
         GrainBin = 14 => FeatureDef {
             props: &["grain bin"],
-            store: Some(StoreDef { holds: ItemKind::Wheat, called: "grain bin", site: "farm", hud: Some("wheat") }),
+            store: Some(StoreDef { holds: ItemKind::Wheat, called: "grain bin", site: "farm", hud: Some("wheat"), made: true }),
             ..BESIDE
         },
         /// Where a power plant is run from: its control panel, stood at from
@@ -158,17 +163,17 @@ catalogue! {
         FoodCooker = 18 => FeatureDef { props: &["food cooker"], ..BESIDE },
         WheatHopper = 19 => FeatureDef {
             props: &["wheat hopper"],
-            store: Some(StoreDef { holds: ItemKind::Wheat, called: "wheat hopper", site: "food factory", hud: None }),
+            store: Some(StoreDef { holds: ItemKind::Wheat, called: "wheat hopper", site: "food factory", hud: None, made: false }),
             ..BESIDE
         },
         MealPallet = 20 => FeatureDef {
             props: &["meal pallet"],
-            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal pallet", site: "food factory", hud: None }),
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal pallet", site: "food factory", hud: None, made: true }),
             ..BESIDE
         },
         MealRack = 21 => FeatureDef {
             props: &["meal rack"],
-            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal rack", site: "warehouse", hud: Some("meals") }),
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "meal rack", site: "warehouse", hud: Some("meals"), made: false }),
             ..BESIDE
         },
         /// An arcade cabinet in a playzone: a quick go at something, played from
@@ -189,7 +194,7 @@ catalogue! {
         NurseStation = 26 => FeatureDef { props: &["nurse station"], ..BESIDE },
         FishBin = 27 => FeatureDef {
             props: &["fish bin"],
-            store: Some(StoreDef { holds: ItemKind::Fish, called: "fish bin", site: "warehouse", hud: Some("fish") }),
+            store: Some(StoreDef { holds: ItemKind::Fish, called: "fish bin", site: "warehouse", hud: Some("fish"), made: true }),
             ..BESIDE
         },
         FlowerSupplies = 28 => FeatureDef { props: &["flower supplies"], ..BESIDE },
@@ -207,7 +212,7 @@ catalogue! {
         /// fridge has food in it — only water. The store courier's workplace.
         Superfridge = 30 => FeatureDef {
             props: &["superfridge"],
-            store: Some(StoreDef { holds: ItemKind::Meal, called: "superfridge", site: "store", hud: Some("food") }),
+            store: Some(StoreDef { holds: ItemKind::Meal, called: "superfridge", site: "store", hud: Some("food"), made: false }),
             ..BESIDE
         },
         /// Where a shopkeeper minds the store, stood at from beside it. A
@@ -228,9 +233,13 @@ catalogue! {
         /// once it is (`Facilities::install`). Nobody's workplace yet.
         OutpostStore = 34 => FeatureDef {
             props: &["outpost store"],
-            store: Some(StoreDef { holds: ItemKind::Scrap, called: "outpost store", site: "outpost", hud: None }),
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "outpost store", site: "outpost", hud: None, made: true }),
             ..BESIDE
         },
+        /// Where the news is written: the propagandist's computer in the
+        /// palace, worked from beside it. **Needs power**, and is nothing to
+        /// play on ([`crate::sim::news`]).
+        PropagandaComputer = 35 => FeatureDef { props: &["propaganda computer"], ..BESIDE },
     }
 }
 

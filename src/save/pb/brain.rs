@@ -176,6 +176,20 @@ pub struct Memory {
     /// were builders — is no rest.
     #[prost(double, optional, tag = "11")]
     pub rest_until: Option<f64>,
+    #[prost(bool, tag = "12")]
+    pub returning_inside: bool,
+    #[prost(uint32, optional, tag = "13")]
+    pub guard_warned_night: Option<u32>,
+    #[prost(bool, tag = "14")]
+    pub guard_warning_pending: bool,
+    /// The last article it read on its phone (`crate::sim::news`); 0, and in
+    /// every save from before there was news, none.
+    #[prost(uint32, tag = "15")]
+    pub news_read: u32,
+    /// Until when bad news keeps it more obedient, in world seconds; absent
+    /// is not.
+    #[prost(double, optional, tag = "16")]
+    pub obedient_until: Option<f64>,
 }
 
 /// A small talk one person is in, as it remembers it.

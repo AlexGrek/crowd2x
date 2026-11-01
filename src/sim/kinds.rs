@@ -216,6 +216,14 @@ impl Human {
 impl GameEntity for Human {
     fn is_noble(&self) -> bool { self.noble }
 
+    fn obedience(&self, clock: super::clock::Clock) -> u8 {
+        super::news::obedience(self.body(), self.brain.memory(), clock)
+    }
+
+    fn name(&self) -> Option<&str> {
+        Some(self.identity.name())
+    }
+
     fn clothing(&self) -> Option<Clothing> {
         Some(self.clothing)
     }
@@ -283,7 +291,7 @@ impl GameEntity for Human {
             self.walk.halt();
             self.walk.body_mut().set_dead();
             let cause = if bitten { DEATHDOG_BITES } else { health::cause_of_death(self.biology.stats()) };
-            return Effect::Died { cause };
+            return Effect::Died { cause, when: ctx.clock };
         }
         let due = self.schedule.tick(ctx.game_dt());
         self.biology.background(&due);
@@ -623,7 +631,7 @@ impl GameEntity for Dog {
         if self.biology.stats().health() <= 0.0 {
             self.walk.halt();
             self.walk.body_mut().set_dead();
-            return Effect::Died { cause: DEATHDOG_BITES };
+            return Effect::Died { cause: DEATHDOG_BITES, when: ctx.clock };
         }
         self.biology.advance(ctx.game_dt());
         for _ in ctx.feedings.to(self.walk.body().uid()) {

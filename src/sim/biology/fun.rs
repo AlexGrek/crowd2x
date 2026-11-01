@@ -52,6 +52,15 @@ pub const CHAT_FUN: f32 = 20.0;
 /// cures it.
 pub const SMALL_TALK_FUN: f32 = 2.0;
 
+/// How much fun a look at a phone is worth ([`Event::Phoned`]): a quarter of a
+/// chat's, a little over twice small talk's. Enough
+/// to slow boredom through a wander, never to cure it.
+pub const PHONE_FUN: f32 = 5.0;
+
+/// Fun over which nobody takes out a phone: it is what a person does to
+/// stop being bored, not what it does once content.
+pub const PHONE_CEILING: f32 = 80.0;
+
 /// How much of its pace boredom keeps asleep: none. Nobody gets bored in their
 /// sleep, and a sleeper who did was up at two in the morning for the computer.
 pub const ASLEEP_PACE: f32 = 0.0;
@@ -89,6 +98,7 @@ impl Process for Fun {
             // Talking to somebody is fun, and a chat more than a word.
             Event::Chatted => stats.change_fun(CHAT_FUN),
             Event::SmallTalk => stats.change_fun(SMALL_TALK_FUN),
+            Event::Phoned => stats.change_fun(PHONE_FUN),
             _ => {}
         }
     }

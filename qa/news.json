@@ -1,0 +1,79 @@
+{
+  "name": "a death is written up by the propagandist and kept in the news menu",
+  "state": "game",
+  "timeout": 900,
+  "given": {
+    "maps": [
+      {
+        "name": "newsroom",
+        "map": {
+          "version": 1,
+          "size": { "width": 12, "height": 7 },
+          "terrain": {
+            "palette": ["void", "tiles blue", "block"],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "ceiling": ["############", "############", "############", "############", "############", "############", "############"],
+          "power": ["............", "............", "............", ".....-......", ".B----......", ".=.-........", "............"],
+          "objects": {
+            "props": [
+              { "at": { "x": 72, "y": 264 }, "kind": "generator" },
+              { "at": { "x": 72, "y": 216 }, "kind": "crate" },
+              { "at": { "x": 168, "y": 264 }, "kind": "propaganda computer" },
+              { "at": { "x": 504, "y": 72 }, "kind": "bed 1" },
+              { "at": { "x": 504, "y": 168 }, "kind": "bed 2" }
+            ],
+            "lamps": [{ "at": { "x": 264, "y": 168 }, "kind": "ceiling lamp" }],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "newsroom",
+  "steps": [
+    { "key": "p" },
+    { "expect_connected": { "utility": "power", "served": 2, "of": 2 } },
+    { "note": "a room fed by a generator at (1, 5) through a box at (1, 4) with a crate on it, so no electrician is hired; the propaganda computer at (3, 5). The first arrival is hired to it; it neither eats nor drinks" },
+    { "spawn": { "kind": "human", "x": 4, "y": 4 } },
+    { "tick": 1 },
+    { "expect_log": "was hired as the propagandist at the propaganda computer at 3, 5, 12:00-16:00" },
+    { "select": 0 },
+    { "process": { "name": "thirst", "on": false } },
+    { "process": { "name": "hunger", "on": false } },
+    { "note": "the second has no job and nothing to drink: it dies of thirst" },
+    { "spawn": { "kind": "human", "x": 8, "y": 2 } },
+    { "tick": 1 },
+
+    { "press": "news" },
+    { "expect_text": "nothing published yet   0 waiting for the propagandist" },
+    { "press": "close" },
+
+    { "note": "about a day and a half: dead of thirst, and written up in the propagandist's next hours. The log keeps only its recent lines; the news keeps everything" },
+    { "tick": 110000 },
+
+    { "press": "news" },
+    { "expect_text": "1 published" },
+    { "expect_text": "bad   " },
+    { "expect_text": "died of thirst at " },
+    { "shot": "the news menu" },
+
+    { "note": "esc closes the menu and stays in the game" },
+    { "key": "esc" },
+    { "wait": 0.2 },
+    { "expect_state": "game" },
+    { "shot": "the news button" }
+  ]
+}

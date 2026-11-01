@@ -138,7 +138,10 @@ old enums): `a_steel_works_saved_before_the_catalogues_loads_and_goes_on_exactly
 the same world built fresh. `task.rs`'s `every_task_comes_back_from_a_save_as_itself` and
 `a_task_saved_under_its_old_tag_still_loads` cover every task both ways. The dead counted, `sim::statistics::Tally` (`died`, `cremated`), is
 `pb::World.tally` (tag 13, `pb::Deaths`; absent = none counted): a body cremated has left the
-world, so only the count remembers it; checked by
+world, so only the count remembers it. The statistics graphs' week, `sim::history::History`, is
+`pb::World.history` (tag 31, `pb::HourSample { hour, mind, health, budget, cash, humans }`,
+oldest first; empty in an older save = graphs from the load; the golden steel-works test clears
+it in its reference). The tally is checked by
 `a_world_saved_with_the_dead_lying_and_carried_carries_on_exactly` (seen failing with the
 tally not restored). **With the farm**: `pb::World.crops` (tag 14, `pb::Crop { cell, farm, sown,
 quality, tended }`, empty in an older save = nothing sown) — `Fields::save`/`restore`

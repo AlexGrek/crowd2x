@@ -1,6 +1,7 @@
 //! The routines that exist.
 
 use crate::save::{invalid, Invalid};
+use crate::sim::biology::fun::PHONE_CEILING;
 use crate::sim::biology::{Biology, ProcessId, Stats};
 use crate::sim::clock::HOUR;
 use crate::sim::inventory::Inventory;
@@ -364,9 +365,68 @@ impl RoutineExecutor for StayBusyRoutine {
         "stay busy"
     }
 
-    fn arrange(&mut self, _ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         goals.raise_to(GoalId::Wander, BUSY);
+        if wants_the_phone(ctx, goals.top()) {
+            goals.raise_to(GoalId::Phone, PHONING);
+        }
     }
+}
+
+/// How much a look at the phone is wanted: over wandering ([`BUSY`]), which it
+/// interrupts, and under a go at something ([`PLAYING`]) and everything else.
+pub const PHONING: f32 = 0.11;
+
+/// How long after a look at the phone before the next may start.
+pub const PHONE_GAP: f64 = 20.0 * 60.0;
+
+/// A person rolls for the phone once a slot this long (world seconds)...
+pub const PHONE_SLOT: f64 = 3.0 * 60.0;
+
+/// ...and takes it out one slot in this many.
+pub const PHONE_ONE_IN: u64 = 8;
+
+/// Whether a person takes out its phone: **from time to time, on a walk** (the
+/// goal in charge is wandering - it holds nothing, so the phone takes over at
+/// once and the walk is picked up after), not within [`PHONE_GAP`] of the last
+/// look, and never with fun over [`PHONE_CEILING`]. Once the goal is in charge
+/// it is wanted until the look is had and remembered, which starts the gap
+/// afresh. Which slots are the person's
+/// is a hash of who it is and which slot it is: no random stream, and the same
+/// answer all through a slot, so every tick of it agrees. Humans only; a dog
+/// has no phone and no executor for one.
+pub(crate) fn wants_the_phone(ctx: &RoutineCtx<'_>, top: GoalId) -> bool {
+    use super::memory::{Recall, PHONED};
+    use crate::sim::uid::EntityType;
+    if ctx.body.uid().kind() != Some(EntityType::Human) || ctx.body.is_dead() {
+        return false;
+    }
+    // Off means off: with fun switched off there is none to be had.
+    let Some(biology) = ctx.biology.filter(|biology| biology.is_running(ProcessId::Fun)) else {
+        return false;
+    };
+    if top != GoalId::Wander && top != GoalId::Phone {
+        return false;
+    }
+    let now = ctx.think.clock.elapsed();
+    let since = match ctx.memory.get(PHONED) {
+        Some(Recall::Time(then)) => now - *then as f64,
+        _ => f64::INFINITY,
+    };
+    if since < PHONE_GAP {
+        return false;
+    }
+    if top == GoalId::Phone {
+        return true;
+    }
+    if biology.stats().fun() > PHONE_CEILING {
+        return false;
+    }
+    let slot = (now / PHONE_SLOT) as u64;
+    let mut hash = ctx.body.uid().raw() ^ slot.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    (hash ^ (hash >> 31)) % PHONE_ONE_IN == 0
 }
 
 /// How much [`ChatRoutine`] wants a chat both sides have agreed to: over
@@ -482,6 +542,7 @@ impl RoutineExecutor for OrdersRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        if ctx.memory.returning_inside { goals.break_in(GoalId::ReturnInside, 3.0); }
         if ctx.memory.get(SALVAGE_ORDER).is_some() {
             goals.raise_to(GoalId::Salvage, ORDERED);
         }

@@ -386,6 +386,11 @@ pub struct Perception {
 }
 
 impl Perception {
+    /// Sound is omnidirectional and independent of the visual cone.
+    pub fn hear<'a>(&self, ctx: &'a Think<'_>, body: &crate::sim::entity::Body) -> impl Iterator<Item = &'a crate::sim::sound::Utterance> {
+        ctx.sound.heard_by(body.uid(), body.center_position())
+    }
+
     /// Local air, independent of facing and sight. The caller schedules this
     /// on Priority::Low rather than doing a crowd's worth of reads each tick.
     pub fn smell(&self, ctx: &Think<'_>, body: &Body) -> f32 {

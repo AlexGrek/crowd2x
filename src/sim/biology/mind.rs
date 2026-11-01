@@ -26,6 +26,10 @@
 //!   one, and a point a look (every half world minute) swung a crowd's mind
 //!   from one end to the other in a day.
 //!
+//! * **The news.** An article read on the phone ([`Event::News`]): good news
+//!   (a production record) is [`GOOD_NEWS`] on at once, bad news (a death)
+//!   [`BAD_NEWS`] off.
+//!
 //! Smell and money are told on the brain's low beat, with the world time the
 //! beat covers, so each is a rate like the rest. Asleep, the mind holds
 //! still: no fun, no work, no worries, no scent.
@@ -72,6 +76,13 @@ pub const FRIGHT: f32 = 8.0;
 /// Mental health a bite takes for every point of health it took: six to
 /// eighteen for a deathdog's 20 to 60.
 pub const BITE_SHOCK: f32 = 0.3;
+
+/// Mental health good news gives at once: a production record read about.
+pub const GOOD_NEWS: f32 = 3.0;
+
+/// Mental health bad news takes at once: a death read about. Under a scare's
+/// [`FRIGHT`]: it happened to somebody else.
+pub const BAD_NEWS: f32 = 3.0;
 
 /// The debt, in dollars, at which money weighs on the mind as much as it ever
 /// will: about a month of eating on credit on a care package.
@@ -130,6 +141,8 @@ impl Process for Mind {
             }
             Event::Frightened => stats.change_mental_health(-FRIGHT),
             Event::Bitten { damage } => stats.change_mental_health(-BITE_SHOCK * damage as f32),
+            Event::News { good: true } => stats.change_mental_health(GOOD_NEWS),
+            Event::News { good: false } => stats.change_mental_health(-BAD_NEWS),
             Event::Worried { debt, world_seconds } if debt.is_finite() && world_seconds.is_finite() => {
                 let weight = (debt / DESPAIRING_DEBT).clamp(0.0, 1.0);
                 stats.change_mental_health(-weight * per_second(HOURS_TO_DESPAIR) * world_seconds);
