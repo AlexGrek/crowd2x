@@ -770,7 +770,7 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// getting ready for a trip out (`getting ready: eat`), away from it for
 /// something more pressing, or off.
 fn job_and_cash(sim: &Sim, entity: &dyn GameEntity) -> String {
-    let mut text = job_block(entity, sim.0.clock());
+    let mut text = job_block_for(entity, sim.0.clock(), sim.0.outposts().has_work_for(entity.uid()));
     let economy = sim.0.economy();
     if let Some(account) = economy.account(entity.uid()) {
         text.push_str(&format!("\ncash    {}", account.cash));
@@ -782,7 +782,14 @@ fn job_and_cash(sim: &Sim, entity: &dyn GameEntity) -> String {
     text
 }
 
+#[cfg(test)]
 fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
+    job_block_for(entity, clock, true)
+}
+
+/// [`job_block`], for a job worked on demand (a builder's) that has work to
+/// do or not: with none, while it is due, it is `waiting for work`.
+fn job_block_for(entity: &dyn GameEntity, clock: Clock, has_work: bool) -> String {
     let Some(job) = entity.job() else {
         return if entity.kind() == Some(EntityType::Human) { "unemployed" } else { "no job" }.to_string();
     };
@@ -792,6 +799,8 @@ fn job_block(entity: &dyn GameEntity, clock: Clock) -> String {
         "sick leave".to_string()
     } else if entity.current_goal() == Some(GoalId::Deliver) {
         "delivering food to the store".to_string()
+    } else if job.kind.is_on_demand() && !has_work && job.is_due(clock) && entity.current_goal() != Some(job.kind.goal()) {
+        "waiting for work".to_string()
     } else if job.is_due(clock) {
         match entity.current_goal() {
             Some(goal) if goal == job.kind.goal() => job.kind.now(at_work, entity.inventory()).to_string(),
@@ -1223,6 +1232,12 @@ mod tests {
             Uid::new(EntityType::Dog, 1), Point::new(0, 0), crate::sim::Facing::Left, &mut rng,
         );
         assert_eq!(job_block(&dog, on(1, 10.0)), "no job");
+        let mut builder = human();
+        let job = crate::sim::Job::new(crate::sim::JobKind::Builder, Point::new(0, 0), crate::sim::job::BUILDER_HOURS);
+        assert!(GameEntity::hire(&mut builder, job));
+        assert_eq!(field(&job_block_for(&builder, on(1, 10.0), false), "now"), "waiting for work", "nothing to build");
+        assert_ne!(field(&job_block_for(&builder, on(1, 10.0), true), "now"), "waiting for work");
+        assert_eq!(field(&job_block_for(&builder, on(1, 20.0), false), "now"), "done for the day");
     }
 
     #[test]

@@ -585,6 +585,10 @@ mod tests {
             Task::unpack(ItemKind::Food, 28.0),
             Task::unpack(ItemKind::Water, 29.0),
             Task::stow(30.0),
+            Task::claim(at),
+            Task::lay(at, 31.0),
+            Task::construct(at, 32.0),
+            Task::decree(at, 33.0),
         ]
     }
 

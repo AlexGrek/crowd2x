@@ -566,6 +566,7 @@ fn fingerprint(state: &GameState) -> Vec<Vec<u8>> {
         .collect();
     parts.push(format!("{salvaged:?}").into_bytes());
     parts.push(format!("{:?}", state.map.planted().collect::<Vec<_>>()).into_bytes());
+    parts.push(format!("{:?}", state.map.built().collect::<Vec<_>>()).into_bytes());
     // Not saved, worked out again from the entities on load: it has to come
     // out as the spawn pass kept it.
     parts.push(format!("{:?}", state.society()).into_bytes());
@@ -1119,6 +1120,36 @@ fn loading_a_district_preserves_current_meals_without_restocking_it() {
 /// Tuesday's tending under way. Every crop — where, how old, how well kept,
 /// when last tended — comes back, planted in the map again, and the world
 /// goes on as it would have: the rest of the field tended after the load.
+/// An outpost saved half built — walls going up, a piece of its furniture
+/// built and in the indexes, builders on tiles with their building tiles
+/// half worked — comes back built on the map again, its furniture working,
+/// and goes on going up exactly as it would have.
+#[test]
+fn an_outpost_saved_half_built_carries_on_exactly() {
+    use crate::sim::outposts::Stage;
+    let (mut state, _, _) = crate::sim::testing::outpost_works(crate::sim::outposts::OUTPOST_STEEL, 3);
+    let furnished = |state: &GameState| state.outposts().fixtures().next();
+    let mut ticks = 0;
+    while furnished(&state).is_none() {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 5 * 24 * 1800, "nothing furnished by {}", state.clock());
+    }
+    let outpost = state.outposts().under_way().expect("still going up").clone();
+    assert!(outpost.tiles().iter().any(|tile| matches!(tile.stage, Stage::Laid { .. })), "a building tile half worked");
+    let fixture = furnished(&state).unwrap();
+    let copy = side_by_side(&mut state, 3 * 1800, |_, _| Input::new());
+    assert_eq!(copy.outposts(), state.outposts());
+    assert_eq!(copy.map.built().collect::<Vec<_>>(), state.map.built().collect::<Vec<_>>());
+    assert!(copy.features() == state.features(), "the furniture is in the features again");
+    assert!(
+        crate::sim::feature::kinds_of(fixture.prop).all(|kind| copy.features().has(kind, fixture.cell)),
+        "{} at {:?} still what it is for",
+        fixture.prop,
+        fixture.cell
+    );
+}
+
 #[test]
 fn a_farm_saved_mid_week_carries_on_exactly() {
     let (mut state, farmer) = crate::sim::testing::farm(5);

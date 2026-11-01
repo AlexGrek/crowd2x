@@ -326,6 +326,10 @@ impl GameEntity for Human {
         self.brain.memory().medical.on_leave(clock.day())
     }
 
+    fn is_on_mental_health_leave(&self) -> bool {
+        self.brain.memory().medical.mental_leave
+    }
+
     fn current_goal(&self) -> Option<GoalId> {
         (!self.is_dead()).then(|| self.brain.top_goal())
     }

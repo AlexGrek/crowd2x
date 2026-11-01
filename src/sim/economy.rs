@@ -933,7 +933,10 @@ mod tests {
         assert_eq!(tariffs.price(ItemKind::Water), Money::ZERO);
         let mid = [JobKind::OfficeWorker, JobKind::Accountant, JobKind::ScrapCollector, JobKind::Farmer, JobKind::CityDecorator];
         for job in JobKind::ALL {
-            let wage = if job == JobKind::King {
+            let wage = if job == JobKind::Builder {
+                // Paid only for the days it builds.
+                150
+            } else if job == JobKind::King {
                 100
             } else if mid.contains(&job) {
                 60

@@ -264,6 +264,7 @@ impl std::fmt::Debug for Map {
             .field("loaded_chunks", &self.chunks.len())
             .field("salvaged", &self.salvaged.len())
             .field("planted", &self.planted.len())
+            .field("built", &self.built.len())
             .field("terrain_layers", &self.terrain.len())
             .field("props", &self.objects(ObjectLayer::Props).len())
             .field("spawners", &self.objects(ObjectLayer::Spawners).len())
@@ -318,6 +319,21 @@ pub struct Map {
     /// Simulation state the simulation keeps the rest of (`sim::fields`): not
     /// in a map file, nor in a save's chunks — the save's crops plant it again.
     planted: BTreeSet<(ChunkPos, u16)>,
+    /// Every cell play has built on off the site — an outpost's walls, its
+    /// furniture and the building tiles of what is going up — by chunk and
+    /// cell in it like `planted` ([`Map::build`]). What is built is the
+    /// simulation's (`sim::outposts`), which builds the map again when a game
+    /// is loaded: never in a map file, nor in a save's chunks.
+    built: BTreeMap<(ChunkPos, u16), Structure>,
+}
+
+/// What stands in a cell play has built on off the site ([`Map::build`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Structure {
+    /// In the way, and seen past: a building tile, a fridge, a bed.
+    Obstacle,
+    /// A wall: [`WALL`] terrain, in the way and hiding what is behind it.
+    Wall,
 }
 
 /// Where a heap's tally is kept in `Map::salvaged`, and a crop in
@@ -393,6 +409,7 @@ impl Map {
             salvaged: BTreeMap::new(),
             salvage_revision: 0,
             planted: BTreeSet::new(),
+            built: BTreeMap::new(),
         };
         map.rebuild_passability();
         map
@@ -419,6 +436,7 @@ impl Map {
             self.salvaged.clear();
             let site = self.site();
             self.planted.retain(|&(pos, index)| site.contains(cell_of_key(pos, index)));
+            self.built.clear();
             self.salvage_revision = self.salvage_revision.wrapping_add(1);
             self.invalidate_navigation();
         }
@@ -457,7 +475,24 @@ impl Map {
         });
         self.clear_salvaged(pos);
         self.block_planted(pos);
+        self.block_built(pos);
         true
+    }
+
+    /// Close the cells of the loaded chunk at `pos` that have been built on,
+    /// and shade its walls: an outpost put up before the chunk was dropped is
+    /// still there.
+    fn block_built(&mut self, pos: ChunkPos) {
+        let Some(chunk) = self.chunks.get_mut(pos) else {
+            return;
+        };
+        for (&(_, index), &structure) in self.built.range((pos, 0)..=(pos, u16::MAX)) {
+            let cell = cell_of_key(pos, index);
+            chunk.block(cell);
+            if structure == Structure::Wall {
+                chunk.shade(cell);
+            }
+        }
     }
 
     /// Close the cells of the loaded chunk at `pos` that have a crop in them:
@@ -521,6 +556,9 @@ impl Map {
     #[inline]
     fn ground(&self, cell: Point) -> Option<TerrainId> {
         let wasteland = self.wasteland?;
+        if self.structure(cell) == Some(Structure::Wall) {
+            return Some(WALL);
+        }
         Some(match self.chunks.at(cell) {
             Some(chunk) => chunk.tile(cell),
             None => wasteland.tile(cell, self.site()),
@@ -539,6 +577,7 @@ impl Map {
         tile.is_passable()
             && wasteland.scrap_on(cell, site, tile).is_none_or(|found| self.left_of(cell, found).is_none())
             && !self.is_planted(cell)
+            && self.structure(cell).is_none()
     }
 
     /// What is left of a heap found as `found` in `cell`: `None` once it is
@@ -636,7 +675,7 @@ impl Map {
     /// which counts a heap as something that can go, the way it counts a
     /// door as something that can open.
     pub fn is_open_ground(&self, point: Point) -> bool {
-        self.is_passable(point) || self.scrap(point).is_some() || self.is_planted(point)
+        self.is_passable(point) || self.scrap(point).is_some() || self.is_planted(point) || self.structure(point).is_some()
     }
 
     /// Whether a crop could be sown in `cell` now: a [plot](is_plot) of good
@@ -706,6 +745,52 @@ impl Map {
                 if let Some(chunk) = self.chunks.get_mut(ChunkPos::of(cell)) {
                     chunk.clear(cell);
                 }
+            }
+        }
+        true
+    }
+
+    /// What has been built in `cell` off the site, if anything.
+    #[inline]
+    pub fn structure(&self, cell: Point) -> Option<Structure> {
+        if self.built.is_empty() {
+            return None;
+        }
+        self.built.get(&salvage_key(cell)).copied()
+    }
+
+    /// Every cell built on off the site, by chunk and cell in it.
+    pub fn built(&self) -> impl Iterator<Item = (Point, Structure)> + '_ {
+        self.built.iter().map(|(&(pos, index), &structure)| (cell_of_key(pos, index), structure))
+    }
+
+    /// Whether something could be built in `cell` now: off the site of a map
+    /// with a wasteland round it, on ground that can be walked with nothing in
+    /// the way — no heap, no crop, nothing built there before.
+    pub fn can_build(&self, cell: Point) -> bool {
+        self.is_endless() && !self.contains(cell) && self.is_passable(cell)
+    }
+
+    /// Build `structure` in `cell` off the site: from now on it is in the way
+    /// — and a [`Structure::Wall`] is wall terrain, hiding what is behind it.
+    /// Refused — `false`, nothing changed — where [`Map::can_build`] says
+    /// no, unless an [`Structure::Obstacle`] stands there already: a building
+    /// tile is built over by what it was the building of.
+    ///
+    /// Like [`Map::plant`], it leaves [`Map::navigation`] alone: reachability
+    /// counts a built cell as open ground ([`Map::is_open_ground`]), and what
+    /// is built — an outpost (`sim::outposts`) — keeps a doorway open into
+    /// whatever its walls go round.
+    pub fn build(&mut self, cell: Point, structure: Structure) -> bool {
+        let over = self.structure(cell) == Some(Structure::Obstacle);
+        if !(over || self.can_build(cell)) {
+            return false;
+        }
+        self.built.insert(salvage_key(cell), structure);
+        if let Some(chunk) = self.chunks.get_mut(ChunkPos::of(cell)) {
+            chunk.block(cell);
+            if structure == Structure::Wall {
+                chunk.shade(cell);
             }
         }
         true
@@ -1377,5 +1462,65 @@ mod tests {
         map.set_wasteland(None);
         map.set_wasteland(Some(Wasteland::new(3)));
         assert!(!map.is_planted(plot) && map.is_passable(plot));
+        let (mut map, cell) = open_ground();
+        assert!(map.build(cell, Structure::Wall));
+        map.set_wasteland(None);
+        map.set_wasteland(Some(Wasteland::new(3)));
+        assert!(map.structure(cell).is_none() && map.is_passable(cell), "nor what was built on it");
+    }
+
+    /// A small site in the wasteland of seed 3, and a cell of open ground
+    /// well out past it with open ground all round.
+    fn open_ground() -> (Map, Point) {
+        let map = Map::new(Size::new(8, 8), FLOOR).with_wasteland(3);
+        let cell = Bounds::new(Point::new(40, -100), Size::new(200, 200))
+            .points()
+            .find(|&cell| (-1..=1).all(|dy| (-1..=1).all(|dx| map.can_build(cell.offset(dx, dy)))))
+            .expect("open ground in a patch that size");
+        (map, cell)
+    }
+
+    /// A wall built off the site is wall terrain — in the way, hidden behind,
+    /// costing nothing to walk — whether its chunk was loaded or not, and
+    /// stays one when its chunk is dropped and loaded again. A building tile
+    /// is in the way and seen past, and built over by a wall. Reachability is
+    /// never worked out again for it.
+    #[test]
+    fn what_is_built_off_the_site_stands_there_loaded_or_not() {
+        for loaded in [false, true] {
+            let (mut map, cell) = open_ground();
+            let pos = ChunkPos::of(cell);
+            if loaded {
+                map.load_chunk(pos);
+            }
+            let ground = map.terrain(cell);
+            let navigation = map.navigation_revision();
+            assert!(map.build(cell, Structure::Obstacle), "loaded {loaded}");
+            assert!(!map.is_passable(cell) && map.is_see_through(cell), "loaded {loaded}");
+            assert_eq!(map.terrain(cell), ground, "a building tile leaves the ground as it was");
+            assert!(map.build(cell, Structure::Wall), "a building tile is built over");
+            assert!(!map.build(cell, Structure::Wall), "but a wall is not");
+            assert_eq!(map.terrain(cell), Some(WALL), "loaded {loaded}");
+            assert!(!map.is_passable(cell) && !map.is_see_through(cell), "loaded {loaded}");
+            assert!(map.is_open_ground(cell), "reachability counts it open");
+            map.unload_chunks(|_| false);
+            assert!(!map.is_passable(cell) && !map.is_see_through(cell), "dropped");
+            assert_eq!(map.terrain(cell), Some(WALL), "dropped");
+            map.load_chunk(pos);
+            assert!(!map.is_passable(cell) && !map.is_see_through(cell), "loaded again");
+            assert_eq!(map.built().collect::<Vec<_>>(), [(cell, Structure::Wall)]);
+            assert_eq!(map.navigation_revision(), navigation, "a building changes nothing about who can reach what");
+            assert!(map.is_passable(cell.offset(1, 0)), "only its own cell");
+        }
+    }
+
+    #[test]
+    fn nothing_is_built_on_the_site_on_a_heap_or_round_a_map_with_nothing_round_it() {
+        let (mut map, heap) = scrapyard(1);
+        assert!(!map.build(Point::new(3, 3), Structure::Wall), "the site is not built on in play");
+        assert!(map.is_passable(Point::new(3, 3)));
+        assert!(!map.can_build(heap) && !map.build(heap, Structure::Obstacle), "a heap is in the way");
+        let mut bare = Map::new(Size::new(8, 8), FLOOR);
+        assert!(!bare.build(Point::new(20, 20), Structure::Obstacle));
     }
 }

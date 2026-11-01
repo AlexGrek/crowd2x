@@ -562,9 +562,23 @@ impl RoutineExecutor for WorkRoutine {
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
         if ctx.memory.medical.on_leave(ctx.think.clock.day()) { self.on_shift = false; return; }
-        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
+        let uid = ctx.body.uid();
+        let due = ctx.job.filter(|job| super::goals::build::on_duty(job, uid, ctx.think))
             .filter(|job| !job.kind.is_on_call() || !ctx.think.electrical.damaged().is_empty());
         self.on_shift = due.is_some();
+        // Worked on demand: out in the wasteland with nothing more to do
+        // there today — the shift over, or nothing left to build — it comes
+        // back in before dark. Resting after a stretch, it wants the work
+        // less (`RESTING`), so a meal or a drink out of the pocket gets a look
+        // in before it is back at it.
+        if let Some(job) = ctx.job.filter(|job| job.kind.is_on_demand()) {
+            if due.is_none() && !ctx.think.map.contains(ctx.body.center_position()) {
+                goals.raise_to(job.kind.goal(), WORKING);
+            } else if due.is_some() && ctx.memory.is_resting(ctx.think.clock.elapsed()) {
+                goals.raise_to(job.kind.goal(), RESTING);
+                return;
+            }
+        }
         // A courier the dispatch sent for the store's food brings it in, in
         // place of its own hauling and past the end of its shift: the order
         // is its until the food is in (`sim::dispatch`).
@@ -595,6 +609,13 @@ impl RoutineExecutor for WorkRoutine {
         vec![("on shift", if self.on_shift { "yes" } else { "no" }.to_string())]
     }
 }
+
+/// How much `WorkRoutine` wants an on-demand job's goal while its worker
+/// rests after a stretch (`Memory::is_resting`): under any need committed to
+/// (1.2) by more than the hold, so a builder eats or drinks what it carries,
+/// or sees to the bladder, in its rest — and over wandering and the night's
+/// floor, so it rests where it is rather than wandering off.
+pub const RESTING: f32 = 0.8;
 
 /// A need no worse than this — 85% met — is one a worker sets out on a trip
 /// into the wasteland with ([`ReadyRoutine`]): hunger, thirst and the bladder
@@ -781,7 +802,8 @@ impl RoutineExecutor for ReadyRoutine {
     }
 
     fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
-        let due = ctx.job.filter(|job| job.is_due(ctx.think.clock))
+        let uid = ctx.body.uid();
+        let due = ctx.job.filter(|job| super::goals::build::on_duty(job, uid, ctx.think))
             .filter(|_| !ctx.memory.medical.on_leave(ctx.think.clock.day()));
         let (Some(job), Some(biology)) = (due, ctx.biology) else {
             *self = ReadyRoutine::new();

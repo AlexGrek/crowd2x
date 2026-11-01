@@ -125,8 +125,9 @@ mod tests {
         for _ in 0..3 {
             assert!(rig.inventory.stow(ItemKind::Scrap));
         }
+        assert!(rig.inventory.stow(ItemKind::Food));
         rig.set_hand(Some(ItemKind::Steel));
-        assert_eq!(rig.tick(&mut Task::stow(0.1)), TaskResult::Failed, "nine kilos and five more");
+        assert_eq!(rig.tick(&mut Task::stow(0.1)), TaskResult::Failed, "nine and a half kilos and one more");
         assert_eq!(rig.hand(), Some(ItemKind::Steel));
     }
 

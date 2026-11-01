@@ -36,9 +36,10 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   takes 3, hired after the farmers. See "The power plant" below;
 - the **king**: the `"throne"` in the district's palace, the one there is — court held an
   hour at a time like a guard's post (`WorkGoal`, the `"hold court"` stretch), ten to four
-  every day but Sunday, **and nothing else yet**: the major decisions are to be the king's
-  brain's, next. In robes and a crown always, and walking slowly (`Bearing`). Hired after the
-  power plant workers. See "The king" below;
+  every day but Sunday, **and the outposts decreed from it** (`Paperwork::Decrees`: with the
+  steel for a whole one on the warehouse's racks and none going up, where the next goes — the
+  `outposts` skill). In robes and a crown always, and walking slowly (`Bearing`). Hired after
+  the power plant workers. See "The king" below;
 - the **playzone administrator**: the `"playzone computer"` in the district's playzone — one
   computer, **four** administrators: a day shift (10-16) and an evening shift (16-22), each kept
   by two who take turns by the day (`PLAYZONE_SHIFTS`: group 1 Mon, Wed, Fri, Sun; group 2 Tue,
@@ -53,6 +54,16 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   dirtier than 0.15, mops it up nearest first (`CleanGoal`, `Task::clean`, `Effect::Clean`), and
   with nothing found walks round — it has nowhere to wait. Hired **last** (`JobKind::ALL`'s end).
   See "The cleaner" below and the `dirt` skill.
+- the **builder**: its place in the **builders' yard** beside the warehouse's steel rack
+  (`FeatureKind::BuildersYard`, no prop, four places, on a map with a throne too), eight to six
+  every day — **but only on demand** (`JobDef::on_demand`, the one row with it true): while an
+  outpost the king decreed is going up and there is a tile of it for it, it takes the tile on,
+  fetches its steel, lays its building tile and works it two hours, an hour at a time with a
+  rest between (`BuildGoal`), getting ready at its yard before every trip out as a collector
+  does at its bin (`goes_out_for: Some(Steel)`). With nothing to build it is as good as
+  unemployed — never on duty, a care package for the day — and still a builder, so nobody hires
+  it into another job; out in the wasteland it comes back in before dark. $150 a shift built.
+  Hired **last**. The `outposts` skill has all of it.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
@@ -60,7 +71,8 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
 
 | Concept | Where | What |
 | --- | --- | --- |
-| `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name), `now` (the job menu's line), `goes_out_for` and `bearing` (below). The methods read the row. Saved as its number (`JobKind::number`) |
+| `JobKind` | `job.rs` | a `catalogue!` (`sim/catalogue.rs`): **one row a job**, a `JobDef` — `name`, `article` (for log lines), `workplace` (the `FeatureKind` its workplace is; `workplace_name()` is that feature's prop: `computer`, `scrap bin`, `guard post`), `goal` (`GoalId::Work` for a desk **and a post**, `GoalId::Collect`... — what `WorkRoutine` raises), `commute` (`COMMUTE`, or `GUARD_COMMUTE` = 2 world hours), `shifts` (the shifts a workplace of the kind is worked in, one worker each, in hand-out order: `[OFFICE_HOURS]`, or `WATCHES`), `uniform` (its name), `now` (the job menu's line), `goes_out_for`, `bearing` (below), and `on_demand` (worked only
+while there is work — `goals::build::on_duty`; the builder's, the `outposts` skill). The methods read the row. Saved as its number (`JobKind::number`) |
 | `Bearing` | `job.rs` | how somebody in the job carries themselves, on duty or off: `gait` (a share of its own pace, hurry included: `Walker::set_gait`, set by `Human::hire`/`dismiss`/`restore` from the job, **not saved**), `always_in_uniform` (`GameEntity::worn` puts the uniform on at any hour, not only while due) and `hat` (a layer over the hair with the uniform: `assets/human/hat_<hat>.png`, `characters::human::hat_path`). `WORKER` (1.0, on shift, none) for every job but the king's `ROYAL` (`KING_GAIT` 0.6, always, `"crown"`) |
 | `JobKind::ALL` | `job.rs` | every kind **in hiring order** — the order the rows are listed: office, collectors, guards, undertakers, steelworkers, couriers, farmers, power plant workers. `give_a_job` and `Command::Hire` walk it |
 | `Shift` | `job.rs` | `start`/`end` hour **on the same day** (end may be 24), `days` bitmask (bit 0 = Monday). `Shift::new` refuses anything else: a watch across midnight is two shifts. `OFFICE_HOURS` = 9, 17, `WEEKDAYS`; `WATCHES` = 8-16, 16-24, 0-8, `EVERY_DAY`; `FARM_HOURS` = 9, 17, `MONDAY_TO_SATURDAY`; `PLAYZONE_SHIFTS` = 10-16 and 16-22, each for `FIRST_GROUP` (`0b101_0101`: Mon, Wed, Fri, Sun) and `SECOND_GROUP` (`0b010_1010`: Tue, Thu, Sat), handed out day shifts first (so two keep it open every day from ten) |
@@ -113,6 +125,16 @@ Plain Rust in `src/sim/`, like every other part of the simulation.
   death; the list is empty between ticks, so nothing new is saved. Before it, a post emptied by
   a death stayed empty with dozens jobless, and the last steelworker or courier dying stopped
   steel for good (the `lab` skill). Test: `sim::tests::the_job_somebody_dies_in_goes_to_the_nearest_jobless`.
+- **So is a worker on leave for its mental health.** `Effect::LeavePost` (asked by `Brain::step`
+  while `Medical::mental_leave` and a job) lets it go — workplace, outpost tile, dispatch order,
+  colleagues — logs `"{uid} gave up its post as a shopkeeper at the shop counter at x, y: on
+  leave for its mental health"`, and queues the job on `Facilities::vacancies` like a death's.
+  Recovered, it is jobless and is hired again into the next post left empty. **Nobody on mental
+  leave is hired** (`give_a_job`, `hire` — `"hire: {uid} is on leave for its mental health"` —
+  and `fill_vacancy`), or the post would bounce back every tick. A sick day or a hospital stay
+  keeps the job. Before it, posts stood empty for weeks: seed 3's two couriers on leave stopped
+  steel for 17 days, and seed 11 starved (`brain-engineer`, "Mental health leave"). Test:
+  `sim::tests::a_worker_on_mental_health_leave_gives_its_post_to_the_nearest_jobless`.
 
 ## The brain
 
@@ -294,11 +316,11 @@ back one at a time (`Bins::take`). `Think::bins` hands it to every brain, read-o
 
 | Layer | What | File |
 | --- | --- | --- |
-| item | `ItemKind::Steel` (`"steel"`, 5 kg, 1 l: two to a pack), `SCRAP_PER_STEEL` = 2, carried as ⛓ | `item.rs` |
+| item | `ItemKind::Steel` (`"steel"`, 1 kg, 1 l: ten to a pack — a piece of scrap's 3 kg is three ingots, so a smelt never adds weight), a smelt takes `SCRAP_PER_SMELT` = 1 scrap for `STEEL_PER_SMELT` = 3 ingots, carried as ⛓ | `item.rs` |
 | kinds | `JobKind::Steelworker` (workplace `FeatureKind::Furnace`, `"furnace"`, **needs power**; goal `GoalId::Smelt` 🔥) and `JobKind::Courier` (workplace `FeatureKind::ScrapHopper`; goal `GoalId::Haul` 📦), both `OFFICE_HOURS` and `COMMUTE`, hired **after** the undertakers (`JobKind::ALL`), uniforms `"uniform steelworker"` (leather apron) and `"uniform courier"` (green jacket, satchel) | `job.rs`, `feature.rs` |
 | the world | `Effect::Deposit { at, pieces }` puts the pieces in whatever store is at `at` (`effect::deposit`, the log line names the item and the store: `"stored 3 scrap metal in the bin at"`, `"stored 1 steel in the steel pallet at"`); `Effect::Withdraw { at }` takes pieces out one at a time while the store has any and the pack has room (`effect::withdraw`, `"took 2 steel from the steel pallet at x, y: N left"`), in slot order | `sim/mod.rs` |
-| tasks | `Deposit` now empties the pack of **the store's item** into any store (checks `Think::bins`); `Withdraw { store, seconds }` (`WITHDRAW_SECONDS` = 5 world min) beside a store with stock and room in the pack → `Effect::Withdraw`; `Smelt { furnace, seconds }` (`SMELT_SECONDS` = 30 world min) beside a powered furnace with 2 scrap in the pack → 2 scrap out, 1 steel in, all in the pack, the furnace lit (`Action::interact`). All `Event::Worked`, and for the part done when cut short | `brain/tasks/withdraw.rs`, `smelt.rs`, `deposit.rs` |
-| steelworker | `SmeltGoal` (a `Seek`): 2+ scrap in the pack → its own furnace, `Smelt`; steel in the pack → the nearest pallet, `Deposit` (`Achieved`); else the nearest hopper with scrap (`goals::nearest_store`), `Withdraw`; none → `"found no scrap to smelt"`, `Blocked` | `brain/goals/smelt.rs` |
+| tasks | `Deposit` now empties the pack of **the store's item** into any store (checks `Think::bins`); `Withdraw { store, seconds }` (`WITHDRAW_SECONDS` = 5 world min) beside a store with stock and room in the pack → `Effect::Withdraw`; `Smelt { furnace, seconds }` (`SMELT_SECONDS` = 30 world min) beside a powered furnace with scrap in the pack and room for the ingots once it is out (`Smelt::fits`) → 1 scrap out, 3 steel in, all in the pack, the furnace lit (`Action::interact`). All `Event::Worked`, and for the part done when cut short | `brain/tasks/withdraw.rs`, `smelt.rs`, `deposit.rs` |
+| steelworker | `SmeltGoal` (a `Seek`): `Smelt::fits` the pack (scrap, and room for the ingots) → its own furnace, `Smelt` (a packful of 3 scrap is nine ingots, deposited at once); steel in the pack → the nearest pallet, `Deposit` (`Achieved`); else the nearest hopper with scrap (`goals::nearest_store`), `Withdraw`; none → `"found no scrap to smelt"`, `Blocked` | `brain/goals/smelt.rs` |
 | courier | `HaulGoal` (a `Seek`): steel in the pack → the nearest steel rack; scrap → its own hopper (`Deposit`, `Achieved` either way); empty → the nearer of the nearest stocked pallet and the nearest stocked scrap bin, `Withdraw`; neither → `"found nothing to carry"`, `Blocked`. **The trips alternate of themselves**: unloading scrap at the factory leaves it beside the pallets, unloading steel at the warehouse beside the bins | `brain/goals/haul.rs` |
 | menu | `now` (the rows' `JobDef::now`): `smelting steel` at the furnace, `fetching scrap, storing steel`; `carrying steel to the warehouse`, `carrying scrap to the factory`, `fetching a load` (from the pack) | `job.rs` |
 | on screen | the hopper, pallet and rack fill like the scrap bin (`BinFill`, `fill_bins`); the furnace burns while worked (`used` strip, `"furnace"` emitter); the HUD's `steel  N stored` (the racks) | `game-screen`, `lighting` |
@@ -310,10 +332,10 @@ steel on the warehouse's rack by Tuesday 12:30 (the collectors spend Monday brin
 in). With needs on, the crowd limit in `map-generator`'s traps applies to them as to everybody.
 
 Tests: `bins.rs` (every store holds its own item, gives it back until empty); `withdraw.rs`,
-`smelt.rs` (`Rig`, with `Rig::apply_effect` doing the world's half: two ingots fit a pack);
+`smelt.rs` (`Rig`, with `Rig::apply_effect` doing the world's half: ten ingots fit a pack);
 `sim::tests::a_courier_and_a_steelworker_turn_the_warehouse_s_scrap_into_steel_on_its_rack`
 (`testing::steel_works`, a 24x17 floor: the log lines of the whole chain, and every piece of
-scrap accounted for — in a store, a pack, or two to an ingot; seen failing with the courier
+scrap accounted for — in a store, a pack, or a third of an ingot; seen failing with the courier
 never fetching from a pallet) and `a_district_s_steel_works_bring_steel_into_its_warehouse`
 (seed 7, by Tuesday); `save::tests::the_steel_works_saved_mid_shift_carries_on_exactly`. QA
 `qa/steel_factory.json`: a small powered room, the courier `give`n 3 scrap, the job menu at
@@ -399,9 +421,11 @@ now it is the job's frame: where, when, and how a king carries itself.
 | menu | `now`: `holding court` at the throne, `on the way to the palace` | `job.rs` |
 | where | the **palace** (`map/district/palace.rs`), **the whole of the block in the middle of the district** (`palace::BLOCK`; `District::palace`, not a lot building), `wall red` and `floor white`, its door onto the main street, a red carpet from it to the throne in the middle of the far wall (`map-generator`) | |
 
-**The decisions, next**: a goal of the king's own in place of `GoalId::Work` (a new `GoalId` row
-and the job row's `goal`), or a routine only a king's brain raises (`WorkRoutine` reads the job;
-`RoutineCtx::job` has the kind) — the brain is where it goes, never a Bevy system.
+**The decisions**: the king's row has `paperwork: Some(Paperwork::Decrees)`, so `WorkGoal::plan`
+at the throne queues `Task::decree` (half an hour of court, then `outposts::choose_site` and
+`Effect::Decree`) in place of an hour of court while `outposts::decree_due` — the first decision
+a king makes, where an outpost goes and when (the `outposts` skill). More of them go the same
+way: in the brain, from the throne, never a Bevy system.
 
 Tests: `job.rs` `the_king_holds_court_at_its_throne_in_its_crown_and_walks_slowly`;
 `goals/work.rs` `the_king_holds_court_beside_its_throne`; `kinds.rs`
@@ -638,11 +662,13 @@ Hiring, `WorkRoutine`, the save, the uniform, the job menu and the statistics me
 
 ## Payroll and the accountant
 
-JobDef.paperwork is Payroll for the office, Books for the accountant, None otherwise.
+JobDef.paperwork is Payroll for the office, Books for the accountant, Decrees for the king
+(where the outposts go, the `outposts` skill), None otherwise.
 Office workers process owed accounts at powered desks, five world minutes each.
 The accountant (job 13, hired last) uses the powered accountant computer beside the
 palace throne, Mon?Fri 09?17, a two-hour commute, and closes finished daily books.
-Wages are $60 office/accountant/scrap/farmer, $100 king and $40 all other jobs.
+Wages are $60 office/accountant/scrap/farmer, $100 king, $150 builder (paid only for the days
+it builds; a care package for the rest) and $40 all other jobs.
 Timesheets, care, tax and the job panel cash readout: see ../economy/SKILL.md.
 
 

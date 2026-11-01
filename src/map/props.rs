@@ -122,6 +122,9 @@ pub const PROPS: &[Prop] = &[
     // beside it.
     Prop::blocking("grain bin"),
     Prop::blocking("fish bin"),
+    // An outpost's local warehouse, a store of scrap out in the wasteland
+    // (`sim::outposts`). Builders put it up; it is never on a map file.
+    Prop::blocking("outpost store"),
     // The store: its superfridge, the district's food, which a courier the
     // dispatch sends fills a unit at a time (`sim::superfridge`), and the
     // counter its shopkeepers mind. Both used from beside them.

@@ -200,6 +200,14 @@ impl Chunk {
         self.passable[index / 64] &= !(1 << (index % 64));
     }
 
+    /// Something stands in `cell` now that hides what is behind it — a wall
+    /// an outpost's builders put up (`Map::build`) — and nothing is seen
+    /// across it.
+    pub fn shade(&mut self, cell: Point) {
+        let index = local_index(cell);
+        self.see_through[index / 64] &= !(1 << (index % 64));
+    }
+
     /// The tile of a cell in this chunk. A cell of another chunk reads the
     /// cell in the same place in this one — the caller found the chunk.
     #[inline]

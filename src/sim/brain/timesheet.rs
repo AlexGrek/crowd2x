@@ -11,7 +11,9 @@
 //! shift it is employed through. A shift never gone to is not paid.
 //!
 //! **A care package a day** for the out of work: each day that turns with no
-//! job adds a day owed.
+//! job adds a day owed — and so does each a job worked only on demand
+//! ([`JobKind::is_on_demand`]: the builder's) went by without being on duty,
+//! there being nothing to build.
 //!
 //! The brain asks the world for what it is owed once, with the first tick its
 //! effect is free ([`Brain::react`](super::Brain::react), step 6c): a task
@@ -41,11 +43,14 @@ pub struct Timesheet {
     shift_job: Option<JobKind>,
     /// Days gone by out of work, not yet handed to the world.
     care_days: u8,
+    /// The last day it was on duty, for a job worked on demand: a day that
+    /// turns without it is a day out of work. 0, never.
+    last_on_duty: u32,
 }
 
 impl Timesheet {
     pub const fn new() -> Timesheet {
-        Timesheet { day: 0, clocked: None, shifts: 0, shift_job: None, care_days: 0 }
+        Timesheet { day: 0, clocked: None, shifts: 0, shift_job: None, care_days: 0, last_on_duty: 0 }
     }
 
     /// Bring it up to date at `clock`, with the unit's `job` and the goal
@@ -76,8 +81,20 @@ impl Timesheet {
             self.clocked = Some(job.kind);
         }
         let today = clock.day();
-        if self.day != 0 && today > self.day && job.is_none() {
-            self.care_days = self.care_days.saturating_add((today - self.day).min(u8::MAX as u32) as u8);
+        if self.clocked.is_some() {
+            self.last_on_duty = today;
+        }
+        if self.day != 0 && today > self.day {
+            let turned = (today - self.day).min(u8::MAX as u32) as u8;
+            match job {
+                None => self.care_days = self.care_days.saturating_add(turned),
+                // Every day gone by but one it was on duty for.
+                Some(job) if job.kind.is_on_demand() => {
+                    let worked = (self.last_on_duty == self.day) as u8;
+                    self.care_days = self.care_days.saturating_add(turned - worked.min(turned));
+                }
+                Some(_) => {}
+            }
         }
         self.day = self.day.max(today);
     }
@@ -113,13 +130,14 @@ impl Timesheet {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Timesheet {
-        let Timesheet { day, clocked, shifts, shift_job, care_days } = *self;
+        let Timesheet { day, clocked, shifts, shift_job, care_days, last_on_duty } = *self;
         pb::Timesheet {
             day,
             clocked: clocked.map(JobKind::number),
             shifts: shifts as u32,
             shift_job: shift_job.map(JobKind::number),
             care_days: care_days as u32,
+            last_on_duty,
         }
     }
 
@@ -138,7 +156,14 @@ impl Timesheet {
         let (Ok(shifts), Ok(care_days)) = (u8::try_from(saved.shifts), u8::try_from(saved.care_days)) else {
             return invalid(format!("a timesheet of {} shifts and {} care days", saved.shifts, saved.care_days));
         };
-        Ok(Timesheet { day: saved.day, clocked: kind(saved.clocked)?, shifts, shift_job: kind(saved.shift_job)?, care_days })
+        Ok(Timesheet {
+            day: saved.day,
+            clocked: kind(saved.clocked)?,
+            shifts,
+            shift_job: kind(saved.shift_job)?,
+            care_days,
+            last_on_duty: saved.last_on_duty,
+        })
     }
 }
 
@@ -233,6 +258,27 @@ mod tests {
         let mut sheet = Timesheet::new();
         run(&mut sheet, Some(&job), 1, 8.0, 17.0, |_| false);
         assert_eq!(sheet.take(), Some(Effect::Record { shifts: 1, job: Some(JobKind::Electrician), care_days: 0 }));
+    }
+
+    /// A builder works only on demand: a day it was on duty is a shift, at
+    /// its wage, and a day there was nothing to build a care package, as for
+    /// the jobless.
+    #[test]
+    fn a_builder_is_paid_for_a_day_it_built_and_given_care_for_a_day_it_did_not() {
+        let job = Job::new(JobKind::Builder, Point::new(0, 0), crate::sim::job::BUILDER_HOURS);
+        let mut sheet = Timesheet::new();
+        run(&mut sheet, Some(&job), 1, 6.0, 24.0, |hours| (8.0..12.0).contains(&hours));
+        run(&mut sheet, Some(&job), 2, 0.0, 24.0, |_| false);
+        run(&mut sheet, Some(&job), 3, 0.0, 1.0, |_| false);
+        assert_eq!(
+            sheet.take(),
+            Some(Effect::Record { shifts: 1, job: Some(JobKind::Builder), care_days: 1 }),
+            "the building day paid, the idle day cared for"
+        );
+        let office = office();
+        run(&mut sheet, Some(&office), 4, 0.0, 24.0, |_| false);
+        run(&mut sheet, Some(&office), 5, 0.0, 1.0, |_| false);
+        assert!(!sheet.is_pending(), "a job not on demand is no care day, gone to or not");
     }
 
     #[test]

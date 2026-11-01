@@ -136,6 +136,9 @@ pub const PALETTE: &[PaletteItem] = &[
     // Drawn by `tools/farm_art.py`.
     PaletteItem::posed("grain bin", "grain_bin.png", 4),
     PaletteItem::posed("fish bin", "fish_bin.png", 4),
+    // An outpost's local warehouse (`sim::outposts`), a store of scrap that
+    // fills up like the scrap bin it is drawn as.
+    PaletteItem::posed("outpost store", "scrap_bin.png", 4),
     // The store, drawn by `tools/store_art.py`: the superfridge, its glass
     // doors showing it empty, low, half full and stocked as the simulation's
     // count says ([`BinFill`]), and the shop counter with its till.

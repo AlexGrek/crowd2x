@@ -145,6 +145,36 @@ pub enum Effect {
     /// A deathdog has gone back into the wasteland (`kinds::Deathdog`): it
     /// leaves the world at the end of the tick, as a body taken up does.
     Depart,
+    /// The king has decided where the next outpost goes, on `day`
+    /// (`brain::tasks::Decree`, from the throne): its flag goes up at `at`
+    /// and its plan is laid out ([`super::outposts::Outposts::found`]) — or,
+    /// `None`, it found nowhere, and does not look again that day.
+    Decree { at: Option<Point>, day: u32 },
+    /// A builder takes on the tile of the outpost going up at `at`
+    /// (`brain::tasks::Claim`): granted while nobody has it, so two asking
+    /// in one tick get it in slot order, the lower first.
+    Claim { at: Point },
+    /// A builder has finished laying the building tile of its own tile at
+    /// `at` (`brain::tasks::Lay`): the steel it takes comes out of its pack
+    /// all at once. Refused where somebody stands or a body lies, or with the
+    /// steel short.
+    Lay { at: Point },
+    /// A builder worked `seconds` of world time on its building tile at `at`
+    /// (`brain::tasks::Construct`, every tick it does): once it has had all
+    /// it takes, it is built, and its furniture taken into the world's
+    /// indexes.
+    Construct { at: Point, seconds: f32 },
+    /// A builder on leave — sick, or off for its mental health, maybe for
+    /// days — gives back the tile it had taken on, as it stands, for another
+    /// builder to take on (`Brain::step`).
+    GiveUpTile,
+    /// A worker on leave for its mental health — off for days, often weeks —
+    /// gives up its post (`Brain::step`): let go, as a death lets go, and the
+    /// job handed to somebody jobless before the tick is out
+    /// ([`Facilities::vacancies`]). A shop, a dispatch or a throne is not left
+    /// to stand empty for as long as the leave lasts. Recovered, it is jobless,
+    /// and is hired again into the next post left empty.
+    LeavePost,
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -224,6 +254,9 @@ pub(crate) fn apply(
                 && facilities.features.has(FeatureKind::HospitalBed, at)
                 && occupancy.is_free_for(at, entity.uid())
                 && facilities.hospital.admit(at, entity.uid()) {
+                // In hospital for days, maybe: its tile of an outpost is for
+                // another builder to take on.
+                facilities.outposts.release(entity.uid());
                 log.unit(entity.uid(), format!("{} admitted to hospital", entity.uid()));
             }
         }
@@ -339,6 +372,122 @@ pub(crate) fn apply(
             facilities.leaving.push(uid);
             log.unit(uid, format!("{uid} went back into the wasteland"));
         }
+        Effect::Decree { at, day } => decree(entity, map, facilities, log, at, day),
+        Effect::Claim { at } => claim(entity, facilities, log, at),
+        Effect::Lay { at } => lay(entity, map, facilities, occupancy, log, at),
+        Effect::Construct { at, seconds } => construct(entity, map, facilities, log, at, seconds),
+        Effect::GiveUpTile => {
+            let uid = entity.uid();
+            if let Some(tile) = facilities.outposts.claim_of(uid).copied()
+                && facilities.outposts.release(uid)
+            {
+                log.unit(uid, format!("{uid} gave up the outpost's {} at {}, {}: on leave", tile.part.name(), tile.cell.x, tile.cell.y));
+            }
+        }
+        Effect::LeavePost => leave_post(entity, facilities, log),
+    }
+}
+
+/// [`Effect::Decree`]: the king's outpost founded where it decided, or the
+/// day it found nowhere remembered. From the king alone.
+fn decree(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, log: &Log, at: Option<Point>, day: u32) {
+    if entity.job().is_none_or(|job| job.kind != JobKind::King) {
+        return;
+    }
+    let uid = entity.uid();
+    match at {
+        Some(center) if facilities.outposts.found(map, center, day) => {
+            log.important(format!("the king decreed an outpost at {}, {}: its flag is up", center.x, center.y));
+        }
+        Some(center) => log.unit(uid, format!("{uid} could not found an outpost at {}, {}", center.x, center.y)),
+        None => {
+            facilities.outposts.found_nowhere(day);
+            log.important("the king found nowhere to build an outpost".to_string());
+        }
+    }
+}
+
+/// [`Effect::Claim`]: the tile at `at` the builder's to build, while nobody
+/// else has it. Logged either way — once a tile.
+fn claim(entity: &dyn GameEntity, facilities: &mut Facilities, log: &Log, at: Point) {
+    if entity.job().is_none_or(|job| job.kind != JobKind::Builder) || entity.is_dead() {
+        return;
+    }
+    let uid = entity.uid();
+    let Some(part) = facilities.outposts.tile(at).map(|tile| tile.part) else {
+        log.unit(uid, format!("{uid} found nothing to build at {}, {}", at.x, at.y));
+        return;
+    };
+    if facilities.outposts.claim(at, uid) {
+        log.unit(uid, format!("{uid} took on the outpost's {} at {}, {}", part.name(), at.x, at.y));
+    } else {
+        log.unit(uid, format!("{uid} found the outpost's {} at {}, {} taken", part.name(), at.x, at.y));
+    }
+}
+
+/// [`Effect::Lay`]: the building tile of the builder's own tile at `at` down,
+/// and the steel it takes out of the builder's pack — unless somebody stands
+/// there, a body lies there, the steel is short or the plan will not have it.
+/// Logged either way.
+fn lay(entity: &mut dyn GameEntity, map: &mut Map, facilities: &mut Facilities, occupancy: &Occupancy, log: &Log, at: Point) {
+    let uid = entity.uid();
+    let Some(tile) = facilities.outposts.claim_of(uid).filter(|tile| tile.cell == at).copied() else {
+        return;
+    };
+    if entity.is_dead() || entity.center_position().manhattan_distance(at) > 1 {
+        return;
+    }
+    let part = tile.part.name();
+    if let Some(other) = occupancy.occupant(at) {
+        log.related(uid, other, format!("{uid} could not lay the {part} at {}, {}: {other} is standing there", at.x, at.y));
+        return;
+    }
+    if let Some(dead) = facilities.corpses.at(at) {
+        log.related(uid, dead, format!("{uid} could not lay the {part} at {}, {}: the body of {dead} lies there", at.x, at.y));
+        return;
+    }
+    let steel = tile.steel_wanted();
+    let Some(pack) = entity.inventory_mut() else {
+        return;
+    };
+    if (pack.count(ItemKind::Steel) as u32) < steel {
+        log.unit(uid, format!("{uid} has not the steel for the {part} at {}, {}", at.x, at.y));
+        return;
+    }
+    match facilities.outposts.lay(map, at, uid) {
+        Ok(_) => {
+            for _ in 0..steel {
+                let taken = pack.take_out(ItemKind::Steel);
+                debug_assert!(taken, "the steel was counted");
+            }
+            log.unit(uid, format!("{uid} laid the building tile of the outpost's {part} at {}, {}, with {steel} steel", at.x, at.y));
+        }
+        Err(why) => log.unit(uid, format!("{uid} could not lay the {part} at {}, {}: {why}", at.x, at.y)),
+    }
+}
+
+/// [`Effect::Construct`]: the builder's work on its building tile at `at`,
+/// and when that is all it takes, the tile built — its furniture into the
+/// world's indexes — and said. A line a tile built, an important one an
+/// outpost.
+fn construct(entity: &dyn GameEntity, map: &mut Map, facilities: &mut Facilities, log: &Log, at: Point, seconds: f32) {
+    let uid = entity.uid();
+    if entity.is_dead() || entity.center_position().manhattan_distance(at) > 1 {
+        return;
+    }
+    let Some(done) = facilities.outposts.construct(map, at, uid, seconds) else {
+        return;
+    };
+    if let Some(fixture) = done.fixture {
+        facilities.install(fixture);
+    }
+    let total = super::outposts::TILES;
+    log.unit(uid, format!("{uid} built the outpost's {} at {}, {}: {} of {total} built", done.part.name(), at.x, at.y, done.built));
+    if done.outpost_done
+        && let Some(outpost) = facilities.outposts.iter().last()
+    {
+        let center = outpost.center();
+        log.important(format!("the outpost at {}, {} is built", center.x, center.y));
     }
 }
 
@@ -471,6 +620,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     occupancy.release(cell, uid);
     facilities.homes.release(uid);
     facilities.workplaces.release(uid);
+    facilities.outposts.release(uid);
     facilities.society.set_job(uid, None);
     facilities.corpses.add(uid, cell);
     facilities.tally.died += 1;
@@ -479,6 +629,29 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
         facilities.vacancies.push((uid, job));
     }
     log.important(format!("{uid} died of {cause}"));
+}
+
+/// [`Effect::LeavePost`]: the worker let go — its workplace, its outpost
+/// tile, its dispatch order and its colleagues given back, as
+/// [`GameState::dismiss`](super::GameState::dismiss) gives them — and the job
+/// to somebody jobless before the tick is out, as a death's is.
+fn leave_post(entity: &mut dyn GameEntity, facilities: &mut Facilities, log: &Log) {
+    let uid = entity.uid();
+    let Some(job) = entity.dismiss() else {
+        return;
+    };
+    facilities.workplaces.release(uid);
+    facilities.outposts.release(uid);
+    facilities.society.set_job(uid, None);
+    facilities.dispatch.release(uid);
+    facilities.vacancies.push((uid, job));
+    log.important(format!(
+        "{uid} gave up its post as {} at the {} at {}, {}: on leave for its mental health",
+        job.kind.with_article(),
+        job.kind.workplace_name(),
+        job.workplace.x,
+        job.workplace.y
+    ));
 }
 
 /// [`Effect::Deposit`], for the unit `uid`: its pieces into the store at

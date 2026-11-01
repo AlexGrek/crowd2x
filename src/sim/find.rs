@@ -31,6 +31,9 @@ pub enum Search {
     /// Every broken thing. Only a distribution box breaks so far
     /// ([`Electrical::damaged`](super::electrical::Electrical::damaged)).
     BrokenObjects,
+    /// Every outpost's flag ([`super::outposts`]), out in the wasteland, in
+    /// the order the king decreed them.
+    Outposts,
 }
 
 impl Search {
@@ -47,6 +50,7 @@ impl Search {
             Search::PetDogs => "pet dog",
             Search::DirtySquares => "dirty square",
             Search::BrokenObjects => "broken object",
+            Search::Outposts => "outpost",
         }
     }
 
@@ -96,6 +100,7 @@ impl Search {
                     .map(|(cell, _)| cell),
             ),
             Search::BrokenObjects => cells.extend_from_slice(state.electrical().damaged()),
+            Search::Outposts => cells.extend(state.outposts().iter().map(|outpost| outpost.center())),
         }
     }
 }

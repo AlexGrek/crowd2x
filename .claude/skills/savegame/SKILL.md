@@ -289,6 +289,23 @@ than 255), `Follow` = 27 and `Defecate` = 28 (both `pb::Executor::Wander`: a spo
 tasks `"defecate"` and `"feed"` by name, `ItemKind::DogFood` by name. The per-tick `Bonds` index is not
 saved. The `pets` skill.
 
+## Outposts
+
+`pb::World.outposts` (tag 28, `pb::Outposts { outposts: [pb::Outpost { center, flipped,
+decreed, tiles: [pb::OutpostTile { stage: TileStage, progress, claim }] }], fruitless }`, absent =
+none): `Outposts::save`/`restore` (`sim/outposts.rs`), which **builds the map again**
+(`Map::build`: a save's chunks keep the ground as found) and refuses a wrong tile count, a
+progress out of range, a builder on two tiles or a built one, and a structure the map will not
+take. **Restored right after `GameState::new`**, so `refresh_supply` installs the built
+furniture (`GameState::install_fixtures`) into the features, fridges, stores and doors
+**before** their saved states are put back by cell; every claim is then checked to be a living
+builder's. `pb::Memory.rest_until` (tag 11, absent = not resting), `pb::Timesheet.last_on_duty`
+(tag 6, absent = 0). `JobKind::Builder` = 21, `GoalId::Build` = 32 (a `pb::Executor::Seek`),
+`FeatureKind`s 33-34 (the map's), the tasks `"take on a tile"`, `"lay a building tile"`,
+`"build"`, `"decree an outpost"` by name. The fingerprint includes `Map::built`. Test:
+`an_outpost_saved_half_built_carries_on_exactly` (seen failing with the outposts not restored,
+and with the fixtures not installed). The `outposts` skill.
+
 ## Economy state
 
 New archives include optional economy.pb (pb::Economy): signed cents, accounts,

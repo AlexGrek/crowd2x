@@ -99,7 +99,7 @@ use super::background::{Due, Priority};
 use super::biology::{Biology, Event};
 use super::entity::Think;
 use super::inventory::Inventory;
-use super::job::Job;
+use super::job::{Job, JobKind};
 use super::playzone;
 use super::uid::{EntityType, Uid};
 use super::walker::Walker;
@@ -490,8 +490,11 @@ impl Brain {
         // 4b. The timesheet: on duty if the job's goal is in charge while the
         // shift is due, a shift owed once it is over, a care day for each
         // day turned without a job. A person's only: nothing else is paid.
+        // A job worked on demand with nothing to do — a builder walking back
+        // in from a finished outpost — is not on duty, whatever is in charge.
         if body.uid().kind() == Some(EntityType::Human) {
-            timesheet.tick_with_leave(job, ctx.clock, goals.top(), memory.medical.on_leave(ctx.clock.day()));
+            let idle = job.is_some_and(|job| job.kind.is_on_demand() && !goals::build::on_duty(job, body.uid(), ctx));
+            timesheet.tick_with_leave(job, ctx.clock, goals.top(), memory.medical.on_leave(ctx.clock.day()) || idle);
         }
 
         // 6. The current task's executor, which writes the task's result and
@@ -537,6 +540,21 @@ impl Brain {
             && playzone::runs(job, walk.body().center_position(), ctx)
         {
             effect = Effect::Operate { at: job.workplace };
+        }
+
+        // 6b'. A worker on leave for its mental health gives up its post, for
+        // somebody jobless to take on (`Effect::LeavePost`); a builder off for
+        // the day — sick, or a patient — its tile, for the other builders
+        // (`sim::outposts`).
+        if effect == Effect::None && job.is_some() && memory.medical.mental_leave {
+            effect = Effect::LeavePost;
+        }
+        if effect == Effect::None
+            && job.is_some_and(|job| job.kind == JobKind::Builder)
+            && memory.medical.on_leave(ctx.clock.day())
+            && ctx.outposts.claim_of(body.uid()).is_some()
+        {
+            effect = Effect::GiveUpTile;
         }
 
         // 6c. What it is owed, told the world with the first tick nothing

@@ -69,6 +69,10 @@ pub struct Timesheet {
     pub shift_job: Option<i32>,
     #[prost(uint32, tag = "5")]
     pub care_days: u32,
+    /// The last day it was on duty, for a job worked on demand; 0, never —
+    /// and in every save from before there were builders.
+    #[prost(uint32, tag = "6")]
+    pub last_on_duty: u32,
 }
 
 /// A job: what it is, where, and when (`crate::sim::job::Job`).
@@ -167,6 +171,11 @@ pub struct Memory {
     /// save from before there were pets — is none.
     #[prost(fixed64, optional, tag = "10")]
     pub companion: Option<u64>,
+    /// Until when a builder rests after a stretch, in world seconds
+    /// (`Memory::rest_until`). Absent — and in every save from before there
+    /// were builders — is no rest.
+    #[prost(double, optional, tag = "11")]
+    pub rest_until: Option<f64>,
 }
 
 /// A small talk one person is in, as it remembers it.

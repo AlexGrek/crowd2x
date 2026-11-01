@@ -16,7 +16,7 @@
 use bevy::prelude::*;
 
 use crate::sim::fields::Stage;
-use crate::sim::statistics::FieldStock;
+use crate::sim::statistics::{FieldStock, OutpostCount};
 use crate::sim::{GameState, Statistics};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
@@ -200,6 +200,7 @@ pub fn describe(stats: &Statistics) -> String {
         }
     }
     out.push_str(&fields(&stats.fields));
+    out.push_str(&outposts(&stats.outposts));
 
     out.push('\n');
     for (index, job) in stats.jobs.iter().enumerate() {
@@ -236,6 +237,18 @@ fn fields(stock: &FieldStock) -> String {
     format!("{:<10} {:>4}   {}  quality {quality}%\n", "fields", stock.sown(), stages.join("  "))
 }
 
+/// `outposts      1   built  12 of 26 tiles going up`.
+fn outposts(count: &OutpostCount) -> String {
+    match count.going_up {
+        Some((built, tiles)) => format!("{:<10} {:>4}   built  {built} of {tiles} tiles going up
+", "outposts", count.built),
+        None if count.built == 0 => format!("{:<10} {:>4}   none decreed
+", "outposts", 0),
+        None => format!("{:<10} {:>4}   built
+", "outposts", count.built),
+    }
+}
+
 /// "human" to "humans", "office worker" to "office workers".
 fn plural(name: &str) -> String {
     format!("{name}s")
@@ -257,6 +270,7 @@ mod tests {
             alive: vec![(EntityType::Human, 12), (EntityType::Dog, 1)],
             sites: vec![site("warehouse", true, 30, 6), site("factory", true, 3, 1)],
             fields: FieldStock { stages: [10, 20, 30, 20], quality: Some(64) },
+            outposts: OutpostCount { built: 1, going_up: Some((12, 26)) },
             jobs: vec![
                 JobCount { kind: JobKind::OfficeWorker, workers: 5, posts: 12 },
                 JobCount { kind: JobKind::Guard, workers: 3, posts: 3 },
@@ -277,6 +291,7 @@ mod tests {
         assert!(text.contains("              3   guards of 3 posts"), "{text}");
         assert!(text.contains("              4   without a job"), "{text}");
         assert!(text.contains("dead          3   lying 1  carried 1  cremated 1"), "{text}");
+        assert!(text.contains("outposts      1   built  12 of 26 tiles going up"), "{text}");
     }
 
     #[test]
@@ -285,6 +300,7 @@ mod tests {
             alive: vec![(EntityType::Human, 1)],
             sites: vec![site("warehouse", false, 0, 0), site("factory", false, 0, 0)],
             fields: FieldStock::default(),
+            outposts: OutpostCount::default(),
             jobs: Vec::new(),
             jobless: 1,
             died: 0,
@@ -296,5 +312,6 @@ mod tests {
         let text = describe(&stats);
         assert!(text.contains("warehouse         none") && text.contains("factory           none"), "{text}");
         assert!(text.contains("fields        0   nothing sown"), "{text}");
+        assert!(text.contains("outposts      0   none decreed"), "{text}");
     }
 }

@@ -16,6 +16,7 @@ use crate::map::utilities::Supply;
 use crate::map::{Map, ObjectLayer, Point};
 use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::MINUTE;
+use crate::sim::outposts::Fixture;
 
 /// The prop name a fridge is painted with — the only one [`Fridges::from_map`]
 /// looks for.
@@ -44,6 +45,10 @@ pub struct FridgeState {
     temperature: f32,
     /// Whether it is plugged in to live wiring. Fixed at map load.
     powered: bool,
+    /// Whether it keeps itself cold whatever the wiring: an outpost's, out
+    /// in the wasteland where there is no grid (`Fridges::install`). Put back
+    /// with the outposts on load, never saved.
+    own_power: bool,
 }
 
 impl FridgeState {
@@ -53,6 +58,7 @@ impl FridgeState {
             open: false,
             temperature: if powered { COLDEST } else { AMBIENT },
             powered,
+            own_power: false,
         }
     }
 
@@ -142,7 +148,7 @@ impl Fridges {
     pub(crate) fn save(&self) -> Vec<pb::Fridge> {
         self.iter()
             .map(|(cell, state)| {
-                let FridgeState { open, temperature, powered: _ } = state;
+                let FridgeState { open, temperature, powered: _, own_power: _ } = state;
                 pb::Fridge { cell: Some(cell.into()), open, temperature }
             })
             .collect()
@@ -174,7 +180,20 @@ impl Fridges {
     /// warms up from cold, it does not jump to the room.
     pub fn set_power(&mut self, supply: &Supply) {
         for (cell, state) in self.cells.iter().zip(&mut self.states) {
-            state.powered = supply.serves(FRIDGE, *cell);
+            state.powered = state.own_power || supply.serves(FRIDGE, *cell);
+        }
+    }
+
+    /// Take in an outpost's fridge once it is built (`Facilities::install`):
+    /// closed, cold, and keeping itself so — there is no grid out there. A
+    /// fixture that is no fridge, or one already in, changes nothing.
+    pub fn install(&mut self, fixture: Fixture) {
+        if fixture.prop != FRIDGE {
+            return;
+        }
+        if let Err(at) = self.cells.binary_search(&fixture.cell) {
+            self.cells.insert(at, fixture.cell);
+            self.states.insert(at, FridgeState { own_power: true, ..FridgeState::closed(true) });
         }
     }
 

@@ -1,6 +1,6 @@
 ---
 name: game-screen
-description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the crops of wheat drawn by stage and the crop panel, the HUD corners, the spawn menu and the statistics menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
+description: The crowd2x game screen (src/game/) - the sim-to-sprite bridge in actors.rs, culling to VisibleArea and VisibleCrowd, the body pool, game speed and pause, camera clamping, held items, selecting a unit and the unit panel, selecting and switching a distribution box, flipping a light switch with a click, the crops of wheat drawn by stage and the crop panel, the outposts drawn (the flag, building tiles, what is built), the HUD corners, the spawn menu and the statistics menu. Use when changing what the game screen draws or how a player interacts with it, sprite culling, selection, panels, HUD buttons or speed controls.
 ---
 
 # The game screen
@@ -260,6 +260,17 @@ the box; one selection at a time, the green frame on it) and opens a panel along
 `close`. Read-only, rewritten in place every frame; a crop harvested under it clears the
 selection. QA: `select_crop`.
 
+### Outposts (`game/outposts.rs`)
+
+The `crops.rs` pattern for the outposts the king decrees (the `outposts` skill): a sprite on every
+outpost cell on the canvas that shows something — the flag (`outpost_flag.png`), a building tile
+(`building_tile.png`, four frames by how far it has got) and what is built, in the palettes' own
+art found by name (`wall brown` just over the ground, `fridge`, `bed 1`, `outpost store` filled by
+`bin_frame`, `door` posed by its leaf's openness and `DoorLeaf::pose`) — drawn again only when
+what it shows (`Look`) changes. **Nothing of an outpost is in `CurrentMap`**, the walls included
+(they are the simulation's map's), so this draws it all. The job menu says `waiting for work`
+for a builder due with nothing to build (`job_block_for`, handed `Outposts::has_work_for`).
+
 ### The statistics menu (`game/statistics.rs`)
 
 `statistics`, in the row with `save` and `quick save`, opens a full-screen modal like the spawn
@@ -267,7 +278,9 @@ menu (its own `Scope`, `StatisticsMenu` resource so `leave` closes it on `esc` b
 the game, `close` button) showing `GameState::statistics()` (`sim::statistics`): the living by
 kind, what the warehouse (scrap bins, steel rack), the steel factory (hoppers, pallets) and the
 farm (grain bins) hold, the fields (`fields       80   10 seedling  20 young  30 in ear  20 ripe
-quality 64%`, `sim::statistics::FieldStock`, or `nothing sown`), workers per `JobKind` against its posts (workplaces x shifts) and the jobless, and the dead
+quality 64%`, `sim::statistics::FieldStock`, or `nothing sown`), the outposts (`outposts      1
+built  12 of 26 tiles going up`, `OutpostCount`, or `none decreed`; an outpost's store under the
+site `outpost`), workers per `JobKind` against its posts (workplaces x shifts) and the jobless, and the dead
 (`died` — `Tally`, counted as they die and saved —, lying, carried, cremated). **The world runs
 on behind it** and the text is rebuilt every frame the menu is open and written only when it
 changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text
@@ -284,7 +297,9 @@ letter and 8 of padding, 300 a row). Four kinds of answer, one button each:
   `pet dogs` (a living `Dog` with a `companion`).
 - **Squares** — `dirty squares` (site cells with `Dirt::overall() >` the cleaners' `DIRTY`, 0.15;
   the wasteland's chunks and puddles are not searched) and `broken objects` (the distribution boxes
-  in `Electrical::damaged`; the only thing that breaks).
+  in `Electrical::damaged`; the only thing that breaks), and `outposts` (every outpost's flag, out
+  in the wasteland — **pressing it also centres the camera on the newest's flag**, since none is
+  on a screen of the district; the `outposts` skill).
 - **Buildings** — the warehouse, restaurants, crematorium, steel factory, farm, power plant, food
   factory, playzone, hospital and palace, **found on the map from its props**
   (`map::landmarks::find`, `LANDMARKS`: each kind's identifying props, props within 9 cells being one
@@ -296,7 +311,7 @@ letter and 8 of padding, 300 a row). Four kinds of answer, one button each:
 - `clear` and `close`.
 
 `sim::find::Search` is the question (`Workers(JobKind)`, `PetDogs`, `DirtySquares`,
-`BrokenObjects`) and `Search::scan` answers it by one read of the arena or a layer, into `Uid`s for
+`BrokenObjects`, `Outposts`) and `Search::scan` answers it by one read of the arena or a layer, into `Uid`s for
 units (they move) or cells. **A search stays up until cleared or replaced**, and `find` stays lit
 while one is. `Finding` (view state, not saved, reset `OnExit`) rescans twice a second of real time
 (`RESCAN`) and each frame `show` asks `position_of` for every unit found, keeps the cells on the

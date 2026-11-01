@@ -191,8 +191,22 @@ with only the evening guards (joyless through a 16-24 watch) and the frightened 
 The two beat events carry the world seconds the beat covers (`Due::elapsed(Priority::Low)`,
 about 32), so they are rates like the rest. Smell used to be a whole point a beat, about 110 an
 hour. It swung a district's average between 10 and 70 in a day and made the stat mean nothing.
-Nothing reads mental health to decide anything yet; the unit panel and the lab show it. The
-lab samples `mental_health.employed.avg`, `.jobless.avg`, `.in debt.avg` and
+**Mental health leave** (`sim/hospital.rs`, `Medical`): at `CRITICAL_MENTAL_HEALTH` (20) or
+under, a human goes on leave (`mental_leave`, logged `{uid} is taking sick leave for mental
+health`) until it is back to `RETURN_MENTAL_HEALTH` (60) — days, often weeks. On any leave
+(`Medical::on_leave`: mental leave, a sick day, a patient) `Medical::arrange` suppresses every
+job's goal **except wandering** — the special agent's job goal is `Wander`, and suppressing it
+with the rest left everybody on leave standing idle where it last was, in front of the fridge,
+toilet or arcade cabinet it had used, for days (the lab, 2026-11-01). Test:
+`on_leave_with_nothing_pressing_a_unit_wanders_rather_than_standing_still`. On mental leave the
+`get well` routine also raises Play while fun is under `CHEERFUL`. **A worker on mental leave
+gives up its post**: `Brain::step` 6b' asks `Effect::LeavePost`, which lets it go as a death does
+and queues the job on `Facilities::vacancies` for the nearest jobless (`jobs` skill); nobody on
+mental leave is hired (`GameEntity::is_on_mental_health_leave`, checked by `give_a_job`,
+`hire` and `fill_vacancy`). Before it, a month of seed 11 starved: three of four shopkeepers and
+the store courier on leave, the superfridge unstocked, 162 dead in a day.
+
+The unit panel and the lab show mental health. The lab samples `mental_health.employed.avg`, `.jobless.avg`, `.in debt.avg` and
 `mental_health.low` (under 20). Tests: `biology/mind.rs` (each pressure),
 `brain::tests::a_debt_weighs_on_the_mind_through_the_low_beat`,
 `deathdogs::tests::a_scare_costs_the_mind_once_a_fright_and_nothing_inside`,
@@ -318,6 +332,7 @@ Priorities are unitless `f32`s compared only against each other.
 | `NeedRoutine(BLADDER)` → relieve | `bladder / 50`: 1.4 at `BURSTING` (70), released at `RELIEVED` (10) |
 | `SleepRoutine` → sleep | `tiredness / 50`, committed at `EXHAUSTED` (75) by day and `SLEEPY` (30) at night, released at `RESTED` (10) **and only by day**; at night — **the unit's own night**, `job::is_bedtime(job, clock)`: the clock's 22-06, or the 8 hours ending 3 before a worker's shift (the night watch sleeps 13-21), see `jobs` — the priority has a floor of `SLEEPY / 50` = 0.6, over wandering and under every committed need. The one routine that reads the clock (`Think::clock`) as well as a stat, which is why it is not a `Need`. `Stats::tiredness` is `stamina` turned over. *Which* bed is the goal's business: its own (`HOME_BED` in `Memory`, handed out at spawn to the nearest unowned bed), any free one at random only at `CRITICALLY_TIRED` (90), and **none at `COLLAPSED` (95)**: it sleeps where it stands (a `Sleep` task whose bed is its own cell), goes down mid-walk to a bed (`SleepGoal::keep_up`), and stays down a stretch at a time while past `EXHAUSTED`; logged `slept on the floor at` (`World::floor_sleeps`) and drawn lying with zzz like any sleeper |
 | `WorkRoutine` → work / collect | a flat `WORKING = 1.5` on **the job's goal** (`JobKind::goal`: `Work` at a desk or a guard post, `Collect` for a scrap collector) while the job is due (`Job::is_due`: 09:00-17:00 Mon-Fri from 08:30 for the walk in; a guard's watch from two hours before), nothing without a job. Over every need at its commit level (1.2, a bursting bladder 1.4), under any need past 75 on a fresh choice — **but a shift under way holds** (`HOLD`) until a need past `CALLED_AWAY` (90); boredom never comes near; ties a nap at `EXHAUSTED` and loses it, because `GoalId::Work` and `GoalId::Collect` are the last two and ties go to the lower id. Reads the clock and the job, no stat, so no hysteresis. The `jobs` skill |
+| `WorkRoutine` → build (on demand) | a builder's (`JobDef::on_demand`): `WORKING` only while `goals::build::on_duty` (the shift due **and** a tile for it, `Outposts::has_work_for`), nothing otherwise; **`RESTING` = 0.8** while `Memory::is_resting` after a stretch, so any committed need (1.2) is over it past the hold — a meal or a drink out of the pocket, the bladder — and over the night floor and wandering, so it rests where it is; and `WORKING` while it is **off the site with no work for it now**, so it walks back in before dark. The `outposts` skill |
 | `ReadyRoutine` → provision | the last thing on its list: once the needs are met, `GETTING_READY` less four places while the pocket is short of a meal and a drink (`goals::provision`). The `jobs` skill, "Getting ready" |
 | `ReadyRoutine` → eat / drink / play / relieve | before a trip out for a job that goes out (`JobDef::goes_out_for`: the collector): `GETTING_READY = 1.6` less 0.01 per place on its list (drink, eat, play, toilet), **raised to break in** (`Goals::break_in`) so the shift in charge does not hold against it, so over work and under any need past 80, for each need it is seeing to until every one is 85% met. Starts beside the bin or back in with a half trip, keeps a list (no need joins it mid-way) and a `ready` latch until it goes out; tells `CollectGoal` through `GoalCtx::ready_to_go_out`; reads the pack through `RoutineCtx::inventory` and held-off goals through `Goals::cooldown`. The `jobs` skill, "Getting ready" |
 | `OrdersRoutine` → salvage | `ORDERED = 0.5` while an order is remembered |

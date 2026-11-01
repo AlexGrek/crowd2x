@@ -194,6 +194,13 @@ pub struct JobDef {
     pub courier: bool,
     /// Restricted to nobles while any noble is alive.
     pub noble: bool,
+    /// Worked only when there is work: due on its days and hours only while
+    /// there is something for it to do, and otherwise nothing — a care
+    /// package for each day it went by with none, as for the jobless
+    /// (`brain::timesheet`) — though it is still the job, and nobody is
+    /// hired into another. The builder's, which builds only while an outpost
+    /// is going up ([`super::outposts`]).
+    pub on_demand: bool,
 }
 
 /// What a job stood at a computer does at it when there is something to do
@@ -206,6 +213,10 @@ pub enum Paperwork {
     /// Close the books for a day gone by (`Task::close_books`), while one is
     /// unclosed ([`super::economy::Economy::unclosed_day`]).
     Books,
+    /// Decree where the next outpost goes (`Task::decree`), while one is due
+    /// ([`super::outposts::decree_due`]): steel enough on the warehouse's
+    /// racks, and none going up. The king's, from the throne.
+    Decrees,
 }
 
 catalogue! {
@@ -235,6 +246,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -254,6 +266,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -274,6 +287,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -292,6 +306,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -311,6 +326,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -338,6 +354,7 @@ catalogue! {
             on_call: false,
             courier: true,
             noble: false,
+            on_demand: false,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -358,6 +375,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Stands by at the power plant's control panel for one of the three
         /// [`WATCHES`] of the day, an hour at a time like a guard at a post
@@ -378,12 +396,14 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Holds court at the throne in the district's palace, an hour at a
         /// time like a guard at a post (`WorkGoal`), every day but Sunday —
-        /// and nothing else yet: what a king decides is to come. One throne,
-        /// so one king, hired last. In its robes and crown always, and
-        /// walking at a stately pace ([`ROYAL`]).
+        /// and **decrees the outposts** from it ([`Paperwork::Decrees`]):
+        /// with steel enough on the warehouse's racks and none going up,
+        /// where the next goes and when. One throne, so one king. In its
+        /// robes and crown always, and walking at a stately pace ([`ROYAL`]).
         King = 8 => JobDef {
             name: "king",
             article: "the king",
@@ -395,10 +415,11 @@ catalogue! {
             now: |at_work, _| if at_work { "holding court" } else { "on the way to the palace" },
             goes_out_for: None,
             bearing: ROYAL,
-            paperwork: None,
+            paperwork: Some(Paperwork::Decrees),
             on_call: false,
             courier: false,
             noble: true,
+            on_demand: false,
         },
         /// Repairs failed boxes across the map, one worker per watch at
         /// the public service box indexed by Features.
@@ -417,6 +438,7 @@ catalogue! {
             on_call: true,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Makes meals from wheat at the factory's powered cooker.
         FoodFactoryWorker = 10 => JobDef {
@@ -434,6 +456,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Brings wheat from the farm and takes meals to the warehouse.
         FoodCourier = 11 => JobDef {
@@ -459,6 +482,7 @@ catalogue! {
             on_call: false,
             courier: true,
             noble: false,
+            on_demand: false,
         },
         /// Runs the playzone from its central computer, one of four: a day shift
         /// and an evening shift, each kept by two administrators who take
@@ -480,6 +504,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Keeps the district's books at the computer beside the palace's
         /// throne, office hours: closes them a day at a time, saying how the
@@ -501,25 +526,26 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: true,
+            on_demand: false,
         },
         Nurse = 14 => JobDef {
             name: "nurse", article: "a nurse", workplace: FeatureKind::NurseStation,
             goal: GoalId::Care, commute: COMMUTE, shifts: &NURSE_SHIFTS,
             uniform: "uniform nurse", now: |_, _| "taking care of patients",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false,
         },
         Fisherman = 15 => JobDef {
             name: "fisherman", article: "a fisherman", workplace: FeatureKind::FishBin,
             goal: GoalId::Fish, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform fisherman",
             now: |at_work, _| if at_work { "storing fish" } else { "fishing at the water" },
-            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
+            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false,
         },
         CityDecorator = 16 => JobDef {
             name: "city decorator", article: "a city decorator", workplace: FeatureKind::FlowerSupplies,
             goal: GoalId::Decorate, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform city decorator", now: |_, _| "planting flowers in the city",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false,
         },
         /// Keeps the district clean: looks over it for dirt on public
         /// ground, mops it up a cell at a time, and walks round when there
@@ -540,6 +566,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// Keeps the store: minds the shop at its counter and checks the
         /// superfridge every quarter of an hour, and calls the courier
@@ -561,6 +588,7 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
         },
         /// The store's own courier, one to its superfridge: a courier like
         /// the rest — hauls wheat to the food factory and meals to the
@@ -590,6 +618,7 @@ catalogue! {
             on_call: false,
             courier: true,
             noble: false,
+            on_demand: false,
         },
         /// Walks randomly around the district, with two positions and no
         /// weekends. The workplace only reserves a position, never a post
@@ -609,6 +638,39 @@ catalogue! {
             on_call: false,
             courier: false,
             noble: false,
+            on_demand: false,
+        },
+        /// Builds the outposts the king decrees out in the wasteland
+        /// ([`super::outposts`]): takes a tile of the plan on, fetches the
+        /// steel it takes from the warehouse, lays its building tile and works
+        /// it until it is built, an hour at a time with a rest between
+        /// (`BuildGoal`). **Works only on demand** — while there is a tile for
+        /// it — and by day: the wasteland is no place at night. Getting ready
+        /// at its yard before every trip out, as a collector does at its bin.
+        Builder = 21 => JobDef {
+            name: "builder",
+            article: "a builder",
+            workplace: FeatureKind::BuildersYard,
+            goal: GoalId::Build,
+            commute: BUILDER_COMMUTE,
+            shifts: &[BUILDER_HOURS],
+            uniform: "uniform builder",
+            now: |at_work, pack| {
+                if pack.is_some_and(|pack| pack.count(ItemKind::Steel) > 0) {
+                    "carrying steel to the outpost"
+                } else if at_work {
+                    "getting ready at the yard"
+                } else {
+                    "building the outpost"
+                }
+            },
+            goes_out_for: Some(ItemKind::Steel),
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
+            on_demand: true,
         },
     }
 }
@@ -698,6 +760,12 @@ impl JobKind {
     pub const fn is_courier(self) -> bool {
         self.def().courier
     }
+
+    /// Whether it is worked only when there is work ([`JobDef::on_demand`]):
+    /// the builder's.
+    pub const fn is_on_demand(self) -> bool {
+        self.def().on_demand
+    }
 }
 
 /// Monday to Friday, as a [`Shift::days`] mask.
@@ -709,6 +777,15 @@ pub const EVERY_DAY: u8 = 0b111_1111;
 /// Two special agents per district, both walking the daily nine-to-five.
 pub const SPECIAL_AGENTS: usize = 2;
 pub const SPECIAL_AGENT_HOURS: Shift = Shift { start: 9, end: 17, days: EVERY_DAY };
+
+/// A builder's day: eight to six, every day there is building — ten hours,
+/// all of them in daylight, with an hour's walk home before the deathdogs
+/// come out at dusk. The wasteland is no place to build at night.
+pub const BUILDER_HOURS: Shift = Shift { start: 8, end: 18, days: EVERY_DAY };
+
+/// How long before its shift a builder sets off: an hour, so it is at its
+/// yard and ready to go out by eight — and not out before the sun is up.
+pub const BUILDER_COMMUTE: f32 = HOUR;
 
 /// Every day but Sunday, as a [`Shift::days`] mask.
 pub const MONDAY_TO_SATURDAY: u8 = 0b011_1111;
@@ -1310,7 +1387,8 @@ mod tests {
                 JobKind::Cleaner,
                 JobKind::Shopkeeper,
                 JobKind::StoreCourier,
-                JobKind::SpecialAgent
+                JobKind::SpecialAgent,
+                JobKind::Builder
             ],
             "the office first, new professions last"
         );
@@ -1460,10 +1538,32 @@ mod tests {
         assert_eq!(kind.paperwork(), Some(Paperwork::Books));
         assert_eq!(JobKind::OfficeWorker.paperwork(), Some(Paperwork::Payroll));
         assert_eq!(JobKind::OfficeWorker.now(true, None), "doing the payroll");
-        let others = JobKind::ALL.into_iter().filter(|&job| job != kind && job != JobKind::OfficeWorker);
+        assert_eq!(JobKind::King.paperwork(), Some(Paperwork::Decrees), "the king decrees the outposts");
+        let others = JobKind::ALL.into_iter().filter(|&job| ![kind, JobKind::OfficeWorker, JobKind::King].contains(&job));
         assert!(others.clone().all(|job| job.paperwork().is_none()));
         let on_call: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_call()).collect();
         assert_eq!(on_call, [JobKind::Electrician]);
+    }
+
+    /// A builder works by day, every day there is building, out of its yard
+    /// beside the warehouse's steel rack, and only on demand; hired last.
+    #[test]
+    fn a_builder_builds_by_day_on_demand_out_of_its_yard_and_is_hired_last() {
+        let kind = JobKind::Builder;
+        assert_eq!(kind.number(), 21);
+        assert_eq!((kind.name(), kind.with_article()), ("builder", "a builder"));
+        assert_eq!((kind.workplace(), kind.workplace_name()), (FeatureKind::BuildersYard, "builders' yard"));
+        assert_eq!(kind.goal(), GoalId::Build);
+        assert_eq!(kind.shifts(), [BUILDER_HOURS]);
+        assert_eq!(BUILDER_HOURS, Shift::new(8, 18, EVERY_DAY).unwrap(), "ten hours, all in daylight");
+        assert_eq!(kind.goes_out_for(), Some(ItemKind::Steel), "got ready before every trip out");
+        assert_eq!(kind.uniform().name(), "uniform builder");
+        let on_demand: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_demand()).collect();
+        assert_eq!(on_demand, [JobKind::Builder]);
+        assert_eq!(JobKind::ALL.last(), Some(&kind), "hired last");
+        let job = Job::new(kind, Point::new(0, 0), BUILDER_HOURS);
+        assert!(job.is_due(at(1, 7.0)) && !job.is_due(at(1, 6.9)), "sets off at seven");
+        assert!(job.is_due(at(7, 17.9)) && !job.is_due(at(7, 18.0)), "every day, till six");
     }
 
     /// The king: the palace's throne, held court at like a post, ten to four

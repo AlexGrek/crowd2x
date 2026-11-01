@@ -13,6 +13,8 @@ pub use decorate::DecorateGoal;
 pub mod fish;
 pub use fish::FishGoal;
 pub use hospital::{RecoverGoal, CareGoal};
+pub mod build;
+pub use build::BuildGoal;
 pub mod bury;
 pub mod chat;
 pub mod clean;
@@ -265,6 +267,19 @@ impl Seek {
     /// The visit is over, however it went.
     pub(super) fn forget(&mut self) {
         *self = Seek::default();
+    }
+
+    /// Something in the way at the target that is not a walk — somebody
+    /// standing in the cell a builder lays its tile in: wait
+    /// [`WAIT_FOR_A_GAP`] (queued here) and try again, `true`, up to
+    /// [`PATIENCE`] times in a row; then `false`, give it up for now.
+    pub(super) fn wait_again(&mut self, ctx: &mut GoalCtx<'_>) -> bool {
+        if self.retries >= PATIENCE {
+            return false;
+        }
+        self.retries += 1;
+        let _ = ctx.tasks.push_back(Task::wait(WAIT_FOR_A_GAP));
+        true
     }
 
     /// The walk to the target, or the step into it, failed. Decide what next,

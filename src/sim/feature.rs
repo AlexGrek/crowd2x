@@ -33,6 +33,7 @@ use crate::map::{Map, ObjectLayer, Point};
 
 use super::catalogue::catalogue;
 use super::item::ItemKind;
+use super::outposts::Fixture;
 use super::property::Properties;
 
 /// Everything about one kind of feature: its row in [`FeatureKind`]'s
@@ -215,6 +216,21 @@ catalogue! {
         /// Two bookkeeping positions for special agents. Like the district
         /// workplace, these have no prop and are never destinations.
         Patrol = 32 => FeatureDef { props: &[], ..BESIDE },
+        /// The builders' places beside the warehouse's steel rack: a
+        /// builder's workplace, no prop — where it gets ready before every
+        /// trip out to the outpost it is building, as a scrap collector does
+        /// at its bin. [`BUILDERS`](super::outposts::BUILDERS) of them, the
+        /// public ground nearest the rack, on a map that has a king to decree
+        /// outposts (a throne) and steel to build them with (a steel rack).
+        BuildersYard = 33 => FeatureDef { props: &[], ..BESIDE },
+        /// An outpost's local warehouse: a store of scrap metal out in the
+        /// wasteland, built by the builders ([`super::outposts`]) and taken in
+        /// once it is (`Facilities::install`). Nobody's workplace yet.
+        OutpostStore = 34 => FeatureDef {
+            props: &["outpost store"],
+            store: Some(StoreDef { holds: ItemKind::Scrap, called: "outpost store", site: "outpost", hud: None }),
+            ..BESIDE
+        },
     }
 }
 
@@ -314,6 +330,7 @@ impl FeatureKind {
             Self::DistributionBox => "distribution box",
             Self::District => "district",
             Self::Patrol => "district patrol",
+            Self::BuildersYard => "builders' yard",
             _ => self.def().props[0],
         }
     }
@@ -452,6 +469,23 @@ impl Features {
                 );
             }
         }
+        // A king to decree outposts and steel to build them with keep
+        // builders: their places, the public ground nearest the warehouse's
+        // steel rack, clear of its sides. A scan of the site, once with the
+        // world.
+        let rack = features.cells[FeatureKind::SteelRack as usize].iter().min().copied();
+        if let Some(rack) = rack.filter(|_| !features.cells[FeatureKind::Throne as usize].is_empty()) {
+            let mut yard: Vec<Point> = map
+                .size()
+                .points()
+                .filter(|&cell| {
+                    map.is_passable(cell) && properties.of(cell).is_none() && cell.manhattan_distance(rack) > 1
+                })
+                .collect();
+            yard.sort_unstable_by_key(|&cell| (cell.manhattan_distance(rack), cell));
+            yard.truncate(super::outposts::BUILDERS);
+            features.cells[FeatureKind::BuildersYard as usize] = yard;
+        }
         // Sorted, so nothing that picks among them depends on the order the
         // props were painted in.
         for cells in &mut features.cells {
@@ -471,6 +505,22 @@ impl Features {
     }
 
     pub fn green_plots(&self) -> &[Point] { &self.green_plots }
+
+    /// Take in an outpost's furniture once it is built (`Facilities::install`):
+    /// whatever its prop is for, as if it had been on the map — and working,
+    /// for an outpost keeps itself (no grid reaches the wasteland). A bed is
+    /// entered, like any other. Nothing taken twice.
+    pub fn install(&mut self, fixture: Fixture) {
+        for kind in kinds_of(fixture.prop) {
+            let cells = &mut self.cells[kind as usize];
+            if let Err(at) = cells.binary_search(&fixture.cell) {
+                cells.insert(at, fixture.cell);
+            }
+            if kind.access() == Access::Entered && !self.entered.contains(&fixture.cell) {
+                self.entered.push(fixture.cell);
+            }
+        }
+    }
 
     pub fn fishing_water(&self) -> &[Point] {
         &self.fishing_water

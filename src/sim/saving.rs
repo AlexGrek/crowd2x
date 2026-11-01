@@ -27,6 +27,7 @@ use super::entities::{Entities, Slot};
 use super::entity::GameEntity;
 use super::feature::FeatureKind;
 use super::fields::Fields;
+use super::outposts::Outposts;
 use super::homes::Homes;
 use super::job::Workplaces;
 use super::relationships::{Rules, Society};
@@ -90,6 +91,7 @@ impl GameState {
             workplaces: self.facilities.workplaces.save(),
             tally: Some(self.facilities.tally.save()),
             crops: self.facilities.fields.save(),
+            outposts: Some(self.facilities.outposts.save()),
             flowers: self.facilities.flowers.save(),
             dirt: self.facilities.dirt.save(),
             smell: self.facilities.smell.save(),
@@ -183,6 +185,11 @@ impl GameState {
                 return invalid(format!("no light switch at {}, {} to be off", cell.x, cell.y));
             }
         }
+        // The outposts, built on the map again — a save keeps the ground as
+        // it was found — and their furniture put into the indexes (by
+        // `refresh_supply`, next) before the fridges', stores' and doors'
+        // states are put back by cell.
+        state.facilities.outposts = Outposts::restore(world.outposts.as_ref(), &mut state.map)?;
         // The supply both ways, the features and the fridges' power, for
         // the switches as saved.
         state.refresh_supply();
@@ -293,6 +300,19 @@ impl GameState {
             }
         }
         state.facilities.hospital.restore(&world.hospital, &state.entities)?;
+        // A tile of an outpost is taken on by a builder, alive, and given up
+        // when it dies or is let go.
+        if let Some(outpost) = state.facilities.outposts.under_way() {
+            for tile in outpost.tiles() {
+                let Some(uid) = tile.claim else { continue };
+                let builder = state.entities.get(uid).is_some_and(|entity| {
+                    !entity.is_dead() && entity.job().is_some_and(|job| job.kind == crate::sim::job::JobKind::Builder)
+                });
+                if !builder {
+                    return invalid(format!("the outpost's tile at {}, {} is {uid}'s, who is no builder", tile.cell.x, tile.cell.y));
+                }
+            }
+        }
         // Whoever the dispatch sent is in the world.
         if let Some(courier) = state.facilities.dispatch.couriers().find(|&uid| !state.entities.contains(uid)) {
             return invalid(format!("the courier dispatch sent {courier}, who is not here"));

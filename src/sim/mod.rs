@@ -164,6 +164,7 @@ pub mod kinds;
 pub mod light_switch;
 pub mod log;
 pub mod occupancy;
+pub mod outposts;
 pub mod panics;
 pub mod path;
 pub mod pets;
@@ -865,6 +866,9 @@ impl GameState {
         let Some((supply, features)) = self.other_light.as_mut() else { return };
         std::mem::swap(&mut self.supply, supply);
         std::mem::swap(&mut self.facilities.features, features);
+        // Furniture built out at an outpost while the other features were
+        // put away is put into them too.
+        self.install_fixtures();
         self.street_lights_on = dark;
         self.facilities.fridges.set_power(&self.supply);
         self.supply_generation += 1;
@@ -938,6 +942,7 @@ impl GameState {
             let features = Features::with_properties(&self.map, &other, &self.facilities.properties);
             self.other_light = Some((other, features));
         }
+        self.install_fixtures();
         self.facilities.fridges.set_power(&self.supply);
         self.supply_generation += 1;
         self.facilities.electrical.supply_dirty = false;
@@ -970,6 +975,29 @@ impl GameState {
 
     pub fn fields(&self) -> &Fields {
         &self.facilities.fields
+    }
+
+    /// The outposts the king decreed and the plan of the one going up. See
+    /// [`outposts`].
+    pub fn outposts(&self) -> &outposts::Outposts {
+        &self.facilities.outposts
+    }
+
+    /// Put every piece of outposts' furniture built into the world's
+    /// indexes again — and into the features the other daylight keeps — after
+    /// one of them was built again from the map (`refresh_supply`), swapped
+    /// in (`follow_daylight`) or restored. Nothing is taken twice.
+    fn install_fixtures(&mut self) {
+        let Facilities { outposts, features, fridges, bins, doors, .. } = &mut self.facilities;
+        for fixture in outposts.fixtures() {
+            features.install(fixture);
+            fridges.install(fixture);
+            bins.install(fixture);
+            doors.install(fixture);
+            if let Some((_, features)) = self.other_light.as_mut() {
+                features.install(fixture);
+            }
+        }
     }
 
     /// The district's money. See [`economy`].
@@ -1362,10 +1390,11 @@ impl GameState {
     /// taken is unemployed.
     ///
     /// One scan of the workplaces per arrival, like
-    /// [`GameState::give_a_bed`]. `false` when no job was given.
+    /// [`GameState::give_a_bed`]. `false` when no job was given — and to
+    /// anybody on leave for its mental health, who would only give it up.
     fn give_a_job(&mut self, uid: Uid, near: Point) -> bool {
         let nobles_alive = self.nobles_alive();
-        let Some(entity) = self.entities.get_mut(uid) else {
+        let Some(entity) = self.entities.get_mut(uid).filter(|entity| !entity.is_on_mental_health_leave()) else {
             return false;
         };
         let key = entity.body().home();
@@ -1406,8 +1435,10 @@ impl GameState {
     }
 
     /// Give the job `dead` left — its very workplace and shift — to the
-    /// living, jobless human nearest that workplace who may use it: one not
-    /// on sick leave while there is any such, the lower uid on a tie. `false`
+    /// living, jobless human nearest that workplace who may use it: never one
+    /// on leave for its mental health (it would give the post up again the
+    /// next tick), one not on sick leave while there is any such, the lower
+    /// uid on a tie. `false`
     /// with nobody to take it on, and the post stands empty.
     ///
     /// One walk of the crowd **a death**, at the end of the tick it happened
@@ -1427,6 +1458,7 @@ impl GameState {
                     && !entity.is_dead()
                     && !entity.is_frozen()
                     && entity.job().is_none()
+                    && !entity.is_on_mental_health_leave()
                     && job.kind.permits_class(entity.is_noble(), nobles_alive)
                     && properties.may_use(job.workplace, entity.body().home())
             })
@@ -1468,6 +1500,10 @@ impl GameState {
             self.log.unit(uid, format!("hire: {uid} is already {}", job.kind.with_article()));
             return false;
         }
+        if entity.is_on_mental_health_leave() {
+            self.log.unit(uid, format!("hire: {uid} is on leave for its mental health"));
+            return false;
+        }
         let here = entity.center_position();
         if !self.give_a_job(uid, here) {
             self.log.unit(uid, format!("hire: no workplace free for {uid}"));
@@ -1489,6 +1525,7 @@ impl GameState {
             return false;
         };
         self.facilities.workplaces.release(uid);
+        self.facilities.outposts.release(uid);
         self.facilities.society.set_job(uid, None);
         self.facilities.dispatch.release(uid);
         self.log.unit(uid, format!(
@@ -1528,6 +1565,7 @@ impl GameState {
                 // desk.
                 self.facilities.homes.release(uid);
                 self.facilities.workplaces.release(uid);
+                self.facilities.outposts.release(uid);
                 self.facilities.society.leave(uid);
                 // What it had, or owed, goes to the budget.
                 let _ = self.facilities.economy.close(uid);
@@ -3445,6 +3483,37 @@ mod tests {
     /// The job somebody dies in goes to somebody jobless before the tick is
     /// out — its very workplace and shift, to the nearest — and the post
     /// stands empty only when nobody is left to take it.
+    /// A worker who goes on leave for its mental health gives up its post at
+    /// once, and the nearest jobless takes it on, as a dead worker's — the
+    /// post does not stand empty for the weeks the leave can last.
+    #[test]
+    fn a_worker_on_mental_health_leave_gives_its_post_to_the_nearest_jobless() {
+        let bin = Point::new(1, 1);
+        let mut map = Map::new(Size::new(16, 10), FLOOR);
+        crate::sim::testing::prop_at(&mut map, "scrap bin", bin);
+        let mut state = GameState::new(map, 3);
+        let first = state.spawn_commoner(Point::new(2, 1));
+        let job = state.entities().get(first).unwrap().job().expect("hired");
+        let near = state.spawn_commoner(Point::new(4, 2));
+        assert_eq!(state.entities().get(near).unwrap().job(), None, "one bin, one job");
+        state.entity_mut(first).unwrap().biology_mut().unwrap().edit(|stats| stats.with_mental_health(5.0));
+        let mut lines = Vec::new();
+        for _ in 0..10 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+        }
+        assert_eq!(state.entities().get(first).unwrap().job(), None, "let go: {lines:?}");
+        assert_eq!(state.entities().get(near).unwrap().job(), Some(job), "the nearest: {lines:?}");
+        assert_eq!(state.workplaces().worker(bin, job.shift), Some(near));
+        for said in [
+            format!("{first} is taking sick leave for mental health"),
+            format!("{first} gave up its post as a scrap collector at the scrap bin at 1, 1: on leave for its mental health"),
+            format!("{near} was hired as a scrap collector at the scrap bin at 1, 1, 07:00-18:00, in place of {first}"),
+        ] {
+            assert!(lines.iter().any(|line| line.contains(&said)), "{said}: {lines:?}");
+        }
+    }
+
     #[test]
     fn the_job_somebody_dies_in_goes_to_the_nearest_jobless() {
         let bin = Point::new(1, 1);
@@ -3535,8 +3604,8 @@ mod tests {
     /// The whole chain on a Monday: the courier takes the warehouse's scrap
     /// to the factory's hopper, the steelworker takes it from there, smelts
     /// it at its furnace and puts the steel on the pallet, and the courier
-    /// takes the steel back to the warehouse's rack. Two pieces of scrap to
-    /// an ingot, and nothing made or lost on the way.
+    /// takes the steel back to the warehouse's rack. Three ingots to a piece
+    /// of scrap, and nothing made or lost on the way.
     #[test]
     fn a_courier_and_a_steelworker_turn_the_warehouse_s_scrap_into_steel_on_its_rack() {
         let (mut state, smelter, courier) = crate::sim::testing::steel_works(12, 3);
@@ -3558,17 +3627,103 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains(&format!("{courier} took 3 scrap metal from the bin at 2, 2"))), "{tail:?}");
         assert!(lines.iter().any(|line| line.contains(&format!("{courier} stored 3 scrap metal in the scrap hopper at 16, 2"))), "{tail:?}");
         assert!(lines.iter().any(|line| line.contains(&format!("{smelter} took")) && line.contains("from the scrap hopper")), "{tail:?}");
-        assert!(lines.iter().any(|line| line.contains(&format!("{smelter} stored 1 steel in the steel pallet at 16, 8"))), "{tail:?}");
+        assert!(lines.iter().any(|line| line.contains(&format!("{smelter} stored ")) && line.contains(" steel in the steel pallet at 16, 8")), "{tail:?}");
         assert!(lines.iter().any(|line| line.contains(&format!("{courier} took")) && line.contains("steel from the steel pallet")), "{tail:?}");
 
-        // Every piece of scrap is somewhere: in a store, in a pack, or two
-        // of them in every ingot.
+        // Every piece of scrap is somewhere: in a store, in a pack, or one
+        // third of it in every ingot.
         let carried = |uid: Uid, item: ItemKind| state.entities().get(uid).unwrap().inventory().unwrap().count(item) as u32;
         let scrap = state.bins().stored(bin) + state.bins().stored(hopper) + carried(smelter, ItemKind::Scrap) + carried(courier, ItemKind::Scrap);
         let steel = state.bins().stored(pallet) + state.bins().stored(rack) + carried(smelter, ItemKind::Steel) + carried(courier, ItemKind::Steel);
-        assert_eq!(scrap + 2 * steel, 12, "{scrap} scrap and {steel} steel");
+        assert_eq!(3 * scrap + steel, 3 * 12, "{scrap} scrap and {steel} steel");
         let stats = state.statistics();
         assert_eq!((stats.stock("warehouse", ItemKind::Steel), stats.stock("factory", ItemKind::Steel)), (state.bins().stored(rack), state.bins().stored(pallet)));
+    }
+
+    /// The whole of it: the king, on duty with a whole outpost's steel on
+    /// the rack, decrees one out in the wasteland; the four builders take its
+    /// tiles on — never two to a tile — fetch the steel, lay the building
+    /// tiles and build them, by day, until it stands; and its furniture
+    /// works: a hungry passer-by eats from its fridge and a tired one sleeps
+    /// in its bed.
+    #[test]
+    fn the_king_decrees_an_outpost_and_four_builders_raise_it_with_the_steel_it_takes() {
+        let (mut state, king, builders) = crate::sim::testing::outpost_works(outposts::OUTPOST_STEEL, 3);
+        let rack = crate::sim::testing::OUTPOST_RACK;
+        let mut lines = Vec::new();
+        let mut claimed_at_once = 0;
+        let mut built_after_dark = false;
+        // 1800 ticks a world hour: within five days.
+        for _ in 0..5 * 24 * 1800 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if let Some(outpost) = state.outposts().under_way() {
+                let mut claims: Vec<Uid> = outpost.tiles().iter().filter_map(|tile| tile.claim).collect();
+                claimed_at_once = claimed_at_once.max(claims.len());
+                let held = claims.len();
+                claims.sort_unstable();
+                claims.dedup();
+                assert_eq!(claims.len(), held, "a builder on two tiles");
+                assert!(claims.iter().all(|uid| builders.contains(uid)));
+            }
+            let hour = state.clock().hours();
+            built_after_dark |= (hour < 7.0 || hour >= 18.5) && lines.last().is_some_and(|line: &String| line.contains("worked on the outpost's"));
+            if state.outposts().complete() == 1 {
+                break;
+            }
+        }
+        let tail = &lines[lines.len().saturating_sub(40)..];
+        assert!(lines.iter().any(|line| line.contains("the king decreed an outpost at")), "{tail:?}");
+        assert_eq!(state.outposts().complete(), 1, "built by {}; {tail:?}", state.clock());
+        assert!(lines.iter().any(|line| line.contains("is built")));
+        assert!(claimed_at_once > 1, "the builders worked side by side");
+        assert!(!built_after_dark, "nobody built in the dark");
+        assert_eq!(state.bins().stored(rack), 0, "every piece of steel went into the outpost");
+        for &builder in &builders {
+            assert_eq!(state.entities().get(builder).unwrap().inventory().unwrap().count(ItemKind::Steel), 0, "none left over");
+        }
+        let _ = king;
+
+        let outpost = state.outposts().iter().next().unwrap().clone();
+        let center = outpost.center();
+        let walls = outpost.tiles().iter().filter(|tile| tile.part == outposts::Part::Wall);
+        assert!(walls.clone().all(|tile| state.map.terrain(tile.cell) == Some(crate::map::WALL) && !state.map.is_passable(tile.cell)));
+        let of = |part| outpost.tiles().iter().find(|tile| tile.part == part).unwrap().cell;
+        let (fridge, bed, store, door) = (of(outposts::Part::Fridge), of(outposts::Part::Bed), of(outposts::Part::Store), of(outposts::Part::Door));
+        assert!(state.features().has(feature::FeatureKind::Food, fridge) && state.features().has(feature::FeatureKind::Water, fridge));
+        assert!(state.fridges().get(fridge).is_some_and(|fridge| fridge.is_powered()), "an outpost's fridge keeps itself cold");
+        assert!(state.features().has(feature::FeatureKind::Bed, bed) && state.features().is_enterable(bed));
+        assert_eq!(state.bins().store(store), Some(feature::FeatureKind::OutpostStore));
+        assert!(state.doors().is_door(door));
+
+        // A hungry passer-by eats there; a tired one sleeps there.
+        let mut input = Input::new();
+        let hungry = state.spawn_commoner(center);
+        let tired = state.spawn_commoner(center.offset(1, 0));
+        for (uid, off) in [(hungry, [ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy]), (tired, [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun])] {
+            for process in off {
+                input.set_process(uid, process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        state.entity_mut(hungry).unwrap().biology_mut().unwrap().edit(|stats| stats.with_hunger(80.0));
+        // Exhausted, not collapsing: to its own bed — an arrival is given the
+        // nearest bed nobody has, and that is the outpost's.
+        state.entity_mut(tired).unwrap().biology_mut().unwrap().edit(|stats| stats.with_stamina(20.0));
+        let (mut ate, mut slept) = (false, false);
+        for _ in 0..2 * 1800 {
+            run(&mut state, 1);
+            for line in state.log.drain() {
+                ate |= line.contains(&format!("{hungry} ate at the fridge at {}, {}", fridge.x, fridge.y));
+            }
+            let resting = state.entities().get(tired).unwrap().center_position();
+            slept |= outpost.tiles().iter().any(|tile| tile.part == outposts::Part::Bed && tile.cell == resting);
+            if ate && slept {
+                break;
+            }
+        }
+        assert!(ate, "the hungry one ate at the outpost's fridge: {:?}", state.entities().get(hungry).unwrap().brain_fields());
+        assert!(slept, "the tired one slept in the outpost's bed: {:?}", state.entities().get(tired).unwrap().brain_fields());
     }
 
     /// The desks are offered first, however near the bins are; then one
@@ -3580,6 +3735,11 @@ mod tests {
         let bins = [Point::new(2, 2), Point::new(4, 2)];
         let mut state = with_desks_and_bins(&desks, &bins, 5);
         let arrivals: Vec<Uid> = (0..5).map(|_| state.spawn(EntityType::Human, Point::new(3, 3))).collect();
+        // Nobody rolled low enough to go on leave for its mental health and
+        // give its post up: this is about the order posts are offered in.
+        for &uid in &arrivals {
+            state.entity_mut(uid).unwrap().biology_mut().unwrap().edit(|stats| stats.with_mental_health(100.0));
+        }
         let job = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().job();
 
         for &uid in &arrivals[..2] {
@@ -4352,7 +4512,8 @@ mod tests {
             let mut shopkeeping: Vec<u8> = Vec::new();
             let mut store_hauling = 0;
             let mut agents = 0;
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS;
+            let mut building = 0;
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4453,6 +4614,12 @@ mod tests {
                         assert!(state.features().has(feature::FeatureKind::Patrol, job.workplace));
                         assert_eq!(job.shift, job::SPECIAL_AGENT_HOURS);
                     }
+                    JobKind::Builder => {
+                        building += 1;
+                        assert!(state.features().has(feature::FeatureKind::BuildersYard, job.workplace));
+                        assert!({ let w = district.the(crate::map::district::warehouse::NAME); crate::map::district::Rect::new(w.x - 6, w.y - 6, w.w + 12, w.h + 12).contains(job.workplace) }, "seed {seed}: a builder's yard by the warehouse");
+                        assert_eq!(job.shift, job::BUILDER_HOURS);
+                    }
                 }
                 assert!(state.properties().of(job.workplace).is_none(), "and in nobody's house");
             }
@@ -4460,6 +4627,7 @@ mod tests {
             assert_eq!(fishing, fishermen);
             assert_eq!(decorating, 3);
             assert_eq!(agents, 2, "seed {seed}: exactly two special agents");
+            assert_eq!(building, outposts::BUILDERS, "seed {seed}: the builders");
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
             assert_eq!(farming, farmers, "seed {seed}: the farm's");
@@ -4477,7 +4645,7 @@ mod tests {
             assert_eq!(shopkeeping, [0, 6, 12, 18], "seed {seed}: the store's shopkeepers");
             assert_eq!(store_hauling, store_couriers, "seed {seed}: the store's courier");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::SpecialAgent), "seed {seed}: special agents hired last");
+            assert_eq!(last, Some(JobKind::Builder), "seed {seed}: builders hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");

@@ -12,11 +12,18 @@ Accounts exist for humans only, including bodies until despawn; dogs have none.
 An arrival adds a grant; an estate, including debt, returns to the budget.
 Death forfeits unpaid shifts and care days. Grants are excluded from daily balance.
 
+**Builders are paid on demand** (`JobDef::on_demand`, the `outposts` skill): $150 a shift
+they were on duty for — clocked only while there is something to build
+(`goals::build::on_duty`; `Brain::react` tells the timesheet an idle builder is off) — and,
+for every day that turns without one, a care package, as for the jobless
+(`Timesheet::last_on_duty`, saved as `pb::Timesheet` tag 6).
+
 `economy.yaml` is the single source of built-in defaults, parsed once through
 `LazyLock`. Wages and prices use catalogue names; every job and item must be
 present, and unknown names fail. Starting wages: $60 office/accountant/scrap/farmer,
 $100 king, $40 other jobs. Tax 20%, care $10/day, arrival grant $1000, starting
 cash $10-90, food $3, dog food $0.50, water free, payroll five world minutes/account.
+A builder's shift is $150, the highest wage: it is paid only on the days there is building.
 Care is $10/day, or $20/day for nobles.
 
 **Essentials fit inside care.** A fully awake human needs 2.5 meals/day:

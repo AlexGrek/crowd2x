@@ -57,7 +57,7 @@ Thu, Sat) — **and the cabinets work only while an administrator is on duty and
 computer**. A palace filling the middle block, on the wide main street that runs gate to
 gate, seats the district's one king, who holds court at its
 throne ten to four but Sundays, in purple robes and a crown always, walking at a stately pace;
-the major decisions are to be the king's. A crop is in the way like a heap of
+the major decisions are the king's — where the outposts go, first. A crop is in the way like a heap of
 scrap, and a click on one says how it is growing. The game screen's `statistics` menu counts the
 living, the warehouse's, the factory's and the farm's stock, the fields, the workers per job and
 the dead. Its `find` menu marks every unit of a job, every pet dog, the dirty squares and the broken
@@ -88,6 +88,15 @@ never change, bites bleed and wet patches dry by the hour. Four cleaners, two a 
 district: each one's own brain looks it over every 27 minutes, mops up public ground dirtier
 than 0.15, nearest first, and walks round when there is none.
 
+With the steel for a whole one on the warehouse's racks, the king decrees an **outpost** from
+the throne: its flag goes up 50 to 100 cells out from the wall, as near as that allows to the
+biggest reachable base of scrap, and its plan — 6x7, twenty walls, a doorway facing the
+district, a fridge, a local warehouse and two beds — is every builder's to read. Four
+**builders**, eight to six every day but only when there is something to build (a care package
+otherwise), each take a tile on (never two to one), fetch its steel, lay a building tile with all
+of it and work it two hours, an hour at a time with a rest between, then come back in before
+dark. Walls become wall terrain; built furniture works.
+
 One resident in eight of a district has a pet dog that stays within range of its owner and roams
 freely there. It cannot feed itself: its owner takes dog food out of a fridge, fifty cents, and gives
 it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
@@ -104,6 +113,7 @@ uv run tools/qa.py    # the scripted QA tests in qa/, against the real binary
 uv run tools/qa.py --release   # ...optimised, which is the only profile to quote a timing from
 uv run tools/lab.py batch --seed 7 --for 28d --keep-going   # a district month headless, watched for anomalies
 uv run tools/lab.py start --seed 7   # ...held behind a socket: run, wait, units, unit, trace, stop
+uv run tools/lab_scan.py lab-runs/district-7   # a finished run scanned for anything odd
 ```
 
 **Always run through `cargo`, never the raw binary** (`./target/debug/crowd2x`) — Bevy
@@ -151,6 +161,7 @@ to `screenshots/`.
 | Saving and loading: the `.savegame` format, its Protobuf schema, the Load screen, save / quick save; **any new simulation, entity, brain or map state (it must be saved)** | `savegame` |
 | Dirt: stains on the ground and bodies, footsteps, trails, work grime, the wasteland's puddles, blood and pee, drying, the dirt dots on screen; the cleaners and their look over the district | `dirt` (+ `jobs`) |
 | Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($0.50), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
+| Outposts: the king's decree and its site, the building plan and its claims, builders (on demand, the yard, pay), building tiles, structures off the site, furniture installed into the indexes, the flag drawn | `outposts` (+ `jobs`, `brain-engineer`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -234,6 +245,9 @@ src/game/dirt.rs        the dirt dots drawn over visible stained cells      [dir
 src/sim/brain/goals/clean.rs  the cleaners' look over the district and mopping  [dirt, jobs]
 src/sim/pets.rs         a dog's belly; who is bonded to whom; meals served    [pets]
 src/sim/brain/goals/follow.rs, defecate.rs, dog_care.rs  the dog stays near; the street; the owner feeds it  [pets]
+src/sim/outposts.rs     outposts: the plan, claims, tiles, the king's site  [outposts]
+src/sim/brain/goals/build.rs, tasks/{claim,lay,construct,decree}.rs  builders and the decree  [outposts]
+src/game/outposts.rs    the flag, building tiles and what is built, drawn   [outposts, game-screen]
 src/sim/statistics.rs   the world in numbers; the dead counted (Tally)      [game-screen, simulation]
 src/sim/find.rs, src/game/find.rs  the find menu: searches; gold squares     [game-screen]
 src/map/landmarks.rs    a district's buildings found again from the props   [game-screen, map-generator]
@@ -241,7 +255,7 @@ src/save/               the .savegame: Protobuf schema (pb/), zip, store    [sav
 src/sim/saving.rs, src/map/save.rs  the world and the map into a save and back  [savegame]
 src/game/saving.rs, src/saves.rs  save / quick save; the Load screen       [savegame, interface]
 src/qa/, qa/, tools/qa.py  scripted QA                                      [qa]
-src/lab/, lab/, tools/lab.py  long headless runs, watches, the paused world  [lab]
+src/lab/, lab/, tools/lab.py, lab_scan.py  long headless runs, watches, the paused world, scans  [lab]
 src/debug.rs            env-var driven capture harness                      [debugger]
 src/awake.rs            macOS: hold the display awake during a run
 tools/check_pixel_grid.py, art_scale.py, wire_map.py   pixel grid, art size, wiring
@@ -261,6 +275,7 @@ tools/power_plant_art.py draws the generator and the control panel              
 tools/palace_art.py     draws the palace's throne                               [pixel-artist]
 tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and the administrator's uniform [pixel-artist]
 tools/deathdog_art.py   recolours the dog's sheets into the deathdog's                [deathdogs, pixel-artist]
+tools/outpost_art.py    draws an outpost's flag and the building tile's four stages   [outposts, pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, lab-runs/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

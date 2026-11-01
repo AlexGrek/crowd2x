@@ -117,6 +117,15 @@ impl EconomyStats {
     }
 }
 
+/// The outposts in numbers ([`super::outposts`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OutpostCount {
+    /// Built, every tile.
+    pub built: u32,
+    /// The one going up, if one is: its tiles built, of how many.
+    pub going_up: Option<(u32, u32)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statistics {
     pub economy: EconomyStats,
@@ -128,6 +137,9 @@ pub struct Statistics {
     pub sites: Vec<SiteStock>,
     /// What is growing in the fields.
     pub fields: FieldStock,
+    /// The outposts: how many stand built, and how far the one going up has
+    /// got.
+    pub outposts: OutpostCount,
     /// Every [`JobKind`], in [`JobKind::ALL`] order, posts or none.
     pub jobs: Vec<JobCount>,
     /// Living humans with no job.
@@ -201,11 +213,16 @@ impl Statistics {
             quality += crop.quality as u32;
         }
         stock.quality = (!fields.is_empty()).then(|| quality / fields.len() as u32);
+        let outposts = OutpostCount {
+            built: facilities.outposts.complete() as u32,
+            going_up: facilities.outposts.under_way().map(|outpost| (outpost.built() as u32, super::outposts::TILES as u32)),
+        };
         Statistics {
             economy: EconomyStats::of(&facilities.economy),
             alive: alive.to_vec(),
             sites,
             fields: stock,
+            outposts,
             jobs,
             jobless,
             died: tally.died,

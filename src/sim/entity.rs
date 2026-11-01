@@ -521,6 +521,13 @@ pub trait GameEntity: Send + Sync {
         let _ = clock; false
     }
 
+    /// Whether it is on leave for its mental health: off for days or weeks,
+    /// and never hired meanwhile — it would only give the post up again
+    /// (`Effect::LeavePost`).
+    fn is_on_mental_health_leave(&self) -> bool {
+        false
+    }
+
     fn is_getting_ready(&self) -> bool {
         false
     }
@@ -749,6 +756,11 @@ pub struct Think<'a> {
     /// The courier dispatch's orders ([`super::dispatch`]): whether this
     /// courier has been sent for the store's food, and where.
     pub dispatch: &'a super::dispatch::Dispatch,
+    /// The outposts the king decreed and the plan of the one going up, as of
+    /// the start of this tick, changed only by [`super::world_step`]: whether
+    /// the king has one to decree, which tile a builder has taken on and
+    /// which are free ([`super::outposts`]).
+    pub outposts: &'a super::outposts::Outposts,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -809,6 +821,7 @@ impl<'a> Think<'a> {
             feedings: &facilities.feedings,
             superfridge: &facilities.superfridge,
             dispatch: &facilities.dispatch,
+            outposts: &facilities.outposts,
             electrical: &facilities.electrical,
             dt,
             tick,

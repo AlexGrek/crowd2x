@@ -58,6 +58,14 @@ The map is a finite **site** standing in an endless **wasteland** (`map::wastela
   `Map::is_open_ground` counts a planted cell as open, so **planting never touches
   `Map::navigation`**. Not in a map file, nor in a save's chunks: the simulation's fields plant
   the map again on load. `set_wasteland` forgets what was sown off the site.
+- **Structures off the site** (`Map::build`, `Structure::{Obstacle, Wall}`, `map::built` keyed
+  like `planted`): what builders put up out in the wasteland (the `outposts` skill). A wall
+  reads `WALL` (`ground()`), opaque; an obstacle (a building tile, a fridge, a bed) is in the
+  way and seen past. `can_build` (endless, off the site, passable now), `build` (refused on
+  the site; over an `Obstacle` allowed), `structure`, `built`; a loaded chunk's bits through
+  `Chunk::block` / `Chunk::shade`, applied again by `load_chunk`. **`is_open_ground` counts a
+  built cell as open**, so navigation never changes. Not in a map file or a save's chunks: the
+  simulation's outposts build the map again on load.
 - **Props block.** A static `PROPS` catalogue (`map/props.rs`, the same shape as
   `TERRAIN`, linked to the editor palette by name) says whether each prop can be walked
   through: furniture cannot — beds, the fridge, the toilet, the computer, crates, fire — and the two doors (`"door"`, `"house door"`) can, since a door's leaf is simulation state, not the map's (the `doors` skill).

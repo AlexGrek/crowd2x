@@ -59,6 +59,14 @@ pub mod check_stock;
 pub mod fetch;
 pub use check_stock::{CheckStock, CHECK_SECONDS};
 pub use fetch::Fetch;
+pub mod claim;
+pub mod construct;
+pub mod decree;
+pub mod lay;
+pub use claim::Claim;
+pub use construct::Construct;
+pub use decree::{Decree, DECREE_SECONDS};
+pub use lay::{Lay, LAY_SECONDS};
 pub mod repair_box;
 pub mod plant_flowers;
 pub use plant_flowers::PlantFlowers;
@@ -137,6 +145,10 @@ tasks! {
     Stow,
     CheckStock,
     Fetch,
+    Claim,
+    Lay,
+    Construct,
+    Decree,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

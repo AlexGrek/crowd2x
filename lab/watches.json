@@ -4,5 +4,8 @@
   { "name": "nothing smelted", "metric": "in.steel pallet", "grows_less_than": 1, "within_hours": 72, "after_hours": 48 },
   { "name": "scrap stopped coming in", "metric": "in.scrap bin", "grows_less_than": 1, "within_hours": 72, "after_hours": 24 },
   { "name": "somebody died", "metric": "died", "rises_by": 1, "within_hours": 1 },
-  { "name": "the budget is in the red", "metric": "budget", "below": 0 }
+  { "name": "the budget is in the red", "metric": "budget", "below": 0 },
+  { "name": "the superfridge is empty", "metric": "store.superfridge", "below": 1, "after_hours": 24 },
+  { "name": "the crowd is starving", "metric": "hunger.avg", "above": 80 },
+  { "name": "thirty in despair", "metric": "mental_health.low", "above": 30, "after_hours": 72 }
 ]

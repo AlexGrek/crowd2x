@@ -1,0 +1,440 @@
+{
+  "name": "the king decrees an outpost out in the wasteland and four builders put it up, a tile at a time",
+  "state": "game",
+  "timeout": 600,
+  "given": {
+    "maps": [
+      {
+        "name": "courtyard",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 14,
+            "height": 10
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                  "1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 552,
+                  "y": 312
+                },
+                "kind": "throne"
+              },
+              {
+                "at": {
+                  "x": 120,
+                  "y": 120
+                },
+                "kind": "steel rack"
+              }
+            ],
+            "spawners": []
+          },
+          "initial_stock": [
+            {
+              "cell": {
+                "x": 2,
+                "y": 2
+              },
+              "pieces": 22
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "open": "courtyard",
+  "steps": [
+    {
+      "note": "a courtyard in the wasteland of seed 0: a throne at (11, 6), the warehouse's steel rack at (2, 2) holding the 22 steel a whole outpost takes. A world opens at 08:00 on day 1, a Monday"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "note": "the throne makes the first arrival the king; the throne and the rack together make a builders' yard of four places beside the rack, and the next four are its builders, hired last"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 10,
+        "y": 6
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as the king at the throne at 11, 6, 10:00-16:00"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 4,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a builder at the builders' yard at"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 5,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a builder at the builders' yard at"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 6,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a builder at the builders' yard at"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 7,
+        "y": 5
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_log": "was hired as a builder at the builders' yard at"
+    },
+    {
+      "expect_entities": 5
+    },
+    {
+      "note": "every need but tiredness off for all five, so this is a test about the outpost"
+    },
+    {
+      "select": 0
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 3
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 4
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "builder"
+    },
+    {
+      "expect_text": "08:00-18:00"
+    },
+    {
+      "expect_text": "Mon-Sun"
+    },
+    {
+      "note": "nothing decreed yet: a builder is due, and has nothing to build"
+    },
+    {
+      "expect_text": "waiting for work"
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "expect_text": "wearing: uniform builder (own: "
+    },
+    {
+      "press": "close"
+    },
+    {
+      "note": "half past nine: the king, on duty from half past eight with the steel for a whole outpost on the rack, gives half an hour of court to where it goes, and its flag is put up 50 to 100 cells out"
+    },
+    {
+      "tick": 2900
+    },
+    {
+      "expect_outposts": {
+        "decreed": 1
+      }
+    },
+    {
+      "press": "statistics"
+    },
+    {
+      "expect_text": "outposts"
+    },
+    {
+      "expect_text": "0 of 26 tiles going up"
+    },
+    {
+      "shot": "the statistics menu: an outpost decreed, nothing of it built yet"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "note": "the builders take its tiles on, fetch the steel from the rack, walk out and lay the building tiles: by noon, the first are down"
+    },
+    {
+      "tick": 4640
+    },
+    {
+      "expect_outposts": {
+        "decreed": 1,
+        "laid": 2
+      }
+    },
+    {
+      "press": "find"
+    },
+    {
+      "press": "outposts"
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "noon: the flag, and the building tiles going up round it"
+    },
+    {
+      "note": "two hours' work on a tile, an hour at a time with a rest between: the first walls are built by mid afternoon"
+    },
+    {
+      "tick": 5760
+    },
+    {
+      "expect_outposts": {
+        "decreed": 1,
+        "laid": 2,
+        "built": 1
+      }
+    },
+    {
+      "press": "find"
+    },
+    {
+      "press": "outposts"
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "mid afternoon: the first walls of the outpost built, more going up"
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "builder"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "note": "six o'clock: the day's building is over and every builder walks back in before dark"
+    },
+    {
+      "tick": 5760
+    },
+    {
+      "tick": 1200
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "done for the day"
+    },
+    {
+      "press": "close"
+    },
+    {
+      "look_at": {
+        "x": 7,
+        "y": 5
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "half past seven in the evening: the builders back in the courtyard before dark"
+    }
+  ]
+}

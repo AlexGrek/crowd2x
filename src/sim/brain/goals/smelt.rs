@@ -7,9 +7,9 @@
 //! routine (`WorkRoutine`, while the shift is due) starts the next. **It plans
 //! from what is true now** and never counts:
 //!
-//! * **enough scrap in the pack for an ingot**
-//!   ([`SCRAP_PER_STEEL`](crate::sim::item::SCRAP_PER_STEEL)) — to its own
-//!   furnace (the job's workplace) and [`Smelt`](crate::sim::brain::tasks::Smelt);
+//! * **scrap in the pack to smelt, and room for the ingots it makes**
+//!   ([`Smelt::fits`]) — to its own furnace (the job's workplace) and
+//!   [`Smelt`](crate::sim::brain::tasks::Smelt);
 //! * **steel in the pack** — to the nearest steel pallet and
 //!   [`Deposit`](crate::sim::brain::tasks::Deposit) it;
 //! * **neither** — to the nearest scrap hopper with scrap in it and
@@ -23,12 +23,12 @@
 use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::feature::FeatureKind;
-use crate::sim::item::{ItemKind, SCRAP_PER_STEEL};
+use crate::sim::item::ItemKind;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::{nearest_store, stand_beside, Seek, Stand};
-use crate::sim::brain::tasks::{DEPOSIT_SECONDS, SMELT_SECONDS, WITHDRAW_SECONDS};
+use crate::sim::brain::tasks::{Smelt, DEPOSIT_SECONDS, SMELT_SECONDS, WITHDRAW_SECONDS};
 
 /// Smelt steel for a living.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -164,10 +164,9 @@ impl GoalExecutor for SmeltGoal {
             return GoalProgress::Working;
         }
 
-        let (scrap, steel) = (inventory.count(ItemKind::Scrap), inventory.count(ItemKind::Steel));
-        let next = if scrap >= SCRAP_PER_STEEL {
+        let next = if Smelt::fits(inventory) {
             Self::furnace(ctx)
-        } else if steel > 0 {
+        } else if inventory.count(ItemKind::Steel) > 0 {
             nearest_store(ctx, FeatureKind::SteelPallet, false)
         } else {
             let hopper = nearest_store(ctx, FeatureKind::ScrapHopper, true);

@@ -68,6 +68,16 @@ there; it is terrain only. Every map loaded from a file stands in one.
 - The district generator puts the farm on the edge lot nearest a plot of good soil
   (`soil_round(seed)`, worked out from the generator like `heaps_round`, `map-generator`).
 
+## Outposts, built out there
+
+- The king decrees **outposts** 50 to 100 cells from the site, next to the biggest base of
+  scrap anybody can get to (`sim::outposts::choose_site`, over `Map::heaps` and
+  `Navigation::is_outside`), and builders put them up (the `outposts` skill). What they build
+  is the map's to keep in the way (`Map::build`: walls as `WALL` terrain, opaque; building
+  tiles and furniture as obstacles), by chunk like the crops, applied again whenever a chunk
+  is loaded, counted as open ground for reachability, never in the chunks a save keeps
+  verbatim. `set_wasteland` forgets it.
+
 ## Chunks: `src/map/chunk.rs`
 
 - `CHUNK` = 32 cells. `ChunkPos` (`of`, `covering`, `around`), `Chunk` (tiles plus passable

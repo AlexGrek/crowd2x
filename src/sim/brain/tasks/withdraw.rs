@@ -179,12 +179,12 @@ mod tests {
     /// and no more than the store has.
     #[test]
     fn the_world_hands_out_as_many_as_fit_and_the_store_has() {
-        let mut rig = rig_at(Point::new(5, 6), 3);
+        let mut rig = rig_at(Point::new(5, 6), 12);
         let mut task = Task::withdraw(PALLET, 0.5);
         assert_eq!(rig.run(&mut task, 600), TaskResult::Success);
         let lines = rig.apply_effect();
-        assert_eq!(rig.inventory.count(ItemKind::Steel), 2, "two ingots are as heavy as a pack takes");
-        assert_eq!(rig.world.bins.stored(PALLET), 1);
-        assert!(lines.iter().any(|line| line.contains("took 2 steel from the steel pallet at 6, 6: 1 left")), "{lines:?}");
+        assert_eq!(rig.inventory.count(ItemKind::Steel), 10, "ten ingots are as heavy as a pack takes");
+        assert_eq!(rig.world.bins.stored(PALLET), 2);
+        assert!(lines.iter().any(|line| line.contains("took 10 steel from the steel pallet at 6, 6: 2 left")), "{lines:?}");
     }
 }

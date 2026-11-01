@@ -40,6 +40,7 @@ use crate::save::{invalid, pb, Invalid};
 use crate::sim::clock::{watched, MINUTE};
 
 use super::occupancy::Occupancy;
+use super::outposts::Fixture;
 use super::property::{Properties, PropertyId};
 
 /// A door anybody may open: a shop's, the bank's, a restroom's.
@@ -159,6 +160,19 @@ impl Doors {
 
     fn index(&self, cell: Point) -> Option<usize> {
         self.cells.binary_search(&cell).ok()
+    }
+
+    /// Take in an outpost's door once it is built (`Facilities::install`):
+    /// shut, and anybody's — an outpost is nobody's house. A fixture that is
+    /// no door, or one already in, changes nothing.
+    pub fn install(&mut self, fixture: Fixture) {
+        if !is_door(fixture.prop) {
+            return;
+        }
+        if let Err(at) = self.cells.binary_search(&fixture.cell) {
+            self.cells.insert(at, fixture.cell);
+            self.states.insert(at, DoorState { openness: 0.0, held: 0.0, lock: None });
+        }
     }
 
     /// The door in `cell`, or `None` when there is none.

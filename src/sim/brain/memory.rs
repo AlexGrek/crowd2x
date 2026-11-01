@@ -71,6 +71,11 @@ pub struct Memory {
     /// sides; inline because the think step reads it of every unit every
     /// tick to say who is bonded (`sim::pets::Bonds`).
     companion: Option<Uid>,
+    /// Until when it rests after a stretch of building, in world seconds
+    /// ([`Memory::is_resting`]): `BuildGoal` writes it, and `WorkRoutine`
+    /// wants the building less meanwhile, so a meal or a drink out of the
+    /// pocket gets a look in. Inline: read of every builder every tick.
+    rest_until: Option<f64>,
 }
 
 /// Somebody seen, where, and when — in **world** seconds
@@ -295,6 +300,24 @@ impl Memory {
         self.companion
     }
 
+    /// Whether it is resting after a stretch of building at `now`, world
+    /// seconds since the world began.
+    pub fn is_resting(&self, now: f64) -> bool {
+        self.rest_until.is_some_and(|until| now < until)
+    }
+
+    /// How long it still has to rest at `now`, in world seconds; 0 if it is
+    /// not resting.
+    pub fn rest_left(&self, now: f64) -> f64 {
+        self.rest_until.map_or(0.0, |until| (until - now).max(0.0))
+    }
+
+    /// Rest until `until`, world seconds since the world began — or not, with
+    /// `None`.
+    pub fn rest_until(&mut self, until: Option<f64>) {
+        self.rest_until = until;
+    }
+
     pub fn set_companion(&mut self, companion: Option<Uid>) {
         self.companion = companion;
     }
@@ -302,7 +325,7 @@ impl Memory {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Memory {
-        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion } = self;
+        let Memory { keyed, out_of_reach, medical, spotted, chat, relations, smalltalk, smalltalked, companion, rest_until } = self;
         let OutOfReach { places } = **out_of_reach;
         let (relations, night) = relations.save();
         pb::Memory {
@@ -312,6 +335,7 @@ impl Memory {
             smalltalk: smalltalk.map(|smalltalk| smalltalk.save()),
             smalltalked: *smalltalked,
             companion: companion.map(Uid::raw),
+            rest_until: *rest_until,
             spotted: spotted.map(|Spotted { who, at, when }| pb::Spotted { who: who.raw(), at: Some(at.into()), when }),
             medical: Some(medical.save()),
             keyed: keyed
@@ -348,6 +372,10 @@ impl Memory {
         memory.smalltalked = match saved.smalltalked {
             Some(when) if !when.is_finite() => return invalid(format!("memory: small talk started at {when}")),
             when => when,
+        };
+        memory.rest_until = match saved.rest_until {
+            Some(until) if !until.is_finite() => return invalid(format!("memory: resting until {until}")),
+            until => until,
         };
         memory.companion = match saved.companion {
             Some(raw) => match Uid::from_raw(raw) {

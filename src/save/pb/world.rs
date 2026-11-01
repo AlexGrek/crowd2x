@@ -98,6 +98,56 @@ pub struct World {
     /// Signed airborne scent; older saves start with clean air.
     #[prost(message, repeated, tag = "27")]
     pub smell: Vec<SmellCell>,
+    /// The outposts the king decreed and how far each is built
+    /// (`crate::sim::outposts`). Absent in an older save: none.
+    #[prost(message, optional, tag = "28")]
+    pub outposts: Option<Outposts>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Outposts {
+    /// In the order decreed; only the last may be unfinished.
+    #[prost(message, repeated, tag = "1")]
+    pub outposts: Vec<Outpost>,
+    /// The last day the king looked for a site and found none; 0, never.
+    #[prost(uint32, tag = "2")]
+    pub fruitless: u32,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Outpost {
+    /// Where its flag stands, its middle.
+    #[prost(message, optional, tag = "1")]
+    pub center: Option<Cell>,
+    /// Upside down, its doorway in the top row.
+    #[prost(bool, tag = "2")]
+    pub flipped: bool,
+    /// The day it was decreed.
+    #[prost(uint32, tag = "3")]
+    pub decreed: u32,
+    /// Its plan, tile by tile in `outposts::LAYOUT`'s order.
+    #[prost(message, repeated, tag = "4")]
+    pub tiles: Vec<OutpostTile>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct OutpostTile {
+    #[prost(enumeration = "TileStage", tag = "1")]
+    pub stage: i32,
+    /// World seconds worked on its building tile, while laid.
+    #[prost(float, tag = "2")]
+    pub progress: f32,
+    /// The builder working on it, if anybody is.
+    #[prost(fixed64, optional, tag = "3")]
+    pub claim: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TileStage {
+    Planned = 0,
+    Laid = 1,
+    Built = 2,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

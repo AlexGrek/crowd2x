@@ -52,6 +52,13 @@ Metrics (`src/lab/metrics.rs` has the table) are flat names:
 `in.*` is the throughput to watch: a store's stock goes up and down as it is filled and
 emptied, and a flow only goes up.
 
+## Outposts
+
+`outposts.built` (a headline column: outposts standing, every tile) and `outposts.tiles` (tiles
+built of the one going up) are sampled every world hour (`src/lab/metrics.rs`); a month of a
+district shows when the king first had the steel and how long its builders took (the
+`outposts` skill).
+
 ## Watches
 
 `lab/watches.json` (the default; compiled in) is a list of rules, each naming one metric and
@@ -70,6 +77,34 @@ Office-hour chains stop over the weekend (Fri 17:00 to Mon 09:00 is 64 h), so a 
 under 72 h fires every Saturday. Add a watch to a served lab with
 `watch add {"name": "somebody is dying", "metric": "health.min", "below": 15}`, and drop one
 with `watch rm NAME`.
+
+The defaults watch steel and scrap flows, deaths, the budget, and (since seed 11 starved with
+only "somebody died" firing) **food and minds**: `the superfridge is empty` (after a day), `the
+crowd is starving` (`hunger.avg` over 80) and `thirty in despair` (`mental_health.low` over 30,
+after three days — the starting rolls put about 30 under 20 at hour 0).
+
+## Scanning a finished run for anything odd
+
+The watches catch what somebody thought to watch for. **`uv run tools/lab_scan.py lab-runs/<run>
+[more runs...]`** reads a finished run's `metrics.csv` and `log.txt` (two seconds a month) and
+prints a section of checks, a `!!` line per finding:
+- people lost; jobs left short; **on-shift workers and the share of their hours at their job's
+  goal** (under half is a finding — though an on-call electrician, an undertaker waiting for a
+  body or a special agent's wander is the job);
+- every store's weekly inflow and longest stall, stores that sat empty (a pallet or hopper
+  between two steps empties by design);
+- the budget by week, people in debt, `mental_health.low`, somebody near death;
+- people outside at 22-23h, deathdogs out by day (hours from the `clock` column: the world opens
+  at 08:00, not midnight);
+- from the log: deaths by cause and job, bites, panics by daylight, **`gave up on reaching` by
+  cell** (a jammed fridge, toilet or cabinet), **a unit saying the same thing 8+ times in an
+  hour** (a loop), purchases into negative cash, a daily count of bladder accidents, outdoor
+  relief and `found no ...`, and lines that name no unit.
+
+Run it on every month before reading the headline table; then follow a finding into a snapshot
+with a served lab (below). When cargo cannot relink the release binary because another lab holds
+it open (Windows), copy `release/crowd2x.exe` aside and run the copy from the repo root with
+`CARGO_MANIFEST_DIR` set — the lab loads no Bevy assets.
 
 ## Looking into a paused world
 
@@ -111,6 +146,9 @@ rebuild, then `start --load` the snapshot.
 5. Fix with a unit test that fails first, then rerun the same seed and length and compare.
 
 ## Worked example: steel in the warehouse (seed 7, 2026-10-27)
+
+*Written when a smelt took 2 scrap for 1 ingot; it now takes 1 scrap for 3 (`item.rs`), so the
+steel counts below are about six times what the same scrap makes today. The method stands.*
 
 *Slow*: about 27 ingots a week, every week of a month. Everything downstream of the
 collectors is lossless: 264 scrap stored, 111 steel smelted, 111 racked. The steelworkers spend
@@ -182,6 +220,24 @@ Only "somebody died" fired, so the finds came from reading the series and `log.t
   superfridge", which `flow` does not read), and `out.superfridge` too (fridge meals log no
   take). Timings: check for other heavy processes first. A local LLM server once made a month
   run at a third of its speed.
+
+## Worked example: three seeds, a month each, scanned (2026-11-01)
+
+`lab_scan.py` over seeds 3, 7 and 11. Each finding went into a snapshot (`units goal:idle`,
+`unit`, `trace`):
+- *Seed 11 starved*: 162 dead on day 28. The superfridge ran dry while the meal rack held 188:
+  three of four shopkeepers and the store courier were on mental health leave, so only the night
+  shopkeeper called the dispatch and one meal a day came in. *Seed 3*: both steel couriers on
+  leave from day 12, no steel for 17 days. Posts emptied by leave were never filled. Fixed:
+  `Effect::LeavePost` (`jobs` skill).
+- *Everybody on leave stood still*: every job's goal was suppressed on leave, wandering with the
+  special agent's. In a snapshot all eight idle humans were on leave, in front of arcade cabinets,
+  on the hospital's toilet. Fixed in `Medical::arrange` (`brain-engineer`).
+- *25-58 thousand "gave up on reaching" a month*: the hospital's fridge, the restaurants' and the
+  arcade cabinets, jammed (by the frozen above, among others); a unit waits three half-seconds,
+  gives up and walks across the district, and can cycle every fridge for an hour. Still open, as
+  are fun falling to 0 for workers, the budget falling $13-17k a week, debt purchases rising
+  daily, and a patient dying of thirst in the hospital.
 
 ## Code
 

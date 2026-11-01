@@ -57,6 +57,7 @@ pub mod find;
 pub mod follow;
 pub mod croppanel;
 pub mod crops;
+pub mod outposts;
 mod flowers;
 pub mod dirt;
 pub mod smell;
@@ -132,7 +133,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin))
+            .add_plugins((economy::EconomyPlugin, find::FindPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

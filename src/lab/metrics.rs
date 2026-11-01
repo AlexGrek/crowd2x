@@ -173,6 +173,7 @@ fn is_headline(name: &str) -> bool {
         || name == "in.steel pallet"
         || name == "scrap.left"
         || name == "scrap.nearest"
+        || name == "outposts.built"
 }
 
 /// The headline of the latest sample on one line, for a day gone by.
@@ -256,6 +257,12 @@ pub fn sample(state: &GameState, flows: &BTreeMap<String, f64>) -> BTreeMap<Stri
     values.insert("crops".into(), stats.fields.sown() as f64);
     if let Some(quality) = stats.fields.quality {
         values.insert("crops.quality".into(), quality as f64);
+    }
+    // The outposts: how many stand, and how many tiles of the one going up
+    // are built.
+    values.insert("outposts.built".into(), stats.outposts.built as f64);
+    if let Some((built, _)) = stats.outposts.going_up {
+        values.insert("outposts.tiles".into(), built as f64);
     }
     for job in &stats.jobs {
         if job.posts > 0 {

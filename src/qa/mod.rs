@@ -1132,6 +1132,21 @@ fn perform(
             (actual == (*waiting, *assigned)).then_some(Next::Now)
                 .ok_or(format!("expected dispatch ({waiting} waiting, {assigned} assigned), found {actual:?}"))
         }
+        Step::ExpectOutposts { decreed, laid, built } => {
+            use crate::sim::outposts::Stage;
+            let sim = intents.sim.as_deref().ok_or("no simulation")?;
+            let outposts = sim.0.outposts();
+            let tiles = || outposts.iter().flat_map(|outpost| outpost.tiles());
+            let actual = (
+                outposts.len(),
+                tiles().filter(|tile| tile.stage != Stage::Planned).count(),
+                tiles().filter(|tile| tile.stage == Stage::Built).count(),
+            );
+            (actual.0 == *decreed && actual.1 >= *laid && actual.2 >= *built).then_some(Next::Now).ok_or(format!(
+                "expected {decreed} outposts, {laid}+ tiles laid and {built}+ built; found {} decreed, {} laid, {} built",
+                actual.0, actual.1, actual.2
+            ))
+        }
         Step::ExpectSuperfridge { min, max, food_in_fridges, capacity, level } => {
             let sim = intents.sim.as_deref().ok_or("no simulation")?;
             let fridge = sim.0.superfridge();

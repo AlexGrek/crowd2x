@@ -668,6 +668,17 @@ pub enum Step {
     /// Exact dispatch counts; unlike the recent log this remains observable
     /// after a long scripted tick.
     ExpectDispatch { waiting: usize, assigned: usize },
+    /// The outposts (`sim::outposts`): exactly `decreed` of them, and of
+    /// their tiles at least `laid` with a building tile down or built, and at
+    /// least `built` built. An outcome that stays observable after a long
+    /// scripted tick, as the recent log does not.
+    ExpectOutposts {
+        decreed: usize,
+        #[serde(default)]
+        laid: usize,
+        #[serde(default)]
+        built: usize,
+    },
     /// The central food reserve and the availability seen by fridge users.
     ExpectSuperfridge {
         min: f64,

@@ -27,6 +27,7 @@ use crate::save::{invalid, pb, Invalid};
 
 use super::feature::{self, FeatureKind};
 use super::item::ItemKind;
+use super::outposts::Fixture;
 
 /// Where the stores are, what kind each is, and how many pieces each holds.
 ///
@@ -125,6 +126,19 @@ impl Bins {
     /// Every store, cell, kind and what it holds, sorted by cell.
     pub fn iter_stores(&self) -> impl Iterator<Item = (Point, FeatureKind, u32)> + '_ {
         self.cells.iter().zip(&self.kinds).zip(&self.stored).map(|((&cell, &store), &stored)| (cell, store, stored))
+    }
+
+    /// Take in an outpost's store once it is built (`Facilities::install`):
+    /// empty. A fixture that is no store, or one already in, changes nothing.
+    pub fn install(&mut self, fixture: Fixture) {
+        let Some(kind) = feature::store_of(fixture.prop) else {
+            return;
+        };
+        if let Err(at) = self.cells.binary_search(&fixture.cell) {
+            self.cells.insert(at, fixture.cell);
+            self.kinds.insert(at, kind);
+            self.stored.insert(at, 0);
+        }
     }
 
     /// Put `pieces` in the store in `cell`, and say how many it holds now.

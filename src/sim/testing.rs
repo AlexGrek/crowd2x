@@ -301,6 +301,38 @@ pub fn farm(seed: u64) -> (super::GameState, Uid) {
     (state, farmer)
 }
 
+/// Where [`outpost_works`] keeps its steel.
+pub const OUTPOST_RACK: Point = Point::new(3, 3);
+
+/// A king's throne and a warehouse's steel rack holding `steel` on a 20x14
+/// floor in the wasteland of `seed`, the king and [`BUILDERS`] builders hired
+/// to them — and so to the builders' yard beside the rack — every need of
+/// theirs off. Monday, 08:00, nothing decreed yet.
+///
+/// [`BUILDERS`]: super::outposts::BUILDERS
+pub fn outpost_works(steel: u32, seed: u64) -> (super::GameState, Uid, Vec<Uid>) {
+    let mut map = Map::new(crate::map::Size::new(20, 14), crate::map::FLOOR).with_wasteland(seed);
+    prop_at(&mut map, "throne", Point::new(15, 10));
+    prop_at(&mut map, "steel rack", OUTPOST_RACK);
+    assert!(map.set_initial_stock(OUTPOST_RACK, steel));
+    let mut state = super::GameState::new(map, seed);
+    let king = state.spawn_commoner(Point::new(14, 8));
+    let builders: Vec<Uid> = (0..super::outposts::BUILDERS as i32).map(|i| state.spawn_commoner(Point::new(6 + 2 * i, 7))).collect();
+    let kind = |state: &super::GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| job.kind);
+    assert_eq!(kind(&state, king), Some(super::JobKind::King));
+    for &builder in &builders {
+        assert_eq!(kind(&state, builder), Some(super::JobKind::Builder));
+    }
+    let mut input = super::Input::new();
+    for &uid in builders.iter().chain([&king]) {
+        for process in super::ProcessId::ALL {
+            input.set_process(uid, process, false);
+        }
+    }
+    super::process_game_state(&mut state, 1.0 / 60.0, &input);
+    (state, king, builders)
+}
+
 /// A warehouse at one end of a 24x17 floor — a scrap bin with `scrap`
 /// pieces in it and a steel rack — and a steel factory at the other: a
 /// hopper, a pallet and a powered furnace. A steelworker and a courier

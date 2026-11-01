@@ -134,6 +134,11 @@ catalogue! {
         /// sent by the courier dispatch ([`DeliverGoal`](super::goals::DeliverGoal)):
         /// a courier's, raised over its own job while the order is its.
         Deliver = 31 => GoalDef { name: "deliver", emoji: "🚚", executor: Some(|| Box::new(goals::DeliverGoal::new())) },
+        /// Build a tile of the outpost going up — take it on, fetch its steel,
+        /// lay its building tile, work it an hour at a time until it is built
+        /// — and come back in once there is nothing left to build today
+        /// ([`BuildGoal`](super::goals::BuildGoal)): a builder's.
+        Build = 32 => GoalDef { name: "build", emoji: "🏗", executor: Some(|| Box::new(goals::BuildGoal::new())) },
     }
 }
 
@@ -862,7 +867,8 @@ mod tests {
                 (GoalId::Defecate, 0.0),
                 (GoalId::Provision, 0.0),
                 (GoalId::Shopkeep, 0.0),
-                (GoalId::Deliver, 0.0)
+                (GoalId::Deliver, 0.0),
+                (GoalId::Build, 0.0)
             ]
         );
     }

@@ -1305,3 +1305,26 @@ nearest living human without a dog (Chebyshev distance, then uid). It tries on
 the death tick and every 64 ticks thereafter; strays are never assigned owners.
 Both companion links and the dog's house key change; its body and gut remain.
 The existing saved companion preserves pending adoption across save/load.
+
+### Outposts and builders
+
+The king decrees outposts from the throne (`Paperwork::Decrees`,
+`Task::decree`, `sim/outposts.rs`): on duty, with none going up, a builders'
+yard on the map and the 22 steel a whole one takes on the warehouse's racks
+(`outposts::decree_due`), it finds a site with `choose_site` - every cell 50
+to 100 cells from the district's wall, as near as that allows to the biggest
+reachable base of scrap - and puts its flag up (`Effect::Decree`). The plan
+is `LAYOUT`, 6x7: 20 walls, a two-door doorway facing the district, a fridge,
+a local warehouse (`FeatureKind::OutpostStore`, scrap) and two beds, 26 tiles.
+Four builders (`JobKind::Builder` 21, `FeatureKind::BuildersYard` 33 beside the
+first steel rack on a map with a throne, 08:00-18:00 every day, $150 a shift)
+work only on demand (`JobDef::on_demand`): `BuildGoal` (`GoalId::Build` 32)
+claims a tile (one builder a tile, `Effect::Claim`), fetches its steel, lays a
+building tile with all of it at once (`Effect::Lay`) and works it an hour at a
+time with a 15-minute rest (`Memory::rest_until`, `RESTING`) until two hours
+are done (`Effect::Construct`, every tick). With no work they are as good as
+unemployed - a care package for the day - and come back in before dark.
+Walls are `WALL` terrain off the site (`Map::build`, `Structure`); finished
+furniture is installed into the feature, fridge, store and door indexes
+(`Facilities::install`), so it works. Drawn by `game/outposts.rs`; saved as
+World tag 28. The `outposts` skill has the rest. QA: `qa/builders.json`.

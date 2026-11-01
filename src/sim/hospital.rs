@@ -31,14 +31,14 @@ impl Medical {
         if biology.is_running(super::biology::ProcessId::Mind) {
             let mental_health = biology.stats().mental_health();
             if !self.mental_leave && mental_health <= CRITICAL_MENTAL_HEALTH {
-                ctx.log.unit(uid, "taking sick leave for mental health");
+                ctx.log.unit(uid, format!("{uid} is taking sick leave for mental health"));
                 self.mental_leave = true;
             }
             if self.mental_leave {
                 self.sick_day = Some(ctx.clock.day());
                 if mental_health >= RETURN_MENTAL_HEALTH {
                     self.mental_leave = false;
-                    ctx.log.unit(uid, "mental health recovered; sick leave today");
+                    ctx.log.unit(uid, format!("{uid}'s mental health recovered; sick leave today"));
                 }
             }
         } else {
@@ -87,8 +87,15 @@ impl Medical {
             }
             goals.raise_to(GoalId::Recover, 1.0);
         } else if self.on_leave(day) {
+            // Every job's own goal — but not wandering, which is a special
+            // agent's job and everybody's floor: suppressed with the rest, a
+            // unit on leave with nothing pressing stood where it was, for
+            // days — in front of the fridge, the toilet or the arcade cabinet
+            // it had just used — and nobody else could get at it.
             for kind in super::JobKind::ALL {
-                goals.suppress(kind.goal());
+                if kind.goal() != GoalId::Wander {
+                    goals.suppress(kind.goal());
+                }
             }
         }
     }
@@ -268,6 +275,9 @@ mod tests {
         world.step(&mut human);
         assert!(human.is_on_sick_leave(world.clock));
         assert_ne!(human.current_goal(), Some(GoalId::Work));
+        // Off for days, maybe weeks: its post goes to somebody jobless.
+        assert!(human.job().is_none(), "let go: {:?}", world.lines());
+        assert!(world.log_contains("gave up its post as an office worker"), "{:?}", world.lines());
         assert!(!human.brain().is_hospital_patient());
         assert!(world.hospital.bed_for(human.uid()).is_none());
         // Leave persists through midnight and through a partial recovery.
@@ -283,7 +293,21 @@ mod tests {
         world.clock = Clock::after_watching(((2.0 * DAY + 10.0 * HOUR) as f64 - OPENING_TIME) / TIME_SCALE as f64);
         world.step(&mut human);
         assert!(!human.is_on_sick_leave(world.clock));
-        assert_eq!(human.current_goal(), Some(GoalId::Work));
+        assert!(human.job().is_none(), "recovered, and jobless: hired again into the next post left empty");
+    }
+
+    /// On leave with nothing pressing, a unit wanders as anybody does — it
+    /// does not stand where it was, in front of whatever it last used.
+    #[test]
+    fn on_leave_with_nothing_pressing_a_unit_wanders_rather_than_standing_still() {
+        let mut world = World::new(map());
+        let mut human = wounded(100.0);
+        human.brain_mut().memory_mut().medical.sick_day = Some(world.clock.day());
+        for _ in 0..5 {
+            world.step(&mut human);
+        }
+        assert!(human.is_on_sick_leave(world.clock));
+        assert_eq!(human.current_goal(), Some(GoalId::Wander), "{:?}", human.brain_fields());
     }
 
     #[test]

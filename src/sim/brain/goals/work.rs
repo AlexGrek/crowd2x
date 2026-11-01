@@ -86,6 +86,9 @@ impl WorkGoal {
             Some(Paperwork::Books) if ctx.think.economy.unclosed_day(ctx.think.clock.day()).is_some() => {
                 Task::close_books(desk, super::super::tasks::BOOKS_SECONDS)
             }
+            Some(Paperwork::Decrees) if crate::sim::outposts::decree_due(ctx.think) => {
+                Task::decree(desk, super::super::tasks::DECREE_SECONDS)
+            }
             _ => Task::work_at(job.kind.workplace(), desk, WORK_SECONDS),
         };
         let _ = ctx.tasks.push_back(task);
@@ -156,7 +159,8 @@ impl GoalExecutor for WorkGoal {
         match (last, ctx.finished) {
             (TaskResult::Failed, Some(task))
                 if matches!(task, Task::MoveTo(_))
-                    || matches!(task, Task::Work(work) if work.place.access() == Access::Entered) => {
+                    || matches!(task, Task::Work(work) if work.place.access() == Access::Entered)
+                    || matches!(task, Task::Decree(_)) => {
                 ctx.tasks.clear();
                 // A body in the way: wait and try again. No way there: there
                 // is no other desk that is this one's, so give up on the
@@ -178,7 +182,7 @@ impl GoalExecutor for WorkGoal {
                 self.worked(ctx, task);
                 return GoalProgress::Achieved;
             }
-            (TaskResult::Success, Some(Task::Payroll(_) | Task::CloseBooks(_))) => {
+            (TaskResult::Success, Some(Task::Payroll(_) | Task::CloseBooks(_) | Task::Decree(_))) => {
                 self.forget();
                 return GoalProgress::Achieved;
             }

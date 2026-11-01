@@ -96,15 +96,20 @@ pub const BODY_VOLUME: f32 = 70.0;
 pub const LAY_DOWN_SECONDS: f32 = watched(MINUTE);
 
 /// What an ingot of steel weighs, in kilograms: the steel factory's
-/// furnace makes one of [`SCRAP_PER_STEEL`] pieces of scrap metal. Heavier
-/// than a piece of scrap, so a courier carries two at a time.
-pub const STEEL_MASS: f32 = 5.0;
+/// furnace makes [`STEEL_PER_SMELT`] of [`SCRAP_PER_SMELT`] piece of scrap
+/// metal and loses none of its weight doing it (3 kg of scrap, three ingots of
+/// 1 kg), so the ingots of a smelt weigh no more than the scrap that came out
+/// of the pack, and a pack takes ten.
+pub const STEEL_MASS: f32 = 1.0;
 
 /// ...and the space it takes up, in litres: dense.
 pub const STEEL_VOLUME: f32 = 1.0;
 
-/// How many pieces of scrap metal a furnace smelts into one ingot of steel.
-pub const SCRAP_PER_STEEL: u8 = 2;
+/// How many pieces of scrap metal go into a furnace for one smelt...
+pub const SCRAP_PER_SMELT: u8 = 1;
+
+/// ...and how many ingots of steel come out of it.
+pub const STEEL_PER_SMELT: u8 = 3;
 
 /// What a sheaf of wheat harvested from a crop weighs, in kilograms
 /// (`sim::fields`): light, and bulky, so a pack takes twelve — four crops'

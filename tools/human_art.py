@@ -527,6 +527,17 @@ UNIFORMS["special_agent"] = (
 )
 
 
+# A hi-vis yellow vest with silver reflective bands over a grey work shirt,
+# tan work trousers and brown boots: the builder's, out at the outposts.
+UNIFORMS["builder"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....gdmlmg.....", "....gssssssg....", ".....gdmmdg.....",
+     ".....pppppp.....", "......pqqp......", "......bbbb......"],
+    {"g": (112, 116, 120), "d": (196, 176, 30), "m": (236, 214, 52), "l": (252, 238, 120),
+     "s": (214, 218, 224), "p": (166, 138, 96), "q": (130, 106, 72), "b": (76, 52, 34)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

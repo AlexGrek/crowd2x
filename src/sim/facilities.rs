@@ -21,6 +21,7 @@ use super::feature::Features;
 use super::fields::Fields;
 use super::fridge::Fridges;
 use super::homes::Homes;
+use super::outposts::{Fixture, Outposts};
 use super::job::Workplaces;
 use super::panics::Panics;
 use super::playzone::Playzones;
@@ -130,6 +131,11 @@ pub struct Facilities {
     /// (`sim::comings_and_goings`, `GameState::fill_vacancy`). Empty between
     /// ticks, so never saved.
     pub vacancies: Vec<(Uid, super::Job)>,
+    /// The outposts the king decreed, the plan of the one going up and whose
+    /// tile is whose ([`super::outposts`]): founded by `Effect::Decree`,
+    /// built through `Effect::Claim`, `Lay` and `Construct`, which build the
+    /// map with it. Saved.
+    pub outposts: Outposts,
 }
 
 impl Facilities {
@@ -170,6 +176,20 @@ impl Facilities {
             feedings: Default::default(),
             leaving: Vec::new(),
             vacancies: Vec::new(),
+            outposts: Outposts::new(),
         }
+    }
+
+    /// Take in a piece of an outpost's furniture once it is built: the
+    /// features (what it is for), and the fridges, stores or doors if it is
+    /// one — so a fridge out there is somewhere to eat, a bed somewhere to
+    /// sleep, a door a door. Every index refuses nothing and takes nothing
+    /// twice, so it is asked again wherever an index is built again
+    /// (`GameState::install_fixtures`).
+    pub fn install(&mut self, fixture: Fixture) {
+        self.features.install(fixture);
+        self.fridges.install(fixture);
+        self.bins.install(fixture);
+        self.doors.install(fixture);
     }
 }
