@@ -29,6 +29,9 @@ the rest, and builds the map again on load (`Outposts::restore`), as `sim::field
 
 ## The king's decision
 
+(The same court, the same half hour, also picks the soldiers' training ground — once, first,
+`Effect::DecreeGround`; see the `training` skill.)
+
 - **When**: the king's row has `paperwork: Some(Paperwork::Decrees)` (`sim/job.rs`).
   `WorkGoal::plan` (`brain/goals/work.rs`), at the throne, on duty (court, 10-16 Mon-Sat),
   queues `Task::decree(throne, DECREE_SECONDS)` (30 world minutes) instead of an hour of court
@@ -46,7 +49,11 @@ the rest, and builds the map again on load (`Outposts::restore`), as `sim::field
      (`Navigation::is_outside`: reachable, not in a lake's pocket), its pieces summed into
      16-cell blocks (`BLOCK`);
   2. **the base** is the block whose 3x3 neighbourhood holds the most (ties: nearer the
-     site, then cell); no scrap at all, no site;
+     site, then cell); no scrap at all, no site. **From the second outpost on, spread comes
+     first**: among blocks with scrap, the one furthest round the district (`bearing` from the
+     site's middle, the site taken as a square; `SECTORS` = 12 steps over a half turn) from the
+     nearest earlier outpost wins — the opposite side from one, the middle of the widest gap
+     from several — and scrap only decides within a step;
   3. ring by ring out from the base's middle (up to `SEARCH`), the first ring with a clear
      site, the nearest in it (manhattan, then cell).
 - **`is_clear(map, center, outposts)`**: every footprint cell **50 to 100 cells from the

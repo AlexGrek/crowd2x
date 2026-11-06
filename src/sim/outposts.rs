@@ -670,8 +670,12 @@ const SEARCH: i32 = FROM_WALLS.1 + BASE_REACH;
 /// district's wall, **as near as that allows to the biggest base of scrap
 /// anybody can get to** — the block of the wasteland, counted with the eight
 /// round it, with the most pieces left in heaps that are out in the open
-/// (`Navigation::is_outside`), not in a pocket a lake has walled in. `None`
-/// with no wasteland, no scrap within reach, or nowhere clear.
+/// (`Navigation::is_outside`), not in a pocket a lake has walled in. **From the
+/// second outpost on, the base is the one furthest round the district from
+/// every outpost already decreed** (the opposite side from one, the middle of
+/// the widest gap from several), the biggest scrap deciding among bases about
+/// as far round, so the outposts end up spread evenly. `None` with no
+/// wasteland, no scrap within reach, or nowhere clear.
 ///
 /// A scan of the heaps round the district and of the rings round the base,
 /// with one count of blocks allocated: what a king does once an outpost,
@@ -693,16 +697,29 @@ pub fn choose_site(map: &Map, outposts: &Outposts) -> Option<Point> {
     });
     let at = |col: i32, row: i32| if (0..cols).contains(&col) && (0..rows).contains(&row) { pieces[(row * cols + col) as usize] } else { 0 };
     let middle = |col: i32, row: i32| area.origin.offset(col * BLOCK + BLOCK / 2, row * BLOCK + BLOCK / 2);
-    let (base, most) = (0..rows)
+    // Where the earlier outposts lie round the district, as directions; a new
+    // base is the one with scrap that is furthest round from all of them.
+    let directions: Vec<f64> = outposts.iter().map(|outpost| bearing(site, outpost.center())).collect();
+    let spread = |cell: Point| -> u32 {
+        let own = bearing(site, cell);
+        directions
+            .iter()
+            .map(|&other| {
+                let turn = (own - other).abs() % std::f64::consts::TAU;
+                let gap = turn.min(std::f64::consts::TAU - turn);
+                (gap / std::f64::consts::PI * SECTORS as f64) as u32
+            })
+            .min()
+            .unwrap_or(0)
+    };
+    let (base, _) = (0..rows)
         .flat_map(|row| (0..cols).map(move |col| (col, row)))
         .map(|(col, row)| {
             let around: u32 = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))).map(|(dx, dy)| at(col + dx, row + dy)).sum();
             (middle(col, row), around)
         })
-        .min_by_key(|&(cell, around)| (std::cmp::Reverse(around), site.chebyshev_distance(cell), cell))?;
-    if most == 0 {
-        return None;
-    }
+        .filter(|&(_, around)| around > 0)
+        .min_by_key(|&(cell, around)| (std::cmp::Reverse(spread(cell)), std::cmp::Reverse(around), site.chebyshev_distance(cell), cell))?;
     // Ring by ring out from the base: the first ring with a clear site in it
     // has the nearest, as the crow flies, a lower cell on a tie.
     for radius in 0..=SEARCH {
@@ -717,6 +734,19 @@ pub fn choose_site(map: &Map, outposts: &Outposts) -> Option<Point> {
         }
     }
     None
+}
+
+/// How finely the turn round the district from one outpost to the next is
+/// told apart, in steps over a half turn: within a step, more scrap wins.
+const SECTORS: u32 = 12;
+
+/// The direction of `cell` from the middle of `site`, in radians, the site
+/// taken as a square so a long district's ends and sides weigh the same.
+fn bearing(site: Bounds, cell: Point) -> f64 {
+    let (half_w, half_h) = (site.size.width as f64 / 2.0, site.size.height as f64 / 2.0);
+    let dx = cell.x as f64 + 0.5 - (site.origin.x as f64 + half_w);
+    let dy = cell.y as f64 + 0.5 - (site.origin.y as f64 + half_h);
+    (dy / half_h).atan2(dx / half_w)
 }
 
 /// The nearest and the furthest any cell of `bounds` is from `site`, as a
@@ -852,6 +882,27 @@ mod tests {
             assert!(!footprint(next).grown(1).overlaps(footprint(center).grown(1)), "seed {seed}");
         }
         assert_eq!(choose_site(&Map::new(Size::new(20, 14), FLOOR), &Outposts::new()), None, "no wasteland, no outpost");
+    }
+
+    #[test]
+    fn each_outpost_goes_to_the_side_furthest_round_from_the_others() {
+        for seed in [3, 7, 11] {
+            let map = Map::new(Size::new(60, 40), FLOOR).with_wasteland(seed);
+            let mut outposts = Outposts::new();
+            let mut centers = Vec::new();
+            for day in 1..=3 {
+                let center = choose_site(&map, &outposts).unwrap_or_else(|| panic!("seed {seed}: site {day}"));
+                assert!(outposts.found(&map, center, day), "seed {seed}: found {day}");
+                outposts.outposts.last_mut().unwrap().tiles.iter_mut().for_each(|tile| tile.stage = Stage::Built);
+                centers.push(center);
+            }
+            let turn = |a: Point, b: Point| {
+                let t = (bearing(map.site(), a) - bearing(map.site(), b)).abs() % std::f64::consts::TAU;
+                t.min(std::f64::consts::TAU - t).to_degrees()
+            };
+            assert!(turn(centers[0], centers[1]) > 120.0, "seed {seed}: the second across the district from the first");
+            assert!(turn(centers[2], centers[0]) > 50.0 && turn(centers[2], centers[1]) > 50.0, "seed {seed}: the third between them");
+        }
     }
 
     /// A site with an outpost founded on it, and its plan.

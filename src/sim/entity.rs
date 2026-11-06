@@ -788,6 +788,10 @@ pub struct Think<'a> {
     /// the king has one to decree, which tile a builder has taken on and
     /// which are free ([`super::outposts`]).
     pub outposts: &'a super::outposts::Outposts,
+    /// The soldiers' ground, as of the start of this tick, changed only by
+    /// [`super::world_step`]: where it is, once the king has picked it
+    /// ([`super::training`]).
+    pub training: &'a super::training::Training,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -852,6 +856,7 @@ impl<'a> Think<'a> {
             superfridge: &facilities.superfridge,
             dispatch: &facilities.dispatch,
             outposts: &facilities.outposts,
+            training: &facilities.training,
             electrical: &facilities.electrical,
             dt,
             tick,

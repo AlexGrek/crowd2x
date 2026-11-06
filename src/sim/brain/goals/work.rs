@@ -86,7 +86,7 @@ impl WorkGoal {
             Some(Paperwork::Books) if ctx.think.economy.unclosed_day(ctx.think.clock.day()).is_some() => {
                 Task::close_books(desk, super::super::tasks::BOOKS_SECONDS)
             }
-            Some(Paperwork::Decrees) if crate::sim::outposts::decree_due(ctx.think) => {
+            Some(Paperwork::Decrees) if crate::sim::outposts::decree_due(ctx.think) || crate::sim::training::ground_due(ctx.think) => {
                 Task::decree(desk, super::super::tasks::DECREE_SECONDS)
             }
             Some(Paperwork::News) if ctx.think.news.waiting() > 0 => {

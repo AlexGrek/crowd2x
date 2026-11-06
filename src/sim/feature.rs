@@ -241,6 +241,17 @@ catalogue! {
         /// play on ([`crate::sim::news`]).
         PropagandaComputer = 35 => FeatureDef { props: &["propaganda computer"], ..BESIDE },
         DecorSection = 36 => FeatureDef { props: &["decor section"], ..BESIDE },
+        /// The soldiers' places on the roll: a soldier's workplace, **no prop
+        /// and no building** — a bookkeeping cell in the open street, as a
+        /// cleaner's district is. Nobody goes there to work: they get ready
+        /// wherever they are and go straight out to the training ground the
+        /// king picked; it is only the cell a soldier is sent back in to.
+        /// [`SOLDIERS`](super::training::SOLDIERS) of them, on a town with a
+        /// throne to pick the ground from.
+        Ranks = 37 => FeatureDef { props: &[], ..BESIDE },
+        /// The commander's place on the roll: the same, a cell of its own so
+        /// the soldiers do not take it ([`Ranks`](FeatureKind::Ranks)).
+        Command = 38 => FeatureDef { props: &[], ..BESIDE },
     }
 }
 
@@ -341,6 +352,7 @@ impl FeatureKind {
             Self::District => "district",
             Self::Patrol => "district patrol",
             Self::BuildersYard => "builders' yard",
+            Self::Ranks | Self::Command => "training ground",
             _ => self.def().props[0],
         }
     }
@@ -496,6 +508,28 @@ impl Features {
             yard.truncate(super::outposts::BUILDERS);
             features.cells[FeatureKind::BuildersYard as usize] = yard;
         }
+        // A town with a king to pick a ground keeps soldiers and a commander
+        // (never a test room): their places on the roll, cells of the open
+        // street (no roof over it) nearest the throne, clear of it — nothing
+        // is built there. A scan of the site, once with the world.
+        if let Some(throne) = features.cells[FeatureKind::Throne as usize].iter().min().copied().filter(|_| properties.len() >= TOWN_HOMES) {
+            let mut muster: Vec<Point> = map
+                .size()
+                .points()
+                .filter(|&cell| {
+                    map.is_passable(cell)
+                        && properties.of(cell).is_none()
+                        && map.grid(crate::map::GridLayer::Ceiling, cell) == crate::map::grid::ceiling::OPEN
+                        && cell.manhattan_distance(throne) > 2
+                })
+                .collect();
+            muster.sort_unstable_by_key(|&cell| (cell.manhattan_distance(throne), cell));
+            muster.truncate(super::training::COMMANDERS + super::training::SOLDIERS);
+            if let Some((&commander, soldiers)) = muster.split_first() {
+                features.cells[FeatureKind::Command as usize] = vec![commander];
+                features.cells[FeatureKind::Ranks as usize] = soldiers.to_vec();
+            }
+        }
         // Sorted, so nothing that picks among them depends on the order the
         // props were painted in.
         for cells in &mut features.cells {
@@ -534,6 +568,16 @@ impl Features {
 
     pub fn fishing_water(&self) -> &[Point] {
         &self.fishing_water
+    }
+
+    /// Put a feature of `kind` at `cell`, as the map would have it: for a
+    /// test that wants a workplace with no prop (the soldiers' roll) in a room.
+    #[cfg(test)]
+    pub(crate) fn add(&mut self, kind: FeatureKind, cell: Point) {
+        let cells = &mut self.cells[kind as usize];
+        if let Err(at) = cells.binary_search(&cell) {
+            cells.insert(at, cell);
+        }
     }
 
     /// Whether `cell` is a feature that must be entered to use, and so may

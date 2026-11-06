@@ -549,6 +549,27 @@ UNIFORMS["propagandist"] = (
 )
 
 
+# Camouflage: olive, dark green, tan and brown blotches on the tunic and the
+# trousers, black boots: the soldier's, drilling out on the training ground.
+UNIFORMS["soldier"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....abcabd.....", "....bacdabcb....", ".....cabdcb.....",
+     ".....abcbda.....", "......bcad......", "......kkkk......"],
+    {"a": (92, 104, 56), "b": (46, 58, 34), "c": (158, 140, 92), "d": (96, 72, 46),
+     "k": (28, 26, 24)},
+)
+
+
+# The soldier's camouflage with gold on the shoulders and a gold belt: the
+# commander's, standing in the middle of the drill.
+UNIFORMS["commander"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....abcabd.....", "....gacdabcg....", ".....cabdcb.....",
+     ".....yyyyyy.....", "......bcad......", "......kkkk......"],
+    {**UNIFORMS["soldier"][1], "g": (230, 188, 60), "y": (214, 170, 56)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

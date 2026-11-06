@@ -115,6 +115,23 @@ pub struct World {
     pub history: Vec<HourSample>,
     #[prost(message, repeated, tag = "32")]
     pub decor_purchases: Vec<DecorPurchase>,
+    /// The soldiers' ground the king picked (`crate::sim::training`). Absent
+    /// in an older save: none yet.
+    #[prost(message, optional, tag = "33")]
+    pub training: Option<Training>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Training {
+    /// The middle of the ground, where the commander stands; absent, none.
+    #[prost(message, optional, tag = "1")]
+    pub center: Option<Cell>,
+    /// The day it was decreed.
+    #[prost(uint32, tag = "2")]
+    pub decreed: u32,
+    /// The last day the king looked for a place and found none; 0, never.
+    #[prost(uint32, tag = "3")]
+    pub fruitless: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

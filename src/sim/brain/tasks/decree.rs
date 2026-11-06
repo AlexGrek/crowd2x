@@ -8,12 +8,17 @@
 //! scrap anybody can get to says — and asked of the world
 //! ([`Effect::Decree`]), which founds the outpost, or remembers that the king
 //! found nowhere today.
+//!
+//! The same court picks the soldiers' training ground, once and first
+//! ([`ground_due`], [`choose_ground`], [`Effect::DecreeGround`]): it costs
+//! nothing, and the soldiers wait on it (`sim::training`).
 
 use crate::map::Point;
 use crate::sim::biology::Biology;
 use crate::sim::clock::{watched, MINUTE};
 use crate::sim::feature::FeatureKind;
 use crate::sim::outposts::{choose_site, decree_due};
+use crate::sim::training::{choose_ground, ground_due};
 use crate::sim::Effect;
 
 use super::super::action::Action;
@@ -39,11 +44,19 @@ impl Decree {
 impl TaskExecutor for Decree {
     fn execute(&mut self, ctx: &mut TaskCtx<'_>) -> TaskResult {
         let result = self.court().execute(ctx);
-        if result != TaskResult::Success || !decree_due(ctx.think) {
+        if result != TaskResult::Success {
             return result;
         }
         let day = ctx.think.clock.day();
-        *ctx.effect = Effect::Decree { at: choose_site(ctx.think.map, ctx.think.outposts), day };
+        // The soldiers' ground first: it costs nothing, and they wait on it.
+        if ground_due(ctx.think) {
+            let features = ctx.think.features;
+            let near = features.cells_of(FeatureKind::Command).first();
+            let at = near.and_then(|&near| choose_ground(ctx.think.map, ctx.think.outposts, near));
+            *ctx.effect = Effect::DecreeGround { at, day };
+        } else if decree_due(ctx.think) {
+            *ctx.effect = Effect::Decree { at: choose_site(ctx.think.map, ctx.think.outposts), day };
+        }
         result
     }
 
@@ -110,6 +123,22 @@ mod tests {
         assert_eq!(rig.run(&mut task, 100), TaskResult::Success);
         let Effect::Decree { at: Some(center), day: 1 } = rig.effect else { panic!("{:?}", rig.effect) };
         assert!(crate::sim::outposts::is_clear(&rig.world.map, center, &rig.world.facilities.outposts));
+    }
+
+    #[test]
+    fn with_soldiers_to_drill_the_king_picks_their_ground_first_and_holds_it_to_once() {
+        use crate::sim::feature::FeatureKind;
+        let mut rig = hall(OUTPOST_STEEL);
+        rig.world.facilities.features.add(FeatureKind::Command, Point::new(4, 6));
+        let mut task = Task::decree(Point::new(6, 6), 0.2);
+        assert_eq!(rig.run(&mut task, 100), TaskResult::Success);
+        let Effect::DecreeGround { at: Some(center), day: 1 } = rig.effect else { panic!("{:?}", rig.effect) };
+        assert!(crate::sim::training::is_clear(&rig.world.map, center, &rig.world.facilities.outposts));
+        assert!(rig.world.facilities.training.found(&rig.world.map, center, &rig.world.facilities.outposts, 1));
+        // The ground picked, the next half hour of court is the outpost's.
+        let mut task = Task::decree(Point::new(6, 6), 0.2);
+        assert_eq!(rig.run(&mut task, 100), TaskResult::Success);
+        assert!(matches!(rig.effect, Effect::Decree { at: Some(_), day: 1 }), "{:?}", rig.effect);
     }
 
     #[test]

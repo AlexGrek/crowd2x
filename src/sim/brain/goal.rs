@@ -145,6 +145,11 @@ catalogue! {
         /// wandering, under everything else.
         Phone = 34 => GoalDef { name: "phone", emoji: "\u{1f4f1}", executor: Some(|| Box::new(goals::PhoneGoal::new())) },
         FurnishHome = 35 => GoalDef { name: "furnish home", emoji: "\u{1f33a}", executor: Some(|| Box::new(goals::FurnishHomeGoal::new())) },
+        /// Drill on the training ground the king picked: a soldier walks its
+        /// circles round the commander, who stands in the middle
+        /// ([`DrillGoal`](super::goals::DrillGoal)). The soldiers' and the
+        /// commander's job.
+        Drill = 36 => GoalDef { name: "drill", emoji: "\u{1f396}", executor: Some(|| Box::new(goals::DrillGoal::new())) },
     }
 }
 
@@ -877,7 +882,8 @@ mod tests {
                 (GoalId::Build, 0.0),
                 (GoalId::ReturnInside, 0.0),
                 (GoalId::Phone, 0.0),
-                (GoalId::FurnishHome, 0.0)
+                (GoalId::FurnishHome, 0.0),
+                (GoalId::Drill, 0.0)
             ]
         );
     }

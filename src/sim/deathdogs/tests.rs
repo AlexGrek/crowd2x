@@ -503,3 +503,38 @@ fn the_ring_is_walked_round_every_cell_once() {
     let bounds = crate::map::Bounds::new(origin, Size::new(width, height));
     assert!(cells.iter().all(|&cell| bounds.on_edge(cell)), "{cells:?}");
 }
+
+/// Soldiers cannot fight a deathdog: one drilling out on the ground (the
+/// shift moved to the night, when the packs are out) that sees one runs for
+/// the way in like anybody outside, over the drill.
+#[test]
+fn a_soldier_on_duty_who_sees_a_deathdog_runs_from_it_and_does_not_fight() {
+    use crate::sim::feature::FeatureKind;
+    use crate::sim::job::{Job, JobKind, Shift, EVERY_DAY};
+    use crate::sim::outposts::Outposts;
+    let mut map = endless(Size::new(12, 12), 7);
+    let near = Point::new(6, 2);
+    let center = crate::sim::training::choose_ground(&map, &Outposts::new(), near).unwrap();
+    let loaded = crate::map::Bounds::around([Point::new(0, 0), center]).unwrap().grown(40);
+    map.load_chunks(map.navigation_area().union(loaded));
+    let mut world = World::new(map);
+    world.clock = at(23.0);
+    world.facilities.features.add(FeatureKind::Command, near);
+    assert!(world.facilities.training.found(&world.map, center, &Outposts::new(), 1));
+    let mut soldier = needy_human(Point::new(-8, 6), 0.0, 0.0, 0.0);
+    let night = Shift::new(20, 24, EVERY_DAY).unwrap();
+    assert!(soldier.hire(Job::new(JobKind::Soldier, near, night)));
+    // Alone out there, on duty: the drill is what it wants.
+    for _ in 0..20 {
+        world.step(&mut soldier);
+    }
+    assert_eq!(soldier.brain().top_goal(), GoalId::Drill, "on duty, with nothing to fear");
+    let dog = Uid::new(EntityType::Deathdog, 13);
+    let here = soldier.center_position();
+    let _ = world.occupancy.claim(here.offset(3, 0), dog);
+    for _ in 0..20 {
+        world.step(&mut soldier);
+    }
+    assert_eq!(soldier.brain().top_goal(), GoalId::Flee, "a soldier runs like anybody else; at {here:?} now {:?} seen {:?}", soldier.center_position(), soldier.brain().memory().spotted());
+    assert!(world.wounds.iter().all(|wound| wound.by != soldier.uid()), "and bites nobody");
+}

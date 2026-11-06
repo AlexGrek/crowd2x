@@ -34,6 +34,9 @@ pub enum Search {
     /// Every outpost's flag ([`super::outposts`]), out in the wasteland, in
     /// the order the king decreed them.
     Outposts,
+    /// The soldiers' training ground's middle ([`super::training`]), out in
+    /// the wasteland, once the king has picked it.
+    TrainingGround,
 }
 
 impl Search {
@@ -51,6 +54,7 @@ impl Search {
             Search::DirtySquares => "dirty square",
             Search::BrokenObjects => "broken object",
             Search::Outposts => "outpost",
+            Search::TrainingGround => "training ground",
         }
     }
 
@@ -101,6 +105,7 @@ impl Search {
             ),
             Search::BrokenObjects => cells.extend_from_slice(state.electrical().damaged()),
             Search::Outposts => cells.extend(state.outposts().iter().map(|outpost| outpost.center())),
+            Search::TrainingGround => cells.extend(state.training().center()),
         }
     }
 }

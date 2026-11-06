@@ -93,6 +93,7 @@ impl GameState {
             history: self.facilities.history.save(),
             crops: self.facilities.fields.save(),
             outposts: Some(self.facilities.outposts.save()),
+            training: Some(self.facilities.training.save()),
             flowers: self.facilities.flowers.save(),
             dirt: self.facilities.dirt.save(),
             smell: self.facilities.smell.save(),
@@ -194,6 +195,7 @@ impl GameState {
         // `refresh_supply`, next) before the fridges', stores' and doors'
         // states are put back by cell.
         state.facilities.outposts = Outposts::restore(world.outposts.as_ref(), &mut state.map)?;
+        state.facilities.training = super::training::Training::restore(world.training.as_ref(), &state.map, &state.facilities.outposts)?;
         // The supply both ways, the features and the fridges' power, for
         // the switches as saved.
         state.refresh_supply();

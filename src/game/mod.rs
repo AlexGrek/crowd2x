@@ -59,6 +59,7 @@ pub mod follow;
 pub mod croppanel;
 pub mod crops;
 pub mod outposts;
+pub mod training;
 mod flowers;
 pub mod dirt;
 pub mod smell;
@@ -136,7 +137,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((speech::SpeechPlugin, economy::EconomyPlugin, find::FindPlugin, news::NewsPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin))
+            .add_plugins((speech::SpeechPlugin, economy::EconomyPlugin, find::FindPlugin, news::NewsPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin, training::TrainingPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

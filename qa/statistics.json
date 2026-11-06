@@ -51,6 +51,15 @@
     { "expect_text": "lying 0  carried 0  cremated 0" },
     { "shot": "the statistics menu" },
 
+    { "note": "each tab shows its page" },
+    { "press": "stock" },
+    { "shot": "the statistics stock tab" },
+    { "press": "jobs" },
+    { "shot": "the statistics jobs tab" },
+    { "press": "economy" },
+    { "shot": "the statistics economy tab" },
+    { "press": "overview" },
+
     { "note": "half a day on, the graphs page draws a sample an hour: 08:00 to 19:00, twelve of them" },
     { "tick": 22000 },
     { "press": "graphs" },
@@ -58,7 +67,7 @@
     { "shot": "the statistics graphs" },
     { "expect_text": "12 hours" },
     { "expect_text": "personal money" },
-    { "press": "numbers" },
+    { "press": "overview" },
     { "expect_text": "humans 2" },
 
     { "note": "esc closes the menu and stays in the game; a second esc leaves it" },

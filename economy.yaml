@@ -46,6 +46,8 @@ wages:
   accountant: 60              # mid
   builder: 150                # top: paid only for days it builds, care otherwise
   propagandist: 60            # mid
+  soldier: 30                 # lowest: drilled for little
+  commander: 50               # a little over mid-low
 
 # What a thing costs taken from a fridge, every item by name
 # (`src/sim/item.rs`). Only a fridge sells anything; the rest are never

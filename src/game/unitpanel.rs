@@ -770,7 +770,11 @@ fn employ_label(entity: &dyn GameEntity) -> &'static str {
 /// getting ready for a trip out (`getting ready: eat`), away from it for
 /// something more pressing, or off.
 fn job_and_cash(sim: &Sim, entity: &dyn GameEntity) -> String {
-    let mut text = job_block_for(entity, sim.0.clock(), sim.0.outposts().has_work_for(entity.uid()));
+    let has_work = match entity.job() {
+        Some(job) if job.kind.drills() => sim.0.training().center().is_some(),
+        _ => sim.0.outposts().has_work_for(entity.uid()),
+    };
+    let mut text = job_block_for(entity, sim.0.clock(), has_work);
     let economy = sim.0.economy();
     if let Some(account) = economy.account(entity.uid()) {
         text.push_str(&format!("\ncash    {}", account.cash));

@@ -286,9 +286,14 @@ on behind it** and the text is rebuilt every frame the menu is open and written 
 changed: one walk of the arena per frame, and none while it is shut. `describe` makes the text
 (unit-tested); `qa/statistics.json` opens, reads and closes it.
 
-**The graphs page** (`game/graphs.rs`): `numbers` / `graphs` / `close` sit in one row under the
-menu (`Page(bool)` on the buttons and on the two page nodes, `OnPage` resource, reset to numbers
-on open). `graphs` shows four charts two by two, one measure each on its own scale (never two on
+**Tabs**: the menu has five (`Tab`, `OnTab`, reset to `overview` on open) in a row of buttons pinned
+at the top under the HUD corners, so the row never moves with a page's length; the open tab's label
+is gold: `overview` (alive, dead), `stock` (sites, fields, outposts, reserve and dispatch), `jobs`
+(workers per job), `economy` and `graphs`, then `close`. Every numbers tab's text is written each frame
+the menu is open (not only the open one), so a QA `expect_text` finds any of them whichever tab is
+showing; `describe` is all four joined, for the unit tests.
+
+**The graphs tab** (`game/graphs.rs`) `graphs` shows four charts two by two, one measure each on its own scale (never two on
 one axis): the living humans' mean **mental health** and mean **health** (0-100), the district's
 **budget** and **personal money** (all living accounts' cash summed; from the week's lowest to
 highest, a dollar apart at least, a zero line when it crosses zero). Each is a 140x36 picture at

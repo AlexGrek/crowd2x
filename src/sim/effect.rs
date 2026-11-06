@@ -152,6 +152,11 @@ pub enum Effect {
     /// and its plan is laid out ([`super::outposts::Outposts::found`]) — or,
     /// `None`, it found nowhere, and does not look again that day.
     Decree { at: Option<Point>, day: u32 },
+    /// The king has picked the soldiers' training ground, on `day`
+    /// (`brain::tasks::Decree`, from the throne): its middle is marked at `at`
+    /// ([`super::training::Training::found`]) — or, `None`, it found nowhere,
+    /// and does not look again that day.
+    DecreeGround { at: Option<Point>, day: u32 },
     /// The propagandist's article written (`brain::tasks::WriteNews`, at the
     /// propaganda computer): the oldest story waiting goes up on everybody's
     /// phone at `when` ([`super::news::News::publish`]) — none, if another
@@ -402,6 +407,7 @@ pub(crate) fn apply(
             log.unit(uid, format!("{uid} went back into the wasteland"));
         }
         Effect::Decree { at, day } => decree(entity, map, facilities, log, at, day),
+        Effect::DecreeGround { at, day } => decree_ground(entity, map, facilities, log, at, day),
         Effect::Claim { at } => claim(entity, facilities, log, at),
         Effect::Lay { at } => lay(entity, map, facilities, occupancy, log, at),
         Effect::Construct { at, seconds } => construct(entity, map, facilities, log, at, seconds),
@@ -432,6 +438,25 @@ fn decree(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, log: 
         None => {
             facilities.outposts.found_nowhere(day);
             log.important("the king found nowhere to build an outpost".to_string());
+        }
+    }
+}
+
+/// [`Effect::DecreeGround`]: the soldiers' training ground marked where the
+/// king picked it, or the day it found nowhere remembered. From the king alone.
+fn decree_ground(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, log: &Log, at: Option<Point>, day: u32) {
+    if entity.job().is_none_or(|job| job.kind != JobKind::King) {
+        return;
+    }
+    let uid = entity.uid();
+    match at {
+        Some(center) if facilities.training.found(map, center, &facilities.outposts, day) => {
+            log.important(format!("the king picked a training ground for the soldiers at {}, {}", center.x, center.y));
+        }
+        Some(center) => log.unit(uid, format!("{uid} could not mark a training ground at {}, {}", center.x, center.y)),
+        None => {
+            facilities.training.found_nowhere(day);
+            log.important("the king found nowhere to train the soldiers".to_string());
         }
     }
 }

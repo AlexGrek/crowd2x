@@ -3,9 +3,9 @@
 use super::PixelZoom;
 use bevy::prelude::*;
 
-const CLOSE_SECONDS: f32 = 0.14;
-const BLACK_SECONDS: f32 = 0.045;
-const OPEN_SECONDS: f32 = 0.20;
+const CLOSE_SECONDS: f32 = 0.07;
+const BLACK_SECONDS: f32 = 0.03;
+const OPEN_SECONDS: f32 = 0.10;
 
 #[derive(Clone, Copy)]
 enum Phase {

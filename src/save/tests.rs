@@ -1150,6 +1150,43 @@ fn an_outpost_saved_half_built_carries_on_exactly() {
     );
 }
 
+/// A district saved while its soldiers drill on the ground the king picked —
+/// the commander in the middle, a soldier on its lap, a drill task and the
+/// ground itself in the save — comes back with the ground where it was and
+/// carries on exactly.
+#[test]
+fn a_district_saved_with_its_soldiers_drilling_carries_on_exactly() {
+    let district = crate::map::district::generate(7);
+    let mut state = GameState::new(district.map.clone(), 7);
+    state.spawn_from_spawners();
+    let of = |state: &GameState, kind: crate::sim::JobKind| -> Vec<Uid> {
+        state.entities().iter().filter(|e| e.job().is_some_and(|job| job.kind == kind)).map(|e| e.uid()).collect()
+    };
+    let (soldiers, commander, king) = (of(&state, crate::sim::JobKind::Soldier), of(&state, crate::sim::JobKind::Commander), of(&state, crate::sim::JobKind::King));
+    let mut input = Input::new();
+    for &uid in soldiers.iter().chain(&commander).chain(&king) {
+        for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy, ProcessId::Mind] {
+            input.set_process(uid, process, false);
+        }
+    }
+    process_game_state(&mut state, DT, &input);
+    let mut ticks = 0;
+    let drilling = |state: &GameState| {
+        let Some(center) = state.training().center() else { return false };
+        let on_the_lap = |uid: &Uid| state.entities().get(*uid).unwrap().body().center_position().chebyshev_distance(center) <= crate::sim::training::RADIUS + 1;
+        soldiers.iter().filter(|uid| on_the_lap(uid)).count() >= 3 && commander.iter().any(on_the_lap)
+    };
+    while !drilling(&state) {
+        run(&mut state, 10);
+        ticks += 10;
+        assert!(ticks < 10 * 1800, "nobody drilling by {}", state.clock());
+    }
+    let center = state.training().center().unwrap();
+    let copy = side_by_side(&mut state, 3 * 1800, |_, _| Input::new());
+    assert_eq!(copy.training(), state.training());
+    assert_eq!(copy.training().center(), Some(center), "the ground is where it was");
+}
+
 #[test]
 fn a_farm_saved_mid_week_carries_on_exactly() {
     let (mut state, farmer) = crate::sim::testing::farm(5);

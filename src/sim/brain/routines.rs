@@ -893,7 +893,7 @@ impl RoutineExecutor for ReadyRoutine {
             // about it.
             self.ready = false;
         }
-        if self.ready || (self.pending == 0 && !carrying && !called_away && here.manhattan_distance(job.workplace) > 1) {
+        if self.ready || (self.pending == 0 && !carrying && !called_away && !job.kind.drills() && here.manhattan_distance(job.workplace) > 1) {
             // Ready, and on the way out; or not at the start of a trip yet —
             // beside the bin, where the job's goal goes first, back in with
             // a trip half done, or called away by a need.

@@ -235,6 +235,7 @@ fn open(
         ("dirty squares".to_string(), Choice::Search(Search::DirtySquares)),
         ("broken objects".to_string(), Choice::Search(Search::BrokenObjects)),
         ("outposts".to_string(), Choice::Search(Search::Outposts)),
+        ("training ground".to_string(), Choice::Search(Search::TrainingGround)),
     ];
     let buildings: Vec<(String, Choice)> = LANDMARKS
         .iter()
@@ -346,9 +347,12 @@ fn choose(
             finding.scan_due = 0.0;
             // An outpost is out in the wasteland, off any screen of the
             // district: the camera goes to the newest's flag.
-            if search == Search::Outposts
-                && let Some(flag) = sim.as_ref().and_then(|sim| sim.0.outposts().iter().last().map(|outpost| outpost.center()))
-            {
+            let far_off = match search {
+                Search::Outposts => sim.as_ref().and_then(|sim| sim.0.outposts().iter().last().map(|outpost| outpost.center())),
+                Search::TrainingGround => sim.as_ref().and_then(|sim| sim.0.training().center()),
+                _ => None,
+            };
+            if let Some(flag) = far_off {
                 follow.target = None;
                 for mut pan in &mut cameras {
                     pan.0 = cell_centre(IVec2::new(flag.x, flag.y));

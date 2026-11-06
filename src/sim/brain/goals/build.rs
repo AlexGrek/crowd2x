@@ -70,7 +70,7 @@ const IN_BY: f32 = SUNSET - 0.5;
 /// The cells of the way home a builder counts on walking in a world hour: at
 /// the slowest pace anybody has, a tenth off for the bends in the route — so
 /// it turns for home in time whoever it is.
-const HOMEWARD_CELLS_AN_HOUR: f32 = HUMAN_SPEED * (1.0 - PACE_RANGE) * HOUR / TIME_SCALE / 1.1;
+pub(super) const HOMEWARD_CELLS_AN_HOUR: f32 = HUMAN_SPEED * (1.0 - PACE_RANGE) * HOUR / TIME_SCALE / 1.1;
 
 /// The hour a builder `home` cells from its yard stops building for the day:
 /// the end of its shift, or early enough to walk in by [`IN_BY`] — whichever
@@ -84,7 +84,17 @@ pub fn knock_off(shift_end: u8, home: u32) -> f32 {
 /// worked only on demand — there is a tile for it, its own or one nobody has.
 /// What `WorkRoutine` and `ReadyRoutine` ask of an on-demand job.
 pub fn on_duty(job: &Job, uid: Uid, think: &Think<'_>) -> bool {
-    job.is_due(think.clock) && (!job.kind.is_on_demand() || think.outposts.has_work_for(uid))
+    job.is_due(think.clock) && (!job.kind.is_on_demand() || has_work(job, uid, think))
+}
+
+/// Whether there is work for an on-demand `job` now: a tile to build for a
+/// builder, a ground to drill on for a soldier or its commander.
+pub fn has_work(job: &Job, uid: Uid, think: &Think<'_>) -> bool {
+    if job.kind.drills() {
+        think.training.center().is_some()
+    } else {
+        think.outposts.has_work_for(uid)
+    }
 }
 
 /// Build the outpost going up. See the [module docs](self).

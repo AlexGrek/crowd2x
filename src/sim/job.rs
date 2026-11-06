@@ -704,10 +704,60 @@ catalogue! {
             noble: true,
             on_demand: false,
         },
+        /// Trains on the soldiers' ground the king picked out in the wasteland
+        /// ([`super::training`]): walks in circles round the commander, seven
+        /// hours a day, every day but Sunday, and is paid little for it.
+        /// **Drills only on demand** — once there is a ground to drill on —
+        /// and by day; gets ready, wherever it is, before every trip out, and goes
+        /// straight to the ground — there is no barracks. Cannot fight a deathdog: it runs, as
+        /// anybody outside does (`deathdogs`).
+        Soldier = 23 => JobDef {
+            name: "soldier",
+            article: "a soldier",
+            workplace: FeatureKind::Ranks,
+            goal: GoalId::Drill,
+            commute: SOLDIER_COMMUTE,
+            shifts: &[SOLDIER_HOURS],
+            uniform: "uniform soldier",
+            now: |_, _| "drilling",
+            goes_out_for: Some(ItemKind::Food),
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
+            on_demand: true,
+        },
+        /// The soldiers' commander: stands in the middle of the training
+        /// ground while they walk their circles round it, the same hours.
+        /// One, hired after the soldiers; in camouflage like them.
+        Commander = 24 => JobDef {
+            name: "commander",
+            article: "the commander",
+            workplace: FeatureKind::Command,
+            goal: GoalId::Drill,
+            commute: SOLDIER_COMMUTE,
+            shifts: &[SOLDIER_HOURS],
+            uniform: "uniform commander",
+            now: |_, _| "commanding the drill",
+            goes_out_for: Some(ItemKind::Food),
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
+            on_demand: true,
+        },
     }
 }
 
 impl JobKind {
+    /// Whether it is drilled on the training ground: the soldiers' and their
+    /// commander's, who have work once the king has picked it.
+    pub const fn drills(self) -> bool {
+        matches!(self, JobKind::Soldier | JobKind::Commander)
+    }
+
     pub const fn is_noble_role(self) -> bool { self.def().noble }
 
     pub const fn permits_class(self, noble: bool, nobles_alive: bool) -> bool {
@@ -818,6 +868,15 @@ pub const BUILDER_HOURS: Shift = Shift { start: 8, end: 18, days: EVERY_DAY };
 /// How long before its shift a builder sets off: an hour, so it is at its
 /// yard and ready to go out by eight — and not out before the sun is up.
 pub const BUILDER_COMMUTE: f32 = HOUR;
+
+/// The soldiers' and their commander's seven hours: eight to three, every day
+/// but Sunday. Home before dark whatever the walk.
+pub const SOLDIER_HOURS: Shift = Shift { start: 8, end: 15, days: MONDAY_TO_SATURDAY };
+
+/// How long before the drill a soldier sets off: three hours, up at five. A
+/// soldier lives anywhere in the district and the ground is twenty to thirty
+/// cells past its wall.
+pub const SOLDIER_COMMUTE: f32 = 3.0 * HOUR;
 
 /// Every day but Sunday, as a [`Shift::days`] mask.
 pub const MONDAY_TO_SATURDAY: u8 = 0b011_1111;
@@ -1439,7 +1498,9 @@ mod tests {
                 JobKind::StoreCourier,
                 JobKind::SpecialAgent,
                 JobKind::Builder,
-                JobKind::Propagandist
+                JobKind::Propagandist,
+                JobKind::Soldier,
+                JobKind::Commander
             ],
             "the office first, new professions last"
         );
@@ -1614,11 +1675,41 @@ mod tests {
         assert_eq!(kind.goes_out_for(), Some(ItemKind::Steel), "got ready before every trip out");
         assert_eq!(kind.uniform().name(), "uniform builder");
         let on_demand: Vec<JobKind> = JobKind::ALL.into_iter().filter(|job| job.is_on_demand()).collect();
-        assert_eq!(on_demand, [JobKind::Builder]);
-        assert_eq!(JobKind::ALL.into_iter().filter(|job| !job.is_noble_role()).last(), Some(kind), "hired last");
+        assert_eq!(on_demand, [JobKind::Builder, JobKind::Soldier, JobKind::Commander]);
+        let hired = |of: JobKind| JobKind::ALL.into_iter().position(|job| job == of);
+        assert!(hired(kind) > hired(JobKind::Cleaner) && hired(kind) < hired(JobKind::Soldier), "hired late, before the soldiers");
         let job = Job::new(kind, Point::new(0, 0), BUILDER_HOURS);
         assert!(job.is_due(at(1, 7.0)) && !job.is_due(at(1, 6.9)), "sets off at seven");
         assert!(job.is_due(at(7, 17.9)) && !job.is_due(at(7, 18.0)), "every day, till six");
+    }
+
+    /// Soldiers drill seven hours a day, every day but Sunday, on demand —
+    /// once there is a ground — straight from home, for little; their
+    /// commander the same hours from its own post. Hired last of all.
+    #[test]
+    fn soldiers_drill_seven_hours_a_day_but_sundays_and_their_commander_is_hired_after_them() {
+        assert_eq!((JobKind::Soldier.number(), JobKind::Commander.number()), (23, 24));
+        assert_eq!(JobKind::ALL.last(), Some(&JobKind::Commander));
+        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 2], JobKind::Soldier);
+        assert_eq!(SOLDIER_HOURS, Shift::new(8, 15, MONDAY_TO_SATURDAY).unwrap());
+        assert_eq!(SOLDIER_HOURS.end() - SOLDIER_HOURS.start(), 7, "seven hours");
+        assert_eq!(SOLDIER_HOURS.days(), "Mon-Sat");
+        for kind in [JobKind::Soldier, JobKind::Commander] {
+            assert!(kind.drills() && kind.is_on_demand());
+            assert_eq!(kind.goal(), GoalId::Drill);
+            assert_eq!(kind.shifts(), [SOLDIER_HOURS]);
+            assert_eq!(kind.goes_out_for(), Some(ItemKind::Food), "got ready before every trip out");
+            assert!(!kind.is_noble_role());
+        }
+        assert_eq!((JobKind::Soldier.workplace(), JobKind::Commander.workplace()), (FeatureKind::Ranks, FeatureKind::Command), "no barracks: a cell on the roll");
+        assert_eq!(JobKind::Soldier.uniform().name(), "uniform soldier");
+        assert_eq!(JobKind::Commander.uniform().name(), "uniform commander");
+        assert!(JobKind::ALL.into_iter().filter(|kind| kind.drills()).count() == 2);
+        let job = Job::new(JobKind::Soldier, Point::new(0, 0), SOLDIER_HOURS);
+        assert!(job.is_due(at(1, 5.1)) && !job.is_due(at(1, 4.9)), "up at five, three hours before");
+        assert!(job.is_due(at(6, 14.9)) && !job.is_due(at(6, 15.0)), "till three");
+        assert!(!job.is_due(at(7, 10.0)), "Sunday off");
+        assert!(!job.is_due(at(6, 20.0)) && !job.is_due(at(7, 5.1)), "nobody sets off for Sunday");
     }
 
     /// The propagandist: the propaganda computer in the palace, four hours a
@@ -1635,7 +1726,7 @@ mod tests {
         assert!(kind.is_noble_role());
         assert_eq!(kind.uniform().name(), "uniform propagandist");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("writing the news", "on the way to the palace"));
-        assert_eq!(JobKind::ALL.last(), Some(&kind), "hired last");
+        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 3], kind, "hired just before the soldiers");
         let job = Job::new(kind, Point::new(0, 0), PROPAGANDA_HOURS);
         assert!(job.is_due(at(7, 10.0)) && !job.is_due(at(7, 9.9)), "sets off two hours before, Sunday too");
         assert!(job.is_due(at(3, 15.9)) && !job.is_due(at(3, 16.0)), "till four");

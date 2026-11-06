@@ -22,6 +22,7 @@ use super::fields::Fields;
 use super::fridge::Fridges;
 use super::homes::Homes;
 use super::outposts::{Fixture, Outposts};
+use super::training::Training;
 use super::job::Workplaces;
 use super::panics::Panics;
 use super::playzone::Playzones;
@@ -144,6 +145,9 @@ pub struct Facilities {
     /// built through `Effect::Claim`, `Lay` and `Construct`, which build the
     /// map with it. Saved.
     pub outposts: Outposts,
+    /// The soldiers' ground the king picked, if he has ([`super::training`]):
+    /// founded by `Effect::DecreeGround`. Saved.
+    pub training: Training,
 }
 
 impl Facilities {
@@ -189,6 +193,7 @@ impl Facilities {
             leaving: Vec::new(),
             vacancies: Vec::new(),
             outposts: Outposts::new(),
+            training: Training::new(),
         }
     }
 

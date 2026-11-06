@@ -17,6 +17,8 @@ pub use fish::FishGoal;
 pub use hospital::{RecoverGoal, CareGoal};
 pub mod build;
 pub use build::BuildGoal;
+pub mod drill;
+pub use drill::DrillGoal;
 pub mod bury;
 pub mod chat;
 pub mod clean;

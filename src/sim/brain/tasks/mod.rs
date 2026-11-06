@@ -64,11 +64,13 @@ pub use fetch::Fetch;
 pub mod claim;
 pub mod construct;
 pub mod decree;
+pub mod drill;
 pub mod write_news;
 pub mod lay;
 pub use claim::Claim;
 pub use construct::Construct;
 pub use decree::{Decree, DECREE_SECONDS};
+pub use drill::Drill;
 pub use write_news::{WriteNews, NEWS_SECONDS};
 pub use lay::{Lay, LAY_SECONDS};
 pub mod repair_box;
@@ -160,6 +162,7 @@ tasks! {
     Phone,
     BuyVase,
     PlaceVase,
+    Drill,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

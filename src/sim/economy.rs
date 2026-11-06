@@ -940,6 +940,10 @@ mod tests {
                 150
             } else if job == JobKind::King {
                 100
+            } else if job == JobKind::Soldier {
+                30
+            } else if job == JobKind::Commander {
+                50
             } else if mid.contains(&job) {
                 60
             } else {

@@ -169,6 +169,7 @@ pub mod light_switch;
 pub mod log;
 pub mod occupancy;
 pub mod outposts;
+pub mod training;
 pub mod panics;
 pub mod path;
 pub mod pets;
@@ -990,6 +991,11 @@ impl GameState {
     /// [`outposts`].
     pub fn outposts(&self) -> &outposts::Outposts {
         &self.facilities.outposts
+    }
+
+    /// The soldiers' ground the king picked. See [`training`].
+    pub fn training(&self) -> &training::Training {
+        &self.facilities.training
     }
 
     /// Put every piece of outposts' furniture built into the world's
@@ -4544,7 +4550,8 @@ mod tests {
             let mut store_hauling = 0;
             let mut agents = 0;
             let mut building = 0;
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists;
+            let (mut soldiering, mut commanding) = (0, 0);
+            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists + training::SOLDIERS + training::COMMANDERS;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4651,6 +4658,16 @@ mod tests {
                         assert!({ let w = district.the(crate::map::district::warehouse::NAME); crate::map::district::Rect::new(w.x - 6, w.y - 6, w.w + 12, w.h + 12).contains(job.workplace) }, "seed {seed}: a builder's yard by the warehouse");
                         assert_eq!(job.shift, job::BUILDER_HOURS);
                     }
+                    JobKind::Soldier => {
+                        soldiering += 1;
+                        assert!(state.features().has(feature::FeatureKind::Ranks, job.workplace));
+                        assert_eq!(job.shift, job::SOLDIER_HOURS);
+                    }
+                    JobKind::Commander => {
+                        commanding += 1;
+                        assert!(state.features().has(feature::FeatureKind::Command, job.workplace));
+                        assert_eq!(job.shift, job::SOLDIER_HOURS);
+                    }
                     JobKind::Propagandist => {
                         propagandizing += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: the propagandist outside the palace");
@@ -4664,6 +4681,7 @@ mod tests {
             assert_eq!(decorating, 3);
             assert_eq!(agents, 2, "seed {seed}: exactly two special agents");
             assert_eq!(building, outposts::BUILDERS, "seed {seed}: the builders");
+            assert_eq!((soldiering, commanding), (training::SOLDIERS, training::COMMANDERS), "seed {seed}: the soldiers and their commander");
             assert_eq!(propagandizing, propagandists, "seed {seed}: one propagandist");
             assert_eq!((clerks, collectors, cremating), (desks, bins, undertakers), "seed {seed}");
             assert_eq!((smelting, hauling), (smelters, couriers), "seed {seed}: the steel factory's");
@@ -4682,7 +4700,7 @@ mod tests {
             assert_eq!(shopkeeping, [0, 6, 12, 18], "seed {seed}: the store's shopkeepers");
             assert_eq!(store_hauling, store_couriers, "seed {seed}: the store's courier");
             let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
-            assert_eq!(last, Some(JobKind::Builder), "seed {seed}: builders hired last");
+            assert_eq!(last, Some(JobKind::Commander), "seed {seed}: the commander hired last");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");
@@ -4898,6 +4916,65 @@ mod tests {
             assert_eq!(state.fields().of(bin).count(), fields::PLOTS, "{farmer}'s field");
         }
 
+    }
+
+    /// On its first Monday a district's king picks the soldiers' ground, twenty
+    /// to thirty cells past the wall, from the throne, and by the afternoon the
+    /// commander stands in the middle of it while the soldiers — their needs
+    /// off — walk their circles round it.
+    #[test]
+    fn a_district_s_king_picks_a_training_ground_and_the_soldiers_drill_on_it_the_same_monday() {
+        let district = crate::map::district::generate(7);
+        let mut state = GameState::new(district.map.clone(), 7);
+        state.spawn_from_spawners();
+        let mut input = Input::new();
+        let of = |state: &GameState, kind: &[JobKind]| -> Vec<Uid> {
+            state.entities().iter().filter(|e| e.job().is_some_and(|job| kind.contains(&job.kind))).map(|e| e.uid()).collect()
+        };
+        let soldiers = of(&state, &[JobKind::Soldier]);
+        let commander = of(&state, &[JobKind::Commander]);
+        let king = of(&state, &[JobKind::King]);
+        assert_eq!((soldiers.len(), commander.len(), king.len()), (training::SOLDIERS, 1, 1));
+        for &uid in soldiers.iter().chain(&commander).chain(&king) {
+            for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy, ProcessId::Mind] {
+                input.set_process(uid, process, false);
+            }
+        }
+        process_game_state(&mut state, 1.0 / 60.0, &input);
+        assert!(state.training().center().is_none(), "nothing picked before the king has held court");
+        let mut lines: Vec<String> = Vec::new();
+        let (mut drilling, mut standing) = (std::collections::BTreeSet::new(), false);
+        let mut ground = None;
+        for _ in 0..8 * 1800 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if let Some(center) = state.training().center() {
+                ground = Some(center);
+                let near = training::footprint(center).grown(3);
+                for &uid in &soldiers {
+                    if near.contains(state.entities().get(uid).unwrap().body().center_position()) {
+                        drilling.insert(uid);
+                    }
+                }
+                standing |= state.entities().get(commander[0]).unwrap().body().center_position() == center;
+            }
+            if drilling.len() == soldiers.len() && standing && lines.iter().filter(|line| line.contains("drilled a lap")).count() >= 5 {
+                break;
+            }
+        }
+        let center = ground.unwrap_or_else(|| panic!("the king picked no ground by {}", state.clock()));
+        assert!(lines.iter().any(|line| line.contains("the king picked a training ground")), "{:?}", &lines[lines.len().saturating_sub(20)..]);
+        assert!(training::is_clear(&state.map, center, state.outposts()));
+        let (near, far) = {
+            let site = state.map.site();
+            let ground = training::footprint(center);
+            let corners = [ground.origin, ground.max(), Point::new(ground.origin.x, ground.max().y), Point::new(ground.max().x, ground.origin.y)];
+            (corners.iter().map(|&c| site.chebyshev_distance(c)).min().unwrap(), corners.iter().map(|&c| site.chebyshev_distance(c)).max().unwrap())
+        };
+        assert!(near >= 20 - 1 && far <= 30 + 1, "twenty to thirty cells from the wall: {near}..{far}");
+        assert_eq!(drilling.len(), soldiers.len(), "every soldier came out to drill by {}", state.clock());
+        assert!(standing, "the commander stood in the middle");
+        assert!(lines.iter().filter(|line| line.contains("drilled a lap")).count() >= 5, "laps walked");
     }
 
     /// A district's cleaners, their needs off, mop up the stains put on its

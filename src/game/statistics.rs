@@ -25,7 +25,7 @@ use crate::sim::{GameState, Statistics};
 use crate::state::AppState;
 use crate::ui::keyboard::MODAL_Z;
 use crate::ui::nav::{Activated, Focus, Focusable, NavSystems, Scope};
-use crate::ui::{button, hover_highlight, label, plain_button, FONT_BODY, FONT_TITLE, OVERLAY, TEXT};
+use crate::ui::{button, hover_highlight, label, plain_button, FONT_BODY, OVERLAY, TEXT, TEXT_ACCENT};
 
 use super::actors::Sim;
 use super::graphs::{self, Chart, ChartTitle};
@@ -47,29 +47,63 @@ pub struct OpenStatistics;
 #[derive(Component)]
 struct CloseStatistics;
 
-/// The menu's text, rewritten as the world changes.
+/// The menu's tabs: four of numbers and one of graphs.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Tab {
+    /// Who is alive and who is dead.
+    #[default]
+    Overview,
+    /// What the warehouse, the factory, the farm and the reserve hold; the fields and the outposts.
+    Stock,
+    /// Workers per job against its posts.
+    Jobs,
+    /// The budget, the books, the cash.
+    Economy,
+    /// The last week, an hour a point.
+    Graphs,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 5] = [Tab::Overview, Tab::Stock, Tab::Jobs, Tab::Economy, Tab::Graphs];
+
+    /// The tab button's label.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Overview => "overview",
+            Tab::Stock => "stock",
+            Tab::Jobs => "jobs",
+            Tab::Economy => "economy",
+            Tab::Graphs => "graphs",
+        }
+    }
+}
+
+/// The text of one numbers tab, rewritten as the world changes.
 #[derive(Component)]
-struct StatisticsText(bool);
+struct StatisticsText(Tab);
 
-/// The menu's two pages: the numbers (`false`) and the graphs (`true`), and
-/// the buttons that turn to each.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-struct Page(bool);
+/// A tab's button.
+#[derive(Component, Clone, Copy)]
+struct TabButton(Tab);
 
-/// Which page the open menu is on.
+/// A tab's page, shown while it is the open one.
+#[derive(Component, Clone, Copy)]
+struct TabPage(Tab);
+
+/// Which tab the open menu is on.
 #[derive(Resource, Default)]
-struct OnPage(bool);
+struct OnTab(Tab);
 
 pub struct StatisticsPlugin;
 
 impl Plugin for StatisticsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StatisticsMenu>()
-            .init_resource::<OnPage>()
+            .init_resource::<OnTab>()
             .add_systems(OnExit(AppState::Game), forget_the_menu)
             .add_systems(
                 Update,
-                (open, close, turn_page, hover_highlight::<OpenStatistics>, update_text, update_graphs)
+                (open, close, turn_tab, mark_tab, hover_highlight::<OpenStatistics>, update_text, update_graphs)
                     .chain()
                     .after(NavSystems)
                     .run_if(in_state(AppState::Game)),
@@ -99,7 +133,7 @@ fn open(
     mut menu: ResMut<StatisticsMenu>,
     mut scope: ResMut<Scope>,
     mut focus: ResMut<Focus>,
-    mut page: ResMut<OnPage>,
+    mut tab: ResMut<OnTab>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let pressed = clicked.iter().any(|interaction| *interaction == Interaction::Pressed)
@@ -117,59 +151,87 @@ fn open(
                 height: percent(100),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                // The tabs at the top, under the corners' two rows of buttons,
+                // so they stay where they are however long a page runs.
+                justify_content: JustifyContent::FlexStart,
+                padding: UiRect::top(px(40)),
                 row_gap: px(4),
                 ..default()
             },
             BackgroundColor(OVERLAY),
             GlobalZIndex(MODAL_Z),
             DespawnOnExit(AppState::Game),
-            children![
-                label("statistics", FONT_TITLE, TEXT),
-                (Page(false), Node { column_gap: px(6), ..default() }, children![
-                    (StatisticsText(false), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
-                    (StatisticsText(true), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT)),
-                ]),
-            ],
         ))
         .id();
-    let charts = commands
-        .spawn((Page(true), Node { display: Display::None, ..default() }, ChildOf(overlay)))
-        .id();
-    graphs::spawn(&mut commands, &mut images, charts);
-    let row = commands.spawn((Node { column_gap: px(6), ..default() }, ChildOf(overlay))).id();
-    for (column, turn_to) in [false, true].into_iter().enumerate() {
-        let text = if turn_to { "graphs" } else { "numbers" };
+    let row = commands.spawn((Node { column_gap: px(4), ..default() }, ChildOf(overlay))).id();
+    // One page a tab, only the first shown; spawned after the row, so under it.
+    for tab in Tab::ALL {
+        let page = commands
+            .spawn((
+                TabPage(tab),
+                Node { display: if tab == Tab::Overview { Display::Flex } else { Display::None }, ..default() },
+                ChildOf(overlay),
+            ))
+            .id();
+        if tab == Tab::Graphs {
+            graphs::spawn(&mut commands, &mut images, page);
+        } else {
+            commands.spawn((StatisticsText(tab), label(String::new(), FONT_BODY * 2.0 / 3.0, TEXT), ChildOf(page)));
+        }
+    }
+    for (column, tab) in Tab::ALL.into_iter().enumerate() {
         commands.spawn((
-            Page(turn_to),
-            button(text, Focusable::new(column as i32, 0).in_scope(STATISTICS_MENU), px(40)),
+            TabButton(tab),
+            button(tab.name(), Focusable::new(column as i32, 0).in_scope(STATISTICS_MENU), px(40)),
             ChildOf(row),
         ));
     }
     let close = commands
         .spawn((
             CloseStatistics,
-            button("close", Focusable::new(2, 0).in_scope(STATISTICS_MENU), px(40)),
+            button("close", Focusable::new(Tab::ALL.len() as i32, 0).in_scope(STATISTICS_MENU), px(32)),
             ChildOf(row),
         ))
         .id();
     focus.0 = Some(close);
     *scope = Scope(STATISTICS_MENU);
     menu.0 = Some(overlay);
-    page.0 = false;
+    tab.0 = Tab::Overview;
 }
 
-/// `numbers` or `graphs` pressed: show that page and hide the other.
-fn turn_page(
+/// A tab's button pressed: show its page and hide the rest.
+fn turn_tab(
     mut activated: MessageReader<Activated>,
-    buttons: Query<&Page, With<Button>>,
-    mut pages: Query<(&Page, &mut Node), Without<Button>>,
-    mut page: ResMut<OnPage>,
+    buttons: Query<&TabButton>,
+    mut pages: Query<(&TabPage, &mut Node)>,
+    mut tab: ResMut<OnTab>,
 ) {
     let Some(turn_to) = activated.read().filter_map(|Activated(entity)| buttons.get(*entity).ok()).last() else { return };
-    page.0 = turn_to.0;
+    tab.0 = turn_to.0;
     for (which, mut node) in &mut pages {
-        node.display = if which.0 == page.0 { Display::Flex } else { Display::None };
+        node.display = if which.0 == tab.0 { Display::Flex } else { Display::None };
+    }
+}
+
+/// The open tab's label in the accent colour, the others plain.
+fn mark_tab(
+    menu: Res<StatisticsMenu>,
+    tab: Res<OnTab>,
+    buttons: Query<(&TabButton, &Children)>,
+    mut labels: Query<&mut TextColor>,
+) {
+    if menu.0.is_none() {
+        return;
+    }
+    for (button, children) in &buttons {
+        let wanted = if button.0 == tab.0 { TEXT_ACCENT } else { TEXT };
+        for child in children.iter() {
+            if let Ok(mut colour) = labels.get_mut(child) {
+                if colour.0 != wanted {
+                    colour.0 = wanted;
+                }
+            }
+        }
     }
 }
 
@@ -197,99 +259,131 @@ pub(super) fn close_statistics(commands: &mut Commands, menu: &mut StatisticsMen
 /// Keep the graphs up with the hours, while they are shown.
 fn update_graphs(
     menu: Res<StatisticsMenu>,
-    page: Res<OnPage>,
+    tab: Res<OnTab>,
     sim: Option<Res<Sim>>,
     mut images: ResMut<Assets<Image>>,
     mut charts: Query<&mut Chart>,
     mut titles: Query<(&ChartTitle, &mut Text)>,
 ) {
-    if menu.0.is_none() || !page.0 {
+    if menu.0.is_none() || tab.0 != Tab::Graphs {
         return;
     }
     let Some(sim) = sim else { return };
     graphs::draw(&sim.0, &mut images, &mut charts, &mut titles);
 }
 
-/// Keep the menu saying what is true, while it is open on the numbers.
+/// Keep the menu saying what is true, while it is open on a tab of numbers.
+/// Every numbers tab is written, not only the open one: one walk of the
+/// arena either way, and a tab turned to is never a frame behind.
 fn update_text(
     menu: Res<StatisticsMenu>,
-    page: Res<OnPage>,
+    tab: Res<OnTab>,
     sim: Option<Res<Sim>>,
     mut texts: Query<(&StatisticsText, &mut Text)>,
 ) {
-    if menu.0.is_none() || page.0 {
+    if menu.0.is_none() || tab.0 == Tab::Graphs {
         return;
     }
     let Some(sim) = sim else { return };
-    let mut wanted = describe(&GameState::statistics(&sim.0));
+    let stats = GameState::statistics(&sim.0);
+    let mut stock = stock(&stats);
     let reserve = sim.0.superfridge();
     if reserve.exists() {
         let dispatch = sim.0.dispatch();
-        wanted.push_str(&format!(
-            "\n\nreserve    {:.4} / {:.4} ({:.1}%)\ndispatch   {} waiting  {} delivering",
+        stock.push_str(&format!(
+            "
+
+reserve    {:.4} / {:.4} ({:.1}%)
+dispatch   {} waiting  {} delivering",
             reserve.level(sim.0.bins()), reserve.capacity(), reserve.percent(sim.0.bins()),
             dispatch.waiting(), dispatch.orders().len() - dispatch.waiting()
         ));
     }
-    let (left, jobs) = columns(&wanted);
     for (column, mut text) in &mut texts {
-        let wanted = if column.0 { &jobs } else { &left };
+        let wanted = match column.0 {
+            Tab::Overview => overview(&stats),
+            Tab::Stock => stock.clone(),
+            Tab::Jobs => jobs(&stats),
+            Tab::Economy => economy(&stats),
+            Tab::Graphs => continue,
+        };
         // Compared before writing: the same string written again still costs
         // a re-layout.
-        if **text != *wanted {
-            **text = wanted.clone();
+        if **text != wanted {
+            **text = wanted;
         }
     }
 }
 
-/// Keep fourteen job rows beside the overview so the menu fits a 180px canvas.
-fn columns(text: &str) -> (String, String) {
-    let Some((overview, rest)) = text.split_once("\njobs") else { return (text.to_string(), String::new()); };
-    let Some((jobs, accounts)) = rest.split_once("\ndead") else { return (text.to_string(), String::new()); };
-    (format!("{overview}\ndead{accounts}"), format!("jobs{jobs}"))
+/// All the numbers at once, tab after tab.
+pub fn describe(stats: &Statistics) -> String {
+    [overview(stats), stock(stats), jobs(stats), economy(stats)].join("
+
+")
 }
 
-/// The menu's text: four sections, a line or a few each, in columns.
-pub fn describe(stats: &Statistics) -> String {
-    let mut out = String::new();
+/// The overview tab: who is alive and who is dead.
+fn overview(stats: &Statistics) -> String {
     let kinds: Vec<String> = stats.alive.iter().map(|(kind, count)| format!("{} {count}", plural(kind.name()))).collect();
-    out.push_str(&format!("alive      {:>4}   {}\n", stats.living(), kinds.join("  ")));
+    format!(
+        "alive      {:>4}   {}
 
-    out.push('\n');
+dead       {:>4}   lying {}  carried {}  cremated {}",
+        stats.living(), kinds.join("  "), stats.died, stats.lying, stats.carried, stats.cremated
+    )
+}
+
+/// The stock tab: each site's stores, the fields and the outposts.
+fn stock(stats: &Statistics) -> String {
+    let mut out = String::new();
     for stock in &stats.sites {
         let name = stock.site;
         if stock.present {
             let items: Vec<String> = stock.items.iter().map(|(item, count)| format!("{count:>4}   {}", item.name())).collect();
-            out.push_str(&format!("{name:<10} {}\n", items.join("  ")));
+            out.push_str(&format!("{name:<10} {}
+", items.join("  ")));
         } else {
-            out.push_str(&format!("{name:<10}        none\n"));
+            out.push_str(&format!("{name:<10}        none
+"));
         }
     }
     out.push_str(&fields(&stats.fields));
     out.push_str(&outposts(&stats.outposts));
+    out.truncate(out.trim_end().len());
+    out
+}
 
-    out.push('\n');
+/// The jobs tab: workers per job against its posts, and the jobless.
+fn jobs(stats: &Statistics) -> String {
+    let mut out = String::new();
     for (index, job) in stats.jobs.iter().enumerate() {
         let heading = if index == 0 { "jobs" } else { "" };
-        out.push_str(&format!("{heading:<10} {:>4}   {} of {} posts\n", job.workers, plural(job.kind.name()), job.posts));
+        out.push_str(&format!("{heading:<10} {:>4}   {} of {} posts
+", job.workers, plural(job.kind.name()), job.posts));
     }
-    out.push_str(&format!("{:<10} {:>4}   without a job\n", "", stats.jobless));
+    out.push_str(&format!("{:<10} {:>4}   without a job", "", stats.jobless));
+    out
+}
 
-    out.push('\n');
-    out.push_str(&format!(
-        "dead       {:>4}   lying {}  carried {}  cremated {}",
-        stats.died, stats.lying, stats.carried, stats.cremated
-    ));
+/// The economy tab: the budget, the day's books, the cash held.
+fn economy(stats: &Statistics) -> String {
     let economy = &stats.economy;
-    out.push_str(&format!("\n\nbudget     {}   tax {}%\n", economy.budget, economy.tax_percent));
+    let mut out = format!("budget     {}   tax {}%
+", economy.budget, economy.tax_percent);
     if let Some(book) = economy.today {
-        out.push_str(&format!("today      {}   wages {}\n", book.balance().signed(), book.wages));
-        out.push_str(&format!("           care {}  taxes {}\n", book.care, book.taxes.signed()));
-        out.push_str(&format!("           sales {}  estates {}\n", book.sales.signed(), book.estates.signed()));
+        out.push_str(&format!("today      {}   wages {}
+", book.balance().signed(), book.wages));
+        out.push_str(&format!("           care {}  taxes {}
+", book.care, book.taxes.signed()));
+        out.push_str(&format!("           sales {}  estates {}
+", book.sales.signed(), book.estates.signed()));
     }
-    out.push_str(&format!("cash       {}   {} held\n", economy.accounts, economy.cash));
-    out.push_str(&format!("           average {}\n", economy.average));
-    out.push_str(&format!("           {} in debt for {}\n", economy.in_debt, economy.debt));
+    out.push_str(&format!("cash       {}   {} held
+", economy.accounts, economy.cash));
+    out.push_str(&format!("           average {}
+", economy.average));
+    out.push_str(&format!("           {} in debt for {}
+", economy.in_debt, economy.debt));
     out.push_str(&format!("owed       {} shifts  {} care days", economy.shifts, economy.care_days));
     out
 }

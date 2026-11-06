@@ -107,6 +107,13 @@ and the game screen's `news` menu pages through them all, newest first. A
 look at the phone reads one article not yet read — good news mends the mind, bad news wears it
 down and leaves the reader 10 more obedient for 12 hours — or, with none, is a little fun.
 
+The king also picks, once, a **training ground** for the district's **soldiers**: a patch of
+wasteland 20 to 30 cells past the wall. Ten soldiers (camouflage, the lowest pay, Monday to
+Saturday, eight to three; no barracks, nothing is built for them) get ready wherever they live, walk straight out and
+spend seven hours walking circles round their **commander**, who stands in the middle of the
+ground in camouflage too. They fight nothing yet: seeing a deathdog, a soldier runs like
+anybody else.
+
 One resident in eight of a district has a pet dog that stays within range of its owner and roams
 freely there. It cannot feed itself: its owner takes dog food out of a fridge, fifty cents, and gives
 it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
@@ -173,6 +180,7 @@ to `screenshots/`.
 | Pet dogs: a dog's owner and the dog's, staying within range, feeding it dog food from a fridge ($0.50), its belly, droppings on the street, who is bonded to whom (`Bonds`), adoption | `pets` (+ `brain-engineer`, `dirt`, `economy`) |
 | Outposts: the king's decree and its site, the building plan and its claims, builders (on demand, the yard, pay), building tiles, structures off the site, furniture installed into the indexes, the flag drawn | `outposts` (+ `jobs`, `brain-engineer`) |
 | The news: stories (deaths and their cases, production records), the propagandist and the propaganda computer, articles on the phones, reading them, good and bad news on the mind, obedience from bad news, the archive and the game screen's news menu | `news` (+ `jobs`, `brain-engineer`, `game-screen`) |
+| Soldiers: the king's pick of the training ground (20-30 cells from the wall), the soldier and commander jobs (on demand, no barracks, camouflage, the drill: circles round the commander), `DrillGoal`, the ground drawn | `training` (+ `jobs`, `outposts`, `brain-engineer`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -243,6 +251,9 @@ src/sim/bins.rs         the stores: scrap bins, steel racks, hoppers, pallets, g
 src/sim/fields.rs       the crops of wheat: sown, growing, tended, harvested  [jobs, map]
 src/sim/corpses.rs      who lies dead where, for the undertakers            [jobs, simulation]
 src/sim/playzone.rs     which arcade cabinets work: an administrator at the computer [jobs, simulation]
+src/sim/training.rs     the soldiers' ground: the king's pick, the lap of waypoints  [training]
+src/sim/brain/goals/drill.rs, tasks/drill.rs  soldiers walk circles round the commander  [training]
+src/game/training.rs    the ground's chalk marks, drawn                     [training, game-screen]
 src/sim/deathdogs.rs, deathdogs/  the night's packs: constants, arrivals, tests  [deathdogs]
 src/sim/panics.rs, wounds.rs, refuge.rs  who is seen panicking; bites to feel; ways in [deathdogs]
 src/sim/economy.rs      cash, budget, tariffs, accounts and daily books      [economy]
@@ -288,6 +299,7 @@ tools/farm_art.py       draws the grain bin and the wheat at its four stages    
 tools/power_plant_art.py draws the generator and the control panel              [pixel-artist]
 tools/palace_art.py     draws the palace's throne                               [pixel-artist]
 tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and the administrator's uniform [pixel-artist]
+tools/training_art.py   draws the training ground's chalk marks                [training, pixel-artist]
 tools/deathdog_art.py   recolours the dog's sheets into the deathdog's                [deathdogs, pixel-artist]
 tools/outpost_art.py    draws an outpost's flag and the building tile's four stages   [outposts, pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, lab-runs/, maps/, screenshots/, .saves/   gitignored output

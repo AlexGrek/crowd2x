@@ -71,6 +71,15 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   story waiting (a death, a production record) written up into an article on everybody's phone
   (`Task::write_news`), and `"write copy"` stretches between. Hired after the builders. The
   `news` skill has all of it.
+- the **soldier** (`JobKind::Soldier`, 23) and the **commander** (`JobKind::Commander`, 24):
+  ten soldiers and one commander, **with no barracks and no building**: their workplaces are
+  bookkeeping cells on the roll (`FeatureKind::Ranks` ×10, `Command` ×1: no prop, cells of the
+  open street nearest the palace's throne, a town's only), as a cleaner's is the district, seven hours, **08-15 Monday to Saturday** (`SOLDIER_HOURS`), a three-hour commute
+  (up at five), **on demand** like the builder's — drilled only once the king has picked a
+  training ground — getting ready, wherever they are, before every trip out
+  (`goes_out_for: Some(Food)`), `GoalId::Drill`: the soldiers walk circles round the commander,
+  who stands in the middle of the ground. $30 and $50 a shift, camouflage uniforms. Hired
+  **last of all**, soldiers then commander. The `training` skill has all of it.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 
