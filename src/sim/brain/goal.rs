@@ -150,6 +150,12 @@ catalogue! {
         /// ([`DrillGoal`](super::goals::DrillGoal)). The soldiers' and the
         /// commander's job.
         Drill = 36 => GoalDef { name: "drill", emoji: "\u{1f396}", executor: Some(|| Box::new(goals::DrillGoal::new())) },
+        /// Walk to the nearest pew in the church and pray there, now and then
+        /// while wandering, as often as one is religious
+        /// ([`PrayGoal`](super::goals::PrayGoal), [`crate::sim::religion`]):
+        /// over wandering and a go at something, under a chat and
+        /// everything else.
+        Pray = 37 => GoalDef { name: "pray", emoji: "\u{1f64f}", executor: Some(|| Box::new(goals::PrayGoal::new())) },
     }
 }
 
@@ -883,7 +889,8 @@ mod tests {
                 (GoalId::ReturnInside, 0.0),
                 (GoalId::Phone, 0.0),
                 (GoalId::FurnishHome, 0.0),
-                (GoalId::Drill, 0.0)
+                (GoalId::Drill, 0.0),
+                (GoalId::Pray, 0.0)
             ]
         );
     }

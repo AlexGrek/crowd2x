@@ -98,6 +98,7 @@ impl GameState {
             dirt: self.facilities.dirt.save(),
             smell: self.facilities.smell.save(),
             playzones_run: self.facilities.playzones.save(),
+            services_led: self.facilities.services.save(),
             hospital: self.facilities.hospital.save(),
             wounds: self.facilities.wounds.save(),
             sounds: self.facilities.sound.save(),
@@ -222,6 +223,8 @@ impl GameState {
         // Which playzones were being run as the tick ended: derived from the
         // map but for that, which only the tick that ended it knew.
         state.facilities.playzones.restore(&world.playzones_run)?;
+        // ...and which altars a cleric was leading prayers at.
+        state.facilities.services.restore(&world.services_led)?;
         // The bites dealt as the saved tick ended, still to be felt.
         state.facilities.sound = super::sound::SoundField::restore(&world.sounds)?;
         // The news waiting and on the phones.

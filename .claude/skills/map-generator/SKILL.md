@@ -339,6 +339,16 @@ wall from its throne, off the carpet. It draws no RNG. The accountant is hired
 last at this desk; palace and district supply tests require it to be powered.
 
 
+### The church
+
+`church::SPEC`, last in `LOT_BUILDINGS` (after the store), takes the free lot nearest the
+district's middle — the playzone has the nearest. `map/district/church.rs`: the whole lot,
+`wall brown` round `floor diagonal`, a two-cell plain door in the middle of its street side,
+nobody's; laid out with `Room` (`layout`): pews either side of the aisle the door opens onto in
+the row past the door (and two further on, six deep), the row before the far wall clear for the
+clerics, and **`ALTARS` = 5 `"altar"` sections** side by side along the far wall. Draws no RNG;
+nothing powered. A `LANDMARKS` row. The `religion` skill.
+
 ### Working store
 
 `store::SPEC`, after the hospital in `LOT_BUILDINGS`, reserves one remaining

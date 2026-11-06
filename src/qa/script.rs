@@ -292,6 +292,11 @@ pub enum Step {
     /// an error; a value out of range is kept in it, and the log says what it
     /// came to.
     Relationships(std::collections::BTreeMap<String, f64>),
+    /// Set how religious the **selected** unit is, 0 to 100
+    /// (`sim::religion`) — `{"religiosity": 100}`: who is ordained a cleric
+    /// and how often anybody prays both follow from it. On the command queue,
+    /// in force from the next tick.
+    Religiosity(i32),
     /// How many of `item` the **selected** unit has stowed.
     ///
     /// What is in its hand is not stowed and is not counted here, which is the

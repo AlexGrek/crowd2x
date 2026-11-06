@@ -65,6 +65,9 @@ pub struct Body {
     /// Surface contaminants carried by this unit, independent of its needs.
     dirt: super::dirt::Dirt,
     obedience: u8,
+    /// How religious it is, 0 to 100 ([`super::religion`]): rolled once from
+    /// its uid, like obedience, and changed by nothing in play.
+    religiosity: u8,
 }
 
 impl Body {
@@ -79,6 +82,7 @@ impl Body {
             family: None,
             dirt: super::dirt::Dirt::CLEAN,
             obedience: super::sound::obedience(uid),
+            religiosity: super::religion::religiosity(uid),
         }
     }
 
@@ -90,6 +94,11 @@ impl Body {
     pub fn obedience(&self) -> u8 { self.obedience }
 
     pub fn set_obedience(&mut self, value: i32) { self.obedience = value.clamp(0, 100) as u8; }
+
+    /// How religious it is, 0 to 100 ([`super::religion`]).
+    pub fn religiosity(&self) -> u8 { self.religiosity }
+
+    pub fn set_religiosity(&mut self, value: i32) { self.religiosity = value.clamp(0, 100) as u8; }
 
     pub fn uid(&self) -> Uid {
         self.uid
@@ -174,7 +183,7 @@ impl Body {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Body {
-        let Body { uid, position: (x, y), frozen, home, dead, panicking, family, dirt, obedience } = *self;
+        let Body { uid, position: (x, y), frozen, home, dead, panicking, family, dirt, obedience, religiosity } = *self;
         pb::Body {
             uid: uid.raw(),
             x,
@@ -186,6 +195,7 @@ impl Body {
             family: family.map(|family| family.get() as u32),
             dirt: Some(dirt.save()),
             obedience: Some(obedience as u32),
+            religiosity: Some(religiosity as u32),
         }
     }
 
@@ -204,12 +214,16 @@ impl Body {
             },
         };
         if saved.obedience.is_some_and(|v| v > 100) { return invalid("obedience exceeds 100"); }
+        if saved.religiosity.is_some_and(|v| v > 100) { return invalid("religiosity exceeds 100"); }
         let home = property(saved.home, "home")?;
         let family = property(saved.family, "family")?;
         Ok(Body {
             uid,
             position: (saved.x, saved.y),
             obedience: saved.obedience.map_or_else(|| super::sound::obedience(uid), |v| v as u8),
+            // Absent in a save from before there was religion: rolled again,
+            // the value it would have had.
+            religiosity: saved.religiosity.map_or_else(|| super::religion::religiosity(uid), |v| v as u8),
             frozen: saved.frozen,
             home,
             dead: saved.dead,
@@ -739,6 +753,10 @@ pub struct Think<'a> {
     /// by [`super::world_step`]: whether a playzone has an administrator at
     /// its computer ([`super::playzone`]).
     pub playzones: &'a super::playzone::Playzones,
+    /// Which altars a cleric is leading prayers at, as of the start of this
+    /// tick, changed only by [`super::world_step`] (`Effect::Lead`): what
+    /// makes a prayer a service ([`super::religion`]).
+    pub services: &'a super::religion::Services,
     /// The district's money, as of the start of this tick, changed only by
     /// [`super::world_step`]: whether anybody is owed, which day's books
     /// want closing, and what is in them ([`super::economy`]).
@@ -842,6 +860,7 @@ impl<'a> Think<'a> {
             smell: &facilities.smell,
             decor: &facilities.decor,
             playzones: &facilities.playzones,
+            services: &facilities.services,
             economy: &facilities.economy,
             panics: &facilities.panics,
             wounds: &facilities.wounds,

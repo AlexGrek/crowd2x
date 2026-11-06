@@ -309,6 +309,17 @@ builder's. `pb::Memory.rest_until` (tag 11, absent = not resting), `pb::Timeshee
 `an_outpost_saved_half_built_carries_on_exactly` (seen failing with the outposts not restored,
 and with the fixtures not installed). The `outposts` skill.
 
+## Religion
+
+`pb::Body.religiosity` (tag 11, optional; absent = rolled again from the uid,
+`religion::religiosity`, the value it would have had; over 100 refused) and
+`pb::World.services_led` (tag 34, `repeated Cell`: the altars a cleric was leading prayers at as
+the tick ended, `Services::save`/`restore`, a cell that is no altar refused; absent = no
+service until the next tick). `JobKind::Cleric` = 25, `GoalId::Pray` = 37 (a
+`pb::Executor::Seek`), `FeatureKind`s 39-40 (the map's), the tasks `"pray"` and the `Work`
+stretch `"lead prayers"` by name; the `PRAYED` memory key is saved with the memory. The
+`religion` skill.
+
 ## Economy state
 
 New archives include optional economy.pb (pb::Economy): signed cents, accounts,

@@ -1,0 +1,363 @@
+{
+  "name": "the most religious of the free is ordained the church's cleric, leads prayers at the altar, and the devout come to pray",
+  "state": "game",
+  "timeout": 300,
+  "given": {
+    "maps": [
+      {
+        "name": "church",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 14,
+            "height": 9
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor diagonal",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 312,
+                  "y": 312
+                },
+                "kind": "altar"
+              },
+              {
+                "at": {
+                  "x": 216,
+                  "y": 168
+                },
+                "kind": "pew"
+              },
+              {
+                "at": {
+                  "x": 264,
+                  "y": 168
+                },
+                "kind": "pew"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 168
+                },
+                "kind": "pew"
+              },
+              {
+                "at": {
+                  "x": 456,
+                  "y": 168
+                },
+                "kind": "pew"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "church",
+  "steps": [
+    {
+      "note": "a church of a room: the altar at (6, 6), four pews either side of an aisle at (4-5, 3) and (8-9, 3). A world opens at 08:00 on day 1, a Monday"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "expect_zoom": 2
+    },
+    {
+      "key": "p"
+    },
+    {
+      "expect_speed": "paused"
+    },
+    {
+      "note": "three arrivals, and nobody is hired to the altar by distance: a cleric is ordained, not hired"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 3,
+        "y": 5
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 10,
+        "y": 5
+      }
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 11,
+        "y": 2
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 3
+    },
+    {
+      "note": "every need switched off, so this is a test about faith: the first is devout, the others nearly as devout"
+    },
+    {
+      "select": 0
+    },
+    {
+      "expect_selected": "human"
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "religiosity": 100
+    },
+    {
+      "select": 1
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "religiosity": 99
+    },
+    {
+      "select": 2
+    },
+    {
+      "process": {
+        "name": "hunger",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "thirst",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "bladder",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "fun",
+        "on": false
+      }
+    },
+    {
+      "process": {
+        "name": "energy",
+        "on": false
+      }
+    },
+    {
+      "religiosity": 98
+    },
+    {
+      "tick": 1
+    },
+    {
+      "note": "on the hour, nine o'clock (a tick is 1.875 world seconds): the most religious of the free is ordained to the empty altar"
+    },
+    {
+      "tick": 1920
+    },
+    {
+      "expect_log": "was hired as a cleric at the altar at 6, 6, 08:00-16:00, ordained for its faith (100)"
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "cleric"
+    },
+    {
+      "expect_text": "altar at 6, 6"
+    },
+    {
+      "expect_text": "08:00-16:00"
+    },
+    {
+      "expect_text": "Mon-Sun"
+    },
+    {
+      "press": "talents"
+    },
+    {
+      "expect_text": "100 / 100"
+    },
+    {
+      "note": "the others are left free: one altar, one cleric"
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "unemployed"
+    },
+    {
+      "note": "a little later: the cleric at its altar, leading prayers, in its white robe and gold stole"
+    },
+    {
+      "tick": 600
+    },
+    {
+      "select": 0
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "expect_text": "lead prayers at the altar at 6, 6"
+    },
+    {
+      "press": "job"
+    },
+    {
+      "expect_text": "leading prayers"
+    },
+    {
+      "press": "clothing"
+    },
+    {
+      "expect_text": "wearing: uniform cleric (own: "
+    },
+    {
+      "press": "close"
+    },
+    {
+      "look_at": {
+        "x": 7,
+        "y": 4
+      }
+    },
+    {
+      "wait": 0.3
+    },
+    {
+      "shot": "the church: the cleric at the altar in a white robe and gold stole, the pews either side of the aisle"
+    },
+    {
+      "tick": 1920
+    },
+    {
+      "expect_log": "led prayers an hour at the altar at 6, 6"
+    },
+    {
+      "note": "within the day the devout come to a pew and pray"
+    },
+    {
+      "tick": 46080
+    },
+    {
+      "select": 1
+    },
+    {
+      "press": "brains"
+    },
+    {
+      "expect_text": "prayed "
+    },
+    {
+      "note": "its memory says when it last prayed; a shot of the brains menu"
+    },
+    {
+      "shot": "a day on: a worshipper's brains menu remembers when it prayed"
+    }
+  ]
+}

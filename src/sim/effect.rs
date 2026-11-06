@@ -109,6 +109,11 @@ pub enum Effect {
     /// before granting this one's, so the playzone's cabinets work exactly
     /// as long as somebody is saying so.
     Operate { at: Point },
+    /// The unit is leading prayers at the altar at `at`: a cleric on duty and
+    /// beside it (`brain::Brain::react`, [`super::religion::leads`]). Asked
+    /// every tick it is, like [`Effect::Operate`], so a prayer in the church
+    /// is a service exactly as long as somebody says so.
+    Lead { at: Point },
     /// The unit's own timesheet (`brain::timesheet`): `shifts` more shifts
     /// worked as `job`, and `care_days` more days gone by out of work, to be
     /// paid by a clerk ([`super::economy::Economy::record`]).
@@ -372,6 +377,10 @@ pub(crate) fn apply(
         Effect::Operate { at } => {
             // Not logged: it is said every tick of a shift.
             let _ = facilities.playzones.run(at);
+        }
+        Effect::Lead { at } => {
+            // Not logged either: every tick of a shift.
+            let _ = facilities.services.lead(at);
         }
         // An account nobody opened — a test's world of one — is nobody's
         // business: the economy ignores it.

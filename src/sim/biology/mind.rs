@@ -30,6 +30,11 @@
 //!   (a production record) is [`GOOD_NEWS`] on at once, bad news (a death)
 //!   [`BAD_NEWS`] off.
 //!
+//! * **Prayer.** A prayer said beside a pew ([`Event::Prayed`]) mends it by
+//!   how devout the one praying is, [`PRAYER_PEACE`] for the most religious,
+//!   and [`SERVICE_BLESSING`] times that at a service, a cleric leading
+//!   prayers in the church ([`crate::sim::religion`]).
+//!
 //! Smell and money are told on the brain's low beat, with the world time the
 //! beat covers, so each is a rate like the rest. Asleep, the mind holds
 //! still: no fun, no work, no worries, no scent.
@@ -83,6 +88,16 @@ pub const GOOD_NEWS: f32 = 3.0;
 /// Mental health bad news takes at once: a death read about. Under a scare's
 /// [`FRIGHT`]: it happened to somebody else.
 pub const BAD_NEWS: f32 = 3.0;
+
+/// Mental health a prayer gives the devout (religiosity 100) at once;
+/// somebody half as religious, half of it. Comfort, not cheer: over a piece
+/// of good news, a day of the devout praying twice is a working day's
+/// purpose.
+pub const PRAYER_PEACE: f32 = 4.0;
+
+/// How many times a prayer's peace one at a service is worth: with a cleric
+/// leading prayers in the church ([`crate::sim::religion::Services`]).
+pub const SERVICE_BLESSING: f32 = 2.0;
 
 /// The debt, in dollars, at which money weighs on the mind as much as it ever
 /// will: about a month of eating on credit on a care package.
@@ -143,6 +158,10 @@ impl Process for Mind {
             Event::Bitten { damage } => stats.change_mental_health(-BITE_SHOCK * damage as f32),
             Event::News { good: true } => stats.change_mental_health(GOOD_NEWS),
             Event::News { good: false } => stats.change_mental_health(-BAD_NEWS),
+            Event::Prayed { devotion, service } if devotion.is_finite() => {
+                let blessing = if service { SERVICE_BLESSING } else { 1.0 };
+                stats.change_mental_health(PRAYER_PEACE * devotion.clamp(0.0, 1.0) * blessing);
+            }
             Event::Worried { debt, world_seconds } if debt.is_finite() && world_seconds.is_finite() => {
                 let weight = (debt / DESPAIRING_DEBT).clamp(0.0, 1.0);
                 stats.change_mental_health(-weight * per_second(HOURS_TO_DESPAIR) * world_seconds);

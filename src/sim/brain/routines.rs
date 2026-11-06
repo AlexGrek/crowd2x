@@ -370,7 +370,73 @@ impl RoutineExecutor for StayBusyRoutine {
         if wants_the_phone(ctx, goals.top()) {
             goals.raise_to(GoalId::Phone, PHONING);
         }
+        if wants_to_pray(ctx, goals.top()) {
+            goals.raise_to(GoalId::Pray, PRAYING);
+        }
     }
+}
+
+/// How much a prayer is wanted, once it is due: over wandering ([`BUSY`]),
+/// the phone ([`PHONING`]) and a go at something ([`PLAYING`]), and under a
+/// chat ([`CHATTING`]) and everything else. Like fun, faith never takes
+/// anybody off anything: a prayer is what the religious do with a free hour.
+pub const PRAYING: f32 = 0.13;
+
+/// Whether a person wants to pray: **now and then, on a walk** (the goal in
+/// charge is wandering, as for the phone), once its last prayer is as far
+/// behind it as its religiosity says ([`religion::prayer_gap`]: never, under
+/// [`religion::MIN_FAITH`]), on a slot a hash of who it is picks — one in
+/// [`religion::PRAYER_ONE_IN`] of [`religion::PRAYER_SLOT`]s, so the faithful
+/// do not all set off at once — and only where there is a pew to pray at.
+/// Once the goal is in charge it is wanted until the prayer is said and
+/// remembered ([`PRAYED`](super::memory::PRAYED)).
+///
+/// Somebody who has never prayed is taken to have prayed as the world began,
+/// less a share of its gap its uid picks: the devout of a new town go to
+/// church over its first day, not all on its first morning.
+///
+/// Humans only, and not with the mind switched off — a prayer is for the
+/// mind, and off means off.
+pub(crate) fn wants_to_pray(ctx: &RoutineCtx<'_>, top: GoalId) -> bool {
+    use super::memory::{Recall, PRAYED};
+    use crate::sim::feature::FeatureKind;
+    use crate::sim::religion;
+    use crate::sim::uid::EntityType;
+    if ctx.body.uid().kind() != Some(EntityType::Human) || ctx.body.is_dead() {
+        return false;
+    }
+    if !ctx.biology.is_some_and(|biology| biology.is_running(ProcessId::Mind)) {
+        return false;
+    }
+    if top != GoalId::Wander && top != GoalId::Pray {
+        return false;
+    }
+    let gap = religion::prayer_gap(ctx.body.religiosity());
+    if !gap.is_finite() || ctx.think.features.count(FeatureKind::Pew) == 0 {
+        return false;
+    }
+    let now = ctx.think.clock.elapsed();
+    let uid = ctx.body.uid().raw();
+    let since = match ctx.memory.get(PRAYED) {
+        Some(Recall::Time(then)) => now - *then as f64,
+        _ => now + mix(uid ^ 0x7072_6179) as f64 % gap,
+    };
+    if since < gap {
+        return false;
+    }
+    if top == GoalId::Pray {
+        return true;
+    }
+    let slot = (now / religion::PRAYER_SLOT) as u64;
+    mix(uid ^ slot.wrapping_mul(0xD6E8_FEB8_6659_FD93)) % religion::PRAYER_ONE_IN == 0
+}
+
+/// A 64-bit mix (splitmix's finaliser): a number that says nothing about the
+/// one it came from, for a roll that is the same every time it is asked.
+fn mix(mut hash: u64) -> u64 {
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    hash ^ (hash >> 31)
 }
 
 /// How much a look at the phone is wanted: over wandering ([`BUSY`]), which it

@@ -252,6 +252,13 @@ catalogue! {
         /// The commander's place on the roll: the same, a cell of its own so
         /// the soldiers do not take it ([`Ranks`](FeatureKind::Ranks)).
         Command = 38 => FeatureDef { props: &[], ..BESIDE },
+        /// A section of the church's altar, along its far wall: a cleric's
+        /// workplace, prayers led from the cell in front of it
+        /// ([`super::religion`]). Needs no power.
+        Altar = 39 => FeatureDef { props: &["altar"], ..BESIDE },
+        /// A pew in the church: prayed at by anybody, from beside it
+        /// ([`super::religion`], `PrayGoal`). Nobody's, and needs no power.
+        Pew = 40 => FeatureDef { props: &["pew"], ..BESIDE },
     }
 }
 

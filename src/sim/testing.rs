@@ -143,6 +143,7 @@ impl World {
         let effect = entity.react(&self.ctx(), outcome);
         self.facilities.economy.roll(self.clock.day());
         self.facilities.playzones.begin_tick();
+        self.facilities.services.begin_tick();
         super::soiling::settle(entity, &mut self.facilities, &self.log);
         self.facilities.wounds.begin_tick();
         self.facilities.feedings.begin_tick();

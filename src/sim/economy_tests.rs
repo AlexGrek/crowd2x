@@ -100,8 +100,17 @@ fn the_district_bank_pays_and_the_palace_accountant_reports_the_first_day() {
         for process in ProcessId::ALL { input.set_process(entity.uid(), process, false); }
     }
     spawn_pass(&mut state, &input);
-    for _ in 0..50_400 { process_pass(&mut state, 1.0 / 60.0); }
+    // Read as it goes: the log keeps the last thousand lines, and a district
+    // says more than that in a day.
+    let mut lines = Vec::new();
+    for tick in 0..50_400 {
+        process_pass(&mut state, 1.0 / 60.0);
+        if tick % 600 == 599 {
+            lines.extend(state.log.drain());
+        }
+    }
+    lines.extend(state.log.drain());
     assert!(state.economy().books().iter().any(|book| book.wages > Money::ZERO));
     assert_eq!(state.economy().closed_through(), 1);
-    assert!(state.log.drain().iter().any(|line| line.contains("closed the books for day 1")));
+    assert!(lines.iter().any(|line| line.contains("closed the books for day 1")));
 }

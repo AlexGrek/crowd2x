@@ -41,8 +41,9 @@ from check_pixel_grid import read_png  # noqa: E402  (needs the path above)
 
 ROOT = Path(__file__).resolve().parent.parent
 QA_DIR = ROOT / "qa"
-# Each test gets its own maps directory under here, wiped before it runs.
-SCRATCH = ROOT / "target" / "qa"
+# Each test gets its own maps directory under here, wiped before it runs: in
+# cargo's target directory, wherever CARGO_TARGET_DIR puts it.
+SCRATCH = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target") / "qa"
 # ...and its own screenshot directory here, which is gitignored and meant to be
 # looked at, so it is not buried in target/.
 SHOTS = ROOT / "qa-screenshots"

@@ -213,6 +213,12 @@ pub enum Event {
     /// An article read on the phone (`sim::news::read`): good news or bad.
     /// [`Mind`](mind::Mind) mends for the one and wears down for the other.
     News { good: bool },
+    /// A prayer said beside a pew, stood through to its end
+    /// (`brain::tasks::pray`): how devout the one praying is (its
+    /// religiosity, 0 to 1), and whether a cleric was leading prayers in the
+    /// church — a service ([`crate::sim::religion`]). [`Mind`](mind::Mind)
+    /// mends by both; nothing else cares.
+    Prayed { devotion: f32, service: bool },
     /// A deathdog's teeth: `damage` health gone at once
     /// ([`Health`](health::Health)'s to take, so a body with it switched off
     /// shrugs a bite off). Felt by the one bitten in its own react

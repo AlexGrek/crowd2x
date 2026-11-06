@@ -48,6 +48,7 @@ wages:
   propagandist: 60            # mid
   soldier: 30                 # lowest: drilled for little
   commander: 50               # a little over mid-low
+  cleric: 40                  # low: a calling, not a living
 
 # What a thing costs taken from a fridge, every item by name
 # (`src/sim/item.rs`). Only a fridge sells anything; the rest are never

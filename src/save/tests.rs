@@ -909,6 +909,64 @@ fn a_district_saved_in_the_middle_of_a_working_day_carries_on_exactly() {
 }
 
 
+/// A church in the middle of a service — its cleric at the altar, somebody
+/// devout praying at a pew, everybody's religiosity set by hand — carries on
+/// exactly, the cleric's word that prayers are being led (the world's
+/// `services_led`) and the prayers' memory of when they last prayed
+/// included. The cleric is let go in the middle of it, which ends the
+/// service at once in both worlds.
+#[test]
+fn a_church_saved_in_the_middle_of_a_service_carries_on_exactly() {
+    use crate::sim::JobKind;
+
+    let altar = Point::new(9, 10);
+    let pews = [Point::new(6, 5), Point::new(12, 5)];
+    let mut map = Map::new(Size::new(20, 12), FLOOR);
+    prop_at(&mut map, "altar", altar);
+    for pew in pews {
+        prop_at(&mut map, "pew", pew);
+    }
+    let mut state = GameState::new(map, 5);
+    let cleric = state.spawn_commoner(Point::new(9, 9));
+    state.entity_mut(cleric).unwrap().body_mut().set_religiosity(100);
+    assert_eq!(state.ordain(), 1);
+    assert_eq!(state.entities().get(cleric).unwrap().job().map(|job| job.kind), Some(JobKind::Cleric));
+    let devout: Vec<Uid> = (0..6).map(|i| state.spawn_commoner(Point::new(3 + 2 * i, 2))).collect();
+    let mut input = Input::new();
+    for (i, &uid) in devout.iter().enumerate() {
+        state.entity_mut(uid).unwrap().body_mut().set_religiosity(60 + 8 * i as i32);
+    }
+    for &uid in devout.iter().chain([&cleric]) {
+        for process in [ProcessId::Hunger, ProcessId::Thirst, ProcessId::Bladder, ProcessId::Fun, ProcessId::Energy] {
+            input.set_process(uid, process, false);
+        }
+    }
+    process_game_state(&mut state, DT, &input);
+
+    // On until somebody is praying while the cleric leads.
+    let praying = |state: &GameState| {
+        state.entities().iter().any(|entity| entity.interacting_with().is_some_and(|cell| pews.contains(&cell)))
+    };
+    let mut ticks = 0;
+    while !(praying(&state) && state.services().is_led(altar)) {
+        run(&mut state, 30);
+        ticks += 30;
+        assert!(ticks < 24 * 1800, "nobody prayed at a service by {}", state.clock());
+    }
+    let saved = state.save_world();
+    assert_eq!(saved.services_led.len(), 1, "the one altar, led");
+
+    let copy = side_by_side(&mut state, 600, |tick, _| {
+        let mut input = Input::new();
+        if tick == 300 {
+            input.dismiss(cleric);
+        }
+        input
+    });
+    assert!(!state.services().is_on(pews[0]), "no cleric, no service");
+    assert_eq!(copy.entities().get(devout[5]).unwrap().body().religiosity(), 100, "religiosity saved");
+}
+
 /// A district's playzone in the middle of Monday: its administrators at the
 /// computer and some bored residents let in to play — saved while the
 /// cabinets work, a game half played and the shift part done — carries on

@@ -174,6 +174,7 @@ pub mod panics;
 pub mod path;
 pub mod pets;
 pub mod playzone;
+pub mod religion;
 pub mod property;
 pub mod refuge;
 pub mod relationships;
@@ -323,6 +324,9 @@ pub enum Command {
     /// Change one lasting aptitude explicitly; time alone does not move it.
     /// Values are clamped to 0..=100 and applied before processing begins.
     SetTalent { uid: Uid, talent: Talent, value: i32 },
+    /// Change how religious somebody is ([`religion`]), explicitly: nothing
+    /// in play does. Clamped to 0..=100, applied before processing begins.
+    SetReligiosity { uid: Uid, value: i32 },
     /// Put an item into an entity's [`Inventory`], if it will fit.
     ///
     /// From outside the world like the two above, and the only way anything
@@ -441,6 +445,11 @@ impl Input {
 
     pub fn set_talent(&mut self, uid: Uid, talent: Talent, value: i32) -> &mut Input {
         self.commands.push(Command::SetTalent { uid, talent, value });
+        self
+    }
+
+    pub fn set_religiosity(&mut self, uid: Uid, value: i32) -> &mut Input {
+        self.commands.push(Command::SetReligiosity { uid, value });
         self
     }
 
@@ -978,6 +987,12 @@ impl GameState {
         &self.facilities.playzones
     }
 
+    /// Which altars a cleric is leading prayers at, and so where a prayer is
+    /// a service. See [`religion::Services`].
+    pub fn services(&self) -> &religion::Services {
+        &self.facilities.services
+    }
+
     /// Every crop in the fields. See [`fields`].
     pub fn flowers(&self) -> &flowers::Flowers {
         &self.facilities.flowers
@@ -1313,6 +1328,9 @@ impl GameState {
         if arrived > 0 {
             self.log.push(format!("{arrived} moved in"));
         }
+        // Once everybody is in, the church's clerics: the most religious of
+        // whoever is left without a job.
+        self.ordain();
         // A town keeps pets, once everybody is in: after the last arrival, so
         // nobody's roll depends on whether somebody before it has a dog.
         self.furnish_noble_homes();
@@ -1423,7 +1441,9 @@ impl GameState {
         let key = entity.body().home();
         let noble = entity.is_noble();
         let (workplaces, properties) = (&self.facilities.workplaces, &self.facilities.properties);
-        let Some(job) = JobKind::ALL.into_iter().filter(|kind| kind.permits_class(noble, nobles_alive)).find_map(|kind| {
+        // An ordained post is never offered by distance: `ordain` fills it.
+        let offered = |kind: &JobKind| kind.permits_class(noble, nobles_alive) && !kind.is_ordained();
+        let Some(job) = JobKind::ALL.into_iter().filter(offered).find_map(|kind| {
             let free = |cell: Point| {
                 workplaces.free_shift(cell, kind.shifts()).is_some() && properties.may_use(cell, key)
             };
@@ -1464,6 +1484,9 @@ impl GameState {
     /// uid on a tie. `false`
     /// with nobody to take it on, and the post stands empty.
     ///
+    /// **An ordained post** ([`JobKind::is_ordained`], a cleric's) goes not
+    /// to the nearest but to the most religious of them, wherever it is.
+    ///
     /// One walk of the crowd **a death**, at the end of the tick it happened
     /// in (`comings_and_goings`): never a scan a tick or a unit.
     fn fill_vacancy(&mut self, dead: Uid, job: Job) -> bool {
@@ -1487,7 +1510,10 @@ impl GameState {
             })
             .min_by_key(|entity| {
                 let sick = entity.is_on_sick_leave(clock);
-                (sick, entity.center_position().manhattan_distance(job.workplace), entity.uid().raw())
+                let ordained = job.kind.is_ordained();
+                let faithless = if ordained { 100 - entity.body().religiosity() } else { 0 };
+                let distance = if ordained { 0 } else { entity.center_position().manhattan_distance(job.workplace) };
+                (sick, faithless, distance, entity.uid().raw())
             })
             .map(|entity| entity.uid());
         let Some(uid) = chosen else {
@@ -1504,6 +1530,76 @@ impl GameState {
         }
         self.took_on(uid, job, &format!(", in place of {dead}"));
         true
+    }
+
+    /// Fill every ordained post standing empty — a cleric's altar
+    /// ([`JobKind::is_ordained`], [`religion`]) — with **the most religious
+    /// of the free**: the living, jobless people not on leave for their
+    /// mental health (nor held still by the unit panel) that the post's
+    /// class allows, the most religious first, one not on sick leave before
+    /// one who is, the lower uid on a tie. So the clerics are the top of the
+    /// free by religiosity, however far from the church they live. How many
+    /// were ordained.
+    ///
+    /// Called once everybody has moved in ([`GameState::spawn_from_spawners`])
+    /// and on every hour after (`comings_and_goings`) — and then a walk of the
+    /// crowd only while a post stands empty, which once the church is staffed
+    /// is never.
+    pub fn ordain(&mut self) -> usize {
+        let posts: Vec<Job> = JobKind::ALL
+            .into_iter()
+            .filter(|kind| kind.is_ordained())
+            .flat_map(|kind| {
+                let workplaces = &self.facilities.workplaces;
+                self.facilities.features.cells_of(kind.workplace()).iter().flat_map(move |&cell| {
+                    kind.shifts()
+                        .iter()
+                        .filter(move |&&shift| !workplaces.is_taken(cell, shift))
+                        .map(move |&shift| Job::new(kind, cell, shift))
+                })
+            })
+            .collect();
+        if posts.is_empty() {
+            return 0;
+        }
+        let clock = self.clock();
+        let nobles_alive = self.nobles_alive();
+        let mut free: Vec<(bool, std::cmp::Reverse<u8>, u64, Uid)> = self
+            .entities
+            .iter()
+            .filter(|entity| {
+                entity.kind() == Some(EntityType::Human)
+                    && !entity.is_dead()
+                    && !entity.is_frozen()
+                    && entity.job().is_none()
+                    && !entity.is_on_mental_health_leave()
+            })
+            .map(|entity| {
+                let uid = entity.uid();
+                (entity.is_on_sick_leave(clock), std::cmp::Reverse(entity.body().religiosity()), uid.raw(), uid)
+            })
+            .collect();
+        free.sort_unstable();
+        let mut ordained = 0;
+        for job in posts {
+            let properties = &self.facilities.properties;
+            let entities = &self.entities;
+            let Some(index) = free.iter().position(|&(_, _, _, uid)| {
+                entities.get(uid).is_some_and(|entity| {
+                    job.kind.permits_class(entity.is_noble(), nobles_alive)
+                        && properties.may_use(job.workplace, entity.body().home())
+                })
+            }) else {
+                break;
+            };
+            let (_, std::cmp::Reverse(faith), _, uid) = free.remove(index);
+            if !self.entities.get_mut(uid).is_some_and(|entity| entity.hire(job)) {
+                continue;
+            }
+            self.took_on(uid, job, &format!(", ordained for its faith ({faith})"));
+            ordained += 1;
+        }
+        ordained
     }
 
     /// Give `uid` a job at the free workplace nearest where it stands, in
@@ -1725,6 +1821,19 @@ impl GameState {
         true
     }
 
+    /// Explicitly change how religious somebody is, frozen or not. `false`
+    /// for a missing entity or one that is not a person.
+    pub fn set_religiosity(&mut self, uid: Uid, value: i32) -> bool {
+        let Some(entity) = self.entities.get_mut(uid).filter(|entity| entity.kind() == Some(EntityType::Human)) else {
+            self.log.unit(uid, format!("set religiosity: {uid} is no person"));
+            return false;
+        };
+        entity.body_mut().set_religiosity(value);
+        let now = entity.body().religiosity();
+        self.log.unit(uid, format!("{uid} religiosity set to {now}"));
+        true
+    }
+
     /// Change an outfit even while paused or frozen. Kinds without clothing
     /// and ids that have left the world refuse the request.
     pub fn set_clothing(&mut self, uid: Uid, clothing: clothing::Clothing) -> bool {
@@ -1818,6 +1927,11 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
         state.fill_vacancy(dead, job);
     }
     state.facilities.vacancies = vacancies;
+    // On the hour, a cleric's post standing empty — nobody was free when it
+    // fell vacant, or somebody has come in since — to the most religious free.
+    if (now.day(), now.hour()) != (before.day(), before.hour()) {
+        state.ordain();
+    }
     state.rehome_pets();
     if deathdogs::is_dusk(before, now) {
         deathdogs::arrive(state);
@@ -1902,6 +2016,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::SetTalent { uid, talent, value } => {
                 state.set_talent(*uid, *talent, *value);
+            }
+            Command::SetReligiosity { uid, value } => {
+                state.set_religiosity(*uid, *value);
             }
             Command::GiveItem { uid, item } => {
                 state.give_item(*uid, *item);
@@ -2452,6 +2569,8 @@ fn world_step(
     facilities.economy.roll(clock.day());
     // Who runs a playzone is said afresh every tick (`Effect::Operate`).
     facilities.playzones.begin_tick();
+    // ...and who leads prayers at an altar (`Effect::Lead`).
+    facilities.services.begin_tick();
     // Settle bodily stains before forgetting wounds or granting new bites.
     // This also leaves the unit's own effect free for work or death.
     for (_, entity) in table.iter_slots_mut() {
@@ -3591,6 +3710,73 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains(&format!("nobody is free to take on the scrap bin at 1, 1 that {far} left"))), "{lines:?}");
     }
 
+    /// A church of two altars: nobody is hired to one on arrival, however
+    /// near; ordained, the two most religious of the free take them, however
+    /// far; a dead cleric's post goes to the next most religious, not the
+    /// nearest; and a post let go is filled on the hour.
+    #[test]
+    fn the_most_religious_of_the_free_are_ordained_clerics_and_a_dead_ones_post_goes_to_the_next() {
+        let altars = [Point::new(6, 8), Point::new(7, 8)];
+        let mut map = Map::new(Size::new(16, 10), FLOOR);
+        for altar in altars {
+            crate::sim::testing::prop_at(&mut map, "altar", altar);
+        }
+        let mut state = GameState::new(map, 3);
+        let mut people = Vec::new();
+        for (cell, faith) in [((6, 7), 20), ((14, 1), 90), ((1, 1), 70), ((13, 2), 95), ((7, 7), 40)] {
+            let uid = state.spawn_commoner(Point::new(cell.0, cell.1));
+            state.entity_mut(uid).unwrap().body_mut().set_religiosity(faith);
+            // Sound of mind, or one might be on leave and not free to take it.
+            state.entity_mut(uid).unwrap().biology_mut().unwrap().edit(|stats| stats.with_mental_health(100.0));
+            people.push(uid);
+        }
+        let [beside, devout, keen, most, middling] = people[..] else { unreachable!() };
+        assert!(people.iter().all(|&uid| state.entities().get(uid).unwrap().job().is_none()), "never hired to an altar by distance");
+        let job = |state: &GameState, uid: Uid| state.entities().get(uid).unwrap().job().map(|job| job.kind);
+
+        assert_eq!(state.ordain(), 2);
+        assert_eq!((job(&state, most), job(&state, devout)), (Some(JobKind::Cleric), Some(JobKind::Cleric)), "the two most religious");
+        assert_eq!((job(&state, beside), job(&state, keen), job(&state, middling)), (None, None, None));
+        let lines = state.log.drain();
+        assert!(lines.iter().any(|line| line.contains(&format!("{most} was hired as a cleric at the altar at")) && line.ends_with("ordained for its faith (95)")), "{lines:?}");
+        assert_eq!(state.ordain(), 0, "every altar has its cleric");
+
+        // A cleric dies: its post to the most religious free, far as it is.
+        let post = state.entities().get(most).unwrap().job().unwrap();
+        state
+            .entity_mut(most)
+            .unwrap()
+            .biology_mut()
+            .unwrap()
+            .edit(|stats| stats.with_health(0.5).with_hunger(100.0).with_thirst(100.0));
+        let mut lines = Vec::new();
+        for _ in 0..1800 {
+            run(&mut state, 1);
+            lines.extend(state.log.drain());
+            if state.entities().get(most).unwrap().is_dead() {
+                break;
+            }
+        }
+        assert!(state.entities().get(most).unwrap().is_dead(), "never died");
+        assert_eq!(state.entities().get(keen).unwrap().job(), Some(post), "the next most religious, not the nearest: {lines:?}");
+        assert_eq!(job(&state, beside), None);
+
+        // A cleric let go, and its faith gone: the post stands empty until the
+        // hour, then goes to the most religious still free.
+        assert!(state.dismiss(devout));
+        state.entity_mut(devout).unwrap().body_mut().set_religiosity(10);
+        let mut filled = false;
+        for _ in 0..20_000 {
+            run(&mut state, 1);
+            if job(&state, middling) == Some(JobKind::Cleric) {
+                filled = true;
+                break;
+            }
+        }
+        assert!(filled, "the post let go was never filled");
+        assert_eq!((job(&state, devout), job(&state, beside)), (None, None));
+    }
+
     /// The two commands the job menu sends: let somebody go, and the desk is
     /// free; hire them back, and they have it again — the free desk nearest
     /// where they stand.
@@ -4551,7 +4737,11 @@ mod tests {
             let mut agents = 0;
             let mut building = 0;
             let (mut soldiering, mut commanding) = (0, 0);
-            let jobs = 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists + training::SOLDIERS + training::COMMANDERS;
+            // The church's altar, a cleric to each of its sections: the most
+            // religious of whoever was left without a job.
+            let clerics = crate::map::district::church::ALTARS;
+            let mut faith_of_clerics: Vec<u8> = Vec::new();
+            let jobs = clerics + 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists + training::SOLDIERS + training::COMMANDERS;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4668,6 +4858,11 @@ mod tests {
                         assert!(state.features().has(feature::FeatureKind::Command, job.workplace));
                         assert_eq!(job.shift, job::SOLDIER_HOURS);
                     }
+                    JobKind::Cleric => {
+                        assert!(district.the(crate::map::district::church::NAME).contains(job.workplace), "seed {seed}: an altar outside the church");
+                        assert_eq!(job.shift, job::CHURCH_HOURS);
+                        faith_of_clerics.push(entity.body().religiosity());
+                    }
                     JobKind::Propagandist => {
                         propagandizing += 1;
                         assert!(district.palace.contains(job.workplace), "seed {seed}: the propagandist outside the palace");
@@ -4699,8 +4894,22 @@ mod tests {
             shopkeeping.sort_unstable();
             assert_eq!(shopkeeping, [0, 6, 12, 18], "seed {seed}: the store's shopkeepers");
             assert_eq!(store_hauling, store_couriers, "seed {seed}: the store's courier");
-            let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).last();
+            let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).filter(|kind| !kind.is_ordained()).last();
             assert_eq!(last, Some(JobKind::Commander), "seed {seed}: the commander hired last");
+            // The clerics are the top of the free by religiosity: none of the
+            // commoners still without a job is more religious than the least
+            // religious of them.
+            assert_eq!(faith_of_clerics.len(), clerics, "seed {seed}: a cleric to every altar");
+            let least = *faith_of_clerics.iter().min().unwrap();
+            let freest = state
+                .entities()
+                .iter()
+                .filter(|entity| entity.kind() == Some(EntityType::Human) && entity.job().is_none() && !entity.is_noble())
+                .map(|entity| entity.body().religiosity())
+                .max()
+                .unwrap_or(0);
+            assert!(least >= freest, "seed {seed}: a cleric of {least} while somebody of {freest} is free");
+            assert!(least > 50, "seed {seed}: the clerics are devout, the least of them {least}");
             // Every gate's post kept by three guards, one a watch, round the
             // clock.
             assert_eq!(posts.len(), crate::map::district::GATES, "seed {seed}");

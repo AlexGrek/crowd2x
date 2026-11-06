@@ -114,6 +114,13 @@ spend seven hours walking circles round their **commander**, who stands in the m
 ground in camouflage too. They fight nothing yet: seeing a deathdog, a soldier runs like
 anybody else.
 
+Everybody is religious from 0 to 100 (rolled once). A **church** near the district's middle has
+an altar of five sections and pews; the **five most religious free people** — jobless once
+everybody has moved in — are ordained its **clerics**, never hired by distance, and lead prayers
+there eight to four every day. Anybody religious enough now and then walks to a pew and **prays**
+(the devout twice a day, the faithless never), which mends the mind by its devotion — twice as
+much at a service, while a cleric is leading prayers.
+
 One resident in eight of a district has a pet dog that stays within range of its owner and roams
 freely there. It cannot feed itself: its owner takes dog food out of a fridge, fifty cents, and gives
 it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
@@ -181,6 +188,7 @@ to `screenshots/`.
 | Outposts: the king's decree and its site, the building plan and its claims, builders (on demand, the yard, pay), building tiles, structures off the site, furniture installed into the indexes, the flag drawn | `outposts` (+ `jobs`, `brain-engineer`) |
 | The news: stories (deaths and their cases, production records), the propagandist and the propaganda computer, articles on the phones, reading them, good and bad news on the mind, obedience from bad news, the archive and the game screen's news menu | `news` (+ `jobs`, `brain-engineer`, `game-screen`) |
 | Soldiers: the king's pick of the training ground (20-30 cells from the wall), the soldier and commander jobs (on demand, no barracks, camouflage, the drill: circles round the commander), `DrillGoal`, the ground drawn | `training` (+ `jobs`, `outposts`, `brain-engineer`) |
+| Religion: religiosity, the church, clerics and who is ordained one, praying and what it does to the mind, services (`Effect::Lead`) | `religion` (+ `jobs`, `brain-engineer`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -254,6 +262,9 @@ src/sim/playzone.rs     which arcade cabinets work: an administrator at the comp
 src/sim/training.rs     the soldiers' ground: the king's pick, the lap of waypoints  [training]
 src/sim/brain/goals/drill.rs, tasks/drill.rs  soldiers walk circles round the commander  [training]
 src/game/training.rs    the ground's chalk marks, drawn                     [training, game-screen]
+src/sim/religion.rs     religiosity, prayer's cadence, services (Services)  [religion]
+src/sim/brain/goals/pray.rs, tasks/pray.rs  walking to a pew and praying  [religion]
+src/map/district/church.rs  the church: five altar sections, pews, an aisle  [religion, map-generator]
 src/sim/deathdogs.rs, deathdogs/  the night's packs: constants, arrivals, tests  [deathdogs]
 src/sim/panics.rs, wounds.rs, refuge.rs  who is seen panicking; bites to feel; ways in [deathdogs]
 src/sim/economy.rs      cash, budget, tariffs, accounts and daily books      [economy]
@@ -302,6 +313,7 @@ tools/playzone_art.py   draws the arcade cabinet, the playzone's computer and th
 tools/training_art.py   draws the training ground's chalk marks                [training, pixel-artist]
 tools/deathdog_art.py   recolours the dog's sheets into the deathdog's                [deathdogs, pixel-artist]
 tools/outpost_art.py    draws an outpost's flag and the building tile's four stages   [outposts, pixel-artist]
+tools/church_art.py     draws the church's altar and pew                    [religion, pixel-artist]
 qa-screenshots/, qa-perf/, qa-observe/, lab-runs/, maps/, screenshots/, .saves/   gitignored output
 assets/                 imported wholesale from an earlier prototype
 ```

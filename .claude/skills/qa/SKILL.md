@@ -128,6 +128,7 @@ list growing a row. **Reach for these unless the input itself is what is under t
 | `{"hold": "food"}` | Put an item in the selected unit's **hand**; `null` empties it. |
 | `{"process": {"name": "hunger", "on": false}}` | Switch one of the selected unit's processes on or off: `hunger`, `thirst`, `bladder`, `fun`, `energy`. |
 | `{"relationships": {"stranger chance": 1.0}}` | Set rules relationships are run by, each by its name in `relationships.yaml` (an unknown name fails the step); on the command queue, in force from the next tick, logged `relationships: <name> is <value>`. Every chance at 1 makes chats certain (`qa/relationships.json`); `smalltalks an hour` at 10000 makes small talk certain for anybody close by (`qa/smalltalk.json`). |
+| `{"religiosity": 100}` | Set how religious the **selected** unit is, 0-100 (`sim::religion`), on the command queue, in force from the next tick, logged `{uid} religiosity set to N`. Who is ordained a cleric and how often anybody prays follow from it (`qa/church.json`). |
 | `{"tick": 200}` | Apply pending spawns, then advance exactly this many steps, immediately. |
 | `{"observe": {"name": "a day", "ticks": 46080, "every": 1920}}` | `tick`, **watching**: sample every unit with a body before, every `every` ticks, and after — each stat and its goal — and write the record (below). |
 | `{"select_box": {"x": 4, "y": 1}}` | Select the distribution box in a cell, opening its panel (`switch off`/`switch on`, `close`). Game screen. |

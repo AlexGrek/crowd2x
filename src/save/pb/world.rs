@@ -119,6 +119,11 @@ pub struct World {
     /// in an older save: none yet.
     #[prost(message, optional, tag = "33")]
     pub training: Option<Training>,
+    /// The altars a cleric was leading prayers at as the saved tick ended
+    /// (`crate::sim::religion::Services`). Older saves have none: no service
+    /// until the next tick.
+    #[prost(message, repeated, tag = "34")]
+    pub services_led: Vec<Cell>,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

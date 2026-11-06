@@ -142,6 +142,10 @@ pub const PROPS: &[Prop] = &[
     // The palace's throne, where the king holds court (`sim::job`), stood at
     // from beside it.
     Prop::blocking("throne"),
+    // The church: the altar its clerics lead prayers at and the pews anybody
+    // prays at (`sim::religion`), both used from beside them.
+    Prop::blocking("altar"),
+    Prop::blocking("pew"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

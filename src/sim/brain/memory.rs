@@ -23,6 +23,11 @@ pub const SALVAGE_ORDER: &str = "salvage order";
 /// the next look is a while off (`StayBusyRoutine`, `PhoneGoal`).
 pub const PHONED: &str = "phoned";
 
+/// When it last prayed ([`Recall::Time`], world seconds), so that the next
+/// prayer is as far off as its religiosity says (`StayBusyRoutine`,
+/// `PrayGoal`, [`crate::sim::religion::prayer_gap`]).
+pub const PRAYED: &str = "prayed";
+
 /// How long a place found out of reach is remembered as out of reach, in
 /// **world** seconds: an hour of the world, half a minute of watching. Long
 /// enough for the crowd round a toilet to clear, short enough that a doorway

@@ -79,7 +79,7 @@ impl Process for Satisfaction {
             Event::Bitten { .. } => {}
             // A talk lifts the mood of the moment ([`Fun`](super::Fun)), not
             // the day.
-            Event::Chatted | Event::SmallTalk | Event::Phoned | Event::News { .. } => {}
+            Event::Chatted | Event::SmallTalk | Event::Phoned | Event::News { .. } | Event::Prayed { .. } => {}
         }
     }
 }

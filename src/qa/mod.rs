@@ -1232,6 +1232,15 @@ fn perform(
             Ok(Next::Now)
         }
 
+        Step::Religiosity(value) => {
+            let uid = intents
+                .selected
+                .get()
+                .ok_or("nobody is selected — `religiosity` sets the selected unit's".to_string())?;
+            intents.sim_input.0.set_religiosity(uid, *value);
+            Ok(Next::Now)
+        }
+
         Step::Relationships(rules) => {
             for (name, value) in rules {
                 let rule = crate::sim::relationships::Rule::from_name(name).ok_or_else(|| {

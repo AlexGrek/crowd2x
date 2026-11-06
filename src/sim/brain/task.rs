@@ -591,6 +591,7 @@ mod tests {
             Task::decree(at, 33.0),
             Task::write_news(at, 35.0),
             Task::phone(at, 34.0),
+            Task::pray(at, 36.0),
         ]
     }
 

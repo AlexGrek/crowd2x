@@ -157,6 +157,10 @@ pub const PALETTE: &[PaletteItem] = &[
     // The palace's throne, where the king holds court: gilt and red velvet,
     // drawn by `tools/palace_art.py`.
     PaletteItem::upscaled("throne", "throne.png"),
+    // The church, drawn by `tools/church_art.py`: a section of the altar —
+    // white cloth, a gold cross, two candles — and a wooden pew.
+    PaletteItem::upscaled("altar", "altar.png"),
+    PaletteItem::upscaled("pew", "pew.png"),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

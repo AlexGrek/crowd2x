@@ -80,6 +80,16 @@ A job is **what a unit does for a living, where, and when**. All tiring and no f
   (`goes_out_for: Some(Food)`), `GoalId::Drill`: the soldiers walk circles round the commander,
   who stands in the middle of the ground. $30 and $50 a shift, camouflage uniforms. Hired
   **last of all**, soldiers then commander. The `training` skill has all of it.
+- the **cleric** (`JobKind::Cleric`, 25): its own section of the church's altar
+  (`FeatureKind::Altar`, five in a district's church), eight to four **every day**
+  (`CHURCH_HOURS`), a two-hour commute, `GoalId::Work` with the `"lead prayers"` stretch — and
+  while one is on duty beside its altar, a prayer in the church is a service
+  (`Effect::Lead`, `sim::religion::Services`). **Ordained, never hired by distance**
+  (`JobDef::ordained`, the one row with it): `give_a_job` and `Command::Hire` skip it, and
+  `GameState::ordain` gives every empty altar to **the most religious of the free** — after
+  everybody moves in, and on every hour a post stands empty; a dead cleric's post goes to the
+  most religious free too (`fill_vacancy`), not the nearest. $40, a white robe and gold stole.
+  The `religion` skill has all of it.
 
 Plain Rust in `src/sim/`, like every other part of the simulation.
 

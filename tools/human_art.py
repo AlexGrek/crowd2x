@@ -570,6 +570,18 @@ UNIFORMS["commander"] = (
 )
 
 
+# A white robe to the ankles under a gold stole that hangs down both sides of
+# the front: the cleric's, leading prayers at the church's altar.
+UNIFORMS["cleric"] = (
+    ["", "", "", "", "", "", "", "",
+     ".....dsllsd.....", "....dmsmmsmd....", ".....dsmmsd.....",
+     ".....dsmmsd.....", ".....dSmmSd.....", "....dmmmmmmd....",
+     "....dddddddd...."],
+    {"d": CLOTH["white"][0], "m": CLOTH["white"][1], "l": CLOTH["white"][2],
+     "s": (226, 180, 56), "S": (164, 118, 30)},
+)
+
+
 def uniform_layers():
     """Every (file name, image) of a work uniform."""
     for job, (mask, colours) in UNIFORMS.items():

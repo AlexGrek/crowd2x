@@ -968,16 +968,19 @@ fn items_block(entity: &dyn GameEntity) -> String {
     field_block(fields)
 }
 
-/// All nine aptitudes, with their shared range visible next to each value.
+/// All nine aptitudes, with their shared range visible next to each value,
+/// and last how religious the person is (`sim::religion`) — not an aptitude,
+/// but as lasting, and on the same scale.
 fn talents_block(entity: &dyn GameEntity) -> String {
     let Some(talents) = entity.talents() else {
         return "no talents".to_string();
     };
-    field_block(
-        Talent::ALL.into_iter()
-            .map(|talent| (talent.name(), format!("{} / 100", talents.get(talent))))
-            .collect(),
-    )
+    let mut fields: Vec<(&'static str, String)> = Talent::ALL
+        .into_iter()
+        .map(|talent| (talent.name(), format!("{} / 100", talents.get(talent))))
+        .collect();
+    fields.push(("religiosity", format!("{} / 100", entity.body().religiosity())));
+    field_block(fields)
 }
 
 /// What the unit's mind is doing, as a block of lines — or a plain `empty` for
@@ -1097,10 +1100,11 @@ mod tests {
     fn the_talents_menu_shows_all_nine_scores_and_follows_explicit_changes() {
         let mut person = human();
         let block = talents_block(&person);
-        assert_eq!(block.lines().count(), Talent::ALL.len());
+        assert_eq!(block.lines().count(), Talent::ALL.len() + 1, "and religiosity");
         for talent in Talent::ALL {
             assert_eq!(field(&block, talent.name()), format!("{} / 100", person.talents().get(talent)));
         }
+        assert_eq!(field(&block, "religiosity"), format!("{} / 100", person.body().religiosity()));
         GameEntity::talents_mut(&mut person).unwrap().set(Talent::Precision, 100);
         assert_eq!(field(&talents_block(&person), "precision"), "100 / 100");
     }

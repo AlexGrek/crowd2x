@@ -86,6 +86,9 @@ pub struct Facilities {
     /// administrator was running as the last tick ended (`Effect::Operate`,
     /// [`super::playzone`]).
     pub playzones: Playzones,
+    /// Which altars a cleric was leading prayers at as the last tick ended
+    /// (`Effect::Lead`, [`super::religion`]).
+    pub services: super::religion::Services,
     /// The district's money: the budget, every unit's account, the books
     /// ([`super::economy`]). Changed by `Effect::Record`, `Payroll`, `Buy`
     /// and `CloseBooks`, and by the spawn pass as units come and go.
@@ -181,6 +184,7 @@ impl Facilities {
             dirt: super::dirt::DirtLayer::new(map),
             smell: super::smell::Smell::from_map(map),
             playzones: Playzones::from_map(map),
+            services: super::religion::Services::from_map(map),
             economy: Economy::default(),
             panics: Panics::default(),
             wounds: Wounds::default(),

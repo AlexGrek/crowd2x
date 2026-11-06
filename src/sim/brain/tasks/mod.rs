@@ -52,6 +52,8 @@ pub mod use_toilet;
 pub mod pee;
 pub mod phone;
 pub use phone::{Phone, PHONE_SECONDS};
+pub mod pray;
+pub use pray::Pray;
 pub use pee::Pee;
 pub mod wait;
 pub mod watch_tv;
@@ -163,6 +165,7 @@ tasks! {
     BuyVase,
     PlaceVase,
     Drill,
+    Pray,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

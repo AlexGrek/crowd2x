@@ -49,6 +49,7 @@
 //! 6a. a look at the phone just over reads the news on it, or is a little fun
 //!      (`sim::news::read`)
 //! 6b. a playzone administrator on duty at its computer runs it (`Operate`)
+//!     and a cleric on duty at its altar leads prayers there (`Lead`)
 //! 6c. with the effect still free, what the timesheet owes goes to the world
 //! 7. the walker is told how urgent the goal on top is, and hurries that much
 //! ```
@@ -553,6 +554,15 @@ impl Brain {
             && playzone::runs(job, walk.body().center_position(), ctx)
         {
             effect = Effect::Operate { at: job.workplace };
+        }
+        // ...and a cleric on duty and at its altar leads prayers there: the
+        // church's prayers are a service for as long as it says so
+        // (`sim::religion`).
+        if effect == Effect::None
+            && let Some(job) = job
+            && super::religion::leads(job, walk.body().center_position(), ctx)
+        {
+            effect = Effect::Lead { at: job.workplace };
         }
 
         // 6b'. A worker on leave for its mental health gives up its post, for

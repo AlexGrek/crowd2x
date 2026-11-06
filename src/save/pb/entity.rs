@@ -147,6 +147,10 @@ pub struct Body {
     pub dirt: Option<super::Dirt>,
     #[prost(uint32, optional, tag = "10")]
     pub obedience: Option<u32>,
+    /// How religious it is, 0-100 (`crate::sim::religion`). Absent in a save
+    /// from before there was religion: rolled again from the uid.
+    #[prost(uint32, optional, tag = "11")]
+    pub religiosity: Option<u32>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
