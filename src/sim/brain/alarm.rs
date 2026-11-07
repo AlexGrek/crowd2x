@@ -1,9 +1,10 @@
 //! What in a look is danger, or prey — brain step 0, after
 //! [`Perception::look`](super::perception::Perception::look).
 //!
-//! **Only outside the site.** Inside it nobody is in danger
-//! (`sim::deathdogs`), so somebody inside reacts to nothing here — not to a
-//! deathdog over the wall, not to somebody running in at the gate.
+//! **Only outside the site and the outposts.** Inside either nobody is in
+//! danger (`sim::deathdogs`, `Map::is_safe`), so somebody inside reacts to
+//! nothing here — not to a deathdog over the wall, not to somebody running in
+//! at the gate.
 //!
 //! * **A person outside** is scared by the nearest deathdog it sees, or the
 //!   nearest person it sees running in a panic ([`Think::panics`]) — which is
@@ -25,13 +26,14 @@ use super::perception::{Sighting, Sightings};
 
 /// React to one look's `sightings` — see the module docs.
 pub fn take_in(ctx: &Think<'_>, body: &Body, sightings: &Sightings, memory: &mut Memory) {
-    let site = ctx.map.site();
+    // The site, and the outposts: nowhere a deathdog goes.
+    let map = ctx.map;
     let spot = |memory: &mut Memory, seen: Sighting| {
         memory.spot(Spotted { who: seen.uid, at: seen.cell, when: ctx.clock.elapsed() });
     };
     match body.uid().kind() {
         Some(EntityType::Human) => {
-            if site.contains(body.center_position()) {
+            if map.is_safe(body.center_position()) {
                 return;
             }
             let scary = sightings.iter().find(|seen| match seen.uid.kind() {
@@ -47,7 +49,7 @@ pub fn take_in(ctx: &Think<'_>, body: &Body, sightings: &Sightings, memory: &mut
             let quarry = memory.spotted().map(|spotted| spotted.who);
             let mut prey = sightings
                 .iter()
-                .filter(|seen| seen.uid.kind().is_some_and(EntityType::is_deathdog_prey) && !site.contains(seen.cell));
+                .filter(|seen| seen.uid.kind().is_some_and(EntityType::is_deathdog_prey) && !map.is_safe(seen.cell));
             let first = prey.next();
             let chosen = match first {
                 Some(seen) if Some(seen.uid) == quarry => Some(seen),

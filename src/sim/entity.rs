@@ -930,7 +930,7 @@ impl Think<'_> {
     /// walls). The terrain's walk cost, so a route keeps to the pavement and
     /// crosses the road ([`crate::sim::path`]).
     pub fn step_cost_with(&self, cell: Point, key: Option<PropertyId>, kind: Option<EntityType>) -> Option<u32> {
-        if kind.is_some_and(EntityType::keeps_off_the_site) && self.map.site().contains(cell) {
+        if kind.is_some_and(EntityType::keeps_off_the_site) && self.map.is_safe(cell) {
             return None;
         }
         self.is_passable_with(cell, key).then(|| self.map.walk_cost(cell) as u32)

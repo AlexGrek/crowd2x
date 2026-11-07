@@ -326,6 +326,11 @@ pub struct Map {
     /// simulation's (`sim::outposts`), which builds the map again when a game
     /// is loaded: never in a map file, nor in a save's chunks.
     built: BTreeMap<(ChunkPos, u16), Structure>,
+    /// The ground off the site that is as safe as the site is from the
+    /// wasteland's deathdogs: an outpost's footprint ([`Map::shelter`]).
+    /// Like `built`, the simulation's: never in a map file, nor in a save's
+    /// chunks, and built again when a game is loaded.
+    sheltered: Vec<Bounds>,
 }
 
 /// What stands in a cell play has built on off the site ([`Map::build`]).
@@ -412,6 +417,7 @@ impl Map {
             salvage_revision: 0,
             planted: BTreeSet::new(),
             built: BTreeMap::new(),
+            sheltered: Vec::new(),
         };
         map.rebuild_passability();
         map
@@ -439,6 +445,7 @@ impl Map {
             let site = self.site();
             self.planted.retain(|&(pos, index)| site.contains(cell_of_key(pos, index)));
             self.built.clear();
+            self.sheltered.clear();
             self.salvage_revision = self.salvage_revision.wrapping_add(1);
             self.invalidate_navigation();
         }
@@ -759,6 +766,29 @@ impl Map {
             return None;
         }
         self.built.get(&salvage_key(cell)).copied()
+    }
+
+    /// Make `area` as safe as the site: a deathdog never sets foot in it and
+    /// never bites anybody in it (`sim::deathdogs`). An outpost's footprint,
+    /// from the day its flag goes up. Off the site only; a rectangle sheltered
+    /// twice is kept once.
+    pub fn shelter(&mut self, area: Bounds) {
+        if !self.sheltered.contains(&area) {
+            self.sheltered.push(area);
+        }
+    }
+
+    /// Whether `cell` is sheltered ([`Map::shelter`]) — not counting the site.
+    #[inline]
+    pub fn is_sheltered(&self, cell: Point) -> bool {
+        self.sheltered.iter().any(|area| area.contains(cell))
+    }
+
+    /// Whether `cell` is somewhere deathdogs keep out of and nobody is in
+    /// danger: on the site, or inside an outpost.
+    #[inline]
+    pub fn is_safe(&self, cell: Point) -> bool {
+        self.size.contains(cell) || self.is_sheltered(cell)
     }
 
     /// Every cell built on off the site, by chunk and cell in it.
@@ -1528,5 +1558,20 @@ mod tests {
         assert!(!map.can_build(heap) && !map.build(heap, Structure::Obstacle), "a heap is in the way");
         let mut bare = Map::new(Size::new(8, 8), FLOOR);
         assert!(!bare.build(Point::new(20, 20), Structure::Obstacle));
+    }
+
+    #[test]
+    fn a_sheltered_area_is_as_safe_as_the_site_until_the_wasteland_changes() {
+        let (mut map, _) = scrapyard(1);
+        let area = Bounds::new(Point::new(40, 40), Size::new(6, 7));
+        assert!(map.is_safe(Point::new(3, 3)), "the site is safe");
+        assert!(!map.is_safe(Point::new(42, 42)) && !map.is_sheltered(Point::new(3, 3)));
+        map.shelter(area);
+        map.shelter(area);
+        assert!(map.is_safe(Point::new(42, 42)) && map.is_sheltered(Point::new(45, 46)));
+        assert!(!map.is_safe(Point::new(46, 46)) && !map.is_safe(Point::new(39, 42)), "just outside it is not");
+        map.set_wasteland(Some(Wasteland::new(99)));
+        assert!(!map.is_safe(Point::new(42, 42)), "another wasteland has no outposts");
+        assert!(map.is_safe(Point::new(3, 3)));
     }
 }

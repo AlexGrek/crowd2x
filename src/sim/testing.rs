@@ -104,7 +104,7 @@ impl World {
                 if into == from {
                     entity.apply(&intent);
                     MoveOutcome::Moved
-                } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && self.map.site().contains(into) {
+                } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && self.map.is_safe(into) {
                     // `sim::move_step`'s refusal of a deathdog's step onto
                     // the site, kept in step with it.
                     MoveOutcome::Blocked { by: None }

@@ -185,6 +185,11 @@ pub enum Effect {
     /// days — gives back the tile it had taken on, as it stands, for another
     /// builder to take on (`Brain::step`).
     GiveUpTile,
+    /// Somebody about to sleep books the outpost bed at `bed`
+    /// (`brain::tasks::Book`): it stays theirs for good. Granted while the
+    /// bed is built and nobody's, the district's homes included, and the
+    /// booker has no other.
+    Book { bed: Point },
     /// A worker on leave for its mental health — off for days, often weeks —
     /// gives up its post (`Brain::step`): let go, as a death lets go, and the
     /// job handed to somebody jobless before the tick is out
@@ -416,6 +421,7 @@ pub(crate) fn apply(
             log.unit(uid, format!("{uid} went back into the wasteland"));
         }
         Effect::Decree { at, day } => decree(entity, map, facilities, log, at, day),
+        Effect::Book { bed } => book(entity, facilities, log, bed),
         Effect::DecreeGround { at, day } => decree_ground(entity, map, facilities, log, at, day),
         Effect::Claim { at } => claim(entity, facilities, log, at),
         Effect::Lay { at } => lay(entity, map, facilities, occupancy, log, at),
@@ -434,13 +440,15 @@ pub(crate) fn apply(
 
 /// [`Effect::Decree`]: the king's outpost founded where it decided, or the
 /// day it found nowhere remembered. From the king alone.
-fn decree(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, log: &Log, at: Option<Point>, day: u32) {
+fn decree(entity: &dyn GameEntity, map: &mut Map, facilities: &mut Facilities, log: &Log, at: Option<Point>, day: u32) {
     if entity.job().is_none_or(|job| job.kind != JobKind::King) {
         return;
     }
     let uid = entity.uid();
     match at {
         Some(center) if facilities.outposts.found(map, center, day) => {
+            // From the day its flag is up no deathdog sets foot in it.
+            map.shelter(super::outposts::footprint(center));
             log.important(format!("the king decreed an outpost at {}, {}: its flag is up", center.x, center.y));
         }
         Some(center) => log.unit(uid, format!("{uid} could not found an outpost at {}, {}", center.x, center.y)),
@@ -467,6 +475,22 @@ fn decree_ground(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities
             facilities.training.found_nowhere(day);
             log.important("the king found nowhere to train the soldiers".to_string());
         }
+    }
+}
+
+/// [`Effect::Book`]: the outpost bed at `bed` made the sleeper's own, while it
+/// is built and nobody's — no home in the district's [`Homes`](super::Homes)
+/// either — and the sleeper has booked no other. Logged either way: once a
+/// bed.
+fn book(entity: &dyn GameEntity, facilities: &mut Facilities, log: &Log, bed: Point) {
+    let uid = entity.uid();
+    if entity.is_dead() || entity.is_frozen() || facilities.homes.is_owned(bed) {
+        return;
+    }
+    if facilities.outposts.book(bed, uid) {
+        log.unit(uid, format!("{uid} booked the outpost bed at {}, {}", bed.x, bed.y));
+    } else {
+        log.unit(uid, format!("{uid} found the outpost bed at {}, {} taken", bed.x, bed.y));
     }
 }
 
@@ -638,7 +662,7 @@ fn bite(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, occupan
     let Some(target) = occupancy.occupant(at) else {
         return;
     };
-    if !target.kind().is_some_and(super::uid::EntityType::is_deathdog_prey) || map.site().contains(at) || from.chebyshev_distance(at) > 1 {
+    if !target.kind().is_some_and(super::uid::EntityType::is_deathdog_prey) || map.is_safe(at) || from.chebyshev_distance(at) > 1 {
         return;
     }
     facilities.wounds.inflict(super::wounds::Wound { target, by: dog, from, damage });
@@ -683,6 +707,7 @@ fn died(entity: &mut dyn GameEntity, facilities: &mut Facilities, occupancy: &mu
     occupancy.release(cell, uid);
     facilities.decor.release(uid);
     facilities.homes.release(uid);
+    facilities.outposts.release_bed(uid);
     facilities.workplaces.release(uid);
     facilities.outposts.release(uid);
     facilities.society.set_job(uid, None);

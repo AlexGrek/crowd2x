@@ -1684,6 +1684,7 @@ impl GameState {
                 // desk.
                 self.facilities.decor.release(uid);
                 self.facilities.homes.release(uid);
+                self.facilities.outposts.release_bed(uid);
                 self.facilities.workplaces.release(uid);
                 self.facilities.outposts.release(uid);
                 self.facilities.society.leave(uid);
@@ -1983,7 +1984,7 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
                 state.set_clothing(*uid, *clothing);
             }
             Command::Spawn { kind, at } => {
-                if kind.keeps_off_the_site() && state.map.site().contains(*at) {
+                if kind.keeps_off_the_site() && state.map.is_safe(*at) {
                     // It could never step off it again, nor be routed
                     // anywhere: a route for one goes round the site.
                     state.log.important(format!("a {kind} keeps off the site: none spawned at {}, {}", at.x, at.y));
@@ -2327,7 +2328,7 @@ fn move_step(
             // Still in its own cell: it already holds this one.
             entity.apply(&intent);
             MoveOutcome::Moved
-        } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && map.site().contains(into) {
+        } else if uid.kind().is_some_and(EntityType::keeps_off_the_site) && map.is_safe(into) {
             // A deathdog never sets foot on the site. Its routes go round it
             // (`Think::step_cost_with`), so this is the guarantee rather than
             // the mechanism.

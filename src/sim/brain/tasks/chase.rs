@@ -88,7 +88,7 @@ impl TaskExecutor for Chase {
             return TaskResult::Failed;
         };
         self.at = found;
-        if ctx.think.map.site().contains(found) {
+        if ctx.think.map.is_safe(found) {
             return TaskResult::Failed;
         }
         self.rest = self.rest.saturating_sub(1);

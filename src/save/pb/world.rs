@@ -169,6 +169,9 @@ pub struct Outposts {
     /// The last day the king looked for a site and found none; 0, never.
     #[prost(uint32, tag = "2")]
     pub fruitless: u32,
+    /// The beds of built outposts somebody has booked, and whose.
+    #[prost(message, repeated, tag = "3")]
+    pub bookings: Vec<Home>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

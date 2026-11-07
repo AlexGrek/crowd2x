@@ -109,6 +109,37 @@ scrap, site `"outpost"`, drawn as the scrap bin's fill strip): a working store �
 withdraw, the statistics — but **no job routes scrap through it yet**. That, people living
 out there, and anything else an outpost is *for*, come next.
 
+## Living out there: booked beds, safe ground, the fridge
+
+- **Booking a bed** (`Outposts::bookings`, bed → whose; `book`, `release_bed`, `booker`,
+  `booked_by`, `bookable_near(here, BOOK_REACH = 30)`, `can_book`, `beds`, `is_bed`). A *built* outpost
+  bed nobody has is any local's to book: when `SleepGoal::choose` is picking a bed (see
+  `brain/goals/sleep.rs`) and the unit has no booking, the nearest unbooked outpost bed within
+  `BOOK_REACH` cells (manhattan) is a candidate **only if it is nearer than the bed at home** (or
+  it has none); `plan` queues **`Task::book(bed)`** (`brain/tasks/book.rs`, `"book a bed"`,
+  instant → `Effect::Book { bed }`; fails and asks nothing where `can_book` says no) ahead of the
+  walk. The world (`effect::book`) grants it while the bed is not in `Facilities::homes` either and
+  the booker is alive; logged `booked the outpost bed at x, y`. **It stays the booker's for good**
+  (one bed to a person, one person to a bed) until it dies (`effect::died`) or is despawned
+  (`GameState::despawn`) — not on dismissal. Each night the sleeper picks the nearer of its home
+  bed and its booked one, so a collector far from home sleeps at the outpost and a resident at
+  home never does. A critically tired unit's random free-bed pick skips a bed another has booked.
+  **Not `Homes`**: homes is one bed from the district's spawn pass; bookings are saved in
+  `pb::Outposts.bookings` (tag 3, `pb::Home`), restore refuses a bed that is not a built bed or a
+  second booking either way.
+- **Deathdogs cannot enter an outpost.** `Map::shelter(footprint)` (a `sheltered` list beside
+  `built`, off the site, not in a map file or a save's chunks) is called by `effect::decree` the
+  day the flag goes up and by `Outposts::restore`; `Map::is_safe(cell)` = on the site **or**
+  sheltered. Everywhere a deathdog was kept off `site().contains` now asks `is_safe`: its route
+  (`Think::step_cost_with`), the move step, `Command::Spawn`, `Chase`, `effect::bite` (nobody
+  inside is bitten) and `alarm::take_in` (nobody inside panics at one, no prey inside). The whole
+  6x7 footprint counts, the doorway included. `set_wasteland` forgets it.
+  **Not yet**: `FleeGoal` still runs for the district's gates (`WaysIn`), not the nearest outpost.
+- **The fridge is anyone's.** It is in the `Features` and `Fridges` indexes like any other and has
+  no property, so whoever is nearest — a builder at its shift, a collector — uses it
+  (`nearest_in_reach`); a meal costs the usual price (`Effect::Buy` carries no place, so there is
+  no "free here").
+
 ## On screen (`src/game/outposts.rs`)
 
 The `crops.rs` pattern: a sprite on every outpost cell on the canvas that shows something,
@@ -126,7 +157,8 @@ the newest), and the outpost store under `outpost` (`game-screen`).
 ## Saving (`savegame`)
 
 `pb::World.outposts` (tag 28, `pb::Outposts { outposts: [pb::Outpost { center, flipped,
-decreed, tiles: [pb::OutpostTile { stage: TileStage, progress, claim }] }], fruitless }`,
+decreed, tiles: [pb::OutpostTile { stage: TileStage, progress, claim }] }], fruitless,
+bookings: [pb::Home] }`,
 absent = none). `Outposts::restore(saved, &mut map)` refuses a wrong tile count, progress
 that is no amount of time, a builder on two tiles or on a built one, an unfinished outpost
 before the last, and anything the map will not have built where it is — and builds the map
@@ -151,6 +183,12 @@ sampled every world hour (`src/lab/metrics.rs`).
   footprint, `choose_site` over three seeds, one at a time and once a day, claims exclusive
   (seen failing with the claim check gone), steel-free tiles out there, laying and the two
   hours, a doorway never in the way and the fixtures, stand cells, the save and its refusals.
+- Bookings and shelter: `outposts` (`a_bed_is_booked_once_...`, `..._only_from_within_reach_...`,
+  `bookings_come_back_from_a_save_...`), `tasks/book.rs`, `goals/sleep.rs` (books and sleeps; a
+  booked bed is the one it comes back to; not a free bed to another; the outpost against a far
+  home bed; nobody at home books), `map::tests::a_sheltered_area_is_as_safe_as_the_site_...`,
+  `deathdogs::tests::a_deathdog_keeps_out_of_an_outpost_and_bites_nobody_inside_it` (seen failing
+  with `is_safe` the site alone). `testing` helper `outposts::built_outpost_with_beds`.
 - tasks (`Rig`): `claim`, `lay`, `construct` (every tick counted; done mid-stretch), `decree`
   (with and without the steel).
 - `brain/goals/build.rs` (`testing::World`): a wall from claim to built in two stretches with

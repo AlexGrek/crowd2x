@@ -97,7 +97,7 @@ district, a fridge, a local warehouse and two beds — is every builder's to rea
 **builders**, eight to six every day but only when there is something to build (a care package
 otherwise), each take a tile on (never two to one), fetch its steel, lay a building tile with all
 of it and work it two hours, an hour at a time with a rest between, then come back in before
-dark. Walls become wall terrain; built furniture works.
+dark. Walls become wall terrain; built furniture works. Locals near a finished outpost book its bed when they want to sleep and it stays theirs; deathdogs cannot enter an outpost, and its fridge is anybody's.
 
 The **news**: every death (bad news) and every 100 of anything made (a production record, good
 news) is a story; the palace's **propagandist**, a noble, noon to four every day at the propaganda

@@ -63,6 +63,8 @@ pub mod check_stock;
 pub mod fetch;
 pub use check_stock::{CheckStock, CHECK_SECONDS};
 pub use fetch::Fetch;
+pub mod book;
+pub use book::Book;
 pub mod claim;
 pub mod construct;
 pub mod decree;
@@ -157,6 +159,7 @@ tasks! {
     CheckStock,
     Fetch,
     Claim,
+    Book,
     Lay,
     Construct,
     Decree,

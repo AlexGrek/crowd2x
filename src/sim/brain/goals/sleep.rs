@@ -19,7 +19,11 @@
 //! 1. **Already lying in a bed**: that one, whoever's it is. Getting up to walk
 //!    home across the room half way through the night would throw the hour
 //!    away.
-//! 2. **Its own bed, if it is free.**
+//! 2. **Its own bed, if it is free** — and an **outpost's bed** it has
+//!    **booked** ([`Task::book`], `sim::outposts`): out in the wasteland, a
+//!    local within `BOOK_REACH` of a built outpost's bed nobody has books it
+//!    on the way (if it is nearer than the bed at home), and it is its own for
+//!    good. Of the two it goes to whichever is the nearer.
 //! 3. **Any other free bed, chosen at random — but only when critically
 //!    tired** ([`CRITICALLY_TIRED`]). Somebody who merely wants to sleep does
 //!    not take a bed that is not theirs; somebody who cannot go on will.
@@ -44,6 +48,7 @@ use crate::map::Point;
 use crate::save::{pb, Invalid};
 use crate::sim::clock::{watched, HOUR};
 use crate::sim::feature::FeatureKind;
+use crate::sim::outposts::BOOK_REACH;
 use crate::sim::rng::tick_rng;
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
@@ -103,24 +108,39 @@ impl SleepGoal {
             _ => None,
         };
         let critical = ctx.biology.is_some_and(|biology| biology.stats().tiredness() >= CRITICALLY_TIRED);
+        // An outpost's bed of its own: the one it booked, or, if it has none,
+        // the nearest nobody has booked within reach — but only one nearer
+        // than the bed it has at home (a local out in the wasteland, not
+        // somebody who happens to be near both).
+        let outpost = think.outposts.booked_by(uid).or_else(|| {
+            think
+                .outposts
+                .bookable_near(here, BOOK_REACH)
+                .filter(|&bed| home.is_none_or(|home| here.manhattan_distance(bed) < here.manhattan_distance(home)))
+        });
         let pick = |remembered_too: bool| {
             let free = |bed: Point| think.occupancy.is_free_for(bed, uid) && (remembered_too || !places.contains(bed, now));
-            // Its own, by default.
-            if let Some(home) = home
-                && free(home)
-            {
-                return Some(home);
+            // Its own, by default: at home, or at an outpost if that is nearer.
+            let own = home.filter(|&home| free(home));
+            let outpost = outpost.filter(|&bed| free(bed));
+            match (own, outpost) {
+                (Some(home), Some(bed)) => {
+                    return Some(if here.manhattan_distance(bed) < here.manhattan_distance(home) { bed } else { home });
+                }
+                (Some(bed), None) | (None, Some(bed)) => return Some(bed),
+                (None, None) => {}
             }
             // Anybody's, only when it cannot go on.
             if !critical {
                 return None;
             }
-            // ...and never one in somebody else's house.
+            // ...and never one in somebody else's house, nor one an outpost's
+            // booker has made its own.
             let key = ctx.body.home();
             let mut rng = tick_rng(uid, think.tick);
-            think
-                .features
-                .pick_where(FeatureKind::Bed, &mut rng, |bed| think.may_use(bed, key) && free(bed))
+            think.features.pick_where(FeatureKind::Bed, &mut rng, |bed| {
+                think.may_use(bed, key) && think.outposts.booker(bed).is_none_or(|booker| booker == uid) && free(bed)
+            })
         };
         pick(false).or_else(|| if rerouting { None } else { pick(true) })
     }
@@ -132,6 +152,11 @@ impl SleepGoal {
         let Some(bed) = self.seek.target else {
             return false;
         };
+        // A bed out at an outpost that is nobody's is booked on the way: it
+        // stays this unit's, to come back to when it is the nearest it has.
+        if ctx.think.outposts.can_book(bed, ctx.body.uid()) {
+            let _ = ctx.tasks.push_back(Task::book(bed));
+        }
         match stand_beside(ctx, bed) {
             Stand::Nowhere => return false,
             Stand::Here => {}
@@ -859,5 +884,98 @@ mod tests {
         // The bladder was the worse of the two, so it came first.
         let line = |needle| world.lines().iter().position(|line| line.contains(needle));
         assert!(line("used the toilet") < line("slept in the bed"), "lines {:?}", world.lines());
+    }
+
+    /// A wasteland round a small site, a built outpost far out (50 cells and
+    /// more from the wall) with its beds taken into the indexes, and the
+    /// middle of the night. The beds, and the outpost's flag.
+    fn outpost_night() -> (World, Vec<Point>, Point) {
+        let mut world = World::new(Map::new(Size::new(14, 10), FLOOR).with_wasteland(3));
+        let beds = crate::sim::outposts::built_outpost_with_beds(&mut world.facilities.outposts, &mut world.map);
+        for fixture in world.facilities.outposts.fixtures().collect::<Vec<_>>() {
+            world.facilities.install(fixture);
+        }
+        world.clock = midnight();
+        let center = world.facilities.outposts.iter().next().unwrap().center();
+        (world, beds, center)
+    }
+
+    /// **Booking.** A local with no bed of its own, tired, near an outpost:
+    /// it books the nearest bed there, sleeps in it, and the bed is its own.
+    #[test]
+    fn somebody_tired_near_an_outpost_books_its_bed_and_sleeps_in_it() {
+        let (mut world, beds, center) = outpost_night();
+        let mut human = only_tired(center, 60.0);
+        let uid = human.uid();
+        run_until_slept(&mut world, &mut human, 4000);
+        assert!(world.log_contains("booked the outpost bed at"), "lines {:?}", world.lines());
+        let bed = world.outposts.booked_by(uid).expect("the bed is its own");
+        assert!(beds.contains(&bed));
+        assert!(world.log_contains(&format!("slept in the bed at {}, {}", bed.x, bed.y)), "lines {:?}", world.lines());
+        assert_eq!(human.center_position(), bed);
+    }
+
+    /// The booking stays: another night, with the other bed free and nearer
+    /// the door, it goes back to the one it booked.
+    #[test]
+    fn a_booked_bed_is_the_one_it_comes_back_to() {
+        let (mut world, beds, center) = outpost_night();
+        let mut human = only_tired(center, 60.0);
+        let uid = human.uid();
+        assert!(world.facilities.outposts.book(beds[1], uid));
+        run_until_slept(&mut world, &mut human, 4000);
+        assert!(world.log_contains(&format!("slept in the bed at {}, {}", beds[1].x, beds[1].y)), "lines {:?}", world.lines());
+        assert!(!world.log_contains("booked the outpost bed"), "it had booked one already");
+        assert_eq!(world.outposts.booked_by(uid), Some(beds[1]));
+    }
+
+    /// Somebody else's booking is not a free bed — not even to somebody
+    /// critically tired, who takes any bed that is free.
+    #[test]
+    fn a_booked_bed_is_not_a_free_bed_to_anybody_else() {
+        let (mut world, beds, center) = outpost_night();
+        let owner = Uid::new(EntityType::Human, 500);
+        assert!(world.facilities.outposts.book(beds[0], owner));
+        let mut human = only_tired(center, CRITICALLY_TIRED + 3.0);
+        run_until_slept(&mut world, &mut human, 4000);
+        assert!(world.log_contains(&format!("slept in the bed at {}, {}", beds[1].x, beds[1].y)), "lines {:?}", world.lines());
+        assert!(!world.log_contains(&format!("slept in the bed at {}, {}", beds[0].x, beds[0].y)));
+    }
+
+    /// Out at the outpost the bed at home is the farther: the outpost's is
+    /// the nearest, and it is the one that is booked.
+    #[test]
+    fn a_local_out_at_the_outpost_prefers_it_to_a_bed_at_home_far_away() {
+        let (mut world, beds, center) = outpost_night();
+        let home = Point::new(2, 2);
+        prop_at(&mut world.map, "bed 1", home);
+        world.features = crate::sim::feature::Features::from_map(&world.map, &crate::map::utilities::Supply::everywhere(world.map.size()));
+        for fixture in world.facilities.outposts.fixtures().collect::<Vec<_>>() {
+            world.facilities.install(fixture);
+        }
+        let mut human = owner(center, 60.0, home);
+        let uid = human.uid();
+        run_until_slept(&mut world, &mut human, 4000);
+        let bed = world.outposts.booked_by(uid).expect("booked the nearest");
+        assert!(beds.contains(&bed));
+        assert!(!world.log_contains(&format!("slept in the bed at {}, {}", home.x, home.y)));
+    }
+
+    /// At home, with an outpost a long way off, nobody books it: it is not a
+    /// local's.
+    #[test]
+    fn nobody_at_home_books_a_bed_far_out_in_the_wasteland() {
+        let (mut world, _, _) = outpost_night();
+        let home = Point::new(5, 5);
+        prop_at(&mut world.map, "bed 1", home);
+        world.features = crate::sim::feature::Features::from_map(&world.map, &crate::map::utilities::Supply::everywhere(world.map.size()));
+        for fixture in world.facilities.outposts.fixtures().collect::<Vec<_>>() {
+            world.facilities.install(fixture);
+        }
+        let mut human = owner(Point::new(4, 5), 60.0, home);
+        let uid = human.uid();
+        run_until_slept(&mut world, &mut human, 4000);
+        assert!(world.log_contains(&format!("slept in the bed at {}, {}", home.x, home.y)), "lines {:?}", world.lines());
+        assert_eq!(world.outposts.booked_by(uid), None);
     }
 }

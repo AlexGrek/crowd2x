@@ -50,6 +50,11 @@ cells to a kind that keeps off (routes and detours go round the walls);
 mirrored in `testing::World::step`); `spawn_pass` refuses a `Command::Spawn` of
 one onto the site, with a log line.
 
+**Outposts are as safe as the site.** The checks above ask `Map::is_safe(cell)` (the site or a
+sheltered outpost footprint, `Map::shelter`, set by the king's decree and on load), not
+`site().contains`: no route into an outpost, no step, no spawn, `Chase` fails, `effect::bite`
+and `alarm::take_in` ignore anybody inside (`outposts` skill, "Living out there").
+
 ## The deathdog's mind (`Brain::deathdog`)
 
 | Routine (`brain/routines.rs`) | Goal (`brain/goals/`) | Priority |

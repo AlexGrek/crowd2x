@@ -586,6 +586,7 @@ mod tests {
             Task::unpack(ItemKind::Water, 29.0),
             Task::stow(30.0),
             Task::claim(at),
+            Task::book(at),
             Task::lay(at, 31.0),
             Task::construct(at, 32.0),
             Task::decree(at, 33.0),

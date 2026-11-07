@@ -28,6 +28,8 @@
 //! world step (`effect::apply`: `Effect::Decree`, `Claim`, `Lay`,
 //! `Construct`), read by every brain through `Think::outposts`, and saved.
 
+use std::collections::BTreeMap;
+
 use crate::map::{Bounds, Map, Point, Size, Structure};
 use crate::save::{invalid, pb, Invalid};
 
@@ -335,6 +337,10 @@ impl Outpost {
     }
 }
 
+/// How far from an outpost's bed, in cells as a person walks, somebody may be
+/// and still book it: a local, out in the wasteland near it.
+pub const BOOK_REACH: i32 = 30;
+
 /// The cells an outpost with its flag at `center` covers.
 pub fn footprint(center: Point) -> Bounds {
     Bounds::new(center.offset(-CENTRE.0, -CENTRE.1), Size::new(WIDTH, HEIGHT))
@@ -351,11 +357,83 @@ pub struct Outposts {
     /// The last day the king looked for a site and found none: not looked for
     /// again that day.
     fruitless: u32,
+    /// The beds of built outposts that somebody has booked: bed → whose it
+    /// is now, one bed to a person and one person to a bed. Not
+    /// `Facilities::homes`, whose beds are the district's and handed out as
+    /// people arrive; a booked bed stays its booker's until it dies or is
+    /// despawned.
+    bookings: BTreeMap<Point, Uid>,
 }
 
 impl Outposts {
     pub fn new() -> Outposts {
         Outposts::default()
+    }
+
+    // --- beds ---
+
+    /// Every bed that is built, in every outpost, in the order decreed.
+    pub fn beds(&self) -> impl Iterator<Item = Point> + '_ {
+        self.outposts
+            .iter()
+            .flat_map(|outpost| outpost.tiles.iter())
+            .filter(|tile| tile.part == Part::Bed && tile.stage == Stage::Built)
+            .map(|tile| tile.cell)
+    }
+
+    /// Whether `cell` is a bed of a built outpost.
+    pub fn is_bed(&self, cell: Point) -> bool {
+        self.outposts.iter().any(|outpost| {
+            outpost.footprint().contains(cell)
+                && outpost.tile(cell).is_some_and(|tile| tile.part == Part::Bed && tile.stage == Stage::Built)
+        })
+    }
+
+    /// Whose the outpost bed at `bed` is, if anybody's.
+    pub fn booker(&self, bed: Point) -> Option<Uid> {
+        self.bookings.get(&bed).copied()
+    }
+
+    /// The outpost bed `uid` has booked, if any. A walk of the bookings, a
+    /// handful: asked when somebody is choosing a bed, never every tick.
+    pub fn booked_by(&self, uid: Uid) -> Option<Point> {
+        self.bookings.iter().find(|&(_, &by)| by == uid).map(|(&bed, _)| bed)
+    }
+
+    /// The built outpost bed nobody has booked that is nearest `here` and
+    /// within `reach` cells of it (as a person walks, manhattan); the lower
+    /// cell on a tie.
+    pub fn bookable_near(&self, here: Point, reach: i32) -> Option<Point> {
+        self.beds()
+            .filter(|bed| !self.bookings.contains_key(bed))
+            .map(|bed| (here.manhattan_distance(bed), bed))
+            .filter(|&(distance, _)| distance <= reach)
+            .min()
+            .map(|(_, bed)| bed)
+    }
+
+    /// Whether the bed at `bed` could be booked by `uid` now: a built outpost
+    /// bed nobody has, and `uid` has no other.
+    pub fn can_book(&self, bed: Point, uid: Uid) -> bool {
+        self.is_bed(bed) && !self.bookings.contains_key(&bed) && self.booked_by(uid).is_none()
+    }
+
+    /// Make the outpost bed at `bed` `uid`'s, for good. `false`, nothing
+    /// changed, if [`Outposts::can_book`] says no.
+    pub fn book(&mut self, bed: Point, uid: Uid) -> bool {
+        if !self.can_book(bed, uid) {
+            return false;
+        }
+        self.bookings.insert(bed, uid);
+        true
+    }
+
+    /// Take back the bed `uid` had booked — it died, or left the world — for
+    /// the next to book. The bed it was.
+    pub fn release_bed(&mut self, uid: Uid) -> Option<Point> {
+        let bed = self.booked_by(uid)?;
+        self.bookings.remove(&bed);
+        Some(bed)
     }
 
     /// Every outpost, in the order decreed.
@@ -554,7 +632,7 @@ impl Outposts {
     // --- saving ---
 
     pub(crate) fn save(&self) -> pb::Outposts {
-        let Outposts { outposts, fruitless } = self;
+        let Outposts { outposts, fruitless, bookings } = self;
         pb::Outposts {
             outposts: outposts
                 .iter()
@@ -579,6 +657,7 @@ impl Outposts {
                 })
                 .collect(),
             fruitless: *fruitless,
+            bookings: bookings.iter().map(|(&bed, &owner)| pb::Home { bed: Some(bed.into()), owner: owner.raw() }).collect(),
         }
     }
 
@@ -634,12 +713,23 @@ impl Outposts {
             if !outpost.is_complete() && index + 1 != saved.outposts.len() {
                 return invalid(format!("the outpost at {}, {} unfinished, and a later one decreed", center.x, center.y));
             }
+            map.shelter(outpost.footprint());
             outposts.push(outpost);
         }
         if outposts.last().is_none_or(Outpost::is_complete) && !claimed.is_empty() {
             return invalid("a builder on a tile of no outpost going up");
         }
-        Ok(Outposts { outposts, fruitless: saved.fruitless })
+        let mut restored = Outposts { outposts, fruitless: saved.fruitless, bookings: BTreeMap::new() };
+        for kept in &saved.bookings {
+            let bed = pb::cell(kept.bed, "booked bed")?;
+            let Some(owner) = Uid::from_raw(kept.owner) else {
+                return invalid(format!("the outpost bed at {}, {} booked by nobody", bed.x, bed.y));
+            };
+            if !restored.book(bed, owner) {
+                return invalid(format!("the outpost bed at {}, {} cannot be booked by {owner}", bed.x, bed.y));
+            }
+        }
+        Ok(restored)
     }
 }
 
@@ -794,6 +884,24 @@ pub(crate) fn first_clear_site(map: &Map) -> Point {
         .points()
         .find(|&center| is_clear(map, center, &Outposts::new()))
         .expect("somewhere clear in the band above the site")
+}
+
+/// An outpost founded at the first clear site and built, every tile, the map
+/// sheltered as the world step does: the cells of its beds, for a test that
+/// wants somewhere to sleep out there and does not care where.
+#[cfg(test)]
+pub(crate) fn built_outpost_with_beds(outposts: &mut Outposts, map: &mut Map) -> Vec<Point> {
+    let center = first_clear_site(map);
+    assert!(outposts.found(map, center, 1));
+    map.shelter(footprint(center));
+    let builder = Uid::from_raw(((crate::sim::uid::EntityType::Human as u64) << 56) | 9999).unwrap();
+    let cells: Vec<Point> = outposts.under_way().unwrap().tiles().iter().map(|tile| tile.cell).collect();
+    for cell in cells {
+        assert!(outposts.claim(cell, builder));
+        outposts.lay(map, cell, builder).unwrap();
+        outposts.construct(map, cell, builder, TILE_WORK).unwrap();
+    }
+    outposts.beds().collect()
 }
 
 #[cfg(test)]
@@ -1051,5 +1159,60 @@ mod tests {
         blocked.load_chunks(footprint(saved.outposts[0].center.unwrap().into()).grown(2));
         assert!(blocked.build(wall, Structure::Wall));
         assert!(Outposts::restore(Some(&saved), &mut blocked).is_err(), "something already standing there");
+    }
+
+    #[test]
+    fn a_bed_is_booked_once_by_somebody_with_no_other_and_given_back_with_them() {
+        let mut map = site();
+        let mut outposts = Outposts::new();
+        let beds = built_outpost_with_beds(&mut outposts, &mut map);
+        assert_eq!(beds.len(), 2);
+        let (me, you) = (builder(1), builder(2));
+        assert!(!outposts.book(Point::new(0, 0), me), "the flag's cell is no bed");
+        assert!(outposts.book(beds[0], me));
+        assert_eq!((outposts.booker(beds[0]), outposts.booked_by(me)), (Some(me), Some(beds[0])));
+        assert!(!outposts.book(beds[0], you), "it is mine now");
+        assert!(!outposts.book(beds[1], me), "one bed to a person");
+        assert_eq!(outposts.bookable_near(beds[0], 100), Some(beds[1]), "and no longer one to book");
+        assert_eq!(outposts.release_bed(me), Some(beds[0]));
+        assert_eq!(outposts.release_bed(me), None);
+        assert!(outposts.book(beds[0], you), "free again");
+    }
+
+    #[test]
+    fn a_bed_is_bookable_only_from_within_reach_and_the_nearest_first() {
+        let mut map = site();
+        let mut outposts = Outposts::new();
+        let beds = built_outpost_with_beds(&mut outposts, &mut map);
+        let near = beds[0];
+        assert_eq!(outposts.bookable_near(near, BOOK_REACH), Some(near));
+        assert_eq!(outposts.bookable_near(near.offset(0, BOOK_REACH + 1), BOOK_REACH), None, "too far to be a local");
+        let nearer_the_second = beds[1].offset(1, 0);
+        assert_eq!(outposts.bookable_near(nearer_the_second, BOOK_REACH), Some(beds[1]));
+        let unbuilt = Outposts::new();
+        assert_eq!(unbuilt.bookable_near(near, BOOK_REACH), None, "nothing built, nothing to book");
+    }
+
+    #[test]
+    fn bookings_come_back_from_a_save_and_a_save_cannot_book_what_is_not_a_bed() {
+        let mut map = site();
+        let mut outposts = Outposts::new();
+        let beds = built_outpost_with_beds(&mut outposts, &mut map);
+        assert!(outposts.book(beds[1], builder(7)));
+        let saved = outposts.save();
+        let mut fresh = site();
+        let restored = Outposts::restore(Some(&saved), &mut fresh).unwrap();
+        assert_eq!(restored, outposts);
+        assert!(fresh.is_sheltered(restored.iter().next().unwrap().center()), "and the footprint is sheltered again");
+
+        let mut twice = saved.clone();
+        twice.bookings.push(pb::Home { bed: Some(beds[0].into()), owner: builder(7).raw() });
+        assert!(Outposts::restore(Some(&twice), &mut site()).is_err(), "one bed to a person");
+        let mut shared = saved.clone();
+        shared.bookings.push(pb::Home { bed: Some(beds[1].into()), owner: builder(8).raw() });
+        assert!(Outposts::restore(Some(&shared), &mut site()).is_err(), "one person to a bed");
+        let mut floor = saved.clone();
+        floor.bookings[0].bed = Some(restored.iter().next().unwrap().center().into());
+        assert!(Outposts::restore(Some(&floor), &mut site()).is_err(), "not a bed");
     }
 }

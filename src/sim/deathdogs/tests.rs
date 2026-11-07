@@ -355,6 +355,47 @@ fn a_deathdog_runs_down_somebody_outside_bites_and_gives_up_once_they_are_inside
 
 /// A quarry running away exactly as fast as the deathdog is never caught,
 /// and the chase asks for a route only every few cells, not every tick.
+/// An outpost far out is as safe as the site: no route into it for a
+/// deathdog, no step, no bite — and a person just outside it is bitten.
+#[test]
+fn a_deathdog_keeps_out_of_an_outpost_and_bites_nobody_inside_it() {
+    let mut world = World::new(endless(Size::new(12, 12), 3));
+    let beds = crate::sim::outposts::built_outpost_with_beds(&mut world.facilities.outposts, &mut world.map);
+    assert!(!beds.is_empty());
+    let outpost = world.facilities.outposts.iter().next().unwrap().clone();
+    let (inside, area) = (outpost.center(), outpost.footprint());
+    world.clock = at(23.0);
+    let ctx = world.ctx();
+    assert_eq!(ctx.step_cost_with(inside, None, Some(EntityType::Deathdog)), None, "no way in for a deathdog");
+    assert!(ctx.step_cost_with(inside, None, Some(EntityType::Human)).is_some(), "and one for a person");
+    drop(ctx);
+
+    let victim = Uid::new(EntityType::Human, 22);
+    let mut dog = Deathdog::new(Uid::new(EntityType::Deathdog, 21), inside.offset(-12, 0), Facing::Left, &mut rand::rngs::SmallRng::seed_from_u64(1));
+    dog.brain_mut().memory_mut().spot(Spotted { who: victim, at: inside, when: world.clock.elapsed() });
+    let _ = world.occupancy.claim(inside, victim);
+    for _ in 0..800 {
+        world.step(&mut dog);
+        assert!(!area.contains(dog.center_position()), "the deathdog went in: {:?}", dog.center_position());
+        assert!(world.wounds.iter().all(|wound| wound.target != victim), "bitten inside an outpost: {:?}", world.lines());
+    }
+
+    // Just outside it, the same person is fair game.
+    world.occupancy.release(inside, victim);
+    let outside = area.origin.offset(-3, 2);
+    let _ = world.occupancy.claim(outside, victim);
+    dog.brain_mut().memory_mut().spot(Spotted { who: victim, at: outside, when: world.clock.elapsed() });
+    let mut bitten = false;
+    for _ in 0..800 {
+        world.step(&mut dog);
+        if world.wounds.on(victim).next().is_some() {
+            bitten = true;
+            break;
+        }
+    }
+    assert!(bitten, "not even bitten outside: {:?}", world.lines());
+}
+
 #[test]
 fn a_chase_that_cannot_be_won_asks_for_few_routes() {
     let mut world = World::new(endless(Size::new(12, 12), 9));
