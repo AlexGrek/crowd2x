@@ -691,7 +691,7 @@ impl RoutineExecutor for WorkRoutine {
         if ctx.memory.medical.on_leave(ctx.think.clock.day()) { self.on_shift = false; return; }
         let uid = ctx.body.uid();
         let due = ctx.job.filter(|job| super::goals::build::on_duty(job, uid, ctx.think))
-            .filter(|job| !job.kind.is_on_call() || !ctx.think.electrical.damaged().is_empty());
+            .filter(|job| !job.kind.is_on_call() || !ctx.think.electrical.damaged().is_empty() || !ctx.think.robots.stopped().is_empty());
         self.on_shift = due.is_some();
         // Worked on demand: out in the wasteland with nothing more to do
         // there today — the shift over, or nothing left to build — it comes
@@ -1103,6 +1103,85 @@ impl RoutineExecutor for ProwlRoutine {
     }
 }
 
+/// How much [`RobotRoutine`] wants a robot to top up its charge when it has
+/// charge under [`TOP_UP`](crate::sim::robots::TOP_UP) and nothing better on:
+/// over wandering, under its work — so a courier with something to carry
+/// carries it, and one with nothing goes to charge.
+pub const TOPPING_UP: f32 = 1.0;
+
+/// How much [`RobotRoutine`] wants a robot charging once it has taken it up,
+/// or is down to [`MUST_CHARGE`](crate::sim::robots::MUST_CHARGE): over
+/// everything, raised to break in, so no work holds it from a dock.
+pub const CHARGING: f32 = 2.5;
+
+/// How much [`RobotRoutine`] wants a worn robot at the factory's bay: over
+/// any work, under charging, so it never runs flat waiting.
+pub const SERVICING: f32 = 2.0;
+
+/// A robot's mind for its body (`sim::robots`): keep charged, and go in for
+/// an overhaul when worn.
+///
+/// - **Charge**: with charge at or under `TOP_UP` it wants a dock at
+///   [`TOPPING_UP`]; at or under `MUST_CHARGE`, or once charging is the goal
+///   in charge, it is **committed** — [`CHARGING`], breaking in — until it is
+///   `FULL`. The commitment is what keeps a robot at the dock past `TOP_UP`.
+/// - **Service**: at or under `SERVICE_AT` condition, with a bay on the map,
+///   [`SERVICING`], breaking in, until an engineer has overhauled it.
+///
+/// Reads the robot's battery ([`RoutineCtx::battery`]); with none — any other
+/// kind — it wants nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct RobotRoutine {
+    charging: bool,
+}
+
+impl RobotRoutine {
+    pub const fn new() -> RobotRoutine {
+        RobotRoutine { charging: false }
+    }
+
+    /// Whether it is set on charging to full: all a save keeps of it.
+    pub(crate) fn is_charging(&self) -> bool {
+        let RobotRoutine { charging } = *self;
+        charging
+    }
+
+    pub(crate) fn set_charging(&mut self, charging: bool) {
+        self.charging = charging;
+    }
+}
+
+impl RoutineExecutor for RobotRoutine {
+    fn name(&self) -> &'static str {
+        "keep charged"
+    }
+
+    fn arrange(&mut self, ctx: &RoutineCtx<'_>, goals: &mut Goals) {
+        use crate::sim::robots::{FULL, MUST_CHARGE, SERVICE_AT, TOP_UP};
+        let Some(battery) = ctx.battery else {
+            return;
+        };
+        let charge = battery.charge();
+        if charge >= FULL {
+            self.charging = false;
+        } else if charge <= MUST_CHARGE || goals.top() == GoalId::Charge {
+            self.charging = true;
+        }
+        if self.charging {
+            goals.break_in(GoalId::Charge, CHARGING);
+        } else if charge <= TOP_UP {
+            goals.raise_to(GoalId::Charge, TOPPING_UP);
+        }
+        if battery.condition() <= SERVICE_AT && ctx.think.features.count(crate::sim::feature::FeatureKind::RepairBay) > 0 {
+            goals.break_in(GoalId::Service, SERVICING);
+        }
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        vec![("charging to full", if self.charging { "yes" } else { "no" }.to_string())]
+    }
+}
+
 /// Raises one goal to a priority read from a shared dial, so a test can turn a
 /// goal up and down from outside the brain — the brain's own tests drive
 /// handovers with it.
@@ -1155,6 +1234,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job: None,
                 inventory: None,
+                battery: None,
             },
             &mut goals,
         );
@@ -1231,6 +1311,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job: None,
                 inventory: None,
+                battery: None,
             },
             &mut goals,
         );
@@ -1367,6 +1448,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job,
                 inventory: None,
+                battery: None,
             },
             &mut goals,
         );
@@ -1477,6 +1559,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job,
                 inventory: None,
+                battery: None,
             },
             &mut goals,
         );
@@ -1521,6 +1604,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job: Some(job),
                 inventory: None,
+                battery: None,
             },
             &mut goals,
         );
@@ -1578,6 +1662,7 @@ mod tests {
                     memory: &crate::sim::brain::memory::Memory::new(),
                     job: Some(&job),
                     inventory: None,
+                    battery: None,
                 },
                 &mut goals,
             );
@@ -1654,6 +1739,7 @@ mod tests {
                     memory: &crate::sim::brain::memory::Memory::new(),
                     job,
                     inventory: None,
+                    battery: None,
                 },
                 &mut goals,
             );
@@ -1763,6 +1849,7 @@ mod tests {
                     memory: &crate::sim::brain::memory::Memory::new(),
                     job: self.job.as_ref(),
                     inventory: Some(&self.pack),
+                    battery: None,
                 },
                 goals,
             );
@@ -2117,6 +2204,7 @@ mod tests {
                 memory: &crate::sim::brain::memory::Memory::new(),
                 job: Some(&job),
                 inventory: Some(&pack),
+                battery: None,
             },
             &mut goals,
         );

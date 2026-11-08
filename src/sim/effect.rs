@@ -199,6 +199,32 @@ pub enum Effect {
     LeavePost,
     BuyVase { at: Point, clock: Clock },
     PlaceVase { at: Point },
+    /// A robot has stopped where it stands, `why` — run flat, or broken
+    /// down (`kinds::Robot`): filed for the electricians to see to
+    /// ([`super::robots::Robots::stop`]).
+    Stopped { why: super::robots::State },
+    /// An electrician has finished fixing the robot stopped at `at`
+    /// (`brain::tasks::FixRobot`): a flat one is recharged, a broken one
+    /// mended — a fix for it to feel in its own react next tick. Granted to an
+    /// electrician within a step of a robot still stopped there.
+    FixRobot { at: Point },
+    /// An engineer has finished overhauling the robot waiting at `at`
+    /// (`brain::tasks::Overhaul`): whole again, felt next tick. Granted to an
+    /// engineer within a step of a robot still waiting there.
+    Overhaul { at: Point },
+    /// A worn robot is waiting beside the assembly bay at `at` for an
+    /// overhaul (`kinds::Robot`). Asked every tick it is, like
+    /// [`Effect::Operate`].
+    AwaitService { at: Point },
+    /// An engineer worked `seconds` of world time on the robot being built at
+    /// the bay at `at`, `when` (`brain::tasks::Assemble`): the first hour
+    /// takes its steel off the parts rack, and the one that makes up its
+    /// hours brings it off the line at the end of the tick.
+    Assemble { at: Point, seconds: f32, when: Clock },
+    /// A robot blew up (`kinds::Robot`): everybody near is hurt by how near
+    /// ([`super::robots::blast`]), the ground round it burnt, and the robot
+    /// and all it carried gone at the end of the tick.
+    Explode,
 }
 
 /// Grant what `entity` asked for. The heap and the pack, the store and the
@@ -435,7 +461,125 @@ pub(crate) fn apply(
             }
         }
         Effect::LeavePost => leave_post(entity, facilities, log),
+        Effect::Stopped { why } => {
+            let (uid, at) = (entity.uid(), entity.center_position());
+            facilities.robots.stop(uid, at, why);
+            let what = if why == super::robots::State::Flat { "ran flat" } else { "broke down" };
+            log.important(format!("{uid} {what} at {}, {}", at.x, at.y));
+        }
+        Effect::FixRobot { at } => fix_robot(entity, facilities, log, at),
+        Effect::Overhaul { at } => {
+            if entity.job().is_some_and(|job| job.kind == JobKind::Engineer)
+                && entity.center_position().manhattan_distance(at) <= 1
+                && let Some(robot) = facilities.robots.take_waiting(at)
+            {
+                facilities.robots.fix(super::robots::Fix { robot, kind: super::robots::FixKind::Overhaul });
+                log.related(entity.uid(), robot, format!("{} overhauled {robot} at the robot factory", entity.uid()));
+            }
+        }
+        Effect::AwaitService { at } => {
+            if entity.uid().kind() == Some(super::uid::EntityType::Robot)
+                && entity.center_position().manhattan_distance(at) <= 1
+                && facilities.features.has(FeatureKind::RepairBay, at)
+            {
+                facilities.robots.await_service(entity.uid(), entity.center_position());
+            }
+        }
+        Effect::Assemble { at, seconds, when } => assemble(entity, facilities, log, at, seconds, when),
+        Effect::Explode => explode(entity, map, facilities, occupancy, log),
     }
+}
+
+/// [`Effect::FixRobot`]: the robot stopped at `at` recharged if it ran flat,
+/// mended if it broke down — off the list of the stopped, and a fix for it to
+/// feel. From an electrician beside it alone.
+fn fix_robot(entity: &dyn GameEntity, facilities: &mut Facilities, log: &Log, at: Point) {
+    use super::robots::{Fix, FixKind, State};
+    if !entity.job().is_some_and(|job| job.kind == JobKind::Electrician) || entity.center_position().manhattan_distance(at) > 1 {
+        return;
+    }
+    let Some(stopped) = facilities.robots.stopped_at(at) else {
+        return;
+    };
+    let kind = if stopped.why == State::Flat { FixKind::Recharge } else { FixKind::Mend };
+    let _ = facilities.robots.unstop(stopped.uid);
+    facilities.robots.fix(Fix { robot: stopped.uid, kind });
+    let done = if kind == FixKind::Recharge { "recharged" } else { "mended" };
+    log.related(entity.uid(), stopped.uid, format!("{} {done} {} at {}, {}", entity.uid(), stopped.uid, at.x, at.y));
+}
+
+/// [`Effect::Assemble`]: an engineer's work on the robot being built. A build
+/// not yet started starts only while one is due and the robot's steel is on a
+/// parts rack, which it takes; the work that makes up its hours brings the
+/// robot off the line at the end of the tick (`Robots::assemble`).
+fn assemble(entity: &dyn GameEntity, facilities: &mut Facilities, log: &Log, at: Point, seconds: f32, when: Clock) {
+    use super::robots::ROBOT_STEEL;
+    if !entity.job().is_some_and(|job| job.kind == JobKind::Engineer)
+        || entity.center_position().manhattan_distance(at) > 1
+        || !facilities.features.has(FeatureKind::RepairBay, at)
+    {
+        return;
+    }
+    let uid = entity.uid();
+    let now = when.elapsed();
+    if !facilities.robots.works().is_started() {
+        if !facilities.robots.works().due(now, facilities.robots.population()) {
+            return;
+        }
+        let rack = facilities.features.cells_of(FeatureKind::PartsRack).iter().copied().find(|&rack| facilities.bins.stored(rack) >= ROBOT_STEEL);
+        let Some(rack) = rack else {
+            return;
+        };
+        for _ in 0..ROBOT_STEEL {
+            let _ = facilities.bins.take(rack);
+        }
+        facilities.robots.works_mut().start();
+        log.unit(uid, format!("{uid} began building a robot at the assembly bay at {}, {}: {ROBOT_STEEL} steel taken off the parts rack", at.x, at.y));
+    }
+    if facilities.robots.works_mut().work(seconds, now) {
+        facilities.robots.assemble(at);
+        log.important(format!("{uid} finished building a robot at the assembly bay at {}, {}", at.x, at.y));
+    }
+}
+
+/// [`Effect::Explode`]: a robot blows up. Everybody — person or dog — within
+/// [`BLAST_RADIUS`](super::robots::BLAST_RADIUS) is wounded by how near it
+/// stood ([`super::robots::blast`]), felt in its own react next tick
+/// ([`super::wounds`]); the ground round it is burnt by the same measure; and
+/// the robot leaves the world at the end of the tick with everything it
+/// carried. Asked by the robot itself.
+fn explode(entity: &dyn GameEntity, map: &Map, facilities: &mut Facilities, occupancy: &Occupancy, log: &Log) {
+    use super::robots::{blast, BLAST_RADIUS};
+    use super::uid::EntityType;
+    let uid = entity.uid();
+    if uid.kind() != Some(EntityType::Robot) || facilities.leaving.contains(&uid) {
+        return;
+    }
+    let at = entity.center_position();
+    let reach = BLAST_RADIUS.ceil() as i32;
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let damage = blast(((dx * dx + dy * dy) as f32).sqrt());
+            if damage == 0 {
+                continue;
+            }
+            let cell = at.offset(dx, dy);
+            if map.is_passable(cell) {
+                facilities.dirt.soil(cell, super::dirt::Dirt { burns: damage as f32 / 100.0, ..super::dirt::Dirt::CLEAN });
+            }
+            let Some(target) = occupancy.occupant(cell).filter(|&other| other != uid) else {
+                continue;
+            };
+            if matches!(target.kind(), Some(EntityType::Human | EntityType::Dog)) {
+                facilities.wounds.inflict(super::wounds::Wound { target, by: uid, from: at, damage });
+                log.related(uid, target, format!("{target} was caught in the blast of {uid} for {damage}"));
+            }
+        }
+    }
+    let _ = facilities.robots.unstop(uid);
+    facilities.robots.explode(at);
+    facilities.leaving.push(uid);
+    log.important(format!("{uid} blew up at {}, {}", at.x, at.y));
 }
 
 /// [`Effect::Decree`]: the king's outpost founded where it decided, or the

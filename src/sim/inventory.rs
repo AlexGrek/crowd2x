@@ -73,6 +73,13 @@ impl Capacity {
         mass: 10.0,
         volume: 12.0,
     };
+
+    /// What a robot carries: four times what a person does
+    /// (`sim::robots`) — a courier's packful of forty ingots.
+    pub const ROBOT: Capacity = Capacity {
+        mass: 40.0,
+        volume: 48.0,
+    };
 }
 
 /// Everything a unit is carrying: one hand, and what is stowed away.
@@ -109,6 +116,11 @@ impl Inventory {
     /// An empty inventory a person could carry.
     pub const fn human() -> Inventory {
         Inventory::new(Capacity::HUMAN)
+    }
+
+    /// An empty inventory a robot could carry.
+    pub const fn robot() -> Inventory {
+        Inventory::new(Capacity::ROBOT)
     }
 
     // --- saving ---

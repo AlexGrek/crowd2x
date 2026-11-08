@@ -328,3 +328,5 @@ checks accounts against humans and death state. Old archives synthesize accounts
 without retroactive wages. Brain tag 15 is Timesheet, fresh when absent. Payroll
 and CloseBooks use stable TimedTask names. Save fingerprints include economy.pb.
 See ../economy/SKILL.md for the complete contract.
+
+Robots: `pb::Kind::Robot`, `pb::Battery`, and `pb::World` robot_works / robot_fixes; `stopped` and the population are rebuilt on load. See `robots`.

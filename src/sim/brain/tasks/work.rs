@@ -46,7 +46,7 @@ pub struct Work {
 /// holds every such job to it. The shop counter's is a shopkeeper's, whose
 /// own goal (`ShopGoal`) puts a stretch at it between looks in the
 /// superfridge.
-pub const STRETCHES: [(FeatureKind, &str, &str); 9] = [
+pub const STRETCHES: [(FeatureKind, &str, &str); 10] = [
     (FeatureKind::Workstation, "work", "worked"),
     (FeatureKind::AccountantComputer, "keep the books", "kept the books"),
     (FeatureKind::GuardPost, "keep watch", "kept watch"),
@@ -56,6 +56,7 @@ pub const STRETCHES: [(FeatureKind, &str, &str); 9] = [
     (FeatureKind::ShopCounter, "mind the shop", "minded the shop"),
     (FeatureKind::PropagandaComputer, "write copy", "wrote copy"),
     (FeatureKind::Altar, "lead prayers", "led prayers"),
+    (FeatureKind::RobotWorkbench, "tinker", "tinkered"),
 ];
 
 impl Work {

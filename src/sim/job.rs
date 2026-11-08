@@ -213,6 +213,10 @@ pub struct JobDef {
     /// post somebody leaves goes to the most religious free, not the
     /// nearest. The cleric's ([`super::religion`]).
     pub ordained: bool,
+    /// A robot's job, never a person's: no person is hired into it, and a
+    /// robot is given it when it is built (`GameState::employ_robot`), with
+    /// no workplace on the books (`sim::robots`).
+    pub robotic: bool,
 }
 
 /// What a job stood at a computer does at it when there is something to do
@@ -263,7 +267,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Brings scrap metal in from the heaps in the wasteland and stores it
         /// in its own bin in the warehouse. As tiring as office work, and as
@@ -284,7 +288,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Stands at a guard post by a gate in the district's wall for one of
         /// the three [`WATCHES`] of the day. Worked like a desk, and as tiring;
@@ -306,7 +310,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Takes up the dead and carries them to its own crematorium, on one of
         /// the three [`WATCHES`]: the dead do not wait for office hours.
@@ -326,7 +330,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Smelts scrap metal into steel at its own furnace in the steel
         /// factory, fetching the scrap from the factory's hoppers and putting the
@@ -347,7 +351,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Carries scrap metal from the warehouse to its own hopper in the steel
         /// factory, and steel from the factory back to the warehouse.
@@ -376,7 +380,7 @@ catalogue! {
             courier: true,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Sows wheat in good soil out in the wasteland, a field of
         /// [`PLOTS`](super::fields::PLOTS) crops, tends it every day, harvests
@@ -398,7 +402,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Stands by at the power plant's control panel for one of the three
         /// [`WATCHES`] of the day, an hour at a time like a guard at a post
@@ -420,7 +424,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Holds court at the throne in the district's palace, an hour at a
         /// time like a guard at a post (`WorkGoal`), every day but Sunday —
@@ -444,7 +448,7 @@ catalogue! {
             courier: false,
             noble: true,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Repairs failed boxes across the map, one worker per watch at
         /// the public service box indexed by Features.
@@ -464,7 +468,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Makes meals from wheat at the factory's powered cooker.
         FoodFactoryWorker = 10 => JobDef {
@@ -483,7 +487,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Brings wheat from the farm and takes meals to the warehouse.
         FoodCourier = 11 => JobDef {
@@ -510,7 +514,7 @@ catalogue! {
             courier: true,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Runs the playzone from its central computer, one of four: a day shift
         /// and an evening shift, each kept by two administrators who take
@@ -533,7 +537,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Keeps the district's books at the computer beside the palace's
         /// throne, office hours: closes them a day at a time, saying how the
@@ -556,26 +560,26 @@ catalogue! {
             courier: false,
             noble: true,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         Nurse = 14 => JobDef {
             name: "nurse", article: "a nurse", workplace: FeatureKind::NurseStation,
             goal: GoalId::Care, commute: COMMUTE, shifts: &NURSE_SHIFTS,
             uniform: "uniform nurse", now: |_, _| "taking care of patients",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false, robotic: false,
         },
         Fisherman = 15 => JobDef {
             name: "fisherman", article: "a fisherman", workplace: FeatureKind::FishBin,
             goal: GoalId::Fish, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform fisherman",
             now: |at_work, _| if at_work { "storing fish" } else { "fishing at the water" },
-            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false,
+            goes_out_for: Some(ItemKind::Fish), bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false, robotic: false,
         },
         CityDecorator = 16 => JobDef {
             name: "city decorator", article: "a city decorator", workplace: FeatureKind::FlowerSupplies,
             goal: GoalId::Decorate, commute: COMMUTE, shifts: &[FARM_HOURS],
             uniform: "uniform city decorator", now: |_, _| "planting flowers in the city",
-            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false,
+            goes_out_for: None, bearing: WORKER, paperwork: None, on_call: false, courier: false, noble: false, on_demand: false, ordained: false, robotic: false,
         },
         /// Keeps the district clean: looks over it for dirt on public
         /// ground, mops it up a cell at a time, and walks round when there
@@ -597,7 +601,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Keeps the store: minds the shop at its counter and checks the
         /// superfridge every quarter of an hour, and calls the courier
@@ -620,7 +624,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// The store's own courier, one to its superfridge: a courier like
         /// the rest — hauls wheat to the food factory and meals to the
@@ -651,7 +655,7 @@ catalogue! {
             courier: true,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Walks randomly around the district, with two positions and no
         /// weekends. The workplace only reserves a position, never a post
@@ -672,7 +676,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Builds the outposts the king decrees out in the wasteland
         /// ([`super::outposts`]): takes a tile of the plan on, fetches the
@@ -705,7 +709,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: true,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Writes the news at the propaganda computer beside the palace's
         /// throne, four hours a day ([`PROPAGANDA_HOURS`]): every story
@@ -729,7 +733,7 @@ catalogue! {
             courier: false,
             noble: true,
             on_demand: false,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Trains on the soldiers' ground the king picked out in the wasteland
         /// ([`super::training`]): walks in circles round the commander, seven
@@ -754,7 +758,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: true,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// The soldiers' commander: stands in the middle of the training
         /// ground while they walk their circles round it, the same hours.
@@ -775,7 +779,7 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: true,
-            ordained: false,
+            ordained: false, robotic: false,
         },
         /// Leads prayers at its own section of the church's altar, an hour at
         /// a time like a guard at a post (`WorkGoal`, the `"lead prayers"`
@@ -799,7 +803,66 @@ catalogue! {
             courier: false,
             noble: false,
             on_demand: false,
-            ordained: true,
+            ordained: true, robotic: false,
+        },
+        /// Builds the district's robots at the robot factory and overhauls
+        /// the worn ones brought to its bay (`EngineerGoal`, `sim::robots`).
+        Engineer = 26 => JobDef {
+            name: "engineer",
+            article: "an engineer",
+            workplace: FeatureKind::RobotWorkbench,
+            goal: GoalId::Engineer,
+            commute: COMMUTE,
+            shifts: &[ENGINEER_HOURS],
+            uniform: "uniform engineer",
+            now: |at_work, pack| {
+                if pack.is_some_and(|pack| pack.count(ItemKind::Steel) > 0) {
+                    "carrying steel to the robot factory"
+                } else if at_work {
+                    "at the workbench"
+                } else {
+                    "building robots"
+                }
+            },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: false,
+            noble: false,
+            on_demand: false,
+            ordained: false, robotic: false,
+        },
+        /// A robot's work: one of the courier pool (`HaulGoal`, the store's
+        /// dispatch), round the clock, unpaid. Given to a robot when it is
+        /// built, never to a person; its "workplace" is the factory's bay,
+        /// on nobody's books (`GameState::employ_robot`).
+        RobotCourier = 27 => JobDef {
+            name: "robot courier",
+            article: "a robot courier",
+            workplace: FeatureKind::RepairBay,
+            goal: GoalId::Haul,
+            commute: 0.0,
+            shifts: &[ROBOT_HOURS],
+            uniform: "uniform robot courier",
+            now: |_, pack| {
+                let carries = |item| pack.is_some_and(|pack| pack.count(item) > 0);
+                if carries(ItemKind::Steel) || carries(ItemKind::Meal) {
+                    "carrying goods to the warehouse"
+                } else if carries(ItemKind::Scrap) || carries(ItemKind::Wheat) {
+                    "carrying goods to a factory"
+                } else {
+                    "fetching a load"
+                }
+            },
+            goes_out_for: None,
+            bearing: WORKER,
+            paperwork: None,
+            on_call: false,
+            courier: true,
+            noble: false,
+            on_demand: false,
+            ordained: false, robotic: true,
         },
     }
 }
@@ -907,6 +970,11 @@ impl JobKind {
     pub const fn is_ordained(self) -> bool {
         self.def().ordained
     }
+
+    /// A robot's job, never a person's ([`JobDef::robotic`]).
+    pub const fn is_robotic(self) -> bool {
+        self.def().robotic
+    }
 }
 
 /// Monday to Friday, as a [`Shift::days`] mask.
@@ -978,6 +1046,22 @@ pub const COURT_HOURS: Shift = Shift {
 pub const CHURCH_HOURS: Shift = Shift {
     start: 8,
     end: 16,
+    days: EVERY_DAY,
+};
+
+/// The robot factory's day: nine to five, every day, so a robot is built on
+/// time whatever day it falls due (`sim::robots`).
+pub const ENGINEER_HOURS: Shift = Shift {
+    start: 9,
+    end: 17,
+    days: EVERY_DAY,
+};
+
+/// A robot's day: all of it. A robot never sleeps; it stops only to charge
+/// (`sim::robots`).
+pub const ROBOT_HOURS: Shift = Shift {
+    start: 0,
+    end: 24,
     days: EVERY_DAY,
 };
 
@@ -1568,7 +1652,9 @@ mod tests {
                 JobKind::Propagandist,
                 JobKind::Soldier,
                 JobKind::Commander,
-                JobKind::Cleric
+                JobKind::Cleric,
+                JobKind::Engineer,
+                JobKind::RobotCourier
             ],
             "the office first, new professions last"
         );
@@ -1779,9 +1865,9 @@ mod tests {
         assert_eq!((JobKind::Soldier.number(), JobKind::Commander.number()), (23, 24));
         // The last two hired by order: only the cleric, ordained rather than
         // hired, is listed after them.
-        assert_eq!(JobKind::ALL.last(), Some(&JobKind::Cleric));
-        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 2], JobKind::Commander);
-        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 3], JobKind::Soldier);
+        assert_eq!(JobKind::ALL.last(), Some(&JobKind::RobotCourier));
+        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 4], JobKind::Commander);
+        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 5], JobKind::Soldier);
         assert_eq!(SOLDIER_HOURS, Shift::new(8, 15, MONDAY_TO_SATURDAY).unwrap());
         assert_eq!(SOLDIER_HOURS.end() - SOLDIER_HOURS.start(), 7, "seven hours");
         assert_eq!(SOLDIER_HOURS.days(), "Mon-Sat");
@@ -1817,7 +1903,7 @@ mod tests {
         assert!(kind.is_noble_role());
         assert_eq!(kind.uniform().name(), "uniform propagandist");
         assert_eq!((kind.now(true, None), kind.now(false, None)), ("writing the news", "on the way to the palace"));
-        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 4], kind, "hired just before the soldiers");
+        assert_eq!(JobKind::ALL[JobKind::ALL.len() - 6], kind, "hired just before the soldiers");
         let job = Job::new(kind, Point::new(0, 0), PROPAGANDA_HOURS);
         assert!(job.is_due(at(7, 10.0)) && !job.is_due(at(7, 9.9)), "sets off two hours before, Sunday too");
         assert!(job.is_due(at(3, 15.9)) && !job.is_due(at(3, 16.0)), "till four");

@@ -609,6 +609,13 @@ pub trait GameEntity: Send + Sync {
         false
     }
 
+    /// A robot standing stopped, and why — flat or broken — for an
+    /// electrician to see to (`sim::robots`); `None` for one running, and for
+    /// every other kind. What the game draws lying, like the dead.
+    fn stopped(&self) -> Option<super::robots::State> {
+        None
+    }
+
     /// Who it is bonded to, as the rest of the crowd sees it this tick — what
     /// the think step gathers into [`Bonds`](super::pets::Bonds): a person's
     /// pet dog, or a dog's owner, where it stands, and a dog's hunger. Asked
@@ -810,6 +817,9 @@ pub struct Think<'a> {
     /// [`super::world_step`]: where it is, once the king has picked it
     /// ([`super::training`]).
     pub training: &'a super::training::Training,
+    /// The robots: who stands stopped, the fixes done to them, who waits at
+    /// a bay, the factory's build ([`super::robots`]).
+    pub robots: &'a super::robots::Robots,
     /// **Watched** seconds since the previous tick: what a body *moves* by.
     ///
     /// A walk, an action being stood through, a pause to let somebody past —
@@ -876,6 +886,7 @@ impl<'a> Think<'a> {
             dispatch: &facilities.dispatch,
             outposts: &facilities.outposts,
             training: &facilities.training,
+            robots: &facilities.robots,
             electrical: &facilities.electrical,
             dt,
             tick,

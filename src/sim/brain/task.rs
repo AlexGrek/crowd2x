@@ -593,6 +593,10 @@ mod tests {
             Task::write_news(at, 35.0),
             Task::phone(at, 34.0),
             Task::pray(at, 36.0),
+            Task::charge(at, 37.0),
+            Task::fix_robot(at, 38.0),
+            Task::overhaul(at, 39.0),
+            Task::assemble(at, 40.0),
         ]
     }
 

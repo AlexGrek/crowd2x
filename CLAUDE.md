@@ -126,6 +126,8 @@ freely there. It cannot feed itself: its owner takes dog food out of a fridge, f
 it to it when it is hungry, and a few hours after a meal the dog relieves itself on the street, for
 the cleaners.
 
+Robots join the district: two at the start, more built from steel by the robot factory's three engineers (up to a fifth of the population). Their only need is charge, at one of three charging stations; they wear out and break down, most stopping for an electrician, some exploding. They work as couriers, unpaid. See `robots`.
+
 ## Commands
 
 ```sh
@@ -189,6 +191,7 @@ to `screenshots/`.
 | The news: stories (deaths and their cases, production records), the propagandist and the propaganda computer, articles on the phones, reading them, good and bad news on the mind, obedience from bad news, the archive and the game screen's news menu | `news` (+ `jobs`, `brain-engineer`, `game-screen`) |
 | Soldiers: the king's pick of the training ground (20-30 cells from the wall), the soldier and commander jobs (on demand, no barracks, camouflage, the drill: circles round the commander), `DrillGoal`, the ground drawn | `training` (+ `jobs`, `outposts`, `brain-engineer`) |
 | Religion: religiosity, the church, clerics and who is ordained one, praying and what it does to the mind, services (`Effect::Lead`) | `religion` (+ `jobs`, `brain-engineer`) |
+| Robots: the robot entity and its battery, charging stations and docks, the robot factory and its engineers, the robot courier job, breakdowns and explosions, the electrician's field repair of robots | `robots` (+ `jobs`, `brain-engineer`, `electrician`) |
 | Deathdogs: their arrival at dusk and departure, keeping off the site, prowl / hunt / chase / bite, wounds, death by bites; panic, `Panics`, fleeing, ways in and sheltering; the deathdog sprite | `deathdogs` (+ `brain-engineer`) |
 
 ## Rules that hold everywhere
@@ -265,6 +268,7 @@ src/game/training.rs    the ground's chalk marks, drawn                     [tra
 src/sim/religion.rs     religiosity, prayer's cadence, services (Services)  [religion]
 src/sim/brain/goals/pray.rs, tasks/pray.rs  walking to a pew and praying  [religion]
 src/map/district/church.rs  the church: five altar sections, pews, an aisle  [religion, map-generator]
+src/sim/robots.rs, brain/goals/{charge,service,engineer}.rs, game/explosions.rs  robots, charging, engineers, blasts  [robots]
 src/sim/deathdogs.rs, deathdogs/  the night's packs: constants, arrivals, tests  [deathdogs]
 src/sim/panics.rs, wounds.rs, refuge.rs  who is seen panicking; bites to feel; ways in [deathdogs]
 src/sim/economy.rs      cash, budget, tariffs, accounts and daily books      [economy]

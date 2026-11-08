@@ -148,6 +148,11 @@ pub const EMITTERS: &[(&str, Emission)] = &[
         "furnace",
         Emission { color: [1.1, 0.55, 0.22], radius: 3.5, always_on: false },
     ),
+    // A charging dock's lamp: a green glow while a robot is plugged in.
+    (
+        "charging dock",
+        Emission { color: [0.3, 0.9, 0.45], radius: 2.5, always_on: false },
+    ),
     // An arcade cabinet's screen: a violet glow round it while somebody
     // plays, dark otherwise.
     (

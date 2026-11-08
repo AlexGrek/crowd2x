@@ -231,6 +231,7 @@ fn open(
         .map(|kind| (kind.name().to_string(), Choice::Search(Search::Workers(kind))))
         .collect();
     units.push(("pet dogs".to_string(), Choice::Search(Search::PetDogs)));
+    units.push(("robots".to_string(), Choice::Search(Search::Robots)));
     let squares = vec![
         ("dirty squares".to_string(), Choice::Search(Search::DirtySquares)),
         ("broken objects".to_string(), Choice::Search(Search::BrokenObjects)),

@@ -151,6 +151,9 @@ pub struct Facilities {
     /// The soldiers' ground the king picked, if he has ([`super::training`]):
     /// founded by `Effect::DecreeGround`. Saved.
     pub training: Training,
+    /// The robots: who is stopped, the fixes to feel, who waits at a bay,
+    /// the factory's build ([`super::robots`]).
+    pub robots: super::robots::Robots,
 }
 
 impl Facilities {
@@ -198,6 +201,7 @@ impl Facilities {
             vacancies: Vec::new(),
             outposts: Outposts::new(),
             training: Training::new(),
+            robots: Default::default(),
         }
     }
 

@@ -1,0 +1,103 @@
+{
+  "name": "a robot spawns, is selected, walks at its own steady pace and is not a person",
+  "state": "game",
+  "timeout": 120,
+  "given": {
+    "maps": [
+      {
+        "name": "robots",
+        "map": {
+          "version": 1,
+          "size": {
+            "width": 14,
+            "height": 9
+          },
+          "terrain": {
+            "palette": [
+              "void",
+              "floor diagonal",
+              "wall brown"
+            ],
+            "layers": [
+              {
+                "rows": [
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,1,1,1,1,1,1,1,1,1,1,1,1,2",
+                  "2,2,2,2,2,2,2,2,2,2,2,2,2,2"
+                ]
+              }
+            ]
+          },
+          "objects": {
+            "props": [
+              {
+                "at": {
+                  "x": 312,
+                  "y": 312
+                },
+                "kind": "charging dock"
+              },
+              {
+                "at": {
+                  "x": 408,
+                  "y": 168
+                },
+                "kind": "robot workbench"
+              }
+            ],
+            "spawners": []
+          }
+        }
+      }
+    ]
+  },
+  "open": "robots",
+  "steps": [
+    {
+      "note": "a room with a dock and a workbench; a robot spawned into it"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "q"
+    },
+    {
+      "key": "p"
+    },
+    {
+      "spawn": {
+        "kind": "robot",
+        "x": 3,
+        "y": 3
+      }
+    },
+    {
+      "tick": 1
+    },
+    {
+      "expect_entities": 1
+    },
+    {
+      "select": 0
+    },
+    {
+      "expect_selected": "robot"
+    },
+    {
+      "tick": 600
+    },
+    {
+      "expect_entities": 1
+    },
+    {
+      "shot": "a robot standing in a room with a dock and a workbench"
+    }
+  ]
+}

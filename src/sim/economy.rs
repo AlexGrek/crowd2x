@@ -944,7 +944,9 @@ mod tests {
                 30
             } else if job == JobKind::Commander {
                 50
-            } else if mid.contains(&job) {
+            } else if job == JobKind::RobotCourier {
+                0
+            } else if mid.contains(&job) || job == JobKind::Engineer {
                 60
             } else {
                 40

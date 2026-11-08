@@ -25,6 +25,8 @@ pub enum Search {
     Workers(JobKind),
     /// Every living dog that has an owner.
     PetDogs,
+    /// Every robot, running or stopped.
+    Robots,
     /// Every cell of the site a cleaner would take notice of: dirtier than
     /// [`DIRTY`].
     DirtySquares,
@@ -43,7 +45,7 @@ impl Search {
     /// Whether the answer is units, which move, and so is kept as [`Uid`]s —
     /// and not cells.
     pub const fn follows_units(self) -> bool {
-        matches!(self, Search::Workers(_) | Search::PetDogs)
+        matches!(self, Search::Workers(_) | Search::PetDogs | Search::Robots)
     }
 
     /// What one of the things found is called.
@@ -51,6 +53,7 @@ impl Search {
         match self {
             Search::Workers(kind) => kind.name(),
             Search::PetDogs => "pet dog",
+            Search::Robots => "robot",
             Search::DirtySquares => "dirty square",
             Search::BrokenObjects => "broken object",
             Search::Outposts => "outpost",
@@ -96,6 +99,7 @@ impl Search {
                     })
                     .map(|entity| entity.uid()),
             ),
+            Search::Robots => units.extend(state.entities().iter().filter(|entity| entity.kind() == Some(EntityType::Robot)).map(|entity| entity.uid())),
             Search::DirtySquares => cells.extend(
                 state
                     .dirt()

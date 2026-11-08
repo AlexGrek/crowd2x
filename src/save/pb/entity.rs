@@ -26,7 +26,7 @@ pub struct SlotRecord {
     #[prost(bool, tag = "3")]
     pub holds_cell: bool,
     /// What it is. Must agree with the kind its uid says.
-    #[prost(oneof = "Kind", tags = "4, 5, 6")]
+    #[prost(oneof = "Kind", tags = "4, 5, 6, 7")]
     pub kind: Option<Kind>,
 }
 
@@ -38,6 +38,8 @@ pub enum Kind {
     Dog(Dog),
     #[prost(message, tag = "6")]
     Deathdog(Deathdog),
+    #[prost(message, tag = "7")]
+    Robot(Robot),
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -107,6 +109,44 @@ pub struct Deathdog {
     pub facing: i32,
     #[prost(message, optional, tag = "4")]
     pub schedule: Option<Schedule>,
+}
+
+/// A robot (`crate::sim::kinds::Robot`): a body, a mind, which way it faces,
+/// its battery, what it carries and its background timers.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Robot {
+    #[prost(message, optional, tag = "1")]
+    pub walker: Option<Walker>,
+    #[prost(message, optional, tag = "2")]
+    pub brain: Option<Brain>,
+    #[prost(enumeration = "Facing", tag = "3")]
+    pub facing: i32,
+    #[prost(message, optional, tag = "4")]
+    pub battery: Option<Battery>,
+    #[prost(message, optional, tag = "5")]
+    pub inventory: Option<Inventory>,
+    #[prost(message, optional, tag = "6")]
+    pub schedule: Option<Schedule>,
+}
+
+/// A robot's charge and condition, 0 to 100, and whether it runs
+/// (`crate::sim::robots::Battery`).
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Battery {
+    #[prost(float, tag = "1")]
+    pub charge: f32,
+    #[prost(float, tag = "2")]
+    pub condition: f32,
+    #[prost(enumeration = "RobotState", tag = "3")]
+    pub state: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RobotState {
+    Running = 0,
+    Flat = 1,
+    Broken = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

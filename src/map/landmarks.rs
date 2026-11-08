@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use super::district::{church, crematorium, farm, food_factory, hospital, palace, playzone, power_plant, restaurant, steel_factory, store, warehouse};
+use super::district::{charging_station, church, crematorium, farm, food_factory, hospital, palace, playzone, power_plant, restaurant, robot_factory, steel_factory, store, warehouse};
 use super::{Map, ObjectLayer, Point, TerrainId};
 
 /// How far apart, in cells either way, two props of a building may be and
@@ -37,7 +37,7 @@ pub struct LandmarkDef {
 }
 
 /// How many kinds of building there are.
-pub const KINDS: usize = 12;
+pub const KINDS: usize = 14;
 
 /// Every building a district must have, in the order the find menu lists them.
 pub static LANDMARKS: [LandmarkDef; KINDS] = [
@@ -65,6 +65,8 @@ pub static LANDMARKS: [LandmarkDef; KINDS] = [
     LandmarkDef { name: palace::NAME, props: &[palace::THRONE], floor: None },
     LandmarkDef { name: store::NAME, props: &[store::SUPERFRIDGE, store::SHOP_COUNTER], floor: None },
     LandmarkDef { name: church::NAME, props: &[church::ALTAR, church::PEW], floor: None },
+    LandmarkDef { name: robot_factory::NAME, props: &[robot_factory::BAY, robot_factory::RACK, robot_factory::WORKBENCH], floor: None },
+    LandmarkDef { name: charging_station::NAME, props: &[charging_station::DOCK], floor: None },
 ];
 
 /// One building found on a map.

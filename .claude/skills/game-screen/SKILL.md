@@ -386,3 +386,5 @@ Drawn as dogs: `characters::dog::Breed::Deathdog` picks the deathdog's sheets, a
 comes from and goes back to the dog pool (`actors::breed_of`, `park_or_despawn`); the unit
 panel's portrait the same. Counted by kind in the statistics menu and offered in the spawn
 menu, both from `EntityType::ALL`. The `deathdogs` skill has the rest.
+
+Robots are drawn from the dog pool (`Breed::Robot`); `game/explosions.rs` plays blasts. The find menu has a `robots` search. See `robots`.

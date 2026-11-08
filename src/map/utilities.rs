@@ -90,6 +90,8 @@ pub const CONSUMERS: &[(&str, Utility)] = &[
     ("computer", Utility::Power),
     ("tv", Utility::Power),
     ("furnace", Utility::Power),
+    ("charging dock", Utility::Power),
+    ("robot workbench", Utility::Power),
     ("food cooker", Utility::Power),
     ("playzone computer", Utility::Power),
     ("accountant computer", Utility::Power),

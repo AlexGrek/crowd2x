@@ -587,7 +587,7 @@ fn portrait(
                 }
             });
         }
-        Some(kind @ (EntityType::Dog | EntityType::Deathdog)) => {
+        Some(kind @ (EntityType::Dog | EntityType::Deathdog | EntityType::Robot)) => {
             let Some(sheets) = sheets else {
                 return;
             };

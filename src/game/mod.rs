@@ -77,6 +77,7 @@ pub mod graphs;
 pub mod economy;
 pub mod relationships;
 pub mod store;
+pub mod explosions;
 pub mod smalltalk;
 pub mod speech;
 mod snooze;
@@ -137,7 +138,7 @@ impl Plugin for GamePlugin {
             saving::SavingPlugin,
             statistics::StatisticsPlugin,
         ))
-            .add_plugins((speech::SpeechPlugin, economy::EconomyPlugin, find::FindPlugin, news::NewsPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin, training::TrainingPlugin))
+            .add_plugins((speech::SpeechPlugin, economy::EconomyPlugin, find::FindPlugin, news::NewsPlugin, flowers::FlowersPlugin, smalltalk::SmalltalkPlugin, explosions::ExplosionsPlugin, snooze::SnoozePlugin, dirt::DirtPlugin, needs::NeedsPlugin, smell::SmellPlugin, outposts::OutpostsPlugin, training::TrainingPlugin))
             .configure_sets(
                 Update,
                 (CrowdSystems, SpriteSync).chain().after(ViewSystems),

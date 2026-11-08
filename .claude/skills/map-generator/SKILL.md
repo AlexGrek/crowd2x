@@ -360,3 +360,5 @@ landmarks, lighting, catalogues and generated employment totals. Default new
 games stock the reserve from `store.yaml`; authored `initial_stock` can also
 specify zero. Compare siting against eligible lot centres, excluding the spare
 park from the existing shops' block. See [store](../store/SKILL.md).
+
+The robot factory (`robot_factory.rs`, one, nearest the warehouse) and three charging stations (`charging_station.rs`, random lots) are lot buildings. See `robots`.

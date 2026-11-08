@@ -152,6 +152,7 @@ impl Dispatch {
                 None => Some("is gone"),
                 Some(entity) if entity.is_dead() => Some("died"),
                 Some(entity) if entity.is_frozen() => Some("is frozen"),
+                Some(entity) if entity.stopped().is_some() => Some("has stopped"),
                 Some(entity) if !entity.job().is_some_and(|job| job.kind.is_courier()) => Some("is no courier now"),
                 Some(entity) if entity.is_on_sick_leave(clock) => Some("is on sick leave"),
                 Some(entity) if !carries_food(entity) && pickup(bins, order.store).is_none() => Some("has no food to fetch"),
@@ -229,8 +230,9 @@ impl Dispatch {
                 0 => None,
                 raw => Some(Uid::from_raw(raw).ok_or_else(|| Invalid(format!("no such courier {raw:#x}")))?),
             };
-            if courier.is_some_and(|uid| uid.kind() != Some(super::uid::EntityType::Human)) {
-                return invalid("a courier order assigned to a non-human".to_string());
+            // A person or a robot: a robot courier is one of the pool too.
+            if courier.is_some_and(|uid| !matches!(uid.kind(), Some(super::uid::EntityType::Human | super::uid::EntityType::Robot))) {
+                return invalid("a courier order assigned to neither a person nor a robot".to_string());
             }
             if !order.since.is_finite() || order.since < 0.0 {
                 return invalid(format!("an order given at {} seconds", order.since));
@@ -271,6 +273,7 @@ fn is_free(entity: &dyn GameEntity, clock: Clock) -> bool {
     job.kind.is_courier()
         && !entity.is_dead()
         && !entity.is_frozen()
+        && entity.stopped().is_none()
         && job.is_due(clock)
         && !entity.is_on_sick_leave(clock)
         && entity.inventory().is_some_and(|pack| pack.is_empty())

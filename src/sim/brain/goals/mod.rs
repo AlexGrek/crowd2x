@@ -55,6 +55,12 @@ pub mod wander;
 pub mod work;
 pub mod repair;
 pub use repair::RepairGoal;
+pub mod charge;
+pub mod engineer;
+pub mod service;
+pub use charge::ChargeGoal;
+pub use engineer::EngineerGoal;
+pub use service::ServiceGoal;
 
 pub use bury::BuryGoal;
 pub use chat::ChatGoal;

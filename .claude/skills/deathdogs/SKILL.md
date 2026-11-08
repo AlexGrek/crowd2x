@@ -115,3 +115,5 @@ eye pixels). `characters/dog.rs` has a `Breed { Dog, Deathdog }` component;
 `DogSheets::image_for(breed, facing)`; deathdogs share the dog pool
 (`game/actors.rs::breed_of`). The fur is ash, not black, so the lightmap does not
 swallow it at night.
+
+Robots are not deathdog prey: deathdogs never mark, chase or bite them. See `robots`.

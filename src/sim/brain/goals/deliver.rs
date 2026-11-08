@@ -104,7 +104,8 @@ impl GoalExecutor for DeliverGoal {
     }
 
     fn process(&mut self, ctx: &mut GoalCtx<'_>, last: TaskResult) -> GoalProgress {
-        let (Some(_), Some(store)) = (ctx.biology, Self::store(ctx)) else {
+        // Something to carry it in: a person or a robot.
+        let (Some(_), Some(store)) = (ctx.inventory, Self::store(ctx)) else {
             return GoalProgress::Blocked;
         };
 

@@ -39,6 +39,7 @@ use super::identity::Identity;
 use super::inventory::Inventory;
 use super::job::Job;
 use super::pets::{Bond, Gut};
+use super::robots::{Battery, Mishap, State as RobotState, ROBOT_SPEED};
 use super::relationships::{Chat, Chatter, Relations, Smalltalk, Smalltalker};
 use super::item::ItemKind;
 use super::property::PropertyId;
@@ -272,11 +273,11 @@ impl GameEntity for Human {
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
         // Bitten last tick: the teeth first, before time passes, and what
         // bit it is what scared it now (`sim::wounds`).
-        let mut bitten = false;
+        let mut wounded_by = None;
         for wound in ctx.wounds.on(self.walk.body().uid()) {
             let _ = self.biology.handle(Event::Bitten { damage: wound.damage });
             self.brain.spot(Spotted { who: wound.by, at: wound.from, when: ctx.clock.elapsed() });
-            bitten = true;
+            wounded_by = Some(wound.by);
         }
         // Asleep as of last tick's brain: a body lying in bed ages at the
         // pace of a sleeper (`Process::asleep_pace`).
@@ -290,7 +291,7 @@ impl GameEntity for Human {
         if self.biology.stats().health() <= 0.0 {
             self.walk.halt();
             self.walk.body_mut().set_dead();
-            let cause = if bitten { DEATHDOG_BITES } else { health::cause_of_death(self.biology.stats()) };
+            let cause = wounded_by.map_or_else(|| health::cause_of_death(self.biology.stats()), wound_cause);
             return Effect::Died { cause, when: ctx.clock };
         }
         let due = self.schedule.tick(ctx.game_dt());
@@ -625,13 +626,15 @@ impl GameEntity for Dog {
     /// A surviving dog heals naturally on the world's clock. Its belly is
     /// separate, and its brain has no human needs, hospital care or hands.
     fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        let mut wounded_by = None;
         for wound in ctx.wounds.on(self.walk.body().uid()) {
             let _ = self.biology.handle(Event::Bitten { damage: wound.damage });
+            wounded_by = Some(wound.by);
         }
         if self.biology.stats().health() <= 0.0 {
             self.walk.halt();
             self.walk.body_mut().set_dead();
-            return Effect::Died { cause: DEATHDOG_BITES, when: ctx.clock };
+            return Effect::Died { cause: wounded_by.map_or(DEATHDOG_BITES, wound_cause), when: ctx.clock };
         }
         self.biology.advance(ctx.game_dt());
         for _ in ctx.feedings.to(self.walk.body().uid()) {
@@ -795,6 +798,16 @@ impl Dog {
 /// What a person bitten to death died of.
 pub const DEATHDOG_BITES: &str = "deathdog bites";
 
+/// What somebody wounded by `by` and dying of it died of: a robot's
+/// explosion, or a deathdog's bites (`sim::wounds`).
+fn wound_cause(by: Uid) -> &'static str {
+    if by.kind() == Some(EntityType::Robot) {
+        super::robots::ROBOT_EXPLOSION
+    } else {
+        DEATHDOG_BITES
+    }
+}
+
 /// A deathdog: a beast of the wasteland, out at night ([`super::deathdogs`]).
 ///
 /// A body and a mind and nothing else — no needs, nothing carried, no name.
@@ -935,6 +948,259 @@ impl Deathdog {
     }
 }
 
+/// A robot: a machine that works for the district (`sim::robots`).
+///
+/// A body, a mind, a [`Battery`] — its charge and its condition — and a pack
+/// that carries four times what a person's does. No needs but charge, no
+/// sleep, no fear, no name but a serial off its id. It walks at
+/// [`ROBOT_SPEED`], all of them alike: no pace of its own, never in a hurry,
+/// never in a panic. Stopped — flat, or broken down — it stands where it
+/// stopped and does nothing until it is fixed.
+pub struct Robot {
+    walk: Walker,
+    brain: Brain,
+    facing: Facing,
+    battery: Battery,
+    inventory: Inventory,
+    schedule: Schedule,
+}
+
+impl Robot {
+    pub fn new(uid: Uid, cell: Point, facing: Facing, rng: &mut SmallRng) -> Robot {
+        Robot {
+            walk: Walker::new(uid, cell, ROBOT_SPEED),
+            brain: Brain::robot(),
+            facing,
+            battery: Battery::fresh(),
+            inventory: Inventory::robot(),
+            schedule: Schedule::new(rng.random()),
+        }
+    }
+
+    pub fn brain(&self) -> &Brain {
+        &self.brain
+    }
+
+    pub fn battery(&self) -> Battery {
+        self.battery
+    }
+
+    /// Its serial, off the random half of its id: `RX-0042`.
+    pub fn serial(&self) -> String {
+        format!("RX-{:04}", self.walk.body().uid().body() % 10_000)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn brain_mut(&mut self) -> &mut Brain {
+        &mut self.brain
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_battery(&mut self, battery: Battery) {
+        self.battery = battery;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inventory_mut(&mut self) -> &mut Inventory {
+        &mut self.inventory
+    }
+}
+
+impl GameEntity for Robot {
+    fn body(&self) -> &Body {
+        self.walk.body()
+    }
+
+    fn body_mut(&mut self) -> &mut Body {
+        self.walk.body_mut()
+    }
+
+    fn think(&self, ctx: &Think<'_>) -> Intent {
+        self.walk.think(ctx)
+    }
+
+    fn walker(&self) -> Option<&Walker> {
+        Some(&self.walk)
+    }
+
+    fn walker_mut(&mut self) -> Option<&mut Walker> {
+        Some(&mut self.walk)
+    }
+
+    fn facing(&self) -> Option<Facing> {
+        Some(self.facing)
+    }
+
+    /// The fixes done to it last tick first; then, stopped, nothing at all.
+    /// Running, time passes for its battery — charged at a dock, drained
+    /// elsewhere, and worn — and the dice say whether it runs flat, breaks
+    /// down or blows up, which the world is told ([`Effect::Stopped`],
+    /// [`Effect::Explode`]). Otherwise its brain runs, and with nothing else
+    /// asked, a worn robot beside a bay says it is waiting there
+    /// ([`Effect::AwaitService`]).
+    fn react(&mut self, ctx: &Think<'_>, outcome: MoveOutcome) -> Effect {
+        let uid = self.walk.body().uid();
+        for fix in ctx.robots.fixes_to(uid) {
+            self.battery.feel(fix);
+        }
+        if !self.battery.is_running() {
+            self.walk.halt();
+            return Effect::None;
+        }
+        let mut rng = super::rng::tick_rng(uid, ctx.tick);
+        match self.battery.advance(ctx.game_dt(), self.brain.is_charging(), &mut rng) {
+            Some(Mishap::Flat) => {
+                self.walk.halt();
+                return Effect::Stopped { why: RobotState::Flat };
+            }
+            Some(Mishap::Broken) => {
+                self.walk.halt();
+                return Effect::Stopped { why: RobotState::Broken };
+            }
+            Some(Mishap::Explode) => {
+                self.walk.halt();
+                return Effect::Explode;
+            }
+            None => {}
+        }
+        let due = self.schedule.tick(ctx.game_dt());
+        self.brain.set_battery(self.battery);
+        let effect = self.brain.react(ctx, &due, outcome, &mut self.walk, None, Some(&mut self.inventory));
+        if effect == Effect::None
+            && self.brain.top_goal() == GoalId::Service
+            && let Some(bay) = super::brain::goals::service::bay_beside(ctx.features, self.walk.body().center_position())
+        {
+            return Effect::AwaitService { at: bay };
+        }
+        effect
+    }
+
+    /// Turns to face the way it is walking, as a dog does.
+    fn apply(&mut self, intent: &Intent) {
+        let was = self.walk.body().position().0;
+        self.walk.apply(intent);
+        let now = self.walk.body().position().0;
+        if now < was {
+            self.facing = Facing::Left;
+        } else if now > was {
+            self.facing = Facing::Right;
+        }
+    }
+
+    fn inventory(&self) -> Option<&Inventory> {
+        Some(&self.inventory)
+    }
+
+    fn inventory_mut(&mut self) -> Option<&mut Inventory> {
+        Some(&mut self.inventory)
+    }
+
+    fn current_goal(&self) -> Option<GoalId> {
+        Some(self.brain.top_goal())
+    }
+
+    fn stopped(&self) -> Option<RobotState> {
+        (!self.battery.is_running()).then(|| self.battery.state())
+    }
+
+    /// A robot's job only — never a person's.
+    fn hire(&mut self, job: Job) -> bool {
+        if !job.kind.is_robotic() {
+            return false;
+        }
+        self.brain.hire(job);
+        true
+    }
+
+    fn dismiss(&mut self) -> Option<Job> {
+        self.brain.dismiss()
+    }
+
+    fn job(&self) -> Option<Job> {
+        self.brain.job().copied()
+    }
+
+    fn name(&self) -> Option<&str> {
+        None
+    }
+
+    fn display_name(&self) -> Option<String> {
+        Some(self.serial())
+    }
+
+    fn debug_fields(&self) -> Vec<(&'static str, String)> {
+        let mut fields = vec![
+            ("serial", self.serial()),
+            ("goal", self.brain.top_goal().name().to_string()),
+            ("state", self.battery.state().name().to_string()),
+            ("charge", format!("{:.1}%", self.battery.charge())),
+            ("condition", format!("{:.1}%", self.battery.condition())),
+        ];
+        fields.extend(self.walk.debug_fields());
+        fields.extend(self.inventory.debug_fields());
+        fields.push(self.schedule.debug_field());
+        fields
+    }
+
+    fn brain_fields(&self) -> Vec<(&'static str, String)> {
+        self.brain.debug_fields()
+    }
+
+    fn planned_path(&self) -> Vec<Point> {
+        self.walk.path_cells()
+    }
+
+    fn action_progress(&self) -> Option<f32> {
+        if !self.battery.is_running() {
+            return None;
+        }
+        self.brain.action().progress()
+    }
+
+    fn interacting_with(&self) -> Option<Point> {
+        if !self.battery.is_running() {
+            return None;
+        }
+        self.brain.action().interacting_with()
+    }
+
+    fn save(&self) -> pb::Kind {
+        let Robot { walk, brain, facing, battery, inventory, schedule } = self;
+        pb::Kind::Robot(pb::Robot {
+            walker: Some(walk.save()),
+            brain: Some(brain.save()),
+            facing: match facing {
+                Facing::Left => pb::Facing::Left,
+                Facing::Right => pb::Facing::Right,
+            } as i32,
+            battery: Some(battery.save()),
+            inventory: Some(inventory.save()),
+            schedule: Some(schedule.save()),
+        })
+    }
+}
+
+impl Robot {
+    fn restore(saved: &pb::Robot, revision: u64) -> Result<Robot, Invalid> {
+        let mut brain = Brain::robot();
+        brain.restore(pb::required(&saved.brain, "brain")?).map_err(|error| error.within("brain"))?;
+        if brain.job().is_some_and(|job| !job.kind.is_robotic()) {
+            return invalid("a robot in a person's job");
+        }
+        Ok(Robot {
+            walk: Walker::restore(pb::required(&saved.walker, "walker")?, revision)?,
+            brain,
+            facing: match pb::known::<pb::Facing>(saved.facing, "facing")? {
+                pb::Facing::Left => Facing::Left,
+                pb::Facing::Right => Facing::Right,
+            },
+            battery: Battery::restore(pb::required(&saved.battery, "battery")?)?,
+            inventory: Inventory::restore(pb::required(&saved.inventory, "inventory")?)?,
+            schedule: Schedule::restore(pb::required(&saved.schedule, "schedule")?)?,
+        })
+    }
+}
+
 /// Build an entity of a kind, at a cell.
 ///
 /// The one place a `Uid`'s type tag and the concrete type behind it are tied
@@ -964,6 +1230,12 @@ pub(super) fn build(
             if rng.random() { Facing::Left } else { Facing::Right },
             rng,
         )),
+        EntityType::Robot => Box::new(Robot::new(
+            uid,
+            cell,
+            if rng.random() { Facing::Left } else { Facing::Right },
+            rng,
+        )),
     }
 }
 
@@ -977,11 +1249,13 @@ pub(super) fn restore(saved: &pb::Kind, revision: u64) -> Result<Box<dyn GameEnt
         pb::Kind::Human(human) => Box::new(Human::restore(human, revision)?),
         pb::Kind::Dog(dog) => Box::new(Dog::restore(dog, revision)?),
         pb::Kind::Deathdog(deathdog) => Box::new(Deathdog::restore(deathdog, revision)?),
+        pb::Kind::Robot(robot) => Box::new(Robot::restore(robot, revision)?),
     };
     let saved_as = match saved {
         pb::Kind::Human(_) => EntityType::Human,
         pb::Kind::Dog(_) => EntityType::Dog,
         pb::Kind::Deathdog(_) => EntityType::Deathdog,
+        pb::Kind::Robot(_) => EntityType::Robot,
     };
     if entity.kind() != Some(saved_as) {
         let uid = entity.uid();

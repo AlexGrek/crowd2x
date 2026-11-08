@@ -49,6 +49,8 @@ wages:
   soldier: 30                 # lowest: drilled for little
   commander: 50               # a little over mid-low
   cleric: 40                  # low: a calling, not a living
+  engineer: 60                # mid: builds the robots
+  robot courier: 0            # robots are unpaid
 
 # What a thing costs taken from a fridge, every item by name
 # (`src/sim/item.rs`). Only a fridge sells anything; the rest are never

@@ -463,7 +463,7 @@ fn sync_sprites(
                     None => human::spawn(&mut commands, &assets, pos, look),
                 }
             }
-            Some(kind @ (EntityType::Dog | EntityType::Deathdog)) => {
+            Some(kind @ (EntityType::Dog | EntityType::Deathdog | EntityType::Robot)) => {
                 let Some(sheets) = sheets.as_deref() else {
                     // The atlas is inserted alongside the world, so this only
                     // happens if the two land in different frames. Leaving the
@@ -536,7 +536,7 @@ fn sync_sprites(
         // rise from them, `snooze`): the whole doll turned a quarter round. A
         // square turned about its middle keeps its texels on the grid they
         // were on.
-        let lying = if entity.is_dead() || entity.is_asleep() {
+        let lying = if entity.is_dead() || entity.is_asleep() || entity.stopped().is_some() {
             Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)
         } else {
             Quat::IDENTITY
@@ -574,7 +574,7 @@ fn park_or_despawn(
 ) {
     let parked = match kind {
         Some(EntityType::Human) => pool.park_human(body, budget),
-        Some(EntityType::Dog | EntityType::Deathdog) => pool.park_dog(body, budget),
+        Some(EntityType::Dog | EntityType::Deathdog | EntityType::Robot) => pool.park_dog(body, budget),
         None => false,
     };
     if parked {
@@ -890,6 +890,7 @@ fn sync_clothing(
 pub fn breed_of(kind: EntityType) -> dog::Breed {
     match kind {
         EntityType::Deathdog => dog::Breed::Deathdog,
+        EntityType::Robot => dog::Breed::Robot,
         _ => dog::Breed::Dog,
     }
 }

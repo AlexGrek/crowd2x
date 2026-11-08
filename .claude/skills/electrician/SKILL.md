@@ -211,3 +211,5 @@ other switch). Steps: `expect_connected {utility: "power"}`, `expect_grid {layer
   tie, broken far wall, left, right, near (`Side::ALL`); the editor never stores a centre - it
   stores `mounted_at`, on the chosen edge.
 - Gamepad `Select` leaves the game; the x-ray toggle is `o` / right-stick click.
+
+Electricians also repair stopped robots (flat: +30 charge; broken: condition 60) and charging docks / workbenches are powered consumers. See `robots`.

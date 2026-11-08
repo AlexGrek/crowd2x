@@ -149,6 +149,10 @@ pub struct Brain {
     /// How the last task to end went, kept for a debugger after the goal has
     /// been told.
     last_result: TaskResult,
+    /// A robot's charge and condition, handed in by the robot before every
+    /// react ([`Brain::set_battery`]) for its routines to read; `None` for
+    /// every other kind. Not saved: the robot keeps the battery itself.
+    battery: Option<super::robots::Battery>,
 }
 
 impl Brain {
@@ -176,6 +180,7 @@ impl Brain {
             finished: None,
             blocked_by: None,
             last_result: TaskResult::InProgress,
+            battery: None,
         };
         for executor in executors {
             let slot = &mut brain.executors[executor.goal() as usize];
@@ -249,6 +254,28 @@ impl Brain {
         )
     }
 
+    /// A robot: keeps charged, goes in for an overhaul when worn, does its job
+    /// (a courier's, round the clock) and otherwise wanders. No needs, no
+    /// sleep, no fear, no company (`sim::robots`). Its own goals have no
+    /// executor in [`GoalId`]'s catalogue, so they are built here.
+    pub fn robot() -> Brain {
+        Brain::new(
+            [Routine::work(), Routine::stay_busy(), Routine::robot()],
+            [
+                Box::new(WanderGoal::new()) as Box<dyn GoalExecutor>,
+                Box::new(goals::HaulGoal::new()),
+                Box::new(goals::DeliverGoal::new()),
+                Box::new(goals::ChargeGoal::new()),
+                Box::new(goals::ServiceGoal::new()),
+            ],
+        )
+    }
+
+    /// A robot's battery, as it stands before this tick's react.
+    pub fn set_battery(&mut self, battery: super::robots::Battery) {
+        self.battery = Some(battery);
+    }
+
     /// **The pipeline.** See the module docs for the steps and their order.
     ///
     /// `walk` is the body being driven; `biology` and `inventory` are `None`
@@ -282,6 +309,7 @@ impl Brain {
             finished,
             blocked_by,
             last_result,
+            battery,
         } = self;
         let body = *walk.body();
         let job = job.as_ref();
@@ -382,6 +410,7 @@ impl Brain {
                 memory,
                 job,
                 inventory: inventory.as_deref(),
+                battery: *battery,
             };
             for routine in routines.iter_mut() {
                 routine.arrange(&routine_ctx, goals);
@@ -625,6 +654,12 @@ impl Brain {
         is_asleep(&self.task, &self.action)
     }
 
+    /// Actually charging, beside a dock — not walking to one. What a robot's
+    /// battery fills by (`sim::robots`).
+    pub fn is_charging(&self) -> bool {
+        matches!(self.task, Some(Task::Charge(_))) && matches!(self.action, Action::Interact { .. })
+    }
+
     pub fn current_task(&self) -> Option<Task> {
         self.task
     }
@@ -746,6 +781,8 @@ impl Brain {
             finished,
             blocked_by,
             last_result,
+            // Handed in again before every react.
+            battery: _,
         } = self;
         let (queue, result) = tasks.save();
         pb::Brain {

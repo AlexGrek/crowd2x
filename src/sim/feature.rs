@@ -259,6 +259,24 @@ catalogue! {
         /// A pew in the church: prayed at by anybody, from beside it
         /// ([`super::religion`], `PrayGoal`). Nobody's, and needs no power.
         Pew = 40 => FeatureDef { props: &["pew"], ..BESIDE },
+        /// A charging dock at one of the district's charging stations: a robot
+        /// stands beside it and charges while it is powered (`sim::robots`,
+        /// `ChargeGoal`). One robot to a dock, four to a station.
+        Charger = 41 => FeatureDef { props: &["charging dock"], ..BESIDE },
+        /// An engineer's workbench in the robot factory: its workplace, tinkered
+        /// at between builds. Needs power.
+        RobotWorkbench = 42 => FeatureDef { props: &["robot workbench"], ..BESIDE },
+        /// The robot factory's assembly bay: where a robot is built, and where a
+        /// worn one waits beside it for an engineer's overhaul. Needs no power.
+        RepairBay = 43 => FeatureDef { props: &["assembly bay"], ..BESIDE },
+        /// The robot factory's store of steel for the next robot: filled by an
+        /// engineer from the warehouse's rack, emptied all at once when a build
+        /// starts.
+        PartsRack = 44 => FeatureDef {
+            props: &["parts rack"],
+            store: Some(StoreDef { holds: ItemKind::Steel, called: "parts rack", site: "robot factory", hud: None, made: false }),
+            ..BESIDE
+        },
     }
 }
 

@@ -112,6 +112,15 @@ use crate::sim::biology::Experience;
 pub mod vase;
 pub use vase::{BuyVase, PlaceVase};
 
+pub mod assemble;
+pub mod charge;
+pub mod fix_robot;
+pub mod overhaul;
+pub use assemble::{Assemble, ASSEMBLE_SECONDS};
+pub use charge::{Charge, CHARGE_SECONDS};
+pub use fix_robot::{FixRobot, FIX_ROBOT_SECONDS};
+pub use overhaul::{Overhaul, OVERHAUL_SECONDS};
+
 use super::task::{tasks, TaskCtx};
 
 tasks! {
@@ -169,6 +178,10 @@ tasks! {
     PlaceVase,
     Drill,
     Pray,
+    Charge,
+    FixRobot,
+    Overhaul,
+    Assemble,
 }
 
 /// Say that what a task just did was **in recent memory**, and so less of a

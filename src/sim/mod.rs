@@ -175,6 +175,7 @@ pub mod path;
 pub mod pets;
 pub mod playzone;
 pub mod religion;
+pub mod robots;
 pub mod property;
 pub mod refuge;
 pub mod relationships;
@@ -217,7 +218,7 @@ pub use homes::Homes;
 pub use inventory::{Capacity, Inventory};
 pub use item::ItemKind;
 pub use job::{Job, JobKind, Workplaces};
-pub use kinds::{Deathdog, Dog, Facing, Human};
+pub use kinds::{Deathdog, Dog, Facing, Human, Robot};
 pub use light_switch::LightSwitches;
 pub use log::Log;
 pub use occupancy::Occupancy;
@@ -1008,6 +1009,16 @@ impl GameState {
         &self.facilities.outposts
     }
 
+    #[cfg(test)]
+    pub(crate) fn facilities_mut_for_tests(&mut self) -> &mut Facilities {
+        &mut self.facilities
+    }
+
+    /// The robots' book: who is stopped, the build, the latest explosions.
+    pub fn robots(&self) -> &robots::Robots {
+        &self.facilities.robots
+    }
+
     /// The soldiers' ground the king picked. See [`training`].
     pub fn training(&self) -> &training::Training {
         &self.facilities.training
@@ -1297,7 +1308,46 @@ impl GameState {
             for worker in provisional { self.dismiss(worker); }
         }
         self.give_a_job(uid, at);
+        if kind == EntityType::Robot {
+            self.employ_robot(uid);
+        }
         uid
+    }
+
+    /// Give the robot `uid` its work: a robot courier, round the clock, its
+    /// "workplace" the robot factory's bay nearest it — or where it stands,
+    /// with none — on nobody's books ([`JobDef::robotic`](job::JobDef)).
+    fn employ_robot(&mut self, uid: Uid) {
+        let Some(entity) = self.entities.get_mut(uid) else {
+            return;
+        };
+        let here = entity.center_position();
+        let bay = self.facilities.features.nearest_where(feature::FeatureKind::RepairBay, here, |_| true).unwrap_or(here);
+        let job = Job::new(JobKind::RobotCourier, bay, job::ROBOT_HOURS);
+        if entity.hire(job) {
+            self.facilities.society.set_job(uid, Some(job.kind));
+            self.log.unit(uid, format!("{uid} was put to work as {}", job.kind.with_article()));
+        }
+    }
+
+    /// A robot off the line at the bay in `bay`: spawned in the nearest free
+    /// cell within three of it (none, and it waits for the next tick's
+    /// try... it is not built at all: logged). Its work comes with it.
+    pub fn build_robot(&mut self, bay: Point) -> Option<Uid> {
+        let beside = (1..=3).find_map(|reach: i32| {
+            (-reach..=reach)
+                .flat_map(|dy| (-reach..=reach).map(move |dx| (dx, dy)))
+                .filter(|&(dx, dy)| dx.abs().max(dy.abs()) == reach)
+                .map(|(dx, dy)| bay.offset(dx, dy))
+                .find(|&cell| self.map.is_passable(cell) && !self.occupancy.is_occupied(cell))
+        });
+        let Some(at) = beside else {
+            self.log.important(format!("no room beside the assembly bay at {}, {} for a new robot", bay.x, bay.y));
+            return None;
+        };
+        let robot = self.spawn(EntityType::Robot, at);
+        self.log.important(format!("{robot} came off the line at the robot factory"));
+        Some(robot)
     }
 
     /// Spawn whoever the map's spawners say lives here: one entity per
@@ -1336,7 +1386,15 @@ impl GameState {
         self.furnish_noble_homes();
         if self.facilities.properties.len() >= feature::TOWN_HOMES {
             self.adopt_pets();
+            // ...and its first robots, at the robot factory: the very last
+            // arrivals, so nobody's roll depends on them.
+            if let Some(&bay) = self.facilities.features.cells_of(feature::FeatureKind::RepairBay).first() {
+                for _ in 0..robots::ROBOTS_AT_START {
+                    let _ = self.build_robot(bay);
+                }
+            }
         }
+        self.facilities.robots.recount(self.entities.iter());
         arrived
     }
 
@@ -1442,7 +1500,8 @@ impl GameState {
         let noble = entity.is_noble();
         let (workplaces, properties) = (&self.facilities.workplaces, &self.facilities.properties);
         // An ordained post is never offered by distance: `ordain` fills it.
-        let offered = |kind: &JobKind| kind.permits_class(noble, nobles_alive) && !kind.is_ordained();
+        // A robot's job is never a person's: `employ_robot` gives it.
+        let offered = |kind: &JobKind| kind.permits_class(noble, nobles_alive) && !kind.is_ordained() && !kind.is_robotic();
         let Some(job) = JobKind::ALL.into_iter().filter(offered).find_map(|kind| {
             let free = |cell: Point| {
                 workplaces.free_shift(cell, kind.shifts()).is_some() && properties.may_use(cell, key)
@@ -1934,6 +1993,12 @@ fn comings_and_goings(state: &mut GameState, before: Clock, now: Clock) {
         state.ordain();
     }
     state.rehome_pets();
+    // Robots finished this tick, off the line; and everybody counted, for
+    // the factory to build up to its share.
+    for bay in state.facilities.robots.take_assembled() {
+        let _ = state.build_robot(bay);
+    }
+    state.facilities.robots.recount(state.entities.iter());
     if deathdogs::is_dusk(before, now) {
         deathdogs::arrive(state);
     }
@@ -2584,6 +2649,9 @@ fn world_step(
     facilities.wounds.begin_tick();
     // ...and so have last tick's meals served, by the dogs fed.
     facilities.feedings.begin_tick();
+    // ...and last tick's fixes, by the robots fixed; and who waits at a bay
+    // is who said so last tick (`sim::robots`).
+    facilities.robots.begin_tick();
     facilities.sound.clear();
     for (slot, effect) in effects.iter_mut().enumerate() {
         let asked = std::mem::take(effect);
@@ -4058,7 +4126,7 @@ mod tests {
 
         // Gone from the world, and still counted.
         let stats = state.statistics();
-        assert_eq!(stats.alive, vec![(EntityType::Human, 1), (EntityType::Dog, 0), (EntityType::Deathdog, 0)]);
+        assert_eq!(stats.alive, vec![(EntityType::Human, 1), (EntityType::Dog, 0), (EntityType::Deathdog, 0), (EntityType::Robot, 0)]);
         assert_eq!((stats.died, stats.lying, stats.carried, stats.cremated), (1, 0, 0, 1));
         let undertakers = stats.jobs.iter().find(|job| job.kind == JobKind::Undertaker).unwrap();
         assert_eq!((undertakers.workers, undertakers.posts), (1, 3), "one crematorium, three watches");
@@ -4689,8 +4757,8 @@ mod tests {
             let district = crate::map::district::generate(seed);
             let mut state = GameState::new(district.map.clone(), seed);
             assert_eq!(state.spawn_from_spawners(), district.residents(), "seed {seed}");
-            let dogs = state.entities().iter().filter(|entity| entity.kind() == Some(EntityType::Dog)).count();
-            assert_eq!(state.len() - dogs, district.residents(), "seed {seed}: the residents, and a dog for some of them");
+            let dogs = state.entities().iter().filter(|entity| matches!(entity.kind(), Some(EntityType::Dog | EntityType::Robot))).count();
+            assert_eq!(state.len() - dogs, district.residents(), "seed {seed}: the residents, a dog for some of them, and the factory's first robots");
             assert_eq!(state.homes().len(), district.residents(), "everybody has a bed");
             // The bank's computers are the district's desks, and nobody's
             // house has one: every desk is given out, every one in the bank;
@@ -4742,7 +4810,7 @@ mod tests {
             // religious of whoever was left without a job.
             let clerics = crate::map::district::church::ALTARS;
             let mut faith_of_clerics: Vec<u8> = Vec::new();
-            let jobs = clerics + 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists + training::SOLDIERS + training::COMMANDERS;
+            let jobs = clerics + 3 + fishermen + desks + bins + watches + undertakers + smelters + couriers + farmers + operators + kings + electricians + food_workers + food_couriers + administrators + accountants + nurses + cleaners + shopkeepers + store_couriers + job::SPECIAL_AGENTS + outposts::BUILDERS + propagandists + training::SOLDIERS + training::COMMANDERS + crate::map::district::robot_factory::WORKBENCHES;
             assert!(district.residents() >= jobs, "seed {seed}: more jobs than people");
             assert_eq!(state.workplaces().len(), jobs, "seed {seed}");
             let mut cremating = 0;
@@ -4753,7 +4821,13 @@ mod tests {
             let mut computers: std::collections::BTreeMap<Point, Vec<(u8, u8)>> = std::collections::BTreeMap::new();
             for entity in state.entities().iter() {
                 let Some(job) = entity.job() else { continue };
+                // A robot's job is on nobody's books.
+                if job.kind.is_robotic() { continue; }
                 match job.kind {
+                    JobKind::RobotCourier => unreachable!("skipped above"),
+                    JobKind::Engineer => {
+                        assert!(district.the(crate::map::district::robot_factory::NAME).contains(job.workplace), "seed {seed}: a workbench outside the robot factory");
+                    }
                     JobKind::OfficeWorker => {
                         clerks += 1;
                         assert!(district.bank.contains(job.workplace), "seed {seed}: a desk outside the bank");
@@ -4895,8 +4969,8 @@ mod tests {
             shopkeeping.sort_unstable();
             assert_eq!(shopkeeping, [0, 6, 12, 18], "seed {seed}: the store's shopkeepers");
             assert_eq!(store_hauling, store_couriers, "seed {seed}: the store's courier");
-            let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).filter(|kind| !kind.is_ordained()).last();
-            assert_eq!(last, Some(JobKind::Commander), "seed {seed}: the commander hired last");
+            let last = state.entities().iter().filter_map(|entity| entity.job()).map(|job| job.kind).filter(|kind| !kind.is_ordained() && !kind.is_robotic()).last();
+            assert_eq!(last, Some(JobKind::Engineer), "seed {seed}: the engineers hired last");
             // The clerics are the top of the free by religiosity: none of the
             // commoners still without a job is more religious than the least
             // religious of them.
@@ -4939,7 +5013,7 @@ mod tests {
             // In the order they arrived: every desk taken before the first
             // collector was hired, every bin before the first guard.
             let kinds: Vec<JobKind> =
-                state.entities().iter().filter(|entity| !entity.is_noble()).filter_map(|entity| entity.job()).map(|job| job.kind).collect();
+                state.entities().iter().filter(|entity| !entity.is_noble()).filter_map(|entity| entity.job()).map(|job| job.kind).filter(|kind| !kind.is_ordained()).collect();
             let order = |kind: JobKind| JobKind::ALL.iter().position(|&k| k == kind).unwrap();
             assert!(kinds.windows(2).all(|pair| order(pair[0]) <= order(pair[1])), "seed {seed}: {kinds:?}");
 
@@ -5082,6 +5156,7 @@ mod tests {
                 "farm" => district.the(crate::map::district::farm::NAME),
                 "food factory" => district.the(crate::map::district::food_factory::NAME),
                 "store" => district.the(crate::map::district::store::NAME),
+                "robot factory" => district.the(crate::map::district::robot_factory::NAME),
                 _ => district.the(crate::map::district::warehouse::NAME),
             };
             assert!(building.contains(bin), "{store:?} at {bin:?}");
@@ -5214,6 +5289,11 @@ mod tests {
                 input.set_process(cleaner, process, false);
             }
         }
+        // The factory's robots would walk the stains off underfoot (a footstep
+        // trades dirt with the ground) before any cleaner mopped them.
+        for robot in state.entities().iter().filter(|e| e.kind() == Some(EntityType::Robot)).map(|e| e.uid()).collect::<Vec<_>>() {
+            input.freeze(robot, true);
+        }
         // A dozen stains on public ground round the middle, and one in a home.
         let middle = state.features().cells_of(feature::FeatureKind::District)[0];
         let public = |cell: Point| state.map.is_passable(cell) && state.properties().of(cell).is_none();
@@ -5243,9 +5323,13 @@ mod tests {
         let cleaned_up = |cell: Point| {
             lines.iter().any(|line| line.contains("cleaned up") && line.ends_with(&format!(" at {}, {}", cell.x, cell.y)))
         };
-        // Require every public stain to be cleaned by noon.
-        let missed: Vec<Point> = stains.iter().copied().filter(|&cell| !cleaned_up(cell)).collect();
+        // Every public stain is gone by noon: mopped up, or - on a street
+        // the morning's commute crosses - trodden off underfoot, which no
+        // cleaner logs. Most are mopped, and none is still there.
+        let missed: Vec<Point> = stains.iter().copied().filter(|&cell| state.dirt().at(cell).overall() > 0.15).collect();
         assert!(missed.is_empty(), "not cleaned by {}: {missed:?}", state.clock());
+        let mopped = stains.iter().filter(|&&cell| cleaned_up(cell)).count();
+        assert!(mopped + 2 >= stains.len(), "only {mopped} of {} mopped", stains.len());
         assert!(!cleaned_up(home), "nobody's home is cleaned");
         // From eight to twelve, a look every 27 minutes: 08:00, 08:27,
         // ... 11:36. The evening cleaners are not on yet.

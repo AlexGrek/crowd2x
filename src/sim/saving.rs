@@ -108,6 +108,8 @@ impl GameState {
             store: Some(self.facilities.superfridge.save()),
             orders: self.facilities.dispatch.save(),
             decor_purchases: self.facilities.decor.save(),
+            robot_works: Some(self.facilities.robots.save_works()),
+            robot_fixes: self.facilities.robots.save_fixes(),
             noble_draws: self.noble_draws,
             noble_position: self.noble_position,
         }
@@ -230,6 +232,9 @@ impl GameState {
         // The news waiting and on the phones.
         state.facilities.news = super::news::News::restore(world.news.as_ref())?;
         state.facilities.wounds = super::wounds::Wounds::restore(&world.wounds)?;
+        // The robot factory's build, and the fixes done to robots, still to
+        // be felt.
+        state.facilities.robots.restore(world.robot_works.as_ref(), &world.robot_fixes)?;
         // ...and the dog foods given, still to be felt.
         state.facilities.feedings = super::pets::Feedings::restore(&world.feedings)?;
         // The crops, planted on the map again: a save keeps the ground as it
@@ -273,6 +278,10 @@ impl GameState {
             state.census.file(slot, entity.center_position());
         }
         state.facilities.corpses = crate::sim::Corpses::of(&state.entities);
+        // Who stands stopped for an electrician, and how many people and
+        // robots there are: from the robots and people themselves.
+        state.facilities.robots.restore_stopped(state.entities.iter());
+        state.facilities.robots.recount(state.entities.iter());
         // Everybody's family and job, as the spawn pass kept them: from the
         // people themselves, run by the rules the game was saved with.
         state.facilities.society = Society::of(&state.entities, Rules::restore(&world.relationship_rules)?);
@@ -297,7 +306,8 @@ impl GameState {
         // at a desk has the job that says so, and everybody with a job has
         // its desk.
         for (_, entity) in state.entities.iter_slots() {
-            if let Some(job) = entity.job()
+            // A robot's job is on nobody's books (`GameState::employ_robot`).
+            if let Some(job) = entity.job().filter(|job| !job.kind.is_robotic())
                 && state.facilities.workplaces.worker(job.workplace, job.shift) != Some(entity.uid())
             {
                 let at = job.workplace;

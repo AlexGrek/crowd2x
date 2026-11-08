@@ -124,6 +124,43 @@ pub struct World {
     /// until the next tick.
     #[prost(message, repeated, tag = "34")]
     pub services_led: Vec<Cell>,
+    /// The robot factory's build (`crate::sim::robots::Works`). Absent in an
+    /// older save: the first robot due two days into the world.
+    #[prost(message, optional, tag = "35")]
+    pub robot_works: Option<RobotWorks>,
+    /// Fixes done to robots on the saved tick, for them to feel on the next
+    /// (`crate::sim::robots::Robots`). Older saves have none.
+    #[prost(message, repeated, tag = "36")]
+    pub robot_fixes: Vec<RobotFix>,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct RobotWorks {
+    /// World seconds from which the next robot may be started.
+    #[prost(double, tag = "1")]
+    pub next_due: f64,
+    /// World seconds of work done on the robot being built.
+    #[prost(float, tag = "2")]
+    pub progress: f32,
+    /// Whether its steel is in.
+    #[prost(bool, tag = "3")]
+    pub started: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct RobotFix {
+    #[prost(fixed64, tag = "1")]
+    pub robot: u64,
+    #[prost(enumeration = "FixKind", tag = "2")]
+    pub kind: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FixKind {
+    Recharge = 0,
+    Mend = 1,
+    Overhaul = 2,
 }
 
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

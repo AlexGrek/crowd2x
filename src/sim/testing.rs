@@ -147,6 +147,7 @@ impl World {
         super::soiling::settle(entity, &mut self.facilities, &self.log);
         self.facilities.wounds.begin_tick();
         self.facilities.feedings.begin_tick();
+        self.facilities.robots.begin_tick();
         self.facilities.sound.clear();
         super::effect::apply(effect, entity, &mut self.map, &mut self.facilities, &mut self.occupancy, &self.log);
         // The courier dispatch, over the one unit there is.

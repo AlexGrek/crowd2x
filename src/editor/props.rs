@@ -161,6 +161,14 @@ pub const PALETTE: &[PaletteItem] = &[
     // white cloth, a gold cross, two candles — and a wooden pew.
     PaletteItem::upscaled("altar", "altar.png"),
     PaletteItem::upscaled("pew", "pew.png"),
+    // The robots' world, drawn by `tools/robot_art.py`: the charging dock (a
+    // bar of charge climbing while a robot is plugged in), the engineers'
+    // workbench, the assembly bay, and the parts rack, a store that fills
+    // like the scrap bin ([`BinFill`]).
+    PaletteItem::animated("charging dock", "charging_dock.png", 1).used("charging_dock_used.png", 2),
+    PaletteItem::upscaled("robot workbench", "robot_workbench.png"),
+    PaletteItem::upscaled("assembly bay", "assembly_bay.png"),
+    PaletteItem::posed("parts rack", "parts_rack.png", 4),
 ];
 
 /// What can hang from the ceiling. Each one's light is its entry in

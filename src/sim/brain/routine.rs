@@ -39,7 +39,7 @@ use crate::sim::job::Job;
 use super::goal::Goals;
 use super::memory::Memory;
 use super::routines::{ChatRoutine, HeelRoutine, KeepRoutine, Need, NeedRoutine, OrdersRoutine, ReadyRoutine, SleepRoutine, StayBusyRoutine, WorkRoutine};
-use super::routines::{DepartRoutine, FleeRoutine, HuntRoutine, ProwlRoutine};
+use super::routines::{DepartRoutine, FleeRoutine, HuntRoutine, ProwlRoutine, RobotRoutine};
 
 #[cfg(test)]
 use super::routines::Dial;
@@ -63,6 +63,9 @@ pub struct RoutineCtx<'a> {
     /// ([`WorkRoutine`](super::routines::WorkRoutine)), what a trip out has
     /// brought back so far ([`ReadyRoutine`]).
     pub inventory: Option<&'a Inventory>,
+    /// A robot's charge and condition (`sim::robots`); `None` for every other
+    /// kind. What [`RobotRoutine`] reads.
+    pub battery: Option<crate::sim::robots::Battery>,
 }
 
 /// What one routine does.
@@ -107,6 +110,8 @@ pub enum Routine {
     /// Stay with the owner, and go when it must (a pet dog's).
     Heel(HeelRoutine),
     FurnishHome,
+    /// Keep charged, and go in for an overhaul when worn (a robot's).
+    Robot(RobotRoutine),
     /// A priority a test turns up and down from outside the brain.
     #[cfg(test)]
     Dial(Dial),
@@ -180,6 +185,11 @@ impl Routine {
         Routine::Heel(HeelRoutine)
     }
 
+    /// Keep charged, and go in for an overhaul when worn.
+    pub const fn robot() -> Routine {
+        Routine::Robot(RobotRoutine::new())
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Routine::Need(routine) => routine.name(),
@@ -197,6 +207,7 @@ impl Routine {
             Routine::Keep(routine) => routine.name(),
             Routine::Heel(routine) => routine.name(),
             Routine::FurnishHome => "furnish home",
+            Routine::Robot(routine) => routine.name(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.name(),
         }
@@ -231,6 +242,7 @@ impl Routine {
             Routine::Keep(routine) => routine.arrange(ctx, goals),
             Routine::Heel(routine) => routine.arrange(ctx, goals),
             Routine::FurnishHome => super::routines::furnish_home(ctx, goals),
+            Routine::Robot(routine) => routine.arrange(ctx, goals),
             #[cfg(test)]
             Routine::Dial(routine) => routine.arrange(ctx, goals),
         }
@@ -253,6 +265,7 @@ impl Routine {
             Routine::Keep(routine) => routine.debug_fields(),
             Routine::Heel(routine) => routine.debug_fields(),
             Routine::FurnishHome => Vec::new(),
+            Routine::Robot(routine) => routine.debug_fields(),
             #[cfg(test)]
             Routine::Dial(routine) => routine.debug_fields(),
         }
@@ -280,6 +293,7 @@ impl Routine {
             // The dog it keeps, and the owner it follows, are in its memory.
             Routine::Keep(KeepRoutine) | Routine::Heel(HeelRoutine) => (false, 0),
             Routine::Work(routine) => (routine.is_on_shift(), 0),
+            Routine::Robot(routine) => (routine.is_charging(), 0),
             Routine::Ready(routine) => {
                 let (ready, pending) = routine.state();
                 (ready, pending as u32)
@@ -304,6 +318,7 @@ impl Routine {
             Routine::Need(routine) => routine.set_committed(saved.committed),
             Routine::Sleep(routine) => routine.set_committed(saved.committed),
             Routine::Work(routine) => routine.set_on_shift(saved.committed),
+            Routine::Robot(routine) => routine.set_charging(saved.committed),
             Routine::Ready(routine) => routine.set_state(saved.committed, saved.pending)?,
             Routine::StayBusy(_) | Routine::Orders(_) | Routine::Hospital | Routine::FurnishHome => {}
             Routine::Flee(_) | Routine::Hunt(_) | Routine::Depart(_) | Routine::Prowl(_) | Routine::Chat(_) => {}

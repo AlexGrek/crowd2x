@@ -1,9 +1,12 @@
-//! Electricians walk to the nearest damaged box and repair it. Empty shifts
-//! and unreachable repairs use the normal bounded goal backoff.
+//! Electricians walk to the nearest damaged box, or robot standing stopped
+//! (`sim::robots`: flat, or broken down), and repair it — a box mended, a
+//! robot recharged or mended. Empty shifts and unreachable repairs use the
+//! normal bounded goal backoff.
 
 use super::super::goal::{GoalCtx, GoalExecutor, GoalId, GoalProgress};
 use super::super::task::{Task, TaskResult};
 use super::super::tasks::repair_box::REPAIR_SECONDS;
+use super::super::tasks::FIX_ROBOT_SECONDS;
 use super::{Seek, Stand, stand_beside};
 use crate::save::{Invalid, pb};
 use crate::sim::JobKind;
@@ -22,9 +25,13 @@ impl RepairGoal {
         let Some(at) = self.seek.target else {
             return false;
         };
-        if !ctx.think.electrical.is_damaged(at) {
+        let work = if ctx.think.electrical.is_damaged(at) {
+            Task::repair_box(at, REPAIR_SECONDS)
+        } else if ctx.think.robots.stopped_at(at).is_some() {
+            Task::fix_robot(at, FIX_ROBOT_SECONDS)
+        } else {
             return false;
-        }
+        };
         match stand_beside(ctx, at) {
             Stand::Nowhere => return false,
             Stand::Here => {}
@@ -32,7 +39,7 @@ impl RepairGoal {
                 let _ = ctx.tasks.push_back(Task::move_beside(cell));
             }
         }
-        let _ = ctx.tasks.push_back(Task::repair_box(at, REPAIR_SECONDS));
+        let _ = ctx.tasks.push_back(work);
         true
     }
 }
@@ -97,7 +104,7 @@ impl GoalExecutor for RepairGoal {
         if !ctx.job.is_some_and(|job| job.kind == JobKind::Electrician) || ctx.biology.is_none() {
             return GoalProgress::Blocked;
         }
-        if last == TaskResult::Success && matches!(ctx.finished, Some(Task::RepairBox(_))) {
+        if last == TaskResult::Success && matches!(ctx.finished, Some(Task::RepairBox(_) | Task::FixRobot(_))) {
             self.seek.forget();
             return GoalProgress::Achieved;
         }
@@ -117,12 +124,14 @@ impl GoalExecutor for RepairGoal {
         }
         let here = ctx.body.center_position();
         let now = ctx.think.clock.elapsed();
+        let stopped = ctx.think.robots.stopped().iter().map(|robot| robot.cell);
         let Some(at) = ctx
             .think
             .electrical
             .damaged()
             .iter()
             .copied()
+            .chain(stopped)
             .filter(|&at| !ctx.memory.out_of_reach().contains(at, now))
             .min_by_key(|&at| (here.manhattan_distance(at), at))
         else {

@@ -1871,3 +1871,18 @@ fn a_vase_purchase_in_transit_and_its_placement_survive_saving_exactly() {
     let saved=round_trip(&copy);
     assert_eq!(saved.map.objects(crate::map::ObjectLayer::Props),copy.map.objects(crate::map::ObjectLayer::Props));
 }
+
+/// A district's first robots, hauling for the courier dispatch, saved
+/// mid-trip with a fix pending for one of them and the factory's book of
+/// works, carry on exactly as the original does.
+#[test]
+fn robots_saved_mid_trip_with_a_fix_pending_carry_on_exactly() {
+    use crate::sim::EntityType;
+    let mut state = busy_district();
+    let robots: Vec<Uid> = state.entities().iter().filter(|e| e.kind() == Some(EntityType::Robot)).map(|e| e.uid()).collect();
+    assert_eq!(robots.len(), crate::sim::robots::ROBOTS_AT_START);
+    run(&mut state, 600);
+    state.facilities_mut_for_tests().robots.fix(crate::sim::robots::Fix { robot: robots[0], kind: crate::sim::robots::FixKind::Mend });
+    let copy = side_by_side(&mut state, 1800, |_, _| Input::new());
+    assert_eq!(copy.robots(), state.robots());
+}

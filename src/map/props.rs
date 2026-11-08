@@ -146,6 +146,12 @@ pub const PROPS: &[Prop] = &[
     // prays at (`sim::religion`), both used from beside them.
     Prop::blocking("altar"),
     Prop::blocking("pew"),
+    // The robots' world (`sim::robots`): a charging dock, an engineer's
+    // workbench, the factory's assembly bay and its rack of parts.
+    Prop::blocking("charging dock"),
+    Prop::blocking("robot workbench"),
+    Prop::blocking("assembly bay"),
+    Prop::blocking("parts rack"),
     // A door is walked through, so the map lets a route through one. Its
     // leaf is what stops a body, and a leaf opens and shuts during play, so
     // it is the simulation's (`sim::door`), not the map's; a house door is

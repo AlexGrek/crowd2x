@@ -17,6 +17,8 @@ pub(super) const IDLE_RIGHT: &str = "dog_idle.png";
 pub(super) const IDLE_LEFT: &str = "dog_idle_reversed.png";
 pub(super) const DEATHDOG_IDLE_RIGHT: &str = "deathdog_idle.png";
 pub(super) const DEATHDOG_IDLE_LEFT: &str = "deathdog_idle_reversed.png";
+pub(super) const ROBOT_IDLE_RIGHT: &str = "robot_idle.png";
+pub(super) const ROBOT_IDLE_LEFT: &str = "robot_idle_reversed.png";
 pub(super) const IDLE_FRAMES: u32 = 4;
 const SECONDS_PER_FRAME: f32 = 0.1;
 
@@ -25,6 +27,8 @@ const SECONDS_PER_FRAME: f32 = 0.1;
 pub enum Breed {
     Dog,
     Deathdog,
+    /// A robot (`sim::robots`): a machine on the same four-frame layout.
+    Robot,
 }
 
 /// One breed's two idle sheets.
@@ -39,6 +43,7 @@ struct Sheets {
 pub struct DogSheets {
     dog: Sheets,
     deathdog: Sheets,
+    robot: Sheets,
     layout: Handle<TextureAtlasLayout>,
 }
 
@@ -47,6 +52,7 @@ impl DogSheets {
         Self {
             dog: Sheets { right: assets.load(IDLE_RIGHT), left: assets.load(IDLE_LEFT) },
             deathdog: Sheets { right: assets.load(DEATHDOG_IDLE_RIGHT), left: assets.load(DEATHDOG_IDLE_LEFT) },
+            robot: Sheets { right: assets.load(ROBOT_IDLE_RIGHT), left: assets.load(ROBOT_IDLE_LEFT) },
             layout: layouts.add(TextureAtlasLayout::from_grid(
                 // Frames are indexed in the source art, not on screen.
                 UVec2::splat(ART),
@@ -75,6 +81,7 @@ impl DogSheets {
         let sheets = match breed {
             Breed::Dog => &self.dog,
             Breed::Deathdog => &self.deathdog,
+            Breed::Robot => &self.robot,
         };
         match facing {
             Facing::Right => sheets.right.clone(),
@@ -98,6 +105,7 @@ pub fn spawn(commands: &mut Commands, sheets: &DogSheets, pos: Vec2, breed: Bree
             Name::new(match breed {
                 Breed::Dog => "dog",
                 Breed::Deathdog => "deathdog",
+                Breed::Robot => "robot",
             }),
             Character,
             breed,

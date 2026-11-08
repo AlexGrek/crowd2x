@@ -716,3 +716,5 @@ Deliveries count toward timesheets. Unavailable couriers release their orders;
 full reserves keep excess food in the pack, and hauling returns orphaned meals
 to a warehouse meal rack even for a steel courier. The job panel describes an
 active dispatch as delivering food to the store.
+
+Two jobs belong to robots: `Engineer` (26, robot factory workbenches, 09-17 every day, hired as usual) and `RobotCourier` (27, `robotic`: never offered to a person, given only by `GameState::employ_robot`, unpaid). See the `robots` skill.

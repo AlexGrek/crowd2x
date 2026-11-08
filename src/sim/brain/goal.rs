@@ -156,6 +156,17 @@ catalogue! {
         /// over wandering and a go at something, under a chat and
         /// everything else.
         Pray = 37 => GoalDef { name: "pray", emoji: "\u{1f64f}", executor: Some(|| Box::new(goals::PrayGoal::new())) },
+        /// A robot's: walk to a free charging dock and charge there
+        /// ([`ChargeGoal`](super::goals::ChargeGoal), [`crate::sim::robots`]).
+        /// No executor here, so no person carries one: `Brain::robot` builds it.
+        Charge = 38 => GoalDef { name: "charge", emoji: "\u{1f50b}", executor: None },
+        /// A robot's: worn out, walk to the robot factory's bay and wait there
+        /// for an engineer's overhaul ([`ServiceGoal`](super::goals::ServiceGoal)).
+        Service = 39 => GoalDef { name: "service", emoji: "\u{1f529}", executor: None },
+        /// An engineer's shift at the robot factory: overhaul the robots
+        /// waiting at the bay, build the next robot when one is due, tinker at
+        /// the workbench otherwise ([`EngineerGoal`](super::goals::EngineerGoal)).
+        Engineer = 40 => GoalDef { name: "engineer", emoji: "\u{1f916}", executor: Some(|| Box::new(goals::EngineerGoal::new())) },
     }
 }
 
@@ -890,7 +901,10 @@ mod tests {
                 (GoalId::Phone, 0.0),
                 (GoalId::FurnishHome, 0.0),
                 (GoalId::Drill, 0.0),
-                (GoalId::Pray, 0.0)
+                (GoalId::Pray, 0.0),
+                (GoalId::Charge, 0.0),
+                (GoalId::Service, 0.0),
+                (GoalId::Engineer, 0.0)
             ]
         );
     }

@@ -49,6 +49,9 @@ pub enum EntityType {
     /// A beast of the wasteland, out at night to hunt whoever is outside
     /// the walls (`sim::deathdogs`).
     Deathdog = 3,
+    /// A machine that works for the district: charged at a dock, worn out in
+    /// days, mended by electricians and engineers (`sim::robots`).
+    Robot = 4,
 }
 
 impl EntityType {
@@ -57,7 +60,7 @@ impl EntityType {
         matches!(self, EntityType::Human | EntityType::Dog)
     }
 
-    pub const ALL: [EntityType; 3] = [EntityType::Human, EntityType::Dog, EntityType::Deathdog];
+    pub const ALL: [EntityType; 4] = [EntityType::Human, EntityType::Dog, EntityType::Deathdog, EntityType::Robot];
 
     /// The name used in logs and in a QA script's `spawn` step.
     pub const fn name(self) -> &'static str {
@@ -65,6 +68,7 @@ impl EntityType {
             EntityType::Human => "human",
             EntityType::Dog => "dog",
             EntityType::Deathdog => "deathdog",
+            EntityType::Robot => "robot",
         }
     }
 
@@ -89,6 +93,7 @@ impl EntityType {
             1 => Some(EntityType::Human),
             2 => Some(EntityType::Dog),
             3 => Some(EntityType::Deathdog),
+            4 => Some(EntityType::Robot),
             _ => None,
         }
     }
