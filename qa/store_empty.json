@@ -136,10 +136,20 @@
       }
     },
     {
+      "note": "the sixth arrival's mental health rolled under 20, and one on leave for it is given no job, so a seventh arrives to take the store courier's post (select 6)"
+    },
+    {
+      "spawn": {
+        "kind": "human",
+        "x": 12,
+        "y": 8
+      }
+    },
+    {
       "tick": 1
     },
     {
-      "expect_entities": 6
+      "expect_entities": 7
     },
     {
       "select": 0
@@ -367,7 +377,7 @@
       }
     },
     {
-      "select": 5
+      "select": 6
     },
     {
       "process": {
@@ -451,7 +461,7 @@
       "shot": "the shopkeeper and store"
     },
     {
-      "select": 5
+      "select": 6
     },
     {
       "press": "job"

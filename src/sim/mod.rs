@@ -328,6 +328,9 @@ pub enum Command {
     /// Change how religious somebody is ([`religion`]), explicitly: nothing
     /// in play does. Clamped to 0..=100, applied before processing begins.
     SetReligiosity { uid: Uid, value: i32 },
+    /// Put somebody's fun at a level, explicitly (QA: a wanderer's phone keeps
+    /// its fun from running down to boredom by itself). Clamped to 0..=100.
+    SetFun { uid: Uid, value: f32 },
     /// Put an item into an entity's [`Inventory`], if it will fit.
     ///
     /// From outside the world like the two above, and the only way anything
@@ -451,6 +454,11 @@ impl Input {
 
     pub fn set_religiosity(&mut self, uid: Uid, value: i32) -> &mut Input {
         self.commands.push(Command::SetReligiosity { uid, value });
+        self
+    }
+
+    pub fn set_fun(&mut self, uid: Uid, value: f32) -> &mut Input {
+        self.commands.push(Command::SetFun { uid, value });
         self
     }
 
@@ -1881,6 +1889,19 @@ impl GameState {
         true
     }
 
+    /// Explicitly put somebody's fun at `value`, frozen or not. `false` for a
+    /// missing entity or one with no biology.
+    pub fn set_fun(&mut self, uid: Uid, value: f32) -> bool {
+        let Some(biology) = self.entities.get_mut(uid).and_then(|entity| entity.biology_mut()) else {
+            self.log.unit(uid, format!("set fun: {uid} has no biology"));
+            return false;
+        };
+        biology.set_fun(value);
+        let now = biology.stats().fun();
+        self.log.unit(uid, format!("{uid} fun set to {now:.0}"));
+        true
+    }
+
     /// Explicitly change how religious somebody is, frozen or not. `false`
     /// for a missing entity or one that is not a person.
     pub fn set_religiosity(&mut self, uid: Uid, value: i32) -> bool {
@@ -2085,6 +2106,9 @@ pub fn spawn_pass(state: &mut GameState, input: &Input) {
             }
             Command::SetReligiosity { uid, value } => {
                 state.set_religiosity(*uid, *value);
+            }
+            Command::SetFun { uid, value } => {
+                state.set_fun(*uid, *value);
             }
             Command::GiveItem { uid, item } => {
                 state.give_item(*uid, *item);

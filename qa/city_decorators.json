@@ -8,6 +8,7 @@
         "name": "city gardens",
         "map": {
           "version": 1,
+          "wasteland": false,
           "size": {
             "width": 20,
             "height": 14

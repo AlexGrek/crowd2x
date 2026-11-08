@@ -62,7 +62,7 @@
     { "expect_log": "was hired as a steelworker at the furnace at 12, 3, 09:00-17:00" },
     { "spawn": { "kind": "human", "x": 4, "y": 3 } },
     { "tick": 1 },
-    { "expect_log": "was hired as a courier at the scrap hopper at 9, 1, 09:00-17:00" },
+    { "expect_log": "was hired as a courier at the scrap hopper at 9, 1, 08:00-16:00" },
 
     { "note": "every need off, so this is a test about the work" },
     { "select": 0 },

@@ -7,6 +7,7 @@
         "name": "kitchen",
         "map": {
           "version": 1,
+          "wasteland": false,
           "size": { "width": 12, "height": 7 },
           "terrain": {
             "palette": ["void", "floor", "wall brown"],
@@ -65,8 +66,8 @@
 
     { "note": "a mouth goes from quenched to parched in five hours of world, so drinking takes" },
     { "note": "over about three hours after a drink — sooner than eating does, which is what a" },
-    { "note": "person does. 16000 ticks is eight hours of world: enough however it was born" },
-    { "tick": 16000 },
+    { "note": "person does. needs now run at half the pace they did, so 34000 ticks, seventeen hours of world, is enough however it was born (the map is bounded: no deathdogs at dusk)" },
+    { "tick": 34000 },
     { "expect_entities": 1 },
     { "expect_world_time": { "hours": 8.0 } },
     { "expect_log": "drank at the fridge at 9, 5" },

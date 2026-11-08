@@ -13,8 +13,8 @@
     { "expect_text": "cleaners of 4 posts" },
     { "press": "close" },
 
-    { "note": "arrival 84 of seed 7 is the first group's morning cleaner: Monday, Wednesday, Friday and Sunday, seven to three. It is eight o'clock on the Monday, so it is on duty. Its needs are switched off so that nothing calls it away" },
-    { "select": 84 },
+    { "note": "arrival 91 of seed 7 is the first group's morning cleaner: Monday, Wednesday, Friday and Sunday, seven to three. It is eight o'clock on the Monday, so it is on duty. Its needs are switched off so that nothing calls it away" },
+    { "select": 91 },
     { "expect_selected": "human" },
     { "process": { "name": "hunger", "on": false } },
     { "process": { "name": "thirst", "on": false } },

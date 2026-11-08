@@ -167,7 +167,7 @@
       "tick": 1
     },
     {
-      "expect_log": "was hired as a food courier at the wheat hopper at 9, 1, 09:00-17:00"
+      "expect_log": "was hired as a food courier at the wheat hopper at 9, 1, 08:00-16:00"
     },
     {
       "note": "every need off, so this is a test about the work"

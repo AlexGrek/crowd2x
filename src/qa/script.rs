@@ -297,6 +297,12 @@ pub enum Step {
     /// and how often anybody prays both follow from it. On the command queue,
     /// in force from the next tick.
     Religiosity(i32),
+    /// Put the **selected** unit's fun at a level, 0-100 — `{"fun": 30}`: a
+    /// bored unit at once. A wanderer's look at the phone keeps its fun near
+    /// 80, so a test about what a bored unit does (the TV, an arcade cabinet)
+    /// cannot wait for boredom. On the command queue, in force from the next
+    /// tick, logged `{uid} fun set to N`.
+    Fun(f32),
     /// How many of `item` the **selected** unit has stowed.
     ///
     /// What is in its hand is not stowed and is not counted here, which is the

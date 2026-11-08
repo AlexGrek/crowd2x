@@ -8,8 +8,8 @@
     { "key": "p" },
     { "expect_speed": "paused" },
 
-    { "note": "the pets arrive after every resident, so arrival 183 of this district, which has 183 of them, is the first dog; a dog is somebody's, hungry to some degree, and its debug menu says so" },
-    { "select": 183 },
+    { "note": "the pets arrive after every resident, so arrival 183 of this district, which has 183 of them, is the first dog, and arrival 185 is the one used here: 183 sleeps beside its owner at eight o'clock and 184 is not following anything then, so neither shows `following to`; a dog is somebody's, hungry to some degree, and its debug menu says so" },
+    { "select": 185 },
     { "expect_selected": "dog" },
     { "press": "debug" },
     { "expect_text": "owner" },

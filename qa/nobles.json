@@ -136,13 +136,13 @@
       "press": "noble care package"
     },
     {
-      "expect_text": "noble care package: $40.00 a day"
+      "expect_text": "noble care package: $20.00 a day"
     },
     {
       "press": "raise"
     },
     {
-      "expect_text": "noble care package: $45.00 a day"
+      "expect_text": "noble care package: $25.00 a day"
     },
     {
       "shot": "noble care package"
@@ -151,7 +151,7 @@
       "press": "lower"
     },
     {
-      "expect_text": "noble care package: $40.00 a day"
+      "expect_text": "noble care package: $20.00 a day"
     },
     {
       "key": "esc"

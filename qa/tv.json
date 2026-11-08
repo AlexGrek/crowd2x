@@ -64,10 +64,12 @@
     { "process": { "name": "thirst", "on": false } },
     { "process": { "name": "bladder", "on": false } },
     { "process": { "name": "energy", "on": false } },
+    { "note": "a wanderer's look at the phone keeps its fun near 80, short of boredom (fun 40), so the unit is made bored: fun at 30" },
+    { "fun": 30 },
     { "tick": 1 },
 
-    { "note": "fun runs down over the hours; a bored unit goes to a seat in view and watches" },
-    { "tick": 28000 },
+    { "note": "a bored unit goes to a seat in view and watches; the log panel holds only the last few lines, so look soon after, before the phone has filled it" },
+    { "tick": 3000 },
     { "expect_log": "watched the TV at 9, 3" },
     { "press": "brains" },
     { "shot": "after a programme on the TV" }

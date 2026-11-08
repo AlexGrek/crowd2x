@@ -444,13 +444,13 @@ fn mix(mut hash: u64) -> u64 {
 pub const PHONING: f32 = 0.11;
 
 /// How long after a look at the phone before the next may start.
-pub const PHONE_GAP: f64 = 20.0 * 60.0;
+pub const PHONE_GAP: f64 = 45.0 * 60.0;
 
 /// A person rolls for the phone once a slot this long (world seconds)...
 pub const PHONE_SLOT: f64 = 3.0 * 60.0;
 
 /// ...and takes it out one slot in this many.
-pub const PHONE_ONE_IN: u64 = 8;
+pub const PHONE_ONE_IN: u64 = 12;
 
 /// Whether a person takes out its phone: **from time to time, on a walk** (the
 /// goal in charge is wandering - it holds nothing, so the phone takes over at

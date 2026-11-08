@@ -342,6 +342,14 @@ impl Biology {
         self.switches = self.switches.with(process, running);
     }
 
+    /// Put fun at `value` (kept to 0-100), whatever it was: a way to start a
+    /// body bored, for a QA script, since a look at the phone keeps a
+    /// wanderer's fun from ever running down by itself.
+    pub fn set_fun(&mut self, value: f32) {
+        let by = value - self.stats.fun();
+        self.stats.change_fun(by);
+    }
+
     /// Involuntary relief, settled with the world's surface changes. A
     /// stopped bladder holds its value even at critical fullness.
     pub(crate) fn relieve_if_critical(&mut self) -> bool {
@@ -554,6 +562,17 @@ mod tests {
 
     fn calm() -> Biology {
         Biology::new(Stats::calm())
+    }
+
+    #[test]
+    fn fun_can_be_put_at_a_level_and_stays_within_the_range() {
+        let mut biology = calm();
+        biology.set_fun(30.0);
+        assert_eq!(biology.stats().fun(), 30.0);
+        biology.set_fun(250.0);
+        assert_eq!(biology.stats().fun(), 100.0);
+        biology.set_fun(-5.0);
+        assert_eq!(biology.stats().fun(), 0.0);
     }
 
     #[test]

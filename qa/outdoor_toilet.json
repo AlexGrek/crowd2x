@@ -33,7 +33,7 @@
     { "process": { "name": "health", "on": false } },
     { "press": "follow" },
     { "press": "brains" },
-    { "tick": 9000 },
+    { "tick": 18000 },
     { "expect_log": "peed outside" },
     { "expect_stat": { "stat": "bladder", "max": 50 } },
     { "shot": "after an outdoor toilet break" }

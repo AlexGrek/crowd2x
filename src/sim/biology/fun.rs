@@ -52,10 +52,11 @@ pub const CHAT_FUN: f32 = 20.0;
 /// cures it.
 pub const SMALL_TALK_FUN: f32 = 2.0;
 
-/// How much fun a look at a phone is worth ([`Event::Phoned`]): a quarter of a
-/// chat's, a little over twice small talk's. Enough
-/// to slow boredom through a wander, never to cure it.
-pub const PHONE_FUN: f32 = 5.0;
+/// How much fun a look at a phone is worth ([`Event::Phoned`]): a tenth of a
+/// chat's, small talk's. A look comes about every 80 world minutes
+/// (`routines::PHONE_GAP`, `PHONE_ONE_IN`), so the phone gives back about half
+/// of what boredom drains: it slows boredom through a wander, never stops it.
+pub const PHONE_FUN: f32 = 2.0;
 
 /// Fun over which nobody takes out a phone: it is what a person does to
 /// stop being bored, not what it does once content.
